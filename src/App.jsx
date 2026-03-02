@@ -16,6 +16,7 @@ import ElectronicsLab from './pages/ElectronicsLab';
 import MCULab from './pages/MCULab';
 import GameDevLab from './pages/GameDevLab';
 import PythonGameLab from './pages/PythonGameLab';
+import GameMakerLab from './pages/GameMakerLab';
 import FAQ from './pages/FAQ';
 import './App.css';
 
@@ -26,7 +27,8 @@ function AppContent() {
   const isLabPage = location.pathname.startsWith('/playground/circuit-maker') || 
                     location.pathname.startsWith('/playground/micro-maker') ||
                     location.pathname.startsWith('/playground/gamedev') ||
-                    location.pathname.startsWith('/playground/python-game');
+                    location.pathname.startsWith('/playground/python-game') ||
+                    location.pathname.startsWith('/playground/game-maker');
 
   return (
     <div className="app">
@@ -43,6 +45,7 @@ function AppContent() {
           <Route path="/playground/micro-maker" element={<MCULab />} />
           <Route path="/playground/gamedev" element={<GameDevLab />} />
           <Route path="/playground/python-game" element={<PythonGameLab />} />
+          <Route path="/playground/game-maker" element={<GameMakerLab />} />
           <Route path="/about" element={<About />} />
           <Route path="/contact" element={<Contact />} />
           <Route path="/enrollment" element={<Enrollment />} />

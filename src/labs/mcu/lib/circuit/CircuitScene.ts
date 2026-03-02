@@ -73,6 +73,11 @@ export class CircuitScene extends BaseScene {
   private wireStartNode: string | null = null;
   private isDragging: boolean = false;
 
+  // Wire routing state
+  private wireBendPreference: "horizontal-first" | "vertical-first" = "horizontal-first";
+  private wireWaypoints: { x: number; y: number }[] = [];
+  private wireStartWorldPos: { x: number; y: number } | null = null;
+
   // Selection highlighting
   private selectionHighlight: any = null;
   private selectionHighlights: Map<CircuitComponent, Graphics> = new Map(); // Multi-select highlights
@@ -1821,6 +1826,9 @@ export class CircuitScene extends BaseScene {
       this.wireStartComponent = component;
       this.wireStartNode = node.id;
       this.isWireMode = true;
+      this.wireWaypoints = [];
+      this.wireStartWorldPos = null;
+      this.wireBendPreference = "horizontal-first";
       document.body.classList.add("wire-mode");
 
       // Visual feedback - highlight the starting node
@@ -1941,7 +1949,29 @@ export class CircuitScene extends BaseScene {
           return;
         }
       }
-      // Otherwise cancel
+      // Place a waypoint at the clicked grid position and continue routing
+      if (this.wireStartComponent && this.wireStartNode) {
+        const GRID = 20;
+        const snappedX = Math.round(x / GRID) * GRID;
+        const snappedY = Math.round(y / GRID) * GRID;
+
+        // Compute the orthogonal route from last anchor to this waypoint
+        const lastAnchor = this.wireWaypoints.length > 0
+          ? this.wireWaypoints[this.wireWaypoints.length - 1]
+          : this.wireStartWorldPos!;
+
+        const route = this.computeOrthogonalRoute(
+          lastAnchor.x, lastAnchor.y,
+          snappedX, snappedY,
+          this.wireBendPreference
+        );
+
+        // Add intermediate bend points and the endpoint as waypoints
+        for (let i = 1; i < route.length; i++) {
+          this.wireWaypoints.push(route[i]);
+        }
+        return;
+      }
       this.cancelWireMode();
       return;
     }
@@ -2252,47 +2282,70 @@ export class CircuitScene extends BaseScene {
   }
 
   /**
-   * Create or update wire preview line following the mouse
+   * Compute orthogonal route segments from start to end using the current bend preference.
+   * Returns an array of {x,y} points forming horizontal/vertical segments.
+   */
+  private computeOrthogonalRoute(
+    sx: number, sy: number,
+    ex: number, ey: number,
+    preference: "horizontal-first" | "vertical-first"
+  ): { x: number; y: number }[] {
+    const GRID = 20;
+    const snap = (v: number) => Math.round(v / GRID) * GRID;
+    const tx = snap(ex);
+    const ty = snap(ey);
+    const dx = tx - sx;
+    const dy = ty - sy;
+
+    // Trivially aligned
+    if (Math.abs(dx) < 1 || Math.abs(dy) < 1) {
+      return [{ x: sx, y: sy }, { x: tx, y: ty }];
+    }
+
+    // L-route: one bend
+    if (preference === "horizontal-first") {
+      return [
+        { x: sx, y: sy },
+        { x: tx, y: sy },
+        { x: tx, y: ty },
+      ];
+    } else {
+      return [
+        { x: sx, y: sy },
+        { x: sx, y: ty },
+        { x: tx, y: ty },
+      ];
+    }
+  }
+
+  /**
+   * Create or update wire preview with smart orthogonal routing.
+   * Draws committed waypoint segments + a live L-shaped preview from the last anchor to the mouse.
    */
   private updateWirePreview(mouseX: number, mouseY: number): void {
     if (!this.isWireMode || !this.wireStartComponent || !this.wireStartNode)
       return;
 
-    // Get start node position - use the same method as WireSystem
     const componentPos = this.wireStartComponent.getPosition();
     const nodes = this.wireStartComponent.getNodes();
     const startNode = nodes.find((n) => n.id === this.wireStartNode);
-
     if (!startNode) return;
 
-    // Calculate node world position (same as WireSystem does)
-    // Node positions are relative to component center
-    const startX = componentPos.x + startNode.position.x;
-    const startY = componentPos.y + startNode.position.y;
+    const originX = componentPos.x + startNode.position.x;
+    const originY = componentPos.y + startNode.position.y;
 
-    // Debug: Log once per wire mode session
-    if (!this.wirePreview) {
-      console.log(
-        `🔍 Starting wire from ${this.wireStartComponent.getName()}.${this.wireStartNode}:`
-      );
-      console.log(
-        `   Component position: (${componentPos.x.toFixed(1)}, ${componentPos.y.toFixed(1)})`
-      );
-      console.log(
-        `   Node offset: (${startNode.position.x}, ${startNode.position.y})`
-      );
-      console.log(
-        `   Wire start: (${startX.toFixed(1)}, ${startY.toFixed(1)})`
-      );
+    // Cache the start world position
+    if (!this.wireStartWorldPos) {
+      this.wireStartWorldPos = { x: originX, y: originY };
     }
 
-    // Convert mouse position to world coordinates
+    // Convert mouse to world coordinates
     const rect = this.app.canvas.getBoundingClientRect();
     const screenX = mouseX - rect.left;
     const screenY = mouseY - rect.top;
-    const containerScale = this.zoomableContainer.scale.x;
-    const worldX = (screenX - this.zoomableContainer.x) / containerScale;
-    const worldY = (screenY - this.zoomableContainer.y) / containerScale;
+    const scale = this.zoomableContainer.scale.x;
+    const worldX = (screenX - this.zoomableContainer.x) / scale;
+    const worldY = (screenY - this.zoomableContainer.y) / scale;
 
     // Clear previous preview
     if (this.wirePreview) {
@@ -2301,28 +2354,81 @@ export class CircuitScene extends BaseScene {
       }
       this.wirePreview.destroy();
     }
-
-    // Create new preview line
     this.wirePreview = new Graphics();
 
-    // Draw bright, visible line
-    this.wirePreview.moveTo(startX, startY);
-    this.wirePreview.lineTo(worldX, worldY);
-    this.wirePreview.stroke({
-      width: 3,
-      color: 0x00ff00,
-      alpha: 0.8,
-    });
+    // --- Build the full point path ---
+    // Start from origin, through all waypoints, to the live cursor
+    const anchorPoints: { x: number; y: number }[] = [
+      { x: originX, y: originY },
+      ...this.wireWaypoints,
+    ];
 
-    // Add start circle to verify position
-    this.wirePreview.circle(startX, startY, 5);
-    this.wirePreview.fill({ color: 0xff0000, alpha: 0.8 }); // Red dot at start
+    // Auto-detect bend preference from initial drag direction if not toggled
+    const lastAnchor = anchorPoints[anchorPoints.length - 1];
+    const absDx = Math.abs(worldX - lastAnchor.x);
+    const absDy = Math.abs(worldY - lastAnchor.y);
 
-    // Add end circle indicator
-    this.wirePreview.circle(worldX, worldY, 5);
-    this.wirePreview.fill({ color: 0x00ff00, alpha: 0.8 }); // Green dot at end
+    // Compute the live segment from last anchor to cursor
+    const liveRoute = this.computeOrthogonalRoute(
+      lastAnchor.x, lastAnchor.y,
+      worldX, worldY,
+      this.wireBendPreference
+    );
 
-    // Add to zoomable container
+    // Combine: committed segments (anchor-to-anchor as straight lines) + live route
+    const allPoints: { x: number; y: number }[] = [];
+    // Add committed waypoint path
+    for (const pt of anchorPoints) {
+      allPoints.push(pt);
+    }
+    // Add live route (skip first point as it's the same as the last anchor)
+    for (let i = 1; i < liveRoute.length; i++) {
+      allPoints.push(liveRoute[i]);
+    }
+
+    // --- Draw committed segments (solid) ---
+    if (anchorPoints.length > 1) {
+      this.wirePreview.moveTo(anchorPoints[0].x, anchorPoints[0].y);
+      for (let i = 1; i < anchorPoints.length; i++) {
+        this.wirePreview.lineTo(anchorPoints[i].x, anchorPoints[i].y);
+      }
+      this.wirePreview.stroke({ width: 2.5, color: 0x4ecdc4, alpha: 1.0 });
+    }
+
+    // --- Draw live segment (slightly transparent, rubber-band feel) ---
+    if (liveRoute.length > 1) {
+      this.wirePreview.moveTo(liveRoute[0].x, liveRoute[0].y);
+      for (let i = 1; i < liveRoute.length; i++) {
+        this.wirePreview.lineTo(liveRoute[i].x, liveRoute[i].y);
+      }
+      this.wirePreview.stroke({ width: 2.5, color: 0x00ff88, alpha: 0.7 });
+    }
+
+    // --- Draw anchor dots (waypoints) ---
+    for (const wp of this.wireWaypoints) {
+      this.wirePreview.circle(wp.x, wp.y, 3);
+      this.wirePreview.fill({ color: 0x4ecdc4, alpha: 1.0 });
+    }
+
+    // Start dot
+    this.wirePreview.circle(originX, originY, 4);
+    this.wirePreview.fill({ color: 0xff6b6b, alpha: 0.9 });
+
+    // Cursor dot
+    const GRID = 20;
+    const snappedX = Math.round(worldX / GRID) * GRID;
+    const snappedY = Math.round(worldY / GRID) * GRID;
+    this.wirePreview.circle(snappedX, snappedY, 4);
+    this.wirePreview.fill({ color: 0x00ff88, alpha: 0.9 });
+
+    // Snap crosshair at cursor
+    this.wirePreview.moveTo(snappedX - 8, snappedY);
+    this.wirePreview.lineTo(snappedX + 8, snappedY);
+    this.wirePreview.stroke({ width: 1, color: 0x00ff88, alpha: 0.4 });
+    this.wirePreview.moveTo(snappedX, snappedY - 8);
+    this.wirePreview.lineTo(snappedX, snappedY + 8);
+    this.wirePreview.stroke({ width: 1, color: 0x00ff88, alpha: 0.4 });
+
     this.zoomableContainer.addChild(this.wirePreview);
   }
 
@@ -2419,6 +2525,9 @@ export class CircuitScene extends BaseScene {
     this.isWireMode = false;
     this.wireStartComponent = null;
     this.wireStartNode = null;
+    this.wireWaypoints = [];
+    this.wireStartWorldPos = null;
+    this.wireBendPreference = "horizontal-first";
     this.clearNodeHighlight();
     this.clearWirePreview();
     this.hideWireModeIndicator();
@@ -3622,6 +3731,15 @@ export class CircuitScene extends BaseScene {
       case " ":
         event.preventDefault();
         this.toggleSimulation();
+        break;
+      case "/":
+        if (this.isWireMode) {
+          event.preventDefault();
+          this.wireBendPreference =
+            this.wireBendPreference === "horizontal-first"
+              ? "vertical-first"
+              : "horizontal-first";
+        }
         break;
     }
   }

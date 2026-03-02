@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Zap, Cpu, Play, Lock, ArrowRight, Code, Wrench, Gamepad2 } from 'lucide-react';
+import { Zap, Cpu, Play, Lock, ArrowRight, Code, Wrench, Gamepad2, Puzzle } from 'lucide-react';
 import './Playground.css';
 
 const Playground = () => {
@@ -34,6 +34,21 @@ const Playground = () => {
       color: '#FF6B35',
       status: 'available',
       path: '/playground/micro-maker'
+    },
+    {
+      id: 'game-maker',
+      title: 'Game Maker',
+      icon: <Puzzle size={48} />,
+      description: 'Create games by snapping blocks together! See the Python code your blocks generate.',
+      features: [
+        'Drag-and-drop block coding',
+        'Same game engine as Py Game Maker',
+        'See generated Python code',
+        'Sprites, collision & sound'
+      ],
+      color: '#a78bfa',
+      status: 'available',
+      path: '/playground/game-maker'
     },
     {
       id: 'python-game-lab',
