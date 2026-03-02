@@ -1,0 +1,505 @@
+.lab-page {
+  padding-top: 0;
+  min-height: 100vh;
+  background: var(--bg-light);
+}
+
+/* Full-screen lab pages - no padding, no navbar space */
+/* Game Dev Lab Styling */
+.gamedev-lab-fullscreen {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 1000;
+}
+
+.gamedev-topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.5rem;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(10px);
+  border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+  gap: 1rem;
+  z-index: 100;
+}
+
+.gamedev-controls {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex: 1;
+}
+
+.project-name-input {
+  padding: 0.5rem 1rem;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  color: var(--white);
+  font-size: 1rem;
+  font-weight: 600;
+  min-width: 200px;
+  transition: all 0.3s ease;
+}
+
+.project-name-input:focus {
+  outline: none;
+  background: rgba(255, 255, 255, 0.15);
+  border-color: var(--electric-blue);
+  box-shadow: 0 0 0 3px rgba(0, 102, 255, 0.2);
+}
+
+.project-name-input::placeholder {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.gamedev-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1.2rem;
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  color: var(--white);
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  white-space: nowrap;
+}
+
+.gamedev-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.25);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(255, 255, 255, 0.2);
+}
+
+.gamedev-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.gamedev-exit-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1.2rem;
+  background: rgba(255, 107, 53, 0.8);
+  border: 1px solid rgba(255, 107, 53, 0.5);
+  border-radius: 8px;
+  color: var(--white);
+  font-size: 0.95rem;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.gamedev-exit-btn:hover {
+  background: var(--vibrant-orange);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(255, 107, 53, 0.4);
+}
+
+.save-message {
+  color: var(--white);
+  font-weight: 600;
+  padding: 0.5rem 1rem;
+  background: rgba(76, 175, 80, 0.3);
+  border-radius: 8px;
+  animation: fadeIn 0.3s ease;
+}
+
+.makecode-iframe {
+  flex: 1;
+  width: 100%;
+  border: none;
+  background: white;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 768px) {
+  .gamedev-topbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .gamedev-controls {
+    flex-direction: column;
+  }
+
+  .project-name-input {
+    width: 100%;
+  }
+}
+
+/* Electronics Lab with integrated modern styling */
+.electronics-lab-integrated {
+  background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%) !important;
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  overflow: hidden !important;
+}
+
+.electronics-lab-integrated .simulator-wrapper {
+  width: 100%;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.electronics-lab-integrated .toolbar {
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  z-index: 10;
+  flex-shrink: 0;
+}
+
+.electronics-lab-integrated .simulator-main {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+.electronics-lab-integrated .info-panel {
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(10px);
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  max-height: 100%;
+  overflow-y: auto;
+  width: 300px;
+  flex-shrink: 0;
+}
+
+.electronics-lab-integrated canvas {
+  box-shadow: inset 0 0 50px rgba(0, 0, 0, 0.3);
+}
+
+/* Make buttons look modern */
+.electronics-lab-integrated .component-button {
+  background: rgba(255, 255, 255, 0.15) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  transition: all 0.3s ease;
+}
+
+.electronics-lab-integrated .component-button:hover {
+  background: rgba(255, 255, 255, 0.25) !important;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(255, 255, 255, 0.2);
+}
+
+.electronics-lab-integrated .component-button.selected {
+  background: rgba(76, 175, 80, 0.4) !important;
+  border-color: #4caf50 !important;
+  box-shadow: 0 0 20px rgba(76, 175, 80, 0.4);
+}
+
+.electronics-lab-fullscreen,
+.mcu-lab-fullscreen {
+  padding-top: 0;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+}
+
+.electronics-lab-fullscreen > *:not(.lab-exit-btn),
+.mcu-lab-fullscreen > *:not(.lab-exit-btn) {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: auto;
+}
+
+/* Exit button for full-screen labs */
+.lab-exit-btn {
+  position: fixed;
+  top: 1.5rem;
+  right: 1.5rem;
+  z-index: 9999;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(10px);
+  color: var(--white);
+  border-radius: 50px;
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 1rem;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  pointer-events: auto;
+}
+
+.lab-exit-btn:hover {
+  background: var(--vibrant-orange);
+  border-color: var(--vibrant-orange);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 25px rgba(255, 107, 53, 0.4);
+}
+
+.lab-exit-btn svg {
+  transition: transform 0.3s ease;
+}
+
+.lab-exit-btn:hover svg {
+  transform: rotate(90deg);
+}
+
+.electronics-lab-fullscreen .simulator-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.mcu-lab-fullscreen .circuit-lab-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* Old styles for reference - can be removed */
+.electronics-lab-page {
+  padding-top: 80px;
+}
+
+.electronics-lab-page .simulator-container {
+  position: relative;
+  width: 100%;
+  height: calc(100vh - 80px);
+  overflow: hidden;
+}
+
+.mcu-lab-page {
+  padding-top: 80px;
+}
+
+.mcu-lab-page .circuit-lab-container {
+  overflow: hidden;
+}
+
+.circuit-lab-container canvas {
+  display: block;
+}
+
+.lab-header {
+  background: var(--white);
+  padding: 3rem 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.lab-header-content {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--electric-blue);
+  text-decoration: none;
+  font-weight: 600;
+  margin-bottom: 2rem;
+  transition: all 0.3s ease;
+}
+
+.back-link:hover {
+  gap: 0.8rem;
+  color: var(--vibrant-orange);
+}
+
+.lab-title {
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+}
+
+.lab-icon-large {
+  width: 100px;
+  height: 100px;
+  border-radius: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--white);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+}
+
+.lab-title h1 {
+  font-size: 3rem;
+  margin-bottom: 0.5rem;
+  color: var(--text-dark);
+}
+
+.lab-title p {
+  font-size: 1.3rem;
+  color: var(--text-light);
+}
+
+/* Lab Content */
+.lab-content {
+  padding: 4rem 0;
+}
+
+.coming-soon-notice {
+  max-width: 1000px;
+  margin: 0 auto;
+  background: var(--white);
+  padding: 4rem;
+  border-radius: 20px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+  text-align: center;
+}
+
+.coming-soon-notice > svg {
+  color: var(--vibrant-orange);
+  margin-bottom: 2rem;
+}
+
+.coming-soon-notice h2 {
+  font-size: 2.5rem;
+  margin-bottom: 1rem;
+  color: var(--text-dark);
+}
+
+.coming-soon-notice > p {
+  font-size: 1.2rem;
+  color: var(--text-light);
+  line-height: 1.8;
+  max-width: 700px;
+  margin: 0 auto 3rem;
+}
+
+/* Features Preview */
+.features-preview {
+  margin: 4rem 0;
+  padding: 3rem;
+  background: var(--bg-light);
+  border-radius: 15px;
+}
+
+.features-preview h3 {
+  font-size: 2rem;
+  margin-bottom: 2.5rem;
+  color: var(--text-dark);
+}
+
+.preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 2rem;
+  margin-top: 2rem;
+}
+
+.preview-item {
+  text-align: center;
+  padding: 1.5rem;
+}
+
+.preview-item svg {
+  color: var(--electric-blue);
+  margin-bottom: 1rem;
+}
+
+.preview-item h4 {
+  font-size: 1.3rem;
+  margin-bottom: 0.8rem;
+  color: var(--text-dark);
+}
+
+.preview-item p {
+  color: var(--text-light);
+  line-height: 1.6;
+}
+
+/* CTA Buttons */
+.cta-buttons {
+  display: flex;
+  gap: 1.5rem;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 3rem;
+}
+
+@media (max-width: 768px) {
+  .lab-title {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1.5rem;
+  }
+
+  .lab-icon-large {
+    width: 80px;
+    height: 80px;
+  }
+
+  .lab-title h1 {
+    font-size: 2rem;
+  }
+
+  .lab-title p {
+    font-size: 1.1rem;
+  }
+
+  .coming-soon-notice {
+    padding: 2rem 1.5rem;
+  }
+
+  .coming-soon-notice h2 {
+    font-size: 1.8rem;
+  }
+
+  .features-preview {
+    padding: 2rem 1.5rem;
+  }
+
+  .preview-grid {
+    grid-template-columns: 1fr;
+    gap: 1.5rem;
+  }
+
+  .cta-buttons {
+    flex-direction: column;
+  }
+
+  .cta-buttons .btn {
+    width: 100%;
+    justify-content: center;
+  }
+}

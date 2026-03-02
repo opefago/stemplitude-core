@@ -1,0 +1,316 @@
+.demo-days-page {
+  padding-top: 80px;
+}
+
+.demo-hero {
+  background: var(--electric-blue);
+  padding: 6rem 0 4rem;
+  color: var(--white);
+  text-align: center;
+}
+
+.demo-hero-content h1 {
+  color: var(--white);
+  margin-bottom: 1rem;
+}
+
+.demo-hero-content p {
+  color: rgba(255, 255, 255, 0.95);
+  font-size: 1.3rem;
+}
+
+.competitions {
+  background: var(--white);
+  padding: 5rem 0;
+}
+
+.competitions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 2.5rem;
+}
+
+.competition-card {
+  background: var(--bg-light);
+  border-radius: 20px;
+  padding: 2.5rem;
+  text-align: center;
+  position: relative;
+  transition: transform 0.3s ease;
+}
+
+.competition-card:hover {
+  transform: translateY(-10px);
+}
+
+.competition-icon {
+  margin-bottom: 1.5rem;
+}
+
+.achievement-badge {
+  display: inline-block;
+  color: var(--white);
+  padding: 0.5rem 1.5rem;
+  border-radius: 50px;
+  font-weight: 700;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  margin-bottom: 1.5rem;
+  letter-spacing: 0.5px;
+}
+
+.competition-card h3 {
+  font-size: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.competition-date {
+  color: var(--primary);
+  font-weight: 600;
+  margin-bottom: 1rem;
+}
+
+.competition-description {
+  color: var(--text-light);
+  line-height: 1.7;
+}
+
+.demo-projects {
+  background: var(--bg-light);
+  padding: 5rem 0;
+}
+
+.project-category {
+  margin-bottom: 4rem;
+}
+
+.project-category:last-child {
+  margin-bottom: 0;
+}
+
+.category-title {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  font-size: 2rem;
+  margin-bottom: 1rem;
+  color: var(--primary);
+}
+
+.category-description {
+  font-size: 1.15rem;
+  color: var(--text-light);
+  margin-bottom: 2rem;
+  line-height: 1.7;
+}
+
+.projects-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2rem;
+  justify-content: center;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.project-card {
+  flex: 0 1 calc(50% - 1rem);
+  min-width: 300px;
+  max-width: 450px;
+  background: var(--white);
+  border-radius: 15px;
+  padding: 2rem;
+  box-shadow: 0 5px 20px rgba(0, 0, 0, 0.08);
+  transition: all 0.3s ease;
+  border-left: 4px solid var(--primary);
+}
+
+.project-card:hover {
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+  transform: translateY(-5px);
+}
+
+.project-card h4 {
+  font-size: 1.3rem;
+  margin-bottom: 0.8rem;
+  color: var(--text-dark);
+}
+
+.project-student {
+  color: var(--primary);
+  font-weight: 600;
+  font-size: 0.95rem;
+  margin-bottom: 1rem;
+}
+
+.project-description {
+  color: var(--text-light);
+  line-height: 1.7;
+}
+
+.upcoming-demos {
+  background: var(--white);
+  padding: 5rem 0;
+}
+
+.demo-days-info {
+  max-width: 900px;
+  margin: 0 auto 3rem;
+  text-align: center;
+}
+
+.demo-days-info p {
+  font-size: 1.15rem;
+  color: var(--text-dark);
+  line-height: 1.8;
+}
+
+.upcoming-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2.5rem;
+  justify-content: center;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.upcoming-card {
+  flex: 0 1 calc(50% - 1.25rem);
+  min-width: 300px;
+  max-width: 450px;
+  background: var(--bg-light);
+  border-radius: 20px;
+  padding: 2.5rem;
+  text-align: center;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+}
+
+.upcoming-card svg {
+  color: var(--primary);
+  margin-bottom: 1.5rem;
+}
+
+.upcoming-card h3 {
+  font-size: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.event-date {
+  color: var(--secondary);
+  font-weight: 600;
+  font-size: 1.05rem;
+  margin-bottom: 1rem;
+}
+
+.upcoming-card p {
+  color: var(--text-light);
+  margin-bottom: 1.5rem;
+  line-height: 1.6;
+}
+
+.upcoming-card .btn {
+  width: 100%;
+  justify-content: center;
+}
+
+.demo-testimonials {
+  background: var(--bg-light);
+  padding: 5rem 0;
+}
+
+.demo-testimonials .testimonials-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 2.5rem;
+}
+
+.demo-testimonials .testimonial-card {
+  background: var(--white);
+  border-radius: 20px;
+  padding: 2.5rem;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+  position: relative;
+}
+
+.quote-icon {
+  color: var(--accent);
+  margin-bottom: 1rem;
+}
+
+.testimonial-quote {
+  font-size: 1.1rem;
+  color: var(--text-dark);
+  font-style: italic;
+  line-height: 1.7;
+  margin-bottom: 1.5rem;
+}
+
+.testimonial-author {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.testimonial-author strong {
+  color: var(--text-dark);
+  font-size: 1.1rem;
+}
+
+.testimonial-author span {
+  color: var(--text-light);
+  font-size: 0.95rem;
+}
+
+.demo-cta {
+  background: var(--electric-blue);
+  padding: 5rem 0;
+  color: var(--white);
+}
+
+.cta-content {
+  text-align: center;
+  max-width: 700px;
+  margin: 0 auto;
+}
+
+.cta-content h2 {
+  color: var(--white);
+  margin-bottom: 1rem;
+}
+
+.cta-content p {
+  color: rgba(255, 255, 255, 0.95);
+  font-size: 1.3rem;
+  margin-bottom: 2.5rem;
+}
+
+.cta-buttons {
+  display: flex;
+  gap: 1.5rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 768px) {
+  .project-card,
+  .upcoming-card {
+    flex: 1 1 100%;
+    max-width: 100%;
+  }
+
+  .competitions-grid,
+  .projects-grid,
+  .upcoming-grid,
+  .demo-testimonials .testimonials-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cta-buttons {
+    flex-direction: column;
+  }
+
+  .cta-buttons .btn {
+    width: 100%;
+    justify-content: center;
+  }
+}

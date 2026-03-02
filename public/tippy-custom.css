@@ -1,0 +1,48 @@
+/* Custom Tippy.js theme */
+.tippy-box[data-theme~="custom"] {
+  background: linear-gradient(135deg, #2c3e50, #34495e);
+  color: #ecf0f1;
+  border: 1px solid #3498db;
+  border-radius: 8px;
+  font-size: 12px;
+  font-family: "Arial", sans-serif;
+  font-weight: 500;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(12px);
+  max-width: 250px;
+  transition: all 0.2s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+/* Arrow styling - match the gradient background */
+.tippy-box[data-theme~="custom"][data-placement^="top"] > .tippy-arrow::before {
+  border-top-color: #2c3e50;
+}
+
+.tippy-box[data-theme~="custom"][data-placement^="bottom"]
+  > .tippy-arrow::before {
+  border-bottom-color: #2c3e50;
+}
+
+.tippy-box[data-theme~="custom"][data-placement^="left"]
+  > .tippy-arrow::before {
+  border-left-color: #2c3e50;
+}
+
+.tippy-box[data-theme~="custom"][data-placement^="right"]
+  > .tippy-arrow::before {
+  border-right-color: #2c3e50;
+}
+
+/* Add a subtle border to the arrow to match the tooltip border */
+.tippy-box[data-theme~="custom"] > .tippy-arrow {
+  filter: drop-shadow(0 0 1px #3498db);
+}
+
+/* Enhanced styling for better visual consistency */
+.tippy-box[data-theme~="custom"] {
+  background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+  border: 2px solid #3498db;
+  box-shadow:
+    0 6px 24px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(52, 152, 219, 0.3);
+}

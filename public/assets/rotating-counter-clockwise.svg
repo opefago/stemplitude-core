@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Uploaded to: SVG Repo, www.svgrepo.com, Generator: SVG Repo Mixer Tools -->
+
+<svg
+   fill="#000000"
+   version="1.1"
+   id="Capa_1"
+   width="800px"
+   height="800px"
+   viewBox="0 0 901.013 901.013"
+   xml:space="preserve"
+   sodipodi:docname="rotating-counter-clockwise.svg"
+   inkscape:version="1.2.2 (b0a84865, 2022-12-01)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg"><defs
+   id="defs18" /><sodipodi:namedview
+   id="namedview16"
+   pagecolor="#ffffff"
+   bordercolor="#000000"
+   borderopacity="0.25"
+   inkscape:showpageshadow="2"
+   inkscape:pageopacity="0.0"
+   inkscape:pagecheckerboard="0"
+   inkscape:deskcolor="#d1d1d1"
+   showgrid="false"
+   inkscape:zoom="0.295"
+   inkscape:cx="401.69492"
+   inkscape:cy="400"
+   inkscape:window-width="1309"
+   inkscape:window-height="456"
+   inkscape:window-x="0"
+   inkscape:window-y="38"
+   inkscape:window-maximized="0"
+   inkscape:current-layer="Capa_1" />
+<g
+   id="g13"
+   transform="matrix(-1,0,0,1,901.01167,0)">
+	<path
+   d="M 743.514,174.635 H 397.508 c -28.995,0 -52.5,23.505 -52.5,52.5 0,28.995 23.505,52.5 52.5,52.5 h 346.005 c 28.948,0 52.5,23.552 52.5,52.5 v 238.744 c 0,28.948 -23.552,52.5 -52.5,52.5 H 289.092 c -28.948,0 -52.5,-23.552 -52.5,-52.5 V 352.473 l 42.192,41.689 c 10.23,10.109 23.565,15.155 36.896,15.155 13.541,0 27.078,-5.207 37.347,-15.602 20.381,-20.625 20.181,-53.865 -0.444,-74.244 L 219.312,187.79 c -20.624,-20.38 -53.866,-20.181 -74.244,0.445 L 15.155,319.715 c -20.38,20.625 -20.18,53.865 0.445,74.244 20.624,20.38 53.867,20.181 74.244,-0.445 l 41.747,-42.25 v 219.615 c 0,86.846 70.654,157.5 157.5,157.5 h 454.421 c 86.846,0 157.5,-70.654 157.5,-157.5 V 332.135 c 0.002,-86.846 -70.653,-157.5 -157.498,-157.5 z"
+   id="path11" />
+</g>
+</svg>

@@ -1,0 +1,313 @@
+.camps-page {
+  padding-top: 80px;
+}
+
+.camps-hero {
+  background: var(--electric-blue);
+  padding: 6rem 0 4rem;
+  color: var(--white);
+  text-align: center;
+}
+
+.camps-hero-content h1 {
+  color: var(--white);
+  margin-bottom: 1rem;
+}
+
+.camps-hero-content p {
+  color: rgba(255, 255, 255, 0.95);
+  font-size: 1.3rem;
+}
+
+.camp-features {
+  background: var(--white);
+  padding: 4rem 0;
+  margin-top: -3rem;
+  position: relative;
+  z-index: 2;
+}
+
+.camp-features .features-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2rem;
+  justify-content: center;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.camp-features .feature-card {
+  flex: 0 1 calc(50% - 1rem);
+  min-width: 280px;
+  max-width: 400px;
+}
+
+.camps-detail {
+  background: var(--bg-light);
+  padding: 5rem 0;
+}
+
+.camp-detail-card {
+  background: var(--white);
+  border-radius: 25px;
+  overflow: hidden;
+  margin-bottom: 3rem;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+}
+
+.camp-header {
+  padding: 3rem;
+  color: var(--white);
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+}
+
+.camp-icon svg {
+  filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.2));
+}
+
+.camp-title h2 {
+  color: var(--white);
+  font-size: 2.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.camp-dates {
+  color: rgba(255, 255, 255, 0.95);
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+
+.camp-content {
+  padding: 3rem;
+}
+
+.camp-description {
+  font-size: 1.2rem;
+  color: var(--text-dark);
+  margin-bottom: 2.5rem;
+  line-height: 1.8;
+}
+
+.camp-info-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3rem;
+  margin-bottom: 2.5rem;
+}
+
+.camp-programs h3,
+.camp-details-box h3 {
+  font-size: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.camp-programs ul {
+  list-style: none;
+}
+
+.camp-programs ul li {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding: 0.5rem 0;
+}
+
+.camp-programs ul li svg {
+  flex-shrink: 0;
+  margin-top: 0.2rem;
+}
+
+.camp-programs ul li span {
+  font-size: 1.05rem;
+  color: var(--text-dark);
+  line-height: 1.6;
+}
+
+.camp-details-box {
+  background: var(--bg-light);
+  padding: 2rem;
+  border-radius: 15px;
+}
+
+.detail-section {
+  margin-bottom: 2rem;
+}
+
+.detail-section:last-child {
+  margin-bottom: 0;
+}
+
+.detail-section h3 {
+  font-size: 1.3rem;
+  margin-bottom: 1rem;
+}
+
+.detail-section p {
+  margin-bottom: 0.5rem;
+  font-size: 1.05rem;
+}
+
+.detail-section strong {
+  color: var(--primary);
+}
+
+.camp-cta {
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  padding-top: 2rem;
+  border-top: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.what-to-expect {
+  background: var(--white);
+  padding: 5rem 0;
+}
+
+.expect-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1.5rem;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.expect-item {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  background: var(--bg-light);
+  border-radius: 10px;
+  transition: transform 0.3s ease;
+}
+
+.expect-item:hover {
+  transform: translateX(10px);
+}
+
+.expect-item svg {
+  color: var(--success);
+  flex-shrink: 0;
+}
+
+.expect-item span {
+  font-size: 1.05rem;
+  color: var(--text-dark);
+}
+
+.camp-gallery {
+  background: var(--bg-light);
+  padding: 5rem 0;
+}
+
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 2rem;
+}
+
+.gallery-item {
+  aspect-ratio: 4/3;
+  border-radius: 15px;
+  overflow: hidden;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+}
+
+.gallery-placeholder {
+  width: 100%;
+  height: 100%;
+  background: var(--electric-blue);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--white);
+  gap: 1rem;
+}
+
+.gallery-placeholder svg {
+  opacity: 0.9;
+}
+
+.gallery-placeholder p {
+  color: var(--white);
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+
+.camps-final-cta {
+  background: var(--gradient-steam);
+  padding: 5rem 0;
+  color: var(--white);
+}
+
+.cta-content {
+  text-align: center;
+  max-width: 700px;
+  margin: 0 auto;
+}
+
+.cta-content h2 {
+  color: var(--white);
+  margin-bottom: 1rem;
+}
+
+.cta-content p {
+  color: rgba(255, 255, 255, 0.95);
+  font-size: 1.3rem;
+  margin-bottom: 2.5rem;
+}
+
+.cta-buttons {
+  display: flex;
+  gap: 1.5rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 968px) {
+  .camp-info-grid {
+    grid-template-columns: 1fr;
+    gap: 2rem;
+  }
+}
+
+@media (max-width: 768px) {
+  .camp-features .feature-card {
+    flex: 1 1 100%;
+    max-width: 100%;
+  }
+
+  .camp-header {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 2rem;
+  }
+
+  .camp-content {
+    padding: 2rem 1.5rem;
+  }
+
+  .camp-cta,
+  .cta-buttons {
+    flex-direction: column;
+  }
+
+  .camp-cta .btn,
+  .cta-buttons .btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .expect-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .gallery-grid {
+    grid-template-columns: 1fr;
+  }
+}

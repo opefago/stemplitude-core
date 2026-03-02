@@ -1,0 +1,274 @@
+.playground-page {
+  padding-top: 80px;
+}
+
+.playground-hero {
+  background: linear-gradient(135deg, var(--electric-blue) 0%, #0052CC 100%);
+  padding: 6rem 0 4rem;
+  color: var(--white);
+  text-align: center;
+}
+
+.playground-hero-content h1 {
+  color: var(--white);
+  margin-bottom: 1rem;
+}
+
+.playground-hero-content p {
+  color: rgba(255, 255, 255, 0.95);
+  font-size: 1.3rem;
+}
+
+.hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: rgba(255, 255, 255, 0.2);
+  padding: 0.5rem 1.5rem;
+  border-radius: 50px;
+  margin-bottom: 1.5rem;
+  font-weight: 600;
+  backdrop-filter: blur(10px);
+}
+
+/* Labs Section */
+.labs-section {
+  background: var(--white);
+  padding: 5rem 0;
+}
+
+.labs-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2.5rem;
+  justify-content: center;
+  margin-top: 3rem;
+}
+
+.lab-card {
+  flex: 0 1 calc(33.333% - 2rem);
+  min-width: 320px;
+  max-width: 420px;
+  background: var(--white);
+  border-radius: 20px;
+  padding: 2.5rem;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s ease;
+  position: relative;
+  border: 2px solid transparent;
+}
+
+.lab-card:hover {
+  transform: translateY(-10px);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+  border-color: var(--electric-blue);
+}
+
+.lab-card.coming-soon {
+  opacity: 0.7;
+}
+
+.lab-icon {
+  width: 80px;
+  height: 80px;
+  border-radius: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--white);
+  margin-bottom: 1.5rem;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+}
+
+.coming-soon-badge {
+  position: absolute;
+  top: 1.5rem;
+  right: 1.5rem;
+  background: var(--vibrant-orange);
+  color: var(--white);
+  padding: 0.4rem 1rem;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.lab-card h3 {
+  font-size: 1.8rem;
+  margin-bottom: 1rem;
+  color: var(--text-dark);
+}
+
+.lab-description {
+  color: var(--text-light);
+  line-height: 1.7;
+  margin-bottom: 1.5rem;
+}
+
+.lab-features {
+  background: var(--bg-light);
+  padding: 1.5rem;
+  border-radius: 10px;
+  margin-bottom: 2rem;
+}
+
+.lab-features h4 {
+  font-size: 1.1rem;
+  margin-bottom: 1rem;
+  color: var(--text-dark);
+}
+
+.lab-features ul {
+  list-style: none;
+}
+
+.lab-features ul li {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin-bottom: 0.8rem;
+  color: var(--text-dark);
+  font-size: 0.95rem;
+}
+
+.lab-features ul li svg {
+  color: var(--electric-blue);
+  flex-shrink: 0;
+}
+
+.lab-card .btn {
+  width: 100%;
+  justify-content: center;
+}
+
+.lab-card .btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Access Info */
+.access-info {
+  background: var(--bg-light);
+  padding: 5rem 0;
+}
+
+.info-card {
+  max-width: 900px;
+  margin: 0 auto;
+  text-align: center;
+  background: var(--white);
+  padding: 3rem;
+  border-radius: 20px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+}
+
+.info-card h2 {
+  font-size: 2.5rem;
+  margin-bottom: 3rem;
+}
+
+.access-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 2rem;
+  margin-bottom: 2.5rem;
+}
+
+.access-item {
+  padding: 2rem;
+  background: var(--bg-light);
+  border-radius: 15px;
+}
+
+.access-icon {
+  width: 60px;
+  height: 60px;
+  border-radius: 12px;
+  background: var(--electric-blue);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--white);
+  margin: 0 auto 1.5rem;
+}
+
+.access-item h3 {
+  font-size: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.access-item p {
+  color: var(--text-light);
+  line-height: 1.7;
+}
+
+.info-note {
+  background: rgba(0, 102, 255, 0.05);
+  padding: 1.5rem;
+  border-radius: 10px;
+  border-left: 4px solid var(--electric-blue);
+  text-align: left;
+  line-height: 1.7;
+}
+
+.info-note strong {
+  color: var(--electric-blue);
+}
+
+/* CTA Section */
+.playground-cta {
+  background: var(--electric-blue);
+  padding: 5rem 0;
+  color: var(--white);
+}
+
+.playground-cta .cta-content {
+  text-align: center;
+  max-width: 700px;
+  margin: 0 auto;
+}
+
+.playground-cta .cta-content h2 {
+  color: var(--white);
+  margin-bottom: 1rem;
+}
+
+.playground-cta .cta-content p {
+  color: rgba(255, 255, 255, 0.95);
+  font-size: 1.3rem;
+  margin-bottom: 2.5rem;
+}
+
+.cta-buttons {
+  display: flex;
+  gap: 1.5rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 768px) {
+  .playground-hero {
+    padding: 4rem 0 3rem;
+  }
+
+  .lab-card {
+    flex: 1 1 100%;
+    max-width: 100%;
+  }
+
+  .access-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .info-card {
+    padding: 2rem 1.5rem;
+  }
+
+  .cta-buttons {
+    flex-direction: column;
+  }
+
+  .cta-buttons .btn {
+    width: 100%;
+    justify-content: center;
+  }
+}

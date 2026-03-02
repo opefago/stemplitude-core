@@ -1,0 +1,15 @@
+.recaptcha-container {
+  display: flex;
+  justify-content: center;
+  margin: 1.5rem 0;
+  padding: 1rem;
+  background: var(--bg-light);
+  border-radius: 10px;
+}
+
+@media (max-width: 768px) {
+  .recaptcha-container {
+    transform: scale(0.85);
+    transform-origin: center;
+  }
+}

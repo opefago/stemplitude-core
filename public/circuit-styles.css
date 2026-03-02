@@ -1,0 +1,572 @@
+/* Circuit Simulation Styles */
+
+/* Toolbar Styles */
+.circuit-toolbar {
+  position: fixed;
+  top: 48px;
+  right: 0;
+  width: 220px;
+  height: calc(100vh - 48px);
+  background: linear-gradient(135deg, #2c3e50, #34495e);
+  border-left: 2px solid #3498db;
+  border-top: 2px solid #3498db;
+  border-radius: 12px 0 0 0;
+  padding: 20px 15px;
+  box-shadow: -5px 0 20px rgba(0, 0, 0, 0.3);
+  z-index: 1000;
+  overflow-y: auto;
+}
+
+.toolbar-category-header {
+  color: #ecf0f1;
+  font-weight: bold;
+  font-size: 12px;
+  text-transform: uppercase;
+  margin: 0 0 10px 0;
+  padding: 12px 16px;
+  border-radius: 0;
+  text-align: left;
+  background: linear-gradient(135deg, #34495e, #2c3e50);
+  border: none;
+  border-top: 1px solid #34495e;
+  border-bottom: 1px solid #34495e;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  transition: all 0.3s ease;
+  cursor: default;
+}
+
+.toolbar-category-header:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* Enhanced hover effects for each category */
+.toolbar-header-sources:hover {
+  box-shadow: 0 4px 12px rgba(39, 174, 96, 0.5) !important;
+}
+
+.toolbar-header-passive:hover {
+  box-shadow: 0 4px 12px rgba(52, 152, 219, 0.5) !important;
+}
+
+.toolbar-header-active:hover {
+  box-shadow: 0 4px 12px rgba(243, 156, 18, 0.5) !important;
+}
+
+.toolbar-header-measurement:hover {
+  box-shadow: 0 4px 12px rgba(26, 188, 156, 0.5) !important;
+}
+
+.toolbar-header-digital:hover {
+  box-shadow: 0 4px 12px rgba(155, 89, 182, 0.5) !important;
+}
+
+/* Sources Section - Green */
+.toolbar-header-sources {
+  background: linear-gradient(135deg, #27ae60, #229954) !important;
+  border-color: #27ae60 !important;
+  color: white !important;
+  box-shadow: 0 2px 8px rgba(39, 174, 96, 0.3) !important;
+}
+
+/* Passive Section - Blue */
+.toolbar-header-passive {
+  background: linear-gradient(135deg, #3498db, #2980b9) !important;
+  border-color: #3498db !important;
+  color: white !important;
+  box-shadow: 0 2px 8px rgba(52, 152, 219, 0.3) !important;
+}
+
+/* Active Section - Orange */
+.toolbar-header-active {
+  background: linear-gradient(135deg, #f39c12, #e67e22) !important;
+  border-color: #f39c12 !important;
+  color: white !important;
+  box-shadow: 0 2px 8px rgba(243, 156, 18, 0.3) !important;
+}
+
+/* Measurement Section - Cyan */
+.toolbar-header-measurement {
+  background: linear-gradient(135deg, #1abc9c, #16a085) !important;
+  border-color: #1abc9c !important;
+  color: white !important;
+  box-shadow: 0 2px 8px rgba(26, 188, 156, 0.3) !important;
+}
+
+/* Digital Section - Purple */
+.toolbar-header-digital {
+  background: linear-gradient(135deg, #9b59b6, #8e44ad) !important;
+  border-color: #9b59b6 !important;
+  color: white !important;
+  box-shadow: 0 2px 8px rgba(155, 89, 182, 0.3) !important;
+}
+
+.toolbar-category-header:first-child {
+  margin-top: 0;
+}
+
+.toolbar-category {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.toolbar-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 4px;
+  background: rgba(52, 73, 94, 0.3);
+  border: 1px solid #34495e;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  min-height: 50px;
+}
+
+.toolbar-item:hover {
+  background: rgba(52, 152, 219, 0.2);
+  border-color: #3498db;
+  transform: translateY(-2px);
+}
+
+.toolbar-item.selected {
+  background: rgba(52, 152, 219, 0.4);
+  border-color: #3498db;
+  box-shadow: 0 0 10px rgba(52, 152, 219, 0.3);
+}
+
+.toolbar-icon {
+  font-size: 18px;
+  margin-bottom: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  width: 24px;
+}
+
+.toolbar-icon-svg {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  filter: brightness(0) invert(1);
+  opacity: 0.9;
+}
+
+.toolbar-item:hover .toolbar-icon-svg {
+  filter: brightness(0) invert(1);
+  opacity: 1;
+}
+
+.toolbar-label {
+  font-size: 9px;
+  color: #bdc3c7;
+  text-align: center;
+  line-height: 1.1;
+  font-weight: 500;
+}
+
+/* Simulation Controls */
+.simulation-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sim-button {
+  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: bold;
+  transition: all 0.3s ease;
+}
+
+.sim-button.play-stop {
+  background: linear-gradient(135deg, #27ae60, #229954);
+  color: white;
+}
+
+.sim-button.play-stop:hover {
+  background: linear-gradient(135deg, #229954, #1e8449);
+}
+
+.sim-button.reset {
+  background: linear-gradient(135deg, #f39c12, #e67e22);
+  color: white;
+}
+
+.sim-button.reset:hover {
+  background: linear-gradient(135deg, #e67e22, #d35400);
+}
+
+.sim-button.analyze {
+  background: linear-gradient(135deg, #9b59b6, #8e44ad);
+  color: white;
+}
+
+.sim-button.analyze:hover {
+  background: linear-gradient(135deg, #8e44ad, #7d3c98);
+}
+
+/* Properties Panel */
+.circuit-properties {
+  position: fixed;
+  top: 20px;
+  left: 20px;
+  width: 250px;
+  background: linear-gradient(135deg, #2c3e50, #34495e);
+  border: 2px solid #3498db;
+  border-radius: 12px;
+  padding: 15px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+  z-index: 1000;
+  transition:
+    opacity 0.3s ease,
+    transform 0.3s ease;
+}
+
+.circuit-properties.hidden {
+  opacity: 0;
+  transform: translateX(-100%);
+  pointer-events: none;
+}
+
+.properties-header {
+  color: #ecf0f1;
+  font-weight: bold;
+  font-size: 14px;
+  margin-bottom: 15px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #34495e;
+}
+
+.properties-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.property-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.property-field label {
+  color: #bdc3c7;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.property-field input {
+  padding: 6px 8px;
+  border: 1px solid #34495e;
+  border-radius: 4px;
+  background: rgba(52, 73, 94, 0.3);
+  color: #ecf0f1;
+  font-size: 12px;
+}
+
+.property-field input:focus {
+  outline: none;
+  border-color: #3498db;
+  box-shadow: 0 0 5px rgba(52, 152, 219, 0.3);
+}
+
+/* Wire Mode Cursor */
+body.wire-mode {
+  cursor: crosshair;
+}
+
+body.wire-mode .circuit-toolbar .toolbar-item[data-type="wire"] {
+  background: rgba(231, 76, 60, 0.4);
+  border-color: #e74c3c;
+}
+
+/* Analysis Results */
+.analysis-results {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: linear-gradient(135deg, #2c3e50, #34495e);
+  border: 2px solid #3498db;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  z-index: 2000;
+  max-width: 80vw;
+  max-height: 80vh;
+  overflow: auto;
+}
+
+.analysis-results h3 {
+  color: #ecf0f1;
+  margin: 0 0 15px 0;
+  font-size: 16px;
+}
+
+.analysis-results pre {
+  background: rgba(0, 0, 0, 0.3);
+  color: #00ff00;
+  padding: 15px;
+  border-radius: 6px;
+  font-family: "Courier New", monospace;
+  font-size: 12px;
+  overflow: auto;
+  max-height: 400px;
+}
+
+.analysis-results button {
+  margin-top: 15px;
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #e74c3c, #c0392b);
+  border: none;
+  border-radius: 6px;
+  color: white;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.analysis-results button:hover {
+  background: linear-gradient(135deg, #c0392b, #a93226);
+}
+
+/* Grid and Canvas Styles */
+.circuit-canvas {
+  background: #ffffff;
+  margin-right: 220px; /* Leave space for sidebar */
+}
+
+/* Main content area adjustment for sidebar */
+.circuit-scene-container {
+  margin-right: 220px;
+  height: calc(100vh - 48px);
+  margin-top: 48px;
+}
+
+/* Component Selection Highlight */
+.component-selected {
+  filter: drop-shadow(0 0 8px #3498db);
+}
+
+/* Current Flow Animation */
+@keyframes current-flow {
+  0% {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+}
+
+.current-flow-dot {
+  animation: current-flow 0.5s ease-in-out infinite;
+}
+
+/* Component Burn Effect */
+@keyframes component-burn {
+  0% {
+    filter: hue-rotate(0deg) brightness(1);
+  }
+  50% {
+    filter: hue-rotate(30deg) brightness(1.5);
+  }
+  100% {
+    filter: hue-rotate(0deg) brightness(0.5);
+  }
+}
+
+.component-burnt {
+  animation: component-burn 2s ease-in-out;
+  filter: brightness(0.3) sepia(1) hue-rotate(0deg);
+}
+
+/* LED Glow Effect */
+@keyframes led-glow {
+  0% {
+    filter: brightness(1) drop-shadow(0 0 5px transparent);
+  }
+  50% {
+    filter: brightness(1.5) drop-shadow(0 0 15px currentColor);
+  }
+  100% {
+    filter: brightness(1) drop-shadow(0 0 5px transparent);
+  }
+}
+
+.led-glowing {
+  animation: led-glow 1s ease-in-out infinite;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .circuit-toolbar {
+    width: 180px;
+    top: 48px;
+    height: calc(100vh - 48px);
+    padding: 15px 10px;
+  }
+
+  .circuit-properties {
+    width: 200px;
+    left: 10px;
+    top: 60px;
+  }
+
+  .toolbar-category {
+    grid-template-columns: 1fr;
+  }
+
+  .toolbar-item {
+    min-height: 50px;
+  }
+
+  .toolbar-icon {
+    font-size: 16px;
+  }
+
+  .toolbar-label {
+    font-size: 9px;
+  }
+
+  .circuit-canvas {
+    margin-right: 180px; /* Adjust for smaller sidebar on mobile */
+  }
+
+  .circuit-scene-container {
+    margin-right: 180px;
+    height: calc(100vh - 48px);
+    margin-top: 48px;
+  }
+}
+
+/* Scrollbar Styling for Webkit Browsers */
+.circuit-toolbar::-webkit-scrollbar,
+.analysis-results::-webkit-scrollbar {
+  width: 6px;
+}
+
+.circuit-toolbar::-webkit-scrollbar-track,
+.analysis-results::-webkit-scrollbar-track {
+  background: rgba(52, 73, 94, 0.3);
+  border-radius: 3px;
+}
+
+.circuit-toolbar::-webkit-scrollbar-thumb,
+.analysis-results::-webkit-scrollbar-thumb {
+  background: rgba(52, 152, 219, 0.5);
+  border-radius: 3px;
+}
+
+.circuit-toolbar::-webkit-scrollbar-thumb:hover,
+.analysis-results::-webkit-scrollbar-thumb:hover {
+  background: rgba(52, 152, 219, 0.7);
+}
+
+/* Tooltip Styles */
+.circuit-tooltip {
+  position: absolute;
+  background: rgba(0, 0, 0, 0.9);
+  color: white;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  pointer-events: none;
+  z-index: 3000;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.circuit-tooltip.visible {
+  opacity: 1;
+}
+
+/* Loading Spinner */
+.circuit-loading {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 4000;
+}
+
+.circuit-spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid rgba(52, 152, 219, 0.3);
+  border-top: 4px solid #3498db;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* Error Messages */
+.circuit-error {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: linear-gradient(135deg, #e74c3c, #c0392b);
+  color: white;
+  padding: 12px 16px;
+  border-radius: 8px;
+  box-shadow: 0 5px 15px rgba(231, 76, 60, 0.3);
+  z-index: 3000;
+  animation: slideInRight 0.3s ease-out;
+}
+
+@keyframes slideInRight {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* Success Messages */
+.circuit-success {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: linear-gradient(135deg, #27ae60, #229954);
+  color: white;
+  padding: 12px 16px;
+  border-radius: 8px;
+  box-shadow: 0 5px 15px rgba(39, 174, 96, 0.3);
+  z-index: 3000;
+  animation: slideInRight 0.3s ease-out;
+}
+
+/* Wire Mode Cursor */
+body.wire-mode {
+  cursor: crosshair !important;
+}
+
+body.wire-mode * {
+  cursor: crosshair !important;
+}
+
+body.wire-mode .circuit-canvas {
+  cursor: crosshair !important;
+}
