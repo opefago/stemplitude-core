@@ -180,6 +180,8 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, wireframe
         position={obj.position}
         rotation={obj.rotation}
         scale={obj.scale}
+        onPointerDown={() => { sceneInteracting.active = true; }}
+        onPointerUp={() => { sceneInteracting.active = false; }}
         onClick={onSelect}
       >
         <Suspense fallback={
@@ -203,6 +205,40 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, wireframe
               <ToyMaterial color={color} wireframe={wireframe} transparent={obj.isHole} opacity={opacity} side={side} />
             </Text3D>
           </Center>
+          {!wireframe && (
+            <Center>
+              <Text3D
+                font={FONT_MAP[obj.geometry.font] || FONT_MAP.helvetiker}
+                size={obj.geometry.size || 10}
+                height={obj.geometry.height || 5}
+                curveSegments={8}
+                bevelEnabled
+                bevelThickness={0.3}
+                bevelSize={0.2}
+                scale={[cartoonRatio, cartoonRatio, cartoonRatio]}
+              >
+                {obj.geometry.text || 'Text'}
+                <meshBasicMaterial color="#2a2a2a" side={THREE.BackSide} />
+              </Text3D>
+            </Center>
+          )}
+          {isSelected && (
+            <Center>
+              <Text3D
+                font={FONT_MAP[obj.geometry.font] || FONT_MAP.helvetiker}
+                size={obj.geometry.size || 10}
+                height={obj.geometry.height || 5}
+                curveSegments={8}
+                bevelEnabled
+                bevelThickness={0.3}
+                bevelSize={0.2}
+                scale={[selectionRatio, selectionRatio, selectionRatio]}
+              >
+                {obj.geometry.text || 'Text'}
+                <meshBasicMaterial color="#00c8ff" side={THREE.BackSide} transparent opacity={0.75} />
+              </Text3D>
+            </Center>
+          )}
         </Suspense>
       </group>
     );
@@ -351,12 +387,9 @@ function DragPreview() {
     groupRef.current.visible = true;
     raycaster.setFromCamera(dragCursor, camera);
     if (raycaster.ray.intersectPlane(plane, hitPoint)) {
-      const snap = snapIncrement;
-      groupRef.current.position.set(
-        Math.round(hitPoint.x / snap) * snap,
-        halfH,
-        Math.round(hitPoint.z / snap) * snap
-      );
+      const sx = snapIncrement ? Math.round(hitPoint.x / snapIncrement) * snapIncrement : hitPoint.x;
+      const sz = snapIncrement ? Math.round(hitPoint.z / snapIncrement) * snapIncrement : hitPoint.z;
+      groupRef.current.position.set(sx, halfH, sz);
     }
   });
 
@@ -551,9 +584,8 @@ function DropHandler() {
     const intersected = raycaster.ray.intersectPlane(plane, hit);
 
     if (intersected) {
-      const snap = snapIncrement;
-      const x = Math.round(hit.x / snap) * snap;
-      const z = Math.round(hit.z / snap) * snap;
+      const x = snapIncrement ? Math.round(hit.x / snapIncrement) * snapIncrement : hit.x;
+      const z = snapIncrement ? Math.round(hit.z / snapIncrement) * snapIncrement : hit.z;
 
       const overrides = { position: [x, 0, z] };
       if (isHole) overrides.isHole = true;
@@ -587,9 +619,8 @@ function MeasureTool() {
     const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
     const hit = new THREE.Vector3();
     if (raycaster.ray.intersectPlane(plane, hit)) {
-      const snap = snapIncrement;
-      const x = Math.round(hit.x / snap) * snap;
-      const z = Math.round(hit.z / snap) * snap;
+      const x = snapIncrement ? Math.round(hit.x / snapIncrement) * snapIncrement : hit.x;
+      const z = snapIncrement ? Math.round(hit.z / snapIncrement) * snapIncrement : hit.z;
       addMeasurePoint([x, 0, z]);
     }
   }, [measureActive, camera, gl, addMeasurePoint, snapIncrement]);
@@ -815,8 +846,8 @@ function SceneContent() {
         <Grid
           position={[0, -0.01, 0]}
           args={[200, 200]}
-          cellSize={snapIncrement}
-          sectionSize={snapIncrement * 10}
+          cellSize={snapIncrement || 1}
+          sectionSize={(snapIncrement || 1) * 10}
           fadeDistance={200}
           fadeStrength={1}
           cellColor="#a8c8e8"
@@ -873,7 +904,7 @@ function SceneContent() {
         <TransformControls
           object={selectedMesh}
           mode={transformMode}
-          translationSnap={snapIncrement}
+          translationSnap={snapIncrement || null}
           rotationSnap={THREE.MathUtils.degToRad(15)}
           scaleSnap={0.1}
           size={0.7}

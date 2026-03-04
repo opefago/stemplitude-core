@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import Tip from './Tip';
+import CustomSelect from './CustomSelect';
 import {
   Move, RotateCw, Maximize2, Grid3X3, Box, BoxSelect, Ruler, PencilRuler,
   Copy, Trash2, FlipHorizontal, FlipVertical,
@@ -144,16 +145,21 @@ export default function Toolbar() {
 
       <div className="dml-toolbar-group">
         <span className="dml-toolbar-label">Snap</span>
-        <select
+        <CustomSelect
           className="dml-snap-select"
           value={snapIncrement}
-          onChange={(e) => setSnapIncrement(Number(e.target.value))}
-        >
-          <option value={0.1}>0.1mm</option>
-          <option value={1}>1mm</option>
-          <option value={5}>5mm</option>
-          <option value={10}>10mm</option>
-        </select>
+          onChange={(v) => setSnapIncrement(Number(v))}
+          options={[
+            { value: 0, label: 'Off' },
+            { value: 0.1, label: '0.1mm' },
+            { value: 0.25, label: '0.25mm' },
+            { value: 0.5, label: '0.5mm' },
+            { value: 1, label: '1mm' },
+            { value: 2, label: '2mm' },
+            { value: 5, label: '5mm' },
+            { value: 10, label: '10mm' },
+          ]}
+        />
       </div>
 
       {hasSelection && (
@@ -185,11 +191,15 @@ export default function Toolbar() {
                 <div className="dml-array-popover">
                   <div className="dml-array-row">
                     <label>Axis</label>
-                    <select value={arrayAxis} onChange={e => setArrayAxis(e.target.value)}>
-                      <option value="x">X</option>
-                      <option value="y">Y</option>
-                      <option value="z">Z</option>
-                    </select>
+                    <CustomSelect
+                      value={arrayAxis}
+                      onChange={(v) => setArrayAxis(v)}
+                      options={[
+                        { value: 'x', label: 'X' },
+                        { value: 'y', label: 'Y' },
+                        { value: 'z', label: 'Z' },
+                      ]}
+                    />
                   </div>
                   <div className="dml-array-row">
                     <label>Count</label>

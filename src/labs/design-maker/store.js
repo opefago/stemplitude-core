@@ -35,7 +35,7 @@ export function getHalfHeight(type, geometry) {
     case 'heart': case 'star':
       return geometry.depth / 2;
     case 'text':
-      return geometry.height / 2;
+      return (geometry.size || 10) / 2;
     default:
       return 10;
   }

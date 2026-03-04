@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Trash2, Copy, Lock, Unlock, ArrowDownToLine } from 'lucide-react';
 import { useDesignStore } from './store';
 import { FONT_MAP, FONT_LABELS } from './Scene';
+import CustomSelect from './CustomSelect';
 
 const COLOR_SWATCHES = [
   '#ef4444', '#f97316', '#eab308', '#22c55e', '#14b8a6',
@@ -82,15 +83,11 @@ function GeometryProps({ obj, updateGeometry }) {
           </div>
           <div className="dml-prop-field">
             <label>Font</label>
-            <select
-              className="dml-font-select"
+            <CustomSelect
               value={p.font || 'helvetiker'}
-              onChange={(e) => updateGeometry('font', e.target.value)}
-            >
-              {Object.keys(FONT_MAP).map(k => (
-                <option key={k} value={k}>{FONT_LABELS[k]}</option>
-              ))}
-            </select>
+              onChange={(v) => updateGeometry('font', v)}
+              options={Object.keys(FONT_MAP).map(k => ({ value: k, label: FONT_LABELS[k] }))}
+            />
           </div>
           <NumberInput label="Size" value={p.size} onChange={(v) => updateGeometry('size', v)} />
           <NumberInput label="Depth" value={p.height} onChange={(v) => updateGeometry('height', v)} />

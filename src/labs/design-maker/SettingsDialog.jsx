@@ -1,6 +1,7 @@
 import React from 'react';
 import { X } from 'lucide-react';
 import { useDesignStore } from './store';
+import CustomSelect from './CustomSelect';
 
 export default function SettingsDialog() {
   const settingsOpen = useDesignStore(s => s.settingsOpen);
@@ -30,20 +31,32 @@ export default function SettingsDialog() {
         <div className="dml-modal-body">
           <div className="dml-setting-row">
             <label>Units</label>
-            <select value={units} onChange={(e) => setUnits(e.target.value)}>
-              <option value="mm">Millimeters (mm)</option>
-              <option value="in">Inches (in)</option>
-            </select>
+            <CustomSelect
+              value={units}
+              onChange={(v) => setUnits(v)}
+              options={[
+                { value: 'mm', label: 'Millimeters (mm)' },
+                { value: 'in', label: 'Inches (in)' },
+              ]}
+            />
           </div>
 
           <div className="dml-setting-row">
             <label>Default Snap</label>
-            <select value={snapIncrement} onChange={(e) => setSnapIncrement(Number(e.target.value))}>
-              <option value={0.1}>0.1 {units}</option>
-              <option value={1}>1 {units}</option>
-              <option value={5}>5 {units}</option>
-              <option value={10}>10 {units}</option>
-            </select>
+            <CustomSelect
+              value={snapIncrement}
+              onChange={(v) => setSnapIncrement(Number(v))}
+              options={[
+                { value: 0, label: 'Off' },
+                { value: 0.1, label: `0.1 ${units}` },
+                { value: 0.25, label: `0.25 ${units}` },
+                { value: 0.5, label: `0.5 ${units}` },
+                { value: 1, label: `1 ${units}` },
+                { value: 2, label: `2 ${units}` },
+                { value: 5, label: `5 ${units}` },
+                { value: 10, label: `10 ${units}` },
+              ]}
+            />
           </div>
 
           <div className="dml-setting-row">
