@@ -2,7 +2,7 @@ import React, { useEffect, useCallback, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Tip from '../labs/design-maker/Tip';
 import {
-  Settings, Upload, Download, Share2, X, Merge, Scissors, Pencil,
+  Settings, Upload, Download, Share2, X, Merge, Scissors, Pencil, Waypoints,
 } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import * as THREE from 'three';
@@ -14,7 +14,7 @@ import SceneTree from '../labs/design-maker/SceneTree';
 import SettingsDialog from '../labs/design-maker/SettingsDialog';
 import ViewControls from '../labs/design-maker/ViewControls';
 import { useDesignStore, dragCursor, sceneCamera, sceneInteracting } from '../labs/design-maker/store';
-import { unionCSG, subtractCSG } from '../labs/design-maker/csgUtils';
+import { unionCSG, subtractCSG, intersectCSG } from '../labs/design-maker/csgUtils';
 import './DesignMakerLab.css';
 
 function createGeometryFromObj(obj) {
@@ -354,6 +354,30 @@ export default function DesignMakerLab() {
     }
   }, [selectedIds, objects, replaceObjects]);
 
+  const handleIntersect = useCallback(() => {
+    if (selectedIds.length < 2) return;
+    const selected = objects.filter(o => selectedIds.includes(o.id));
+    try {
+      const result = intersectCSG(selected);
+      if (result) {
+        replaceObjects(selectedIds, {
+          id: uuidv4(),
+          name: 'Intersection',
+          type: 'imported',
+          position: [0, 0, 0],
+          rotation: [0, 0, 0],
+          scale: [1, 1, 1],
+          color: selected[0].color,
+          isHole: false,
+          visible: true,
+          geometry: { bufferGeometry: result.geometry },
+        });
+      }
+    } catch (err) {
+      console.error('Intersect failed:', err);
+    }
+  }, [selectedIds, objects, replaceObjects]);
+
   return (
     <div className="dml-container">
       <header className="dml-header">
@@ -540,6 +564,10 @@ export default function DesignMakerLab() {
               <button className="dml-csg-btn dml-csg-subtract" onClick={handleSubtract}>
                 <Scissors size={16} />
                 <span>Subtract</span>
+              </button>
+              <button className="dml-csg-btn dml-csg-intersect" onClick={handleIntersect}>
+                <Waypoints size={16} />
+                <span>Intersect</span>
               </button>
               <span className="dml-csg-hint">First selected = target</span>
             </div>

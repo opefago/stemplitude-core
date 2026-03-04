@@ -35,6 +35,21 @@ function GeometryProps({ obj, updateGeometry }) {
           <NumberInput label="Width" value={p.width} onChange={(v) => updateGeometry('width', v)} />
           <NumberInput label="Height" value={p.height} onChange={(v) => updateGeometry('height', v)} />
           <NumberInput label="Depth" value={p.depth} onChange={(v) => updateGeometry('depth', v)} />
+          <div className="dml-prop-field">
+            <label>Edges</label>
+            <CustomSelect
+              value={p.edgeStyle || 'none'}
+              options={[
+                { value: 'none', label: 'Sharp' },
+                { value: 'fillet', label: 'Fillet (Round)' },
+                { value: 'chamfer', label: 'Chamfer (Flat)' },
+              ]}
+              onChange={(v) => updateGeometry('edgeStyle', v)}
+            />
+          </div>
+          {(p.edgeStyle === 'fillet' || p.edgeStyle === 'chamfer') && (
+            <NumberInput label="Edge Size" value={p.edgeRadius || 0} onChange={(v) => updateGeometry('edgeRadius', Math.max(0.5, v))} step={0.5} />
+          )}
         </>
       );
     case 'sphere': case 'hemisphere':
@@ -45,6 +60,21 @@ function GeometryProps({ obj, updateGeometry }) {
           <NumberInput label="Top Radius" value={p.radiusTop} onChange={(v) => updateGeometry('radiusTop', v)} />
           <NumberInput label="Bottom Radius" value={p.radiusBottom} onChange={(v) => updateGeometry('radiusBottom', v)} />
           <NumberInput label="Height" value={p.height} onChange={(v) => updateGeometry('height', v)} />
+          <div className="dml-prop-field">
+            <label>Edges</label>
+            <CustomSelect
+              value={p.edgeStyle || 'none'}
+              options={[
+                { value: 'none', label: 'Sharp' },
+                { value: 'fillet', label: 'Fillet (Round)' },
+                { value: 'chamfer', label: 'Chamfer (Flat)' },
+              ]}
+              onChange={(v) => updateGeometry('edgeStyle', v)}
+            />
+          </div>
+          {(p.edgeStyle === 'fillet' || p.edgeStyle === 'chamfer') && (
+            <NumberInput label="Edge Size" value={p.edgeRadius || 0} onChange={(v) => updateGeometry('edgeRadius', Math.max(0.5, v))} step={0.5} />
+          )}
         </>
       );
     case 'cone': case 'pyramid':

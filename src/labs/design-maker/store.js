@@ -2,13 +2,13 @@ import { create } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
 
 export const SHAPE_DEFAULTS = {
-  box: { geometry: { width: 20, height: 20, depth: 20 }, color: '#6366f1' },
+  box: { geometry: { width: 20, height: 20, depth: 20, edgeRadius: 0, edgeStyle: 'none' }, color: '#6366f1' },
   sphere: { geometry: { radius: 10, widthSegments: 32, heightSegments: 32 }, color: '#ec4899' },
-  cylinder: { geometry: { radiusTop: 10, radiusBottom: 10, height: 20, radialSegments: 32 }, color: '#14b8a6' },
+  cylinder: { geometry: { radiusTop: 10, radiusBottom: 10, height: 20, radialSegments: 32, edgeRadius: 0, edgeStyle: 'none' }, color: '#14b8a6' },
   cone: { geometry: { radius: 10, height: 20, radialSegments: 32 }, color: '#f97316' },
   torus: { geometry: { radius: 10, tube: 3, radialSegments: 16, tubularSegments: 48 }, color: '#8b5cf6' },
   text: { geometry: { text: 'Hello', size: 10, height: 5, font: 'helvetiker' }, color: '#3b82f6' },
-  wall: { geometry: { width: 40, height: 20, depth: 2 }, color: '#64748b' },
+  wall: { geometry: { width: 40, height: 20, depth: 2, edgeRadius: 0, edgeStyle: 'none' }, color: '#64748b' },
   pyramid: { geometry: { radius: 10, height: 20, radialSegments: 4 }, color: '#22c55e' },
   heart: { geometry: { size: 10, depth: 5 }, color: '#ef4444' },
   star: { geometry: { outerRadius: 10, innerRadius: 5, points: 5, depth: 5 }, color: '#eab308' },
@@ -78,7 +78,7 @@ export const useDesignStore = create((set, get) => ({
   snapIncrement: 1,
   wireframe: false,
   faceSnap: true,
-  rulerVisible: true,
+  rulerVisible: false,
   measureActive: false,
   measurePoints: [],
   units: 'mm',

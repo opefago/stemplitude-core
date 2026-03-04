@@ -692,6 +692,14 @@
   background: #dc2626;
 }
 
+.dml-csg-intersect {
+  background: #f59e0b;
+}
+
+.dml-csg-intersect:hover {
+  background: #d97706;
+}
+
 .dml-csg-hint {
   color: var(--dml-text-muted);
   font-size: 11px;
@@ -730,6 +738,59 @@
   height: 28px;
   background: var(--dml-border);
   margin: 0 6px;
+}
+
+.dml-toolbar-vsep {
+  width: 1px;
+  height: 24px;
+  background: var(--dml-border);
+  margin: 0 4px;
+  align-self: center;
+}
+
+.dml-btn-joined {
+  display: flex;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--dml-border);
+}
+
+.dml-joined-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: transparent;
+  border: none;
+  color: var(--dml-text-muted);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+  position: relative;
+}
+
+.dml-joined-btn:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 20%;
+  height: 60%;
+  width: 1px;
+  background: var(--dml-border);
+}
+
+.dml-joined-btn:hover {
+  background: var(--dml-surface-2);
+  color: var(--dml-text);
+}
+
+.dml-joined-btn.active {
+  background: var(--dml-accent);
+  color: #fff;
+}
+
+.dml-joined-btn.active:hover {
+  background: var(--dml-accent);
 }
 
 .dml-tool-btn {
@@ -1705,6 +1766,37 @@
   .dml-shapes-trigger span {
     display: none;
   }
+}
+
+/* --- Dimension Handle Labels --- */
+.dml-dim-handle-label {
+  background: rgba(255, 204, 0, 0.92);
+  color: #1a1a1a;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+  font-family: 'JetBrains Mono', 'SF Mono', monospace;
+  text-shadow: 0 0 2px rgba(255,255,255,0.3);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+}
+
+/* --- Rotation Angle Label --- */
+.dml-rotation-label {
+  background: rgba(20, 20, 30, 0.88);
+  font-size: 13px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+  font-family: 'JetBrains Mono', 'SF Mono', monospace;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  border: 1px solid rgba(255,255,255,0.15);
 }
 
 @media (max-width: 700px) {

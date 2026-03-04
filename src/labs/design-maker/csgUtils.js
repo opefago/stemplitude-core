@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Evaluator, Brush, ADDITION, SUBTRACTION } from 'three-bvh-csg';
+import { Evaluator, Brush, ADDITION, SUBTRACTION, INTERSECTION } from 'three-bvh-csg';
 
 const evaluator = new Evaluator();
 
@@ -55,6 +55,17 @@ export function subtractCSG(targetData, toolsData) {
   for (const tool of toolsData) {
     const brush = createBrush(tool);
     result = evaluator.evaluate(result, brush, SUBTRACTION);
+  }
+  return result;
+}
+
+export function intersectCSG(objectsData) {
+  if (objectsData.length < 2) return null;
+
+  let result = createBrush(objectsData[0]);
+  for (let i = 1; i < objectsData.length; i++) {
+    const brush = createBrush(objectsData[i]);
+    result = evaluator.evaluate(result, brush, INTERSECTION);
   }
   return result;
 }

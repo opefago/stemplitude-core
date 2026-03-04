@@ -91,22 +91,25 @@ export default function Toolbar() {
       <div className="dml-toolbar-sep" />
 
       <div className="dml-toolbar-group">
-        <Tip label="Solid View">
-          <button
-            className={`dml-tool-btn ${!wireframe ? 'active' : ''}`}
-            onClick={() => { if (wireframe) toggleWireframe(); }}
-          >
-            <Box size={20} />
-          </button>
-        </Tip>
-        <Tip label="Wireframe">
-          <button
-            className={`dml-tool-btn ${wireframe ? 'active' : ''}`}
-            onClick={() => { if (!wireframe) toggleWireframe(); }}
-          >
-            <BoxSelect size={20} />
-          </button>
-        </Tip>
+        <div className="dml-btn-joined">
+          <Tip label="Solid View">
+            <button
+              className={`dml-joined-btn ${!wireframe ? 'active' : ''}`}
+              onClick={() => { if (wireframe) toggleWireframe(); }}
+            >
+              <Box size={18} />
+            </button>
+          </Tip>
+          <Tip label="Wireframe">
+            <button
+              className={`dml-joined-btn ${wireframe ? 'active' : ''}`}
+              onClick={() => { if (!wireframe) toggleWireframe(); }}
+            >
+              <BoxSelect size={18} />
+            </button>
+          </Tip>
+        </div>
+        <div className="dml-toolbar-vsep" />
         <Tip label="Grid" shortcut="G">
           <button
             className={`dml-tool-btn ${gridVisible ? 'active' : ''}`}

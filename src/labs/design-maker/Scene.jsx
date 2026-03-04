@@ -1,7 +1,7 @@
 import React, { useRef, useState, useMemo, useCallback, useEffect, Suspense, forwardRef } from 'react';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import {
-  OrbitControls, TransformControls, Grid,
+  OrbitControls, Grid,
   GizmoHelper, GizmoViewcube,
   PerspectiveCamera, OrthographicCamera,
   Text3D, Center, Html, Line, Environment,
@@ -34,6 +34,10 @@ export const FONT_LABELS = {
   'droid-serif': 'Droid Serif',
   'droid-mono': 'Droid Mono',
 };
+
+// Fix #5: Hoist axis line geometry data to module-level constants
+const X_AXIS_POSITIONS = new Float32Array([-200, 0, 0, 200, 0, 0]);
+const Z_AXIS_POSITIONS = new Float32Array([0, 0, -200, 0, 0, 200]);
 
 function ToyMaterial({ color, wireframe, transparent, opacity, side }) {
   return (
@@ -76,10 +80,132 @@ function createStarShape(outer = 10, inner = 5, points = 5) {
   return shape;
 }
 
-function ObjectGeometry({ type, params }) {
-  const geo = useMemo(() => {
+// Fillet: smooth curved edges
+function createFilletBoxGeometry(width, height, depth, radius) {
+  const r = Math.min(radius, width / 2, height / 2);
+  const hw = width / 2 - r;
+  const hh = height / 2 - r;
+  const shape = new THREE.Shape();
+  shape.moveTo(-hw, hh + r);
+  shape.quadraticCurveTo(-hw - r, hh + r, -hw - r, hh);
+  shape.lineTo(-hw - r, -hh);
+  shape.quadraticCurveTo(-hw - r, -hh - r, -hw, -hh - r);
+  shape.lineTo(hw, -hh - r);
+  shape.quadraticCurveTo(hw + r, -hh - r, hw + r, -hh);
+  shape.lineTo(hw + r, hh);
+  shape.quadraticCurveTo(hw + r, hh + r, hw, hh + r);
+  shape.lineTo(-hw, hh + r);
+  const geo = new THREE.ExtrudeGeometry(shape, {
+    depth: depth,
+    bevelEnabled: true,
+    bevelThickness: r,
+    bevelSize: r,
+    bevelSegments: Math.max(3, Math.ceil(r * 2)),
+    curveSegments: Math.max(4, Math.ceil(r * 2)),
+  });
+  geo.translate(0, 0, -depth / 2);
+  geo.rotateX(Math.PI / 2);
+  return geo;
+}
+
+// Chamfer: flat 45-degree angled cut
+function createChamferBoxGeometry(width, height, depth, radius) {
+  const r = Math.min(radius, width / 2, height / 2);
+  const hw = width / 2 - r;
+  const hh = height / 2 - r;
+  const shape = new THREE.Shape();
+  shape.moveTo(-hw, hh + r);
+  shape.lineTo(-hw - r, hh);
+  shape.lineTo(-hw - r, -hh);
+  shape.lineTo(-hw, -hh - r);
+  shape.lineTo(hw, -hh - r);
+  shape.lineTo(hw + r, -hh);
+  shape.lineTo(hw + r, hh);
+  shape.lineTo(hw, hh + r);
+  shape.lineTo(-hw, hh + r);
+  const geo = new THREE.ExtrudeGeometry(shape, {
+    depth: depth,
+    bevelEnabled: true,
+    bevelThickness: r,
+    bevelSize: r,
+    bevelSegments: 1,
+    curveSegments: 1,
+  });
+  geo.translate(0, 0, -depth / 2);
+  geo.rotateX(Math.PI / 2);
+  return geo;
+}
+
+function createFilletCylinderGeometry(radiusTop, radiusBottom, height, radialSegments, edgeRadius) {
+  const r = Math.min(edgeRadius, height / 2, radiusTop, radiusBottom);
+  const halfH = height / 2;
+  const pts = [];
+  const segments = Math.max(4, Math.ceil(r * 2));
+  for (let i = 0; i <= segments; i++) {
+    const t = (i / segments) * (Math.PI / 2);
+    pts.push(new THREE.Vector2(
+      radiusTop - r + Math.cos(t) * r,
+      halfH - r + Math.sin(t) * r,
+    ));
+  }
+  const bodySegments = 4;
+  for (let i = 1; i <= bodySegments; i++) {
+    const t = i / bodySegments;
+    const rad = radiusTop + (radiusBottom - radiusTop) * t;
+    const y = halfH - t * height;
+    if (i < bodySegments) pts.push(new THREE.Vector2(rad, y));
+  }
+  for (let i = 0; i <= segments; i++) {
+    const t = (i / segments) * (Math.PI / 2);
+    pts.push(new THREE.Vector2(
+      radiusBottom - r + Math.cos(Math.PI / 2 - t) * r,
+      -halfH + r - Math.sin(Math.PI / 2 - t) * r,
+    ));
+  }
+  return new THREE.LatheGeometry(pts, radialSegments || 32);
+}
+
+function createChamferCylinderGeometry(radiusTop, radiusBottom, height, radialSegments, edgeRadius) {
+  const r = Math.min(edgeRadius, height / 2, radiusTop, radiusBottom);
+  const halfH = height / 2;
+  const pts = [
+    new THREE.Vector2(radiusTop - r, halfH),
+    new THREE.Vector2(radiusTop, halfH - r),
+    new THREE.Vector2(radiusBottom, -halfH + r),
+    new THREE.Vector2(radiusBottom - r, -halfH),
+  ];
+  return new THREE.LatheGeometry(pts, radialSegments || 32);
+}
+
+// Fix #2: Memoize all geometry creation (including primitives) in a single useMemo
+function useObjectGeometry(type, params) {
+  return useMemo(() => {
     const p = params;
     switch (type) {
+      case 'box': case 'wall':
+        if (p.edgeRadius > 0 && p.edgeStyle === 'fillet') {
+          return createFilletBoxGeometry(p.width, p.height, p.depth, p.edgeRadius);
+        }
+        if (p.edgeRadius > 0 && p.edgeStyle === 'chamfer') {
+          return createChamferBoxGeometry(p.width, p.height, p.depth, p.edgeRadius);
+        }
+        return new THREE.BoxGeometry(p.width, p.height, p.depth);
+      case 'sphere':
+        return new THREE.SphereGeometry(p.radius, p.widthSegments || 32, p.heightSegments || 32);
+      case 'cylinder':
+        if (p.edgeRadius > 0 && p.edgeStyle === 'fillet') {
+          return createFilletCylinderGeometry(p.radiusTop, p.radiusBottom, p.height, p.radialSegments || 32, p.edgeRadius);
+        }
+        if (p.edgeRadius > 0 && p.edgeStyle === 'chamfer') {
+          return createChamferCylinderGeometry(p.radiusTop, p.radiusBottom, p.height, p.radialSegments || 32, p.edgeRadius);
+        }
+        return new THREE.CylinderGeometry(p.radiusTop, p.radiusBottom, p.height, p.radialSegments || 32);
+      case 'cone': case 'pyramid':
+        return new THREE.ConeGeometry(p.radius, p.height, p.radialSegments || 32);
+      case 'torus': case 'tube':
+        return new THREE.TorusGeometry(p.radius, p.tube, p.radialSegments || 16, p.tubularSegments || 48);
+      case 'hemisphere':
+        return new THREE.SphereGeometry(p.radius, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
       case 'heart': {
         const shape = createHeartShape(p.size);
         return new THREE.ExtrudeGeometry(shape, {
@@ -106,64 +232,15 @@ function ObjectGeometry({ type, params }) {
         g.computeVertexNormals();
         return g;
       }
-      default:
-        return null;
-    }
-  }, [type, params]);
-
-  if (geo) return <primitive object={geo} attach="geometry" />;
-
-  const p = params;
-  switch (type) {
-    case 'box': case 'wall':
-      return <boxGeometry args={[p.width, p.height, p.depth]} />;
-    case 'sphere':
-      return <sphereGeometry args={[p.radius, p.widthSegments || 32, p.heightSegments || 32]} />;
-    case 'cylinder':
-      return <cylinderGeometry args={[p.radiusTop, p.radiusBottom, p.height, p.radialSegments || 32]} />;
-    case 'cone': case 'pyramid':
-      return <coneGeometry args={[p.radius, p.height, p.radialSegments || 32]} />;
-    case 'torus': case 'tube':
-      return <torusGeometry args={[p.radius, p.tube, p.radialSegments || 16, p.tubularSegments || 48]} />;
-    case 'hemisphere':
-      return <sphereGeometry args={[p.radius, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2]} />;
-    case 'imported':
-      if (p.bufferGeometry) return <primitive object={p.bufferGeometry} attach="geometry" />;
-      return <boxGeometry args={[20, 20, 20]} />;
-    default:
-      return <boxGeometry args={[20, 20, 20]} />;
-  }
-}
-
-function SelectionEdges({ type, params }) {
-  const edges = useMemo(() => {
-    const p = params;
-    let base;
-    switch (type) {
-      case 'box': case 'wall': case 'wedge':
-        base = new THREE.BoxGeometry(p.width, p.height, p.depth); break;
-      case 'sphere':
-        base = new THREE.SphereGeometry(p.radius, 16, 12); break;
-      case 'hemisphere':
-        base = new THREE.SphereGeometry(p.radius, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2); break;
-      case 'cylinder':
-        base = new THREE.CylinderGeometry(p.radiusTop, p.radiusBottom, p.height, 24); break;
-      case 'cone': case 'pyramid':
-        base = new THREE.ConeGeometry(p.radius, p.height, type === 'pyramid' ? 4 : 24); break;
-      case 'torus': case 'tube':
-        base = new THREE.TorusGeometry(p.radius, p.tube, 12, 24); break;
       case 'imported':
-        if (p.bufferGeometry) { base = p.bufferGeometry; break; }
-        base = new THREE.BoxGeometry(20, 20, 20); break;
+        return p.bufferGeometry || new THREE.BoxGeometry(20, 20, 20);
       default:
-        base = new THREE.BoxGeometry(20, 20, 20);
+        return new THREE.BoxGeometry(20, 20, 20);
     }
-    return new THREE.EdgesGeometry(base, 30);
   }, [type, params]);
-
-  return <primitive object={edges} attach="geometry" />;
 }
 
+// Fix #1 + #2: SceneObject shares a single geometry across main mesh, outline, and selection
 const SceneObject = forwardRef(function SceneObject({ obj, isSelected, wireframe, onSelect }, ref) {
   const color = obj.isHole ? '#ff4444' : obj.color;
   const opacity = obj.isHole ? 0.4 : 1;
@@ -244,6 +321,9 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, wireframe
     );
   }
 
+  // Fix #1: Single geometry shared across main, outline, and selection meshes
+  const geometry = useObjectGeometry(obj.type, obj.geometry);
+
   return (
     <group
       ref={ref}
@@ -254,19 +334,16 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, wireframe
       onPointerUp={() => { sceneInteracting.active = false; }}
       onClick={onSelect}
     >
-      <mesh castShadow receiveShadow>
-        <ObjectGeometry type={obj.type} params={obj.geometry} />
+      <mesh castShadow receiveShadow geometry={geometry}>
         <ToyMaterial color={color} wireframe={wireframe} transparent={obj.isHole} opacity={opacity} side={side} />
       </mesh>
       {!wireframe && (
-        <mesh scale={[cartoonRatio, cartoonRatio, cartoonRatio]}>
-          <ObjectGeometry type={obj.type} params={obj.geometry} />
+        <mesh scale={[cartoonRatio, cartoonRatio, cartoonRatio]} geometry={geometry}>
           <meshBasicMaterial color="#2a2a2a" side={THREE.BackSide} />
         </mesh>
       )}
       {isSelected && (
-        <mesh scale={[selectionRatio, selectionRatio, selectionRatio]}>
-          <ObjectGeometry type={obj.type} params={obj.geometry} />
+        <mesh scale={[selectionRatio, selectionRatio, selectionRatio]} geometry={geometry}>
           <meshBasicMaterial color="#00c8ff" side={THREE.BackSide} transparent opacity={0.75} />
         </mesh>
       )}
@@ -296,12 +373,11 @@ function CameraSetup() {
   );
 }
 
+// Fix #7: Read objects/selectedIds lazily from store only when 'fit' command fires
 function CameraControls({ orbitRef }) {
   const zoomSpeed = useDesignStore(s => s.zoomSpeed);
   const cameraCmd = useDesignStore(s => s._cameraCmd);
   const clearCameraCmd = useDesignStore(s => s.clearCameraCmd);
-  const objects = useDesignStore(s => s.objects);
-  const selectedIds = useDesignStore(s => s.selectedIds);
 
   useEffect(() => {
     if (orbitRef.current) {
@@ -326,6 +402,7 @@ function CameraControls({ orbitRef }) {
       camera.position.set(60, 60, 60);
       controls.target.set(0, 0, 0);
     } else if (cameraCmd === 'fit') {
+      const { objects, selectedIds } = useDesignStore.getState();
       const targets = selectedIds.length > 0
         ? objects.filter(o => selectedIds.includes(o.id))
         : objects;
@@ -349,7 +426,7 @@ function CameraControls({ orbitRef }) {
 
     controls.update();
     clearCameraCmd();
-  }, [cameraCmd, clearCameraCmd, orbitRef, objects, selectedIds]);
+  }, [cameraCmd, clearCameraCmd, orbitRef]);
 
   return (
     <OrbitControls
@@ -378,6 +455,12 @@ function DragPreview() {
   const halfH = defaults ? getHalfHeight(draggingShape.type, defaults.geometry) : 10;
   const color = draggingShape?.isHole ? '#ff4444' : (defaults?.color || '#6366f1');
 
+  const previewType = draggingShape ? (draggingShape.type === 'text' ? 'box' : draggingShape.type) : 'box';
+  const previewParams = draggingShape
+    ? (draggingShape.type === 'text' ? { width: 20, height: 10, depth: 5 } : defaults?.geometry || SHAPE_DEFAULTS.box.geometry)
+    : SHAPE_DEFAULTS.box.geometry;
+  const previewGeo = useObjectGeometry(previewType, previewParams);
+
   useFrame(() => {
     if (!groupRef.current) return;
     if (!dragCursor.active || !draggingShape) {
@@ -395,15 +478,9 @@ function DragPreview() {
 
   if (!draggingShape || !defaults) return null;
 
-  const previewType = draggingShape.type === 'text' ? 'box' : draggingShape.type;
-  const previewParams = draggingShape.type === 'text'
-    ? { width: 20, height: 10, depth: 5 }
-    : defaults.geometry;
-
   return (
     <group ref={groupRef} visible={false}>
-      <mesh renderOrder={998}>
-        <ObjectGeometry type={previewType} params={previewParams} />
+      <mesh renderOrder={998} geometry={previewGeo}>
         <meshStandardMaterial
           color={color}
           transparent
@@ -411,8 +488,7 @@ function DragPreview() {
           depthWrite={false}
         />
       </mesh>
-      <mesh renderOrder={999}>
-        <ObjectGeometry type={previewType} params={previewParams} />
+      <mesh renderOrder={999} geometry={previewGeo}>
         <meshBasicMaterial
           color="#ffffff"
           wireframe
@@ -492,7 +568,6 @@ function DimensionLine({ start, end, label, color = '#ff9f43', offset = [0, 0, 0
         dashSize={1}
         gapSize={0.5}
       />
-      {/* End caps */}
       <Line points={[
         [start[0], start[1] - 0.8, start[2]],
         [start[0], start[1] + 0.8, start[2]]
@@ -508,16 +583,15 @@ function DimensionLine({ start, end, label, color = '#ff9f43', offset = [0, 0, 0
   );
 }
 
+// Fix #6: Targeted selector — only subscribe to the single selected object, not the full array
 function DimensionRuler({ meshRefs }) {
   const groupRef = useRef();
-  const objects = useDesignStore(s => s.objects);
-  const selectedIds = useDesignStore(s => s.selectedIds);
   const rulerVisible = useDesignStore(s => s.rulerVisible);
   const units = useDesignStore(s => s.units);
-
-  const obj = (rulerVisible && selectedIds.length === 1)
-    ? objects.find(o => o.id === selectedIds[0])
-    : null;
+  const obj = useDesignStore(s => {
+    if (!s.rulerVisible || s.selectedIds.length !== 1) return null;
+    return s.objects.find(o => o.id === s.selectedIds[0]) || null;
+  });
   const dims = obj ? getObjectDimensions(obj) : null;
 
   useFrame(() => {
@@ -539,14 +613,12 @@ function DimensionRuler({ meshRefs }) {
 
   return (
     <group ref={groupRef}>
-      {/* Width (X) — along bottom front */}
       <DimensionLine
         start={[-halfW, -halfH - gap, halfD]}
         end={[halfW, -halfH - gap, halfD]}
         label={fmt(dims.width)}
         color="#ff6b6b"
       />
-      {/* Height (Y) — along right side */}
       <DimensionLine
         start={[halfW + gap, -halfH, halfD]}
         end={[halfW + gap, halfH, halfD]}
@@ -554,7 +626,6 @@ function DimensionRuler({ meshRefs }) {
         color="#51cf66"
         offset={[1, 0, 0]}
       />
-      {/* Depth (Z) — along bottom right */}
       <DimensionLine
         start={[halfW, -halfH - gap, -halfD]}
         end={[halfW, -halfH - gap, halfD]}
@@ -601,6 +672,7 @@ function DropHandler() {
   return null;
 }
 
+// Fix #9: Hoist MeasureTool allocations to refs/useMemo
 function MeasureTool() {
   const { camera, gl } = useThree();
   const measureActive = useDesignStore(s => s.measureActive);
@@ -608,22 +680,26 @@ function MeasureTool() {
   const addMeasurePoint = useDesignStore(s => s.addMeasurePoint);
   const snapIncrement = useDesignStore(s => s.snapIncrement);
 
+  const raycaster = useMemo(() => new THREE.Raycaster(), []);
+  const ndc = useMemo(() => new THREE.Vector2(), []);
+  const plane = useMemo(() => new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), []);
+  const hit = useMemo(() => new THREE.Vector3(), []);
+
   const handleClick = useCallback((e) => {
     if (!measureActive) return;
     if (e.button !== 0) return;
     const rect = gl.domElement.getBoundingClientRect();
-    const ndcX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-    const ndcY = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-    const raycaster = new THREE.Raycaster();
-    raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
-    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-    const hit = new THREE.Vector3();
+    ndc.set(
+      ((e.clientX - rect.left) / rect.width) * 2 - 1,
+      -((e.clientY - rect.top) / rect.height) * 2 + 1
+    );
+    raycaster.setFromCamera(ndc, camera);
     if (raycaster.ray.intersectPlane(plane, hit)) {
       const x = snapIncrement ? Math.round(hit.x / snapIncrement) * snapIncrement : hit.x;
       const z = snapIncrement ? Math.round(hit.z / snapIncrement) * snapIncrement : hit.z;
       addMeasurePoint([x, 0, z]);
     }
-  }, [measureActive, camera, gl, addMeasurePoint, snapIncrement]);
+  }, [measureActive, camera, gl, addMeasurePoint, snapIncrement, raycaster, ndc, plane, hit]);
 
   useEffect(() => {
     const el = gl.domElement;
@@ -640,7 +716,6 @@ function MeasureTool() {
 
   return (
     <group>
-      {/* First point marker */}
       <mesh position={p1}>
         <sphereGeometry args={[0.6, 16, 16]} />
         <meshBasicMaterial color="#ff6b6b" />
@@ -648,13 +723,11 @@ function MeasureTool() {
 
       {p2 && (
         <>
-          {/* Second point marker */}
           <mesh position={p2}>
             <sphereGeometry args={[0.6, 16, 16]} />
             <meshBasicMaterial color="#ff6b6b" />
           </mesh>
 
-          {/* X-axis leg */}
           <Line
             points={[p1, [p2[0], 0, p1[2]]]}
             color="#ef4444"
@@ -663,7 +736,6 @@ function MeasureTool() {
             dashSize={1}
             gapSize={0.5}
           />
-          {/* Z-axis leg */}
           <Line
             points={[[p2[0], 0, p1[2]], p2]}
             color="#3b82f6"
@@ -672,7 +744,6 @@ function MeasureTool() {
             dashSize={1}
             gapSize={0.5}
           />
-          {/* Direct distance */}
           <Line
             points={[p1, p2]}
             color="#22c55e"
@@ -682,19 +753,16 @@ function MeasureTool() {
             gapSize={0.8}
           />
 
-          {/* X distance label */}
           {Math.abs(p2[0] - p1[0]) > 0.01 && (
             <Html position={[(p1[0] + p2[0]) / 2, 1.5, p1[2]]} center className="dml-measure-label dml-measure-x">
               X: {fmt(p2[0] - p1[0])}
             </Html>
           )}
-          {/* Z distance label */}
           {Math.abs(p2[2] - p1[2]) > 0.01 && (
             <Html position={[p2[0], 1.5, (p1[2] + p2[2]) / 2]} center className="dml-measure-label dml-measure-z">
               Z: {fmt(p2[2] - p1[2])}
             </Html>
           )}
-          {/* Total distance label */}
           <Html position={[(p1[0] + p2[0]) / 2, 3.5, (p1[2] + p2[2]) / 2]} center className="dml-measure-label dml-measure-total">
             {Math.sqrt((p2[0]-p1[0])**2 + (p2[2]-p1[2])**2).toFixed(1)}
           </Html>
@@ -704,13 +772,360 @@ function MeasureTool() {
   );
 }
 
-const SNAP_THRESHOLD = 3;
+// --- Tinkercad-style Object Handles ---
+// All handle types visible simultaneously: scale squares, rotation arcs, translate arrows
+const AXIS_COLORS = ['#ef4444', '#22c55e', '#3b82f6'];
+const AXIS_LABELS = ['X', 'Y', 'Z'];
 
+const HANDLE_OFFSET = 3;
+
+function getScaleHandles(type, geometry) {
+  const handles = [];
+  const g = geometry;
+  const o = HANDLE_OFFSET;
+  switch (type) {
+    case 'box': case 'wall': case 'wedge': {
+      const by = -g.height / 2;
+      handles.push({ param: 'width', dir: [1, 0, 0], pos: [g.width / 2 + o, by, 0], label: 'W' });
+      handles.push({ param: 'width', dir: [-1, 0, 0], pos: [-g.width / 2 - o, by, 0], label: 'W' });
+      handles.push({ param: 'depth', dir: [0, 0, 1], pos: [0, by, g.depth / 2 + o], label: 'D' });
+      handles.push({ param: 'depth', dir: [0, 0, -1], pos: [0, by, -g.depth / 2 - o], label: 'D' });
+      handles.push({ param: 'height', dir: [0, 1, 0], pos: [0, g.height / 2 + o, 0], label: 'H' });
+      break;
+    }
+    case 'sphere': case 'hemisphere': {
+      const by = -g.radius;
+      handles.push({ param: 'radius', dir: [1, 0, 0], pos: [g.radius + o, by, 0], label: 'R' });
+      handles.push({ param: 'radius', dir: [-1, 0, 0], pos: [-g.radius - o, by, 0], label: 'R' });
+      handles.push({ param: 'radius', dir: [0, 0, 1], pos: [0, by, g.radius + o], label: 'R' });
+      handles.push({ param: 'radius', dir: [0, 1, 0], pos: [0, g.radius + o, 0], label: 'R' });
+      break;
+    }
+    case 'cylinder': {
+      const by = -g.height / 2;
+      handles.push({ param: 'radiusBottom', dir: [1, 0, 0], pos: [g.radiusBottom + o, by, 0], label: 'Rb' });
+      handles.push({ param: 'radiusBottom', dir: [-1, 0, 0], pos: [-g.radiusBottom - o, by, 0], label: 'Rb' });
+      handles.push({ param: 'radiusTop', dir: [1, 0, 0], pos: [g.radiusTop + o, g.height / 2, 0], label: 'Rt' });
+      handles.push({ param: 'height', dir: [0, 1, 0], pos: [0, g.height / 2 + o, 0], label: 'H' });
+      break;
+    }
+    case 'cone': case 'pyramid': {
+      const by = -g.height / 2;
+      handles.push({ param: 'radius', dir: [1, 0, 0], pos: [g.radius + o, by, 0], label: 'R' });
+      handles.push({ param: 'radius', dir: [-1, 0, 0], pos: [-g.radius - o, by, 0], label: 'R' });
+      handles.push({ param: 'height', dir: [0, 1, 0], pos: [0, g.height / 2 + o, 0], label: 'H' });
+      break;
+    }
+    case 'torus': case 'tube':
+      handles.push({ param: 'radius', dir: [1, 0, 0], pos: [g.radius + g.tube + o, 0, 0], label: 'R' });
+      handles.push({ param: 'tube', dir: [0, 0, 1], pos: [g.radius, 0, g.tube + o], label: 'T' });
+      break;
+    default:
+      break;
+  }
+  return handles;
+}
+
+function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
+  const updateObject = useDesignStore(s => s.updateObject);
+  const obj = useDesignStore(s => {
+    if (s.selectedIds.length !== 1) return null;
+    const o = s.objects.find(o => o.id === s.selectedIds[0]);
+    if (!o || o.type === 'text' || o.type === 'imported') return null;
+    return o;
+  });
+  const snapIncrement = useDesignStore(s => s.snapIncrement);
+  const { camera, gl } = useThree();
+
+  const drag = useRef(null);
+  const startPt = useMemo(() => new THREE.Vector3(), []);
+  const startValue = useRef(0);
+  const startPosition = useRef([0, 0, 0]);
+  const startAngleRef = useRef(0);
+  const startRotation = useRef([0, 0, 0]);
+  const objIdRef = useRef(null);
+
+  const [hoveredArc, setHoveredArc] = useState(null);
+  const [angleInfo, setAngleInfo] = useState(null);
+
+  const interactionPlane = useMemo(() => new THREE.Plane(), []);
+  const hitPoint = useMemo(() => new THREE.Vector3(), []);
+  const caster = useMemo(() => new THREE.Raycaster(), []);
+  const centerPt = useMemo(() => new THREE.Vector3(), []);
+
+  const active = !!obj;
+  const dims = active ? getObjectDimensions(obj) : { width: 20, height: 20, depth: 20 };
+  const maxDim = Math.max(dims.width, dims.height, dims.depth);
+  const arcR = maxDim * 0.45 + 3;
+
+  const arcGeo = useMemo(() => new THREE.TorusGeometry(arcR, 0.35, 8, 32, Math.PI / 2), [arcR]);
+  const hoverRingGeo = useMemo(() => new THREE.TorusGeometry(arcR, 0.12, 8, 64), [arcR]);
+
+  const scaleTriGeo = useMemo(() => {
+    const s = new THREE.Shape();
+    s.moveTo(0, 1.5);
+    s.lineTo(-1.3, -0.9);
+    s.lineTo(1.3, -0.9);
+    s.closePath();
+    const geo = new THREE.ExtrudeGeometry(s, { depth: 0.25, bevelEnabled: false });
+    geo.translate(0, 0, -0.125);
+    return geo;
+  }, []);
+  const scaleTriEdges = useMemo(() => new THREE.EdgesGeometry(scaleTriGeo), [scaleTriGeo]);
+
+  useEffect(() => {
+    if (obj) objIdRef.current = obj.id;
+  }, [obj]);
+
+  useEffect(() => {
+    return () => {
+      if (drag.current) {
+        drag.current = null;
+        sceneInteracting.active = false;
+        if (orbitRef.current) orbitRef.current.enabled = true;
+      }
+    };
+  }, [orbitRef]);
+
+  if (!active) return null;
+
+  const mesh = meshRefs.current[selectedId];
+  if (!mesh) return null;
+
+  const hw = dims.width / 2;
+  const hh = dims.height / 2;
+  const hd = dims.depth / 2;
+
+  const worldPos = new THREE.Vector3();
+  mesh.getWorldPosition(worldPos);
+
+  const scaleHandles = getScaleHandles(obj.type, obj.geometry);
+
+  const arrowGap = 10;
+  const translateArrows = [
+    { dir: [1, 0, 0], pos: [hw + arrowGap, 0, 0], rot: [0, 0, -Math.PI / 2], color: '#ef4444' },
+    { dir: [-1, 0, 0], pos: [-hw - arrowGap, 0, 0], rot: [0, 0, Math.PI / 2], color: '#ef4444' },
+    { dir: [0, 1, 0], pos: [0, hh + arrowGap, 0], rot: [0, 0, 0], color: '#22c55e' },
+    { dir: [0, 0, 1], pos: [0, 0, hd + arrowGap], rot: [Math.PI / 2, 0, 0], color: '#3b82f6' },
+    { dir: [0, 0, -1], pos: [0, 0, -hd - arrowGap], rot: [-Math.PI / 2, 0, 0], color: '#3b82f6' },
+  ];
+
+  const rotationArcs = [
+    { axis: 0, pos: [0, hh + 3, hd + 3], arcRot: [0, Math.PI / 2, 0], color: '#ef4444' },
+    { axis: 1, pos: [hw + 3, hh + 3, 0], arcRot: [Math.PI / 2, 0, 0], color: '#22c55e' },
+    { axis: 2, pos: [hw + 3, 0, hd + 3], arcRot: [0, 0, 0], color: '#3b82f6' },
+  ];
+
+  const makeDragPlane = (axisDir, point) => {
+    const camDir = new THREE.Vector3();
+    camera.getWorldDirection(camDir);
+    const pn = new THREE.Vector3().crossVectors(axisDir, camDir).cross(axisDir).normalize();
+    if (pn.lengthSq() < 0.001) pn.copy(camDir);
+    interactionPlane.setFromNormalAndCoplanarPoint(pn, point);
+  };
+
+  const getAngleOnPlane = (point, normal, ctr) => {
+    const local = point.clone().sub(ctr);
+    const up = new THREE.Vector3(0, 1, 0);
+    if (Math.abs(normal.dot(up)) > 0.9) up.set(1, 0, 0);
+    const u = new THREE.Vector3().crossVectors(normal, up).normalize();
+    const v = new THREE.Vector3().crossVectors(normal, u).normalize();
+    return Math.atan2(local.dot(v), local.dot(u));
+  };
+
+  const handleDomMove = (domEvent) => {
+    if (!drag.current) return;
+    const rect = gl.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(
+      ((domEvent.clientX - rect.left) / rect.width) * 2 - 1,
+      -((domEvent.clientY - rect.top) / rect.height) * 2 + 1
+    );
+    caster.setFromCamera(ndc, camera);
+    const id = objIdRef.current;
+
+    if (drag.current.type === 'scale') {
+      if (caster.ray.intersectPlane(interactionPlane, hitPoint)) {
+        const d = hitPoint.clone().sub(startPt).dot(drag.current.dirW);
+        const val = Math.max(0.5, Math.round((startValue.current + d) * 10) / 10);
+        const cur = useDesignStore.getState().objects.find(o => o.id === id);
+        if (cur) updateObject(id, { geometry: { ...cur.geometry, [drag.current.handle.param]: val } });
+      }
+    } else if (drag.current.type === 'translate') {
+      if (caster.ray.intersectPlane(interactionPlane, hitPoint)) {
+        const d = hitPoint.clone().sub(startPt).dot(drag.current.dirW);
+        const si = useDesignStore.getState().snapIncrement;
+        const snapped = si ? Math.round(d / si) * si : d;
+        const pos = [...startPosition.current];
+        for (let i = 0; i < 3; i++) pos[i] += drag.current.dirW.getComponent(i) * snapped;
+        updateObject(id, { position: pos });
+      }
+    } else if (drag.current.type === 'rotate') {
+      if (caster.ray.intersectPlane(interactionPlane, hitPoint)) {
+        const cur = getAngleOnPlane(hitPoint, drag.current.normal, centerPt);
+        let delta = cur - startAngleRef.current;
+        const snap = THREE.MathUtils.degToRad(15);
+        delta = Math.round(delta / snap) * snap;
+        const rot = [...startRotation.current];
+        rot[drag.current.axis] += delta;
+        updateObject(id, { rotation: rot });
+        setAngleInfo({ axis: drag.current.axis, deg: Math.round(THREE.MathUtils.radToDeg(delta)) });
+      }
+    }
+  };
+
+  const handleDomUp = () => {
+    if (!drag.current) return;
+    if (drag.current.type === 'translate') setTransforming(false);
+    if (drag.current.type === 'rotate') { setHoveredArc(null); setAngleInfo(null); }
+    drag.current = null;
+    sceneInteracting.active = false;
+    if (orbitRef.current) orbitRef.current.enabled = true;
+    window.removeEventListener('pointermove', handleDomMove);
+    window.removeEventListener('pointerup', handleDomUp);
+  };
+
+  const beginDrag = (e) => {
+    e.stopPropagation();
+    sceneInteracting.active = true;
+    if (orbitRef.current) orbitRef.current.enabled = false;
+    useDesignStore.getState()._saveSnapshot();
+    window.addEventListener('pointermove', handleDomMove);
+    window.addEventListener('pointerup', handleDomUp);
+  };
+
+  const onScaleDown = (e, handle) => {
+    beginDrag(e);
+    const dirW = new THREE.Vector3(...handle.dir).applyQuaternion(mesh.quaternion).normalize();
+    makeDragPlane(dirW, e.point);
+    drag.current = { type: 'scale', handle, dirW };
+    startPt.copy(e.point);
+    startValue.current = obj.geometry[handle.param];
+  };
+
+  const onTranslateDown = (e, arrow) => {
+    beginDrag(e);
+    setTransforming(true);
+    const dirW = new THREE.Vector3(...arrow.dir).applyQuaternion(mesh.quaternion).normalize();
+    makeDragPlane(dirW, e.point);
+    drag.current = { type: 'translate', dirW };
+    startPt.copy(e.point);
+    startPosition.current = [...obj.position];
+  };
+
+  const axisNormals = [
+    new THREE.Vector3(1, 0, 0),
+    new THREE.Vector3(0, 1, 0),
+    new THREE.Vector3(0, 0, 1),
+  ];
+
+  const onRotateDown = (e, arc) => {
+    beginDrag(e);
+    centerPt.copy(worldPos);
+    const normal = axisNormals[arc.axis].clone();
+    interactionPlane.setFromNormalAndCoplanarPoint(normal, centerPt);
+    startAngleRef.current = getAngleOnPlane(e.point, normal, centerPt);
+    startRotation.current = [...obj.rotation];
+    drag.current = { type: 'rotate', axis: arc.axis, normal };
+    setHoveredArc(arc.axis);
+  };
+
+  return (
+    <group position={worldPos} quaternion={mesh.quaternion}>
+      {/* Scale handles - flat triangles pointing outward from each face */}
+      {scaleHandles.map((h, i) => {
+        const [dx, dy, dz] = h.dir;
+        let rotation;
+        if (dy > 0) {
+          rotation = [0, 0, 0];
+        } else if (dy < 0) {
+          rotation = [Math.PI, 0, 0];
+        } else if (dx > 0) {
+          rotation = [-Math.PI / 2, 0, -Math.PI / 2];
+        } else if (dx < 0) {
+          rotation = [-Math.PI / 2, 0, Math.PI / 2];
+        } else if (dz > 0) {
+          rotation = [-Math.PI / 2, 0, Math.PI];
+        } else {
+          rotation = [-Math.PI / 2, 0, 0];
+        }
+        return (
+          <group key={`sc${i}`} position={h.pos} rotation={rotation}>
+            <mesh
+              onPointerDown={(e) => onScaleDown(e, h)}
+              renderOrder={999}
+              geometry={scaleTriGeo}
+            >
+              <meshBasicMaterial color="#1a1a2e" depthTest={false} />
+            </mesh>
+            <lineSegments renderOrder={1000} geometry={scaleTriEdges}>
+              <lineBasicMaterial color="white" depthTest={false} />
+            </lineSegments>
+          </group>
+        );
+      })}
+
+      {/* Translate arrows - small cones outside each face */}
+      {translateArrows.map((a, i) => (
+        <mesh
+          key={`tr${i}`}
+          position={a.pos}
+          rotation={a.rot}
+          onPointerDown={(e) => onTranslateDown(e, a)}
+          renderOrder={999}
+        >
+          <coneGeometry args={[1.2, 3, 6]} />
+          <meshBasicMaterial color={a.color} depthTest={false} transparent opacity={0.65} />
+        </mesh>
+      ))}
+
+      {/* Rotation arcs at corners outside bounding box */}
+      {rotationArcs.map((arc) => (
+        <group key={`rot${arc.axis}`} position={arc.pos}>
+          {(hoveredArc === arc.axis) && (
+            <mesh rotation={arc.arcRot} geometry={hoverRingGeo} renderOrder={998}>
+              <meshBasicMaterial color={arc.color} transparent opacity={0.12} depthTest={false} side={THREE.DoubleSide} />
+            </mesh>
+          )}
+          <mesh
+            rotation={arc.arcRot}
+            geometry={arcGeo}
+            onPointerEnter={() => setHoveredArc(arc.axis)}
+            onPointerLeave={() => { if (!drag.current || drag.current.type !== 'rotate') setHoveredArc(null); }}
+            onPointerDown={(e) => onRotateDown(e, arc)}
+            renderOrder={999}
+          >
+            <meshBasicMaterial color={arc.color} transparent opacity={0.55} depthTest={false} side={THREE.DoubleSide} />
+          </mesh>
+        </group>
+      ))}
+
+      {/* Rotation angle indicator */}
+      {angleInfo && (
+        <Html center style={{ pointerEvents: 'none' }} position={[0, hh + arcR + 4, 0]}>
+          <div className="dml-rotation-label" style={{ color: AXIS_COLORS[angleInfo.axis] }}>
+            {AXIS_LABELS[angleInfo.axis]}: {angleInfo.deg}°
+          </div>
+        </Html>
+      )}
+    </group>
+  );
+}
+
+const SNAP_THRESHOLD = 3;
+const AXES = ['x', 'y', 'z'];
+const SNAP_COLORS = ['#ef4444', '#22c55e', '#3b82f6'];
+const SNAP_DIRS = [[0, 0, 1], [1, 0, 0], [1, 0, 0]];
+
+// Fix #3 + #4: Pre-allocate Box3; replace JSON.stringify with value comparison
 function FaceSnapper({ meshRefs, selectedId, active }) {
   const faceSnap = useDesignStore(s => s.faceSnap);
   const objects = useDesignStore(s => s.objects);
   const snapLines = useRef([]);
   const [lines, setLines] = useState([]);
+
+  const selBox = useMemo(() => new THREE.Box3(), []);
+  const tgtBox = useMemo(() => new THREE.Box3(), []);
+  const midVec = useMemo(() => new THREE.Vector3(), []);
 
   useFrame(() => {
     if (!active || !faceSnap || !selectedId || !meshRefs.current[selectedId]) {
@@ -718,23 +1133,22 @@ function FaceSnapper({ meshRefs, selectedId, active }) {
       return;
     }
     const selMesh = meshRefs.current[selectedId];
-    const selBox = new THREE.Box3().setFromObject(selMesh);
+    selBox.setFromObject(selMesh);
     const newLines = [];
 
     for (const obj of objects) {
       if (obj.id === selectedId) continue;
       const tgtMesh = meshRefs.current[obj.id];
       if (!tgtMesh) continue;
-      const tgtBox = new THREE.Box3().setFromObject(tgtMesh);
+      tgtBox.setFromObject(tgtMesh);
 
       for (let ax = 0; ax < 3; ax++) {
-        const axes = ['x', 'y', 'z'];
-        const a = axes[ax];
+        const a = AXES[ax];
         const pairs = [
-          { sf: selBox.max[a], tf: tgtBox.min[a], dir: -1 },
-          { sf: selBox.min[a], tf: tgtBox.max[a], dir: 1 },
-          { sf: selBox.min[a], tf: tgtBox.min[a], dir: 0 },
-          { sf: selBox.max[a], tf: tgtBox.max[a], dir: 0 },
+          { sf: selBox.max[a], tf: tgtBox.min[a] },
+          { sf: selBox.min[a], tf: tgtBox.max[a] },
+          { sf: selBox.min[a], tf: tgtBox.min[a] },
+          { sf: selBox.max[a], tf: tgtBox.max[a] },
         ];
 
         for (const { sf, tf } of pairs) {
@@ -745,18 +1159,31 @@ function FaceSnapper({ meshRefs, selectedId, active }) {
             selBox.min[a] += delta;
             selBox.max[a] += delta;
 
-            const mid = new THREE.Vector3();
-            mid.x = (selBox.min.x + selBox.max.x + tgtBox.min.x + tgtBox.max.x) / 4;
-            mid.y = (selBox.min.y + selBox.max.y + tgtBox.min.y + tgtBox.max.y) / 4;
-            mid.z = (selBox.min.z + selBox.max.z + tgtBox.min.z + tgtBox.max.z) / 4;
-            mid[a] = tf;
-            newLines.push({ pos: mid.toArray(), axis: ax });
+            midVec.x = (selBox.min.x + selBox.max.x + tgtBox.min.x + tgtBox.max.x) / 4;
+            midVec.y = (selBox.min.y + selBox.max.y + tgtBox.min.y + tgtBox.max.y) / 4;
+            midVec.z = (selBox.min.z + selBox.max.z + tgtBox.min.z + tgtBox.max.z) / 4;
+            midVec[a] = tf;
+            newLines.push({ pos: midVec.toArray(), axis: ax });
             break;
           }
         }
       }
     }
-    if (JSON.stringify(newLines) !== JSON.stringify(snapLines.current)) {
+
+    const prev = snapLines.current;
+    let changed = prev.length !== newLines.length;
+    if (!changed) {
+      for (let i = 0; i < newLines.length; i++) {
+        if (prev[i].axis !== newLines[i].axis ||
+            prev[i].pos[0] !== newLines[i].pos[0] ||
+            prev[i].pos[1] !== newLines[i].pos[1] ||
+            prev[i].pos[2] !== newLines[i].pos[2]) {
+          changed = true;
+          break;
+        }
+      }
+    }
+    if (changed) {
       snapLines.current = newLines;
       setLines(newLines);
     }
@@ -765,9 +1192,7 @@ function FaceSnapper({ meshRefs, selectedId, active }) {
   return (
     <>
       {lines.map((l, i) => {
-        const colors = ['#ef4444', '#22c55e', '#3b82f6'];
-        const dirs = [[0, 0, 1], [1, 0, 0], [1, 0, 0]];
-        const d = dirs[l.axis];
+        const d = SNAP_DIRS[l.axis];
         const p = l.pos;
         return (
           <Line
@@ -776,7 +1201,7 @@ function FaceSnapper({ meshRefs, selectedId, active }) {
               [p[0] - d[0] * 30, p[1] - d[1] * 30, p[2] - d[2] * 30],
               [p[0] + d[0] * 30, p[1] + d[1] * 30, p[2] + d[2] * 30],
             ]}
-            color={colors[l.axis]}
+            color={SNAP_COLORS[l.axis]}
             lineWidth={1.5}
             dashed
             dashSize={2}
@@ -800,38 +1225,26 @@ function SceneContent() {
 
   const objects = useDesignStore(s => s.objects);
   const selectedIds = useDesignStore(s => s.selectedIds);
-  const transformMode = useDesignStore(s => s.transformMode);
   const gridVisible = useDesignStore(s => s.gridVisible);
   const wireframe = useDesignStore(s => s.wireframe);
   const snapIncrement = useDesignStore(s => s.snapIncrement);
   const clearSelection = useDesignStore(s => s.clearSelection);
-  const updateObject = useDesignStore(s => s.updateObject);
   const selectObject = useDesignStore(s => s.selectObject);
 
   const selectedId = selectedIds.length === 1 ? selectedIds[0] : null;
-  const selectedMesh = selectedId ? meshRefs.current[selectedId] : null;
-
-  const handleTransformEnd = useCallback(() => {
-    if (!selectedId || !meshRefs.current[selectedId]) return;
-    const mesh = meshRefs.current[selectedId];
-    updateObject(selectedId, {
-      position: mesh.position.toArray(),
-      rotation: [mesh.rotation.x, mesh.rotation.y, mesh.rotation.z],
-      scale: mesh.scale.toArray(),
-    });
-  }, [selectedId, updateObject]);
 
   return (
     <>
       <CameraSetup />
 
       <ambientLight intensity={0.4} />
+      {/* Fix #8: Reduced shadow map from 2048 to 1024 */}
       <directionalLight
         position={[50, 100, 50]}
         intensity={0.8}
         castShadow
-        shadow-mapSize-width={2048}
-        shadow-mapSize-height={2048}
+        shadow-mapSize-width={1024}
+        shadow-mapSize-height={1024}
         shadow-camera-far={500}
         shadow-camera-left={-100}
         shadow-camera-right={100}
@@ -858,25 +1271,24 @@ function SceneContent() {
         />
       )}
 
-      {/* X-axis line */}
+      {/* Fix #5: Use module-level constants for axis line positions */}
       <line>
         <bufferGeometry>
           <bufferAttribute
             attach="attributes-position"
             count={2}
-            array={new Float32Array([-200, 0, 0, 200, 0, 0])}
+            array={X_AXIS_POSITIONS}
             itemSize={3}
           />
         </bufferGeometry>
         <lineBasicMaterial color="#ef4444" opacity={0.4} transparent />
       </line>
-      {/* Z-axis line */}
       <line>
         <bufferGeometry>
           <bufferAttribute
             attach="attributes-position"
             count={2}
-            array={new Float32Array([0, 0, -200, 0, 0, 200])}
+            array={Z_AXIS_POSITIONS}
             itemSize={3}
           />
         </bufferGeometry>
@@ -900,25 +1312,9 @@ function SceneContent() {
         />
       ))}
 
-      {selectedMesh && (
-        <TransformControls
-          object={selectedMesh}
-          mode={transformMode}
-          translationSnap={snapIncrement || null}
-          rotationSnap={THREE.MathUtils.degToRad(15)}
-          scaleSnap={0.1}
-          size={0.7}
-          onMouseDown={() => { sceneInteracting.active = true; setTransforming(true); if (orbitRef.current) orbitRef.current.enabled = false; }}
-          onMouseUp={() => {
-            sceneInteracting.active = false;
-            setTransforming(false);
-            if (orbitRef.current) orbitRef.current.enabled = true;
-            handleTransformEnd();
-          }}
-        />
-      )}
+      <ObjectHandles meshRefs={meshRefs} selectedId={selectedId} orbitRef={orbitRef} setTransforming={setTransforming} />
 
-      <FaceSnapper meshRefs={meshRefs} selectedId={selectedId} active={transforming && transformMode === 'translate'} />
+      <FaceSnapper meshRefs={meshRefs} selectedId={selectedId} active={transforming} />
       <DimensionRuler meshRefs={meshRefs} />
       <MeasureTool />
       <DragPreview />
