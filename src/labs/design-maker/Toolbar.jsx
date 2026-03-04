@@ -1,10 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import Tip from './Tip';
 import {
-  Move, RotateCw, Maximize2, Grid3X3, Box, BoxSelect, Ruler,
+  Move, RotateCw, Maximize2, Grid3X3, Box, BoxSelect, Ruler, PencilRuler,
   Copy, Trash2, FlipHorizontal, FlipVertical,
   AlignCenterHorizontal, AlignCenterVertical,
-  Undo2, Redo2,
+  Undo2, Redo2, LayoutGrid, Magnet,
 } from 'lucide-react';
 import { useDesignStore } from './store';
 
@@ -20,15 +20,25 @@ export default function Toolbar() {
   const toggleWireframe = useDesignStore(s => s.toggleWireframe);
   const rulerVisible = useDesignStore(s => s.rulerVisible);
   const toggleRuler = useDesignStore(s => s.toggleRuler);
+  const measureActive = useDesignStore(s => s.measureActive);
+  const toggleMeasure = useDesignStore(s => s.toggleMeasure);
+  const faceSnap = useDesignStore(s => s.faceSnap);
+  const toggleFaceSnap = useDesignStore(s => s.toggleFaceSnap);
   const setSnapIncrement = useDesignStore(s => s.setSnapIncrement);
   const removeSelected = useDesignStore(s => s.removeSelected);
   const duplicateSelected = useDesignStore(s => s.duplicateSelected);
   const mirrorSelected = useDesignStore(s => s.mirrorSelected);
+  const arraySelected = useDesignStore(s => s.arraySelected);
   const alignObjects = useDesignStore(s => s.alignObjects);
   const undo = useDesignStore(s => s.undo);
   const redo = useDesignStore(s => s.redo);
   const canUndo = useDesignStore(s => s._past.length > 0);
   const canRedo = useDesignStore(s => s._future.length > 0);
+
+  const [arrayOpen, setArrayOpen] = useState(false);
+  const [arrayAxis, setArrayAxis] = useState('x');
+  const [arrayCount, setArrayCount] = useState(3);
+  const [arraySpacing, setArraySpacing] = useState(25);
 
   const hasSelection = selectedIds.length > 0;
   const hasMulti = selectedIds.length > 1;
@@ -112,6 +122,22 @@ export default function Toolbar() {
             <Ruler size={20} />
           </button>
         </Tip>
+        <Tip label="Measure" shortcut="M">
+          <button
+            className={`dml-tool-btn ${measureActive ? 'active' : ''}`}
+            onClick={toggleMeasure}
+          >
+            <PencilRuler size={20} />
+          </button>
+        </Tip>
+        <Tip label="Snap to Face">
+          <button
+            className={`dml-tool-btn ${faceSnap ? 'active' : ''}`}
+            onClick={toggleFaceSnap}
+          >
+            <Magnet size={20} />
+          </button>
+        </Tip>
       </div>
 
       <div className="dml-toolbar-sep" />
@@ -149,6 +175,36 @@ export default function Toolbar() {
                 <FlipVertical size={20} />
               </button>
             </Tip>
+            <div className="dml-array-wrap">
+              <Tip label="Linear Array">
+                <button className={`dml-tool-btn ${arrayOpen ? 'active' : ''}`} onClick={() => setArrayOpen(!arrayOpen)}>
+                  <LayoutGrid size={20} />
+                </button>
+              </Tip>
+              {arrayOpen && (
+                <div className="dml-array-popover">
+                  <div className="dml-array-row">
+                    <label>Axis</label>
+                    <select value={arrayAxis} onChange={e => setArrayAxis(e.target.value)}>
+                      <option value="x">X</option>
+                      <option value="y">Y</option>
+                      <option value="z">Z</option>
+                    </select>
+                  </div>
+                  <div className="dml-array-row">
+                    <label>Count</label>
+                    <input type="number" value={arrayCount} min={1} max={20} onChange={e => setArrayCount(Math.max(1, parseInt(e.target.value) || 1))} />
+                  </div>
+                  <div className="dml-array-row">
+                    <label>Spacing</label>
+                    <input type="number" value={arraySpacing} step={5} onChange={e => setArraySpacing(parseFloat(e.target.value) || 10)} />
+                  </div>
+                  <button className="dml-array-apply" onClick={() => { arraySelected(arrayAxis, arrayCount, arraySpacing); setArrayOpen(false); }}>
+                    Create Array
+                  </button>
+                </div>
+              )}
+            </div>
             <Tip label="Delete" shortcut="Del">
               <button className="dml-tool-btn danger" onClick={removeSelected}>
                 <Trash2 size={20} />

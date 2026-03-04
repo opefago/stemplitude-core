@@ -7,7 +7,7 @@ export const SHAPE_DEFAULTS = {
   cylinder: { geometry: { radiusTop: 10, radiusBottom: 10, height: 20, radialSegments: 32 }, color: '#14b8a6' },
   cone: { geometry: { radius: 10, height: 20, radialSegments: 32 }, color: '#f97316' },
   torus: { geometry: { radius: 10, tube: 3, radialSegments: 16, tubularSegments: 48 }, color: '#8b5cf6' },
-  text: { geometry: { text: 'Hello', size: 10, height: 5 }, color: '#3b82f6' },
+  text: { geometry: { text: 'Hello', size: 10, height: 5, font: 'helvetiker' }, color: '#3b82f6' },
   wall: { geometry: { width: 40, height: 20, depth: 2 }, color: '#64748b' },
   pyramid: { geometry: { radius: 10, height: 20, radialSegments: 4 }, color: '#22c55e' },
   heart: { geometry: { size: 10, depth: 5 }, color: '#ef4444' },
@@ -19,6 +19,8 @@ export const SHAPE_DEFAULTS = {
 
 // Mutable cursor state for high-frequency drag position updates (not in Zustand for perf)
 export const dragCursor = { x: 0, y: 0, active: false };
+export const sceneCamera = { current: null };
+export const sceneInteracting = { active: false };
 
 export function getHalfHeight(type, geometry) {
   switch (type) {
@@ -53,20 +55,35 @@ function cloneObjects(objects) {
 
 let objectCounter = 0;
 
+const STORAGE_KEY = 'dml-projects';
+
+function loadProjectList() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; }
+  catch { return []; }
+}
+
+function saveProjectList(list) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+}
+
 export const useDesignStore = create((set, get) => ({
   objects: [],
   selectedIds: [],
   _past: [],
   _future: [],
+  projectId: null,
   transformMode: 'translate',
   cameraMode: 'perspective',
   gridVisible: true,
   snapIncrement: 1,
   wireframe: false,
+  faceSnap: true,
   rulerVisible: true,
+  measureActive: false,
+  measurePoints: [],
   units: 'mm',
   zoomSpeed: 1,
-  backgroundColor: '#1a1a2e',
+  backgroundColor: '#f5f5f5',
   projectName: 'Untitled Project',
   isDirty: false,
   settingsOpen: false,
@@ -180,6 +197,26 @@ export const useDesignStore = create((set, get) => ({
     });
   },
 
+  arraySelected: (axis, count, spacing) => {
+    get()._saveSnapshot();
+    const state = get();
+    const selected = state.objects.filter(o => state.selectedIds.includes(o.id));
+    const ai = { x: 0, y: 1, z: 2 }[axis];
+    const allDupes = [];
+    for (let i = 1; i <= count; i++) {
+      selected.forEach(o => {
+        const pos = [...o.position];
+        pos[ai] += spacing * i;
+        allDupes.push({ ...o, id: uuidv4(), name: `${o.name} ${i + 1}`, position: pos });
+      });
+    }
+    set({
+      objects: [...state.objects, ...allDupes],
+      selectedIds: [...state.selectedIds, ...allDupes.map(o => o.id)],
+      isDirty: true,
+    });
+  },
+
   selectObject: (id, addToSelection = false) => set(state => {
     if (addToSelection) {
       const has = state.selectedIds.includes(id);
@@ -195,7 +232,15 @@ export const useDesignStore = create((set, get) => ({
   toggleGrid: () => set(state => ({ gridVisible: !state.gridVisible })),
   setSnapIncrement: (snap) => set({ snapIncrement: snap }),
   toggleWireframe: () => set(state => ({ wireframe: !state.wireframe })),
+  toggleFaceSnap: () => set(state => ({ faceSnap: !state.faceSnap })),
   toggleRuler: () => set(state => ({ rulerVisible: !state.rulerVisible })),
+  toggleMeasure: () => set(state => ({ measureActive: !state.measureActive, measurePoints: [] })),
+  addMeasurePoint: (pt) => set(state => {
+    const pts = [...state.measurePoints, pt];
+    if (pts.length > 2) return { measurePoints: [pt] };
+    return { measurePoints: pts };
+  }),
+  clearMeasure: () => set({ measurePoints: [] }),
   setBackgroundColor: (color) => set({ backgroundColor: color }),
   setUnits: (units) => set({ units }),
   setZoomSpeed: (speed) => set({ zoomSpeed: speed }),
@@ -223,16 +268,35 @@ export const useDesignStore = create((set, get) => ({
     });
   },
 
+  dropToFloor: () => {
+    get()._saveSnapshot();
+    const state = get();
+    set({
+      objects: state.objects.map(o => {
+        if (!state.selectedIds.includes(o.id)) return o;
+        const halfH = getHalfHeight(o.type, o.geometry);
+        const pos = [...o.position];
+        pos[1] = halfH * Math.abs(o.scale[1]);
+        return { ...o, position: pos };
+      }),
+      isDirty: true,
+    });
+  },
+
   mirrorSelected: (axis) => {
     get()._saveSnapshot();
     const state = get();
     const ai = { x: 0, y: 1, z: 2 }[axis];
+    const selected = state.objects.filter(o => state.selectedIds.includes(o.id));
+    const center = selected.reduce((sum, o) => sum + o.position[ai], 0) / (selected.length || 1);
     set({
       objects: state.objects.map(o => {
         if (!state.selectedIds.includes(o.id)) return o;
+        const pos = [...o.position];
+        pos[ai] = 2 * center - pos[ai];
         const scale = [...o.scale];
         scale[ai] *= -1;
-        return { ...o, scale };
+        return { ...o, position: pos, scale };
       }),
       isDirty: true,
     });
@@ -265,4 +329,63 @@ export const useDesignStore = create((set, get) => ({
       isDirty: true,
     }));
   },
+
+  saveProject: () => {
+    const state = get();
+    let id = state.projectId || uuidv4();
+    const saveable = state.objects.map(o => {
+      const { geometry, ...rest } = o;
+      if (o.type === 'imported') return { ...rest, geometry: {} };
+      return { ...rest, geometry };
+    });
+    const project = {
+      id,
+      name: state.projectName,
+      objects: saveable,
+      backgroundColor: state.backgroundColor,
+      updatedAt: Date.now(),
+    };
+    const list = loadProjectList().filter(p => p.id !== id);
+    list.unshift(project);
+    saveProjectList(list);
+    set({ projectId: id, isDirty: false });
+  },
+
+  loadProject: (id) => {
+    const list = loadProjectList();
+    const project = list.find(p => p.id === id);
+    if (!project) return;
+    objectCounter = project.objects.length;
+    set({
+      objects: project.objects,
+      projectId: project.id,
+      projectName: project.name,
+      backgroundColor: project.backgroundColor || '#f5f5f5',
+      selectedIds: [],
+      _past: [],
+      _future: [],
+      isDirty: false,
+    });
+  },
+
+  newProject: () => {
+    objectCounter = 0;
+    set({
+      objects: [],
+      projectId: null,
+      projectName: 'Untitled Project',
+      selectedIds: [],
+      _past: [],
+      _future: [],
+      isDirty: false,
+      backgroundColor: '#f5f5f5',
+    });
+  },
+
+  deleteProject: (id) => {
+    const list = loadProjectList().filter(p => p.id !== id);
+    saveProjectList(list);
+  },
+
+  getProjectList: () => loadProjectList(),
 }));

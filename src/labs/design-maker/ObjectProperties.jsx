@@ -1,6 +1,13 @@
-import React from 'react';
-import { Trash2, Copy } from 'lucide-react';
+import React, { useState } from 'react';
+import { Trash2, Copy, Lock, Unlock, ArrowDownToLine } from 'lucide-react';
 import { useDesignStore } from './store';
+import { FONT_MAP, FONT_LABELS } from './Scene';
+
+const COLOR_SWATCHES = [
+  '#ef4444', '#f97316', '#eab308', '#22c55e', '#14b8a6',
+  '#3b82f6', '#6366f1', '#a855f7', '#ec4899', '#64748b',
+  '#ffffff', '#1a1a1a',
+];
 
 function NumberInput({ label, value, onChange, step = 1, min, max }) {
   return (
@@ -73,6 +80,18 @@ function GeometryProps({ obj, updateGeometry }) {
               className="dml-text-prop-input"
             />
           </div>
+          <div className="dml-prop-field">
+            <label>Font</label>
+            <select
+              className="dml-font-select"
+              value={p.font || 'helvetiker'}
+              onChange={(e) => updateGeometry('font', e.target.value)}
+            >
+              {Object.keys(FONT_MAP).map(k => (
+                <option key={k} value={k}>{FONT_LABELS[k]}</option>
+              ))}
+            </select>
+          </div>
           <NumberInput label="Size" value={p.size} onChange={(v) => updateGeometry('size', v)} />
           <NumberInput label="Depth" value={p.height} onChange={(v) => updateGeometry('height', v)} />
         </>
@@ -104,6 +123,8 @@ export default function ObjectProperties() {
   const updateObject = useDesignStore(s => s.updateObject);
   const removeSelected = useDesignStore(s => s.removeSelected);
   const duplicateSelected = useDesignStore(s => s.duplicateSelected);
+  const dropToFloor = useDesignStore(s => s.dropToFloor);
+  const [lockScale, setLockScale] = useState(true);
 
   if (selectedIds.length === 0) {
     return (
@@ -120,6 +141,9 @@ export default function ObjectProperties() {
         <h3 className="dml-panel-title">Properties</h3>
         <p className="dml-multi-selection">{selectedIds.length} objects selected</p>
         <div className="dml-prop-actions">
+          <button className="dml-action-btn" onClick={dropToFloor}>
+            <ArrowDownToLine size={14} /> Drop to Floor
+          </button>
           <button className="dml-action-btn" onClick={duplicateSelected}>
             <Copy size={14} /> Duplicate All
           </button>
@@ -148,7 +172,14 @@ export default function ObjectProperties() {
 
   const updateScale = (axis, val) => {
     const scale = [...obj.scale];
-    scale[axis] = val;
+    if (lockScale) {
+      const ratio = obj.scale[axis] !== 0 ? val / obj.scale[axis] : 1;
+      scale[0] = obj.scale[0] * ratio;
+      scale[1] = obj.scale[1] * ratio;
+      scale[2] = obj.scale[2] * ratio;
+    } else {
+      scale[axis] = val;
+    }
     updateObject(obj.id, { scale });
   };
 
@@ -189,7 +220,16 @@ export default function ObjectProperties() {
       </div>
 
       <div className="dml-prop-section">
-        <h4>Scale</h4>
+        <div className="dml-prop-header">
+          <h4>Scale</h4>
+          <button
+            className={`dml-lock-btn ${lockScale ? 'locked' : ''}`}
+            onClick={() => setLockScale(!lockScale)}
+            title={lockScale ? 'Unlock proportions' : 'Lock proportions'}
+          >
+            {lockScale ? <Lock size={13} /> : <Unlock size={13} />}
+          </button>
+        </div>
         <div className="dml-prop-row">
           <NumberInput label="X" value={obj.scale[0]} onChange={(v) => updateScale(0, v)} step={0.1} min={0.01} />
           <NumberInput label="Y" value={obj.scale[1]} onChange={(v) => updateScale(1, v)} step={0.1} min={0.01} />
@@ -199,8 +239,18 @@ export default function ObjectProperties() {
 
       <div className="dml-prop-section">
         <h4>Appearance</h4>
+        <div className="dml-swatches">
+          {COLOR_SWATCHES.map(c => (
+            <button
+              key={c}
+              className={`dml-swatch ${obj.color === c ? 'active' : ''}`}
+              style={{ background: c }}
+              onClick={() => updateObject(obj.id, { color: c })}
+            />
+          ))}
+        </div>
         <div className="dml-color-row">
-          <label>Color</label>
+          <label>Custom</label>
           <input
             type="color"
             value={obj.color}
@@ -225,6 +275,9 @@ export default function ObjectProperties() {
       </div>
 
       <div className="dml-prop-actions">
+        <button className="dml-action-btn" onClick={dropToFloor}>
+          <ArrowDownToLine size={14} /> Drop to Floor
+        </button>
         <button className="dml-action-btn" onClick={duplicateSelected}>
           <Copy size={14} /> Duplicate
         </button>

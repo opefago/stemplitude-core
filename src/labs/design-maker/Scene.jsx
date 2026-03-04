@@ -1,4 +1,4 @@
-import React, { useRef, useMemo, useCallback, useEffect, Suspense, forwardRef } from 'react';
+import React, { useRef, useState, useMemo, useCallback, useEffect, Suspense, forwardRef } from 'react';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import {
   OrbitControls, TransformControls, Grid,
@@ -7,9 +7,33 @@ import {
   Text3D, Center, Html, Line, Environment,
 } from '@react-three/drei';
 import * as THREE from 'three';
-import { useDesignStore, SHAPE_DEFAULTS, getHalfHeight, dragCursor } from './store';
+import { useDesignStore, SHAPE_DEFAULTS, getHalfHeight, dragCursor, sceneCamera, sceneInteracting } from './store';
 
-const FONT_URL = 'https://cdn.jsdelivr.net/npm/three@0.169.0/examples/fonts/helvetiker_regular.typeface.json';
+const FONT_BASE = 'https://cdn.jsdelivr.net/npm/three@0.169.0/examples/fonts';
+export const FONT_MAP = {
+  helvetiker:    `${FONT_BASE}/helvetiker_regular.typeface.json`,
+  'helvetiker-bold': `${FONT_BASE}/helvetiker_bold.typeface.json`,
+  gentilis:      `${FONT_BASE}/gentilis_regular.typeface.json`,
+  'gentilis-bold': `${FONT_BASE}/gentilis_bold.typeface.json`,
+  optimer:       `${FONT_BASE}/optimer_regular.typeface.json`,
+  'optimer-bold': `${FONT_BASE}/optimer_bold.typeface.json`,
+  'droid-sans':  `${FONT_BASE}/droid/droid_sans_regular.typeface.json`,
+  'droid-sans-bold': `${FONT_BASE}/droid/droid_sans_bold.typeface.json`,
+  'droid-serif': `${FONT_BASE}/droid/droid_serif_regular.typeface.json`,
+  'droid-mono':  `${FONT_BASE}/droid/droid_sans_mono_regular.typeface.json`,
+};
+export const FONT_LABELS = {
+  helvetiker: 'Helvetiker',
+  'helvetiker-bold': 'Helvetiker Bold',
+  gentilis: 'Gentilis',
+  'gentilis-bold': 'Gentilis Bold',
+  optimer: 'Optimer',
+  'optimer-bold': 'Optimer Bold',
+  'droid-sans': 'Droid Sans',
+  'droid-sans-bold': 'Droid Sans Bold',
+  'droid-serif': 'Droid Serif',
+  'droid-mono': 'Droid Mono',
+};
 
 function ToyMaterial({ color, wireframe, transparent, opacity, side }) {
   return (
@@ -146,8 +170,8 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, wireframe
   const hasMirror = obj.scale[0] < 0 || obj.scale[1] < 0 || obj.scale[2] < 0;
   const side = (obj.isHole || hasMirror) ? THREE.DoubleSide : THREE.FrontSide;
 
-  const outlineRatio = 1.03;
   const cartoonRatio = 1.025;
+  const selectionRatio = 1.055;
 
   if (obj.type === 'text') {
     return (
@@ -166,7 +190,7 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, wireframe
         }>
           <Center>
             <Text3D
-              font={FONT_URL}
+              font={FONT_MAP[obj.geometry.font] || FONT_MAP.helvetiker}
               size={obj.geometry.size || 10}
               height={obj.geometry.height || 5}
               curveSegments={12}
@@ -190,6 +214,8 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, wireframe
       position={obj.position}
       rotation={obj.rotation}
       scale={obj.scale}
+      onPointerDown={() => { sceneInteracting.active = true; }}
+      onPointerUp={() => { sceneInteracting.active = false; }}
       onClick={onSelect}
     >
       <mesh castShadow receiveShadow>
@@ -203,19 +229,10 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, wireframe
         </mesh>
       )}
       {isSelected && (
-        <lineSegments
-          scale={[outlineRatio, outlineRatio, outlineRatio]}
-          renderOrder={999}
-        >
-          <SelectionEdges type={obj.type} params={obj.geometry} />
-          <lineBasicMaterial
-            color="#7c6df0"
-            transparent
-            opacity={0.8}
-            depthTest={false}
-            linewidth={2}
-          />
-        </lineSegments>
+        <mesh scale={[selectionRatio, selectionRatio, selectionRatio]}>
+          <ObjectGeometry type={obj.type} params={obj.geometry} />
+          <meshBasicMaterial color="#00c8ff" side={THREE.BackSide} transparent opacity={0.75} />
+        </mesh>
       )}
     </group>
   );
@@ -541,7 +558,7 @@ function DropHandler() {
       const overrides = { position: [x, 0, z] };
       if (isHole) overrides.isHole = true;
       if (type === 'text' && text) {
-        overrides.geometry = { text, size: 10, height: 5 };
+        overrides.geometry = { text, size: 10, height: 5, font: 'helvetiker' };
       }
       addObject(type, overrides);
     }
@@ -552,9 +569,203 @@ function DropHandler() {
   return null;
 }
 
+function MeasureTool() {
+  const { camera, gl } = useThree();
+  const measureActive = useDesignStore(s => s.measureActive);
+  const measurePoints = useDesignStore(s => s.measurePoints);
+  const addMeasurePoint = useDesignStore(s => s.addMeasurePoint);
+  const snapIncrement = useDesignStore(s => s.snapIncrement);
+
+  const handleClick = useCallback((e) => {
+    if (!measureActive) return;
+    if (e.button !== 0) return;
+    const rect = gl.domElement.getBoundingClientRect();
+    const ndcX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    const ndcY = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const hit = new THREE.Vector3();
+    if (raycaster.ray.intersectPlane(plane, hit)) {
+      const snap = snapIncrement;
+      const x = Math.round(hit.x / snap) * snap;
+      const z = Math.round(hit.z / snap) * snap;
+      addMeasurePoint([x, 0, z]);
+    }
+  }, [measureActive, camera, gl, addMeasurePoint, snapIncrement]);
+
+  useEffect(() => {
+    const el = gl.domElement;
+    el.addEventListener('click', handleClick);
+    return () => el.removeEventListener('click', handleClick);
+  }, [gl, handleClick]);
+
+  if (!measureActive || measurePoints.length === 0) return null;
+
+  const p1 = measurePoints[0];
+  const p2 = measurePoints.length === 2 ? measurePoints[1] : null;
+
+  const fmt = (v) => `${Math.abs(v).toFixed(1)}`;
+
+  return (
+    <group>
+      {/* First point marker */}
+      <mesh position={p1}>
+        <sphereGeometry args={[0.6, 16, 16]} />
+        <meshBasicMaterial color="#ff6b6b" />
+      </mesh>
+
+      {p2 && (
+        <>
+          {/* Second point marker */}
+          <mesh position={p2}>
+            <sphereGeometry args={[0.6, 16, 16]} />
+            <meshBasicMaterial color="#ff6b6b" />
+          </mesh>
+
+          {/* X-axis leg */}
+          <Line
+            points={[p1, [p2[0], 0, p1[2]]]}
+            color="#ef4444"
+            lineWidth={2}
+            dashed
+            dashSize={1}
+            gapSize={0.5}
+          />
+          {/* Z-axis leg */}
+          <Line
+            points={[[p2[0], 0, p1[2]], p2]}
+            color="#3b82f6"
+            lineWidth={2}
+            dashed
+            dashSize={1}
+            gapSize={0.5}
+          />
+          {/* Direct distance */}
+          <Line
+            points={[p1, p2]}
+            color="#22c55e"
+            lineWidth={1.5}
+            dashed
+            dashSize={1.5}
+            gapSize={0.8}
+          />
+
+          {/* X distance label */}
+          {Math.abs(p2[0] - p1[0]) > 0.01 && (
+            <Html position={[(p1[0] + p2[0]) / 2, 1.5, p1[2]]} center className="dml-measure-label dml-measure-x">
+              X: {fmt(p2[0] - p1[0])}
+            </Html>
+          )}
+          {/* Z distance label */}
+          {Math.abs(p2[2] - p1[2]) > 0.01 && (
+            <Html position={[p2[0], 1.5, (p1[2] + p2[2]) / 2]} center className="dml-measure-label dml-measure-z">
+              Z: {fmt(p2[2] - p1[2])}
+            </Html>
+          )}
+          {/* Total distance label */}
+          <Html position={[(p1[0] + p2[0]) / 2, 3.5, (p1[2] + p2[2]) / 2]} center className="dml-measure-label dml-measure-total">
+            {Math.sqrt((p2[0]-p1[0])**2 + (p2[2]-p1[2])**2).toFixed(1)}
+          </Html>
+        </>
+      )}
+    </group>
+  );
+}
+
+const SNAP_THRESHOLD = 3;
+
+function FaceSnapper({ meshRefs, selectedId, active }) {
+  const faceSnap = useDesignStore(s => s.faceSnap);
+  const objects = useDesignStore(s => s.objects);
+  const snapLines = useRef([]);
+  const [lines, setLines] = useState([]);
+
+  useFrame(() => {
+    if (!active || !faceSnap || !selectedId || !meshRefs.current[selectedId]) {
+      if (snapLines.current.length > 0) { snapLines.current = []; setLines([]); }
+      return;
+    }
+    const selMesh = meshRefs.current[selectedId];
+    const selBox = new THREE.Box3().setFromObject(selMesh);
+    const newLines = [];
+
+    for (const obj of objects) {
+      if (obj.id === selectedId) continue;
+      const tgtMesh = meshRefs.current[obj.id];
+      if (!tgtMesh) continue;
+      const tgtBox = new THREE.Box3().setFromObject(tgtMesh);
+
+      for (let ax = 0; ax < 3; ax++) {
+        const axes = ['x', 'y', 'z'];
+        const a = axes[ax];
+        const pairs = [
+          { sf: selBox.max[a], tf: tgtBox.min[a], dir: -1 },
+          { sf: selBox.min[a], tf: tgtBox.max[a], dir: 1 },
+          { sf: selBox.min[a], tf: tgtBox.min[a], dir: 0 },
+          { sf: selBox.max[a], tf: tgtBox.max[a], dir: 0 },
+        ];
+
+        for (const { sf, tf } of pairs) {
+          const dist = Math.abs(sf - tf);
+          if (dist < SNAP_THRESHOLD) {
+            const delta = tf - sf;
+            selMesh.position[a] += delta;
+            selBox.min[a] += delta;
+            selBox.max[a] += delta;
+
+            const mid = new THREE.Vector3();
+            mid.x = (selBox.min.x + selBox.max.x + tgtBox.min.x + tgtBox.max.x) / 4;
+            mid.y = (selBox.min.y + selBox.max.y + tgtBox.min.y + tgtBox.max.y) / 4;
+            mid.z = (selBox.min.z + selBox.max.z + tgtBox.min.z + tgtBox.max.z) / 4;
+            mid[a] = tf;
+            newLines.push({ pos: mid.toArray(), axis: ax });
+            break;
+          }
+        }
+      }
+    }
+    if (JSON.stringify(newLines) !== JSON.stringify(snapLines.current)) {
+      snapLines.current = newLines;
+      setLines(newLines);
+    }
+  });
+
+  return (
+    <>
+      {lines.map((l, i) => {
+        const colors = ['#ef4444', '#22c55e', '#3b82f6'];
+        const dirs = [[0, 0, 1], [1, 0, 0], [1, 0, 0]];
+        const d = dirs[l.axis];
+        const p = l.pos;
+        return (
+          <Line
+            key={i}
+            points={[
+              [p[0] - d[0] * 30, p[1] - d[1] * 30, p[2] - d[2] * 30],
+              [p[0] + d[0] * 30, p[1] + d[1] * 30, p[2] + d[2] * 30],
+            ]}
+            color={colors[l.axis]}
+            lineWidth={1.5}
+            dashed
+            dashSize={2}
+            gapSize={1}
+            transparent
+            opacity={0.6}
+          />
+        );
+      })}
+    </>
+  );
+}
+
 function SceneContent() {
   const meshRefs = useRef({});
   const orbitRef = useRef();
+  const { camera } = useThree();
+  const [transforming, setTransforming] = useState(false);
+
+  useEffect(() => { sceneCamera.current = camera; }, [camera]);
 
   const objects = useDesignStore(s => s.objects);
   const selectedIds = useDesignStore(s => s.selectedIds);
@@ -608,8 +819,10 @@ function SceneContent() {
           sectionSize={snapIncrement * 10}
           fadeDistance={200}
           fadeStrength={1}
-          cellColor="#4a4a6a"
-          sectionColor="#6a6a8a"
+          cellColor="#a8c8e8"
+          sectionColor="#6a9fd8"
+          cellThickness={0.6}
+          sectionThickness={1.2}
           infiniteGrid
         />
       )}
@@ -639,7 +852,7 @@ function SceneContent() {
         <lineBasicMaterial color="#3b82f6" opacity={0.4} transparent />
       </line>
 
-      {objects.map(obj => (
+      {objects.filter(obj => obj.visible !== false).map(obj => (
         <SceneObject
           key={obj.id}
           ref={el => {
@@ -664,15 +877,19 @@ function SceneContent() {
           rotationSnap={THREE.MathUtils.degToRad(15)}
           scaleSnap={0.1}
           size={0.7}
-          onMouseDown={() => { if (orbitRef.current) orbitRef.current.enabled = false; }}
+          onMouseDown={() => { sceneInteracting.active = true; setTransforming(true); if (orbitRef.current) orbitRef.current.enabled = false; }}
           onMouseUp={() => {
+            sceneInteracting.active = false;
+            setTransforming(false);
             if (orbitRef.current) orbitRef.current.enabled = true;
             handleTransformEnd();
           }}
         />
       )}
 
+      <FaceSnapper meshRefs={meshRefs} selectedId={selectedId} active={transforming && transformMode === 'translate'} />
       <DimensionRuler meshRefs={meshRefs} />
+      <MeasureTool />
       <DragPreview />
       <DropHandler />
 
@@ -699,6 +916,9 @@ function SceneContent() {
   );
 }
 
+export let marqueeActive = false;
+export function setMarqueeActive(v) { marqueeActive = v; }
+
 export default function Scene() {
   const backgroundColor = useDesignStore(s => s.backgroundColor);
   const clearSelection = useDesignStore(s => s.clearSelection);
@@ -708,7 +928,7 @@ export default function Scene() {
       shadows
       gl={{ antialias: true, preserveDrawingBuffer: true, toneMapping: THREE.ACESFilmicToneMapping }}
       onPointerMissed={(e) => {
-        if (e.button === 0) clearSelection();
+        if (e.button === 0 && !marqueeActive) clearSelection();
       }}
       onContextMenu={(e) => e.preventDefault()}
       style={{ background: backgroundColor }}

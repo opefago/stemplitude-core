@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback, useRef } from 'react';
+import React, { useEffect, useCallback, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Tip from '../labs/design-maker/Tip';
 import {
@@ -6,13 +6,14 @@ import {
 } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import * as THREE from 'three';
-import Scene from '../labs/design-maker/Scene';
+import Scene, { setMarqueeActive } from '../labs/design-maker/Scene';
 import ShapeLibrary from '../labs/design-maker/ShapeLibrary';
 import Toolbar from '../labs/design-maker/Toolbar';
 import ObjectProperties from '../labs/design-maker/ObjectProperties';
+import SceneTree from '../labs/design-maker/SceneTree';
 import SettingsDialog from '../labs/design-maker/SettingsDialog';
 import ViewControls from '../labs/design-maker/ViewControls';
-import { useDesignStore, dragCursor } from '../labs/design-maker/store';
+import { useDesignStore, dragCursor, sceneCamera, sceneInteracting } from '../labs/design-maker/store';
 import { unionCSG, subtractCSG } from '../labs/design-maker/csgUtils';
 import './DesignMakerLab.css';
 
@@ -88,6 +89,108 @@ export default function DesignMakerLab() {
   const clearDraggingShape = useDesignStore(s => s.clearDraggingShape);
   const undo = useDesignStore(s => s.undo);
   const redo = useDesignStore(s => s.redo);
+  const dropToFloor = useDesignStore(s => s.dropToFloor);
+  const toggleMeasure = useDesignStore(s => s.toggleMeasure);
+  const saveProject = useDesignStore(s => s.saveProject);
+  const loadProject = useDesignStore(s => s.loadProject);
+  const newProject = useDesignStore(s => s.newProject);
+  const deleteProject = useDesignStore(s => s.deleteProject);
+  const getProjectList = useDesignStore(s => s.getProjectList);
+  const [projectsOpen, setProjectsOpen] = useState(false);
+  const [projectList, setProjectList] = useState([]);
+  const projectsRef = useRef(null);
+  const [sidebarTab, setSidebarTab] = useState('properties');
+
+  useEffect(() => {
+    if (!projectsOpen) return;
+    const handleClick = (e) => {
+      if (projectsRef.current && !projectsRef.current.contains(e.target)) {
+        setProjectsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [projectsOpen]);
+  const [marquee, setMarquee] = useState(null);
+  const marqueeStart = useRef(null);
+  const MIN_MARQUEE = 5;
+
+  const handleMarqueeDown = useCallback((e) => {
+    if (e.button !== 0) return;
+    if (e.target.tagName !== 'CANVAS') return;
+    if (useDesignStore.getState().draggingShape) return;
+    if (sceneInteracting.active) return;
+    const rect = viewportRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    marqueeStart.current = { x, y };
+  }, []);
+
+  const handleMarqueeMove = useCallback((e) => {
+    if (!marqueeStart.current) return;
+    if (useDesignStore.getState().draggingShape || sceneInteracting.active) {
+      marqueeStart.current = null;
+      setMarquee(null);
+      setMarqueeActive(false);
+      return;
+    }
+    const rect = viewportRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const dx = Math.abs(x - marqueeStart.current.x);
+    const dy = Math.abs(y - marqueeStart.current.y);
+    if (dx > MIN_MARQUEE || dy > MIN_MARQUEE) {
+      setMarqueeActive(true);
+      setMarquee({
+        x: Math.min(marqueeStart.current.x, x),
+        y: Math.min(marqueeStart.current.y, y),
+        w: dx,
+        h: dy,
+      });
+    }
+  }, []);
+
+  const handleMarqueeUp = useCallback(() => {
+    if (marquee && viewportRef.current && sceneCamera.current) {
+      const rect = viewportRef.current.getBoundingClientRect();
+      const cam = sceneCamera.current;
+      const objs = useDesignStore.getState().objects;
+      const hits = [];
+      const v = new THREE.Vector3();
+      for (const obj of objs) {
+        v.set(...obj.position);
+        v.project(cam);
+        const sx = ((v.x + 1) / 2) * rect.width;
+        const sy = ((1 - v.y) / 2) * rect.height;
+        if (
+          sx >= marquee.x && sx <= marquee.x + marquee.w &&
+          sy >= marquee.y && sy <= marquee.y + marquee.h &&
+          v.z >= -1 && v.z <= 1
+        ) {
+          hits.push(obj.id);
+        }
+      }
+      if (hits.length > 0) {
+        useDesignStore.setState({ selectedIds: hits });
+      } else {
+        clearSelection();
+      }
+    }
+    marqueeStart.current = null;
+    setMarquee(null);
+    setTimeout(() => setMarqueeActive(false), 50);
+  }, [marquee, clearSelection]);
+
+  useEffect(() => {
+    window.addEventListener('mouseup', handleMarqueeUp);
+    return () => window.removeEventListener('mouseup', handleMarqueeUp);
+  }, [handleMarqueeUp]);
+
+  useEffect(() => {
+    if (!isDirty) return;
+    const timer = setTimeout(() => saveProject(), 2000);
+    return () => clearTimeout(timer);
+  }, [isDirty, objects, projectName, saveProject]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -111,7 +214,8 @@ export default function DesignMakerLab() {
           if (!e.ctrlKey && !e.metaKey) setTransformMode('rotate');
           break;
         case 's': case 'S':
-          if (!e.ctrlKey && !e.metaKey) setTransformMode('scale');
+          if (e.ctrlKey || e.metaKey) { e.preventDefault(); saveProject(); }
+          else setTransformMode('scale');
           break;
         case 'd': case 'D':
           if (e.ctrlKey || e.metaKey) { e.preventDefault(); duplicateSelected(); }
@@ -122,6 +226,12 @@ export default function DesignMakerLab() {
         case 'g': case 'G':
           toggleGrid();
           break;
+        case 'f': case 'F':
+          if (!e.ctrlKey && !e.metaKey) dropToFloor();
+          break;
+        case 'm': case 'M':
+          if (!e.ctrlKey && !e.metaKey) toggleMeasure();
+          break;
         case 'Escape':
           clearSelection();
           break;
@@ -129,7 +239,7 @@ export default function DesignMakerLab() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [removeSelected, setTransformMode, duplicateSelected, selectAll, clearSelection, toggleGrid]);
+  }, [removeSelected, setTransformMode, duplicateSelected, selectAll, clearSelection, toggleGrid, dropToFloor, toggleMeasure, saveProject]);
 
   const handleImport = useCallback(async (e) => {
     const file = e.target.files?.[0];
@@ -253,7 +363,7 @@ export default function DesignMakerLab() {
             <span className="dml-logo-text">Design Maker</span>
           </div>
           <div className="dml-divider" />
-          <div className="dml-project-info">
+          <div className="dml-project-info" ref={projectsRef}>
             <div className="dml-project-name-wrap">
               <input
                 className="dml-project-name"
@@ -263,9 +373,33 @@ export default function DesignMakerLab() {
               />
               <Pencil size={12} className="dml-edit-icon" />
             </div>
-            <span className={`dml-save-indicator ${isDirty ? 'unsaved' : 'saved'}`}>
-              {isDirty ? '● Unsaved' : '✓ Saved'}
-            </span>
+            <div className="dml-save-row">
+              <span className={`dml-save-indicator ${isDirty ? 'unsaved' : 'saved'}`}>
+                {isDirty ? '● Unsaved' : '✓ Saved'}
+              </span>
+              <button className="dml-projects-btn" onClick={() => { setProjectList(getProjectList()); setProjectsOpen(!projectsOpen); }}>
+                My Projects ▾
+              </button>
+            </div>
+            {projectsOpen && (
+              <div className="dml-projects-dropdown">
+                <button className="dml-projects-item dml-projects-new" onClick={() => { newProject(); setProjectsOpen(false); }}>
+                  + New Project
+                </button>
+                {projectList.length === 0 && <p className="dml-projects-empty">No saved projects</p>}
+                {projectList.map(p => (
+                  <div key={p.id} className="dml-projects-item">
+                    <button className="dml-projects-item-name" onClick={() => { loadProject(p.id); setProjectsOpen(false); }}>
+                      {p.name}
+                      <span className="dml-projects-item-date">{new Date(p.updatedAt).toLocaleDateString()}</span>
+                    </button>
+                    <button className="dml-projects-item-del" onClick={(e) => { e.stopPropagation(); deleteProject(p.id); setProjectList(getProjectList()); }}>
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
@@ -332,6 +466,8 @@ export default function DesignMakerLab() {
         <div
           className={`dml-viewport-wrap ${dragOver ? 'drag-over' : ''}`}
           ref={viewportRef}
+          onMouseDown={handleMarqueeDown}
+          onMouseMove={handleMarqueeMove}
           onDragOver={(e) => {
             e.preventDefault();
             e.dataTransfer.dropEffect = 'copy';
@@ -371,6 +507,18 @@ export default function DesignMakerLab() {
         >
           <Scene />
 
+          {marquee && (
+            <div
+              className="dml-marquee"
+              style={{
+                left: marquee.x,
+                top: marquee.y,
+                width: marquee.w,
+                height: marquee.h,
+              }}
+            />
+          )}
+
           <div className="dml-viewport-top-left">
             <ShapeLibrary />
           </div>
@@ -399,7 +547,19 @@ export default function DesignMakerLab() {
         </div>
 
         <div className="dml-sidebar-right">
-          <ObjectProperties />
+          <div className="dml-sidebar-tabs">
+            <button
+              className={`dml-sidebar-tab ${sidebarTab === 'properties' ? 'active' : ''}`}
+              onClick={() => setSidebarTab('properties')}
+            >Properties</button>
+            <button
+              className={`dml-sidebar-tab ${sidebarTab === 'scene' ? 'active' : ''}`}
+              onClick={() => setSidebarTab('scene')}
+            >Scene Tree</button>
+          </div>
+          <div className="dml-sidebar-body">
+            {sidebarTab === 'properties' ? <ObjectProperties /> : <SceneTree />}
+          </div>
         </div>
       </div>
 
