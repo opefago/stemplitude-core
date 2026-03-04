@@ -1,7 +1,8 @@
 import React, { useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import Tippy from '@tippyjs/react';
 import {
-  Settings, Upload, Download, Share2, X, Layers, Pencil,
+  Settings, Upload, Download, Share2, X, Merge, Scissors, Pencil,
 } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import * as THREE from 'three';
@@ -10,8 +11,9 @@ import ShapeLibrary from '../labs/design-maker/ShapeLibrary';
 import Toolbar from '../labs/design-maker/Toolbar';
 import ObjectProperties from '../labs/design-maker/ObjectProperties';
 import SettingsDialog from '../labs/design-maker/SettingsDialog';
-import { useDesignStore } from '../labs/design-maker/store';
-import { performCSG } from '../labs/design-maker/csgUtils';
+import ViewControls from '../labs/design-maker/ViewControls';
+import { useDesignStore, dragCursor } from '../labs/design-maker/store';
+import { unionCSG, subtractCSG } from '../labs/design-maker/csgUtils';
 import './DesignMakerLab.css';
 
 function createGeometryFromObj(obj) {
@@ -64,6 +66,8 @@ export default function DesignMakerLab() {
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
   const [exportOpen, setExportOpen] = React.useState(false);
+  const [dragOver, setDragOver] = React.useState(false);
+  const viewportRef = useRef(null);
 
   const projectName = useDesignStore(s => s.projectName);
   const isDirty = useDesignStore(s => s.isDirty);
@@ -80,12 +84,23 @@ export default function DesignMakerLab() {
   const toggleGrid = useDesignStore(s => s.toggleGrid);
   const addImportedObject = useDesignStore(s => s.addImportedObject);
   const replaceObjects = useDesignStore(s => s.replaceObjects);
+  const setPendingDrop = useDesignStore(s => s.setPendingDrop);
+  const clearDraggingShape = useDesignStore(s => s.clearDraggingShape);
+  const undo = useDesignStore(s => s.undo);
+  const redo = useDesignStore(s => s.redo);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
 
       switch (e.key) {
+        case 'z': case 'Z':
+          if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            if (e.shiftKey) redo();
+            else undo();
+          }
+          break;
         case 'Delete': case 'Backspace':
           removeSelected();
           break;
@@ -179,27 +194,53 @@ export default function DesignMakerLab() {
     setExportOpen(false);
   }, [objects, projectName]);
 
-  const handleGroup = useCallback(() => {
+  const handleUnion = useCallback(() => {
     if (selectedIds.length < 2) return;
     const selected = objects.filter(o => selectedIds.includes(o.id));
     try {
-      const result = performCSG(selected);
+      const result = unionCSG(selected);
       if (result) {
         replaceObjects(selectedIds, {
           id: uuidv4(),
-          name: 'CSG Group',
+          name: 'Union',
           type: 'imported',
           position: [0, 0, 0],
           rotation: [0, 0, 0],
           scale: [1, 1, 1],
-          color: selected.find(s => !s.isHole)?.color || '#6366f1',
+          color: selected[0].color,
           isHole: false,
           visible: true,
           geometry: { bufferGeometry: result.geometry },
         });
       }
     } catch (err) {
-      console.error('CSG operation failed:', err);
+      console.error('Union failed:', err);
+    }
+  }, [selectedIds, objects, replaceObjects]);
+
+  const handleSubtract = useCallback(() => {
+    if (selectedIds.length < 2) return;
+    const selected = objects.filter(o => selectedIds.includes(o.id));
+    const target = selected[0];
+    const tools = selected.slice(1);
+    try {
+      const result = subtractCSG(target, tools);
+      if (result) {
+        replaceObjects(selectedIds, {
+          id: uuidv4(),
+          name: 'Subtraction',
+          type: 'imported',
+          position: [0, 0, 0],
+          rotation: [0, 0, 0],
+          scale: [1, 1, 1],
+          color: target.color,
+          isHole: false,
+          visible: true,
+          geometry: { bufferGeometry: result.geometry },
+        });
+      }
+    } catch (err) {
+      console.error('Subtract failed:', err);
     }
   }, [selectedIds, objects, replaceObjects]);
 
@@ -240,20 +281,23 @@ export default function DesignMakerLab() {
             onChange={handleImport}
             style={{ display: 'none' }}
           />
-          <button className="dml-header-btn" onClick={() => fileInputRef.current?.click()} title="Import STL/OBJ">
-            <Upload size={16} />
-            <span>Import</span>
-          </button>
+          <Tippy content="Import STL/OBJ">
+            <button className="dml-header-btn" onClick={() => fileInputRef.current?.click()}>
+              <Upload size={16} />
+              <span>Import</span>
+            </button>
+          </Tippy>
 
           <div className="dml-dropdown" onMouseLeave={() => setExportOpen(false)}>
-            <button
-              className="dml-header-btn"
-              onClick={() => setExportOpen(!exportOpen)}
-              title="Export"
-            >
-              <Download size={16} />
-              <span>Export</span>
-            </button>
+            <Tippy content="Export" disabled={exportOpen}>
+              <button
+                className="dml-header-btn"
+                onClick={() => setExportOpen(!exportOpen)}
+              >
+                <Download size={16} />
+                <span>Export</span>
+              </button>
+            </Tippy>
             {exportOpen && (
               <div className="dml-dropdown-menu">
                 <button onClick={handleExportSTL}>Export as STL</button>
@@ -262,39 +306,94 @@ export default function DesignMakerLab() {
             )}
           </div>
 
-          <button className="dml-header-btn" onClick={() => alert('Share link copied!')} title="Share">
-            <Share2 size={16} />
-            <span>Share</span>
-          </button>
+          <Tippy content="Share">
+            <button className="dml-header-btn" onClick={() => alert('Share link copied!')}>
+              <Share2 size={16} />
+              <span>Share</span>
+            </button>
+          </Tippy>
 
           <div className="dml-divider" />
 
-          <button className="dml-header-btn icon-only" onClick={() => setSettingsOpen(true)} title="Settings">
-            <Settings size={18} />
-          </button>
-          <button className="dml-header-btn dml-exit-btn icon-only" onClick={() => navigate('/playground')} title="Exit to Playground">
-            <X size={18} />
-          </button>
+          <Tippy content="Settings">
+            <button className="dml-header-btn icon-only" onClick={() => setSettingsOpen(true)}>
+              <Settings size={18} />
+            </button>
+          </Tippy>
+          <Tippy content="Exit to Playground">
+            <button className="dml-header-btn dml-exit-btn icon-only" onClick={() => navigate('/playground')}>
+              <X size={18} />
+            </button>
+          </Tippy>
         </div>
       </header>
 
       <div className="dml-main">
-        <div className="dml-sidebar-left">
-          <ShapeLibrary />
-        </div>
-
-        <div className="dml-viewport-wrap">
+        <div
+          className={`dml-viewport-wrap ${dragOver ? 'drag-over' : ''}`}
+          ref={viewportRef}
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+            if (viewportRef.current) {
+              const rect = viewportRef.current.getBoundingClientRect();
+              dragCursor.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+              dragCursor.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+              dragCursor.active = true;
+            }
+            setDragOver(true);
+          }}
+          onDragEnter={(e) => {
+            e.preventDefault();
+            setDragOver(true);
+          }}
+          onDragLeave={(e) => {
+            if (viewportRef.current && !viewportRef.current.contains(e.relatedTarget)) {
+              dragCursor.active = false;
+              setDragOver(false);
+            }
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            dragCursor.active = false;
+            setDragOver(false);
+            clearDraggingShape();
+            const raw = e.dataTransfer.getData('application/x-design-shape');
+            if (!raw) return;
+            try {
+              const data = JSON.parse(raw);
+              const rect = viewportRef.current.getBoundingClientRect();
+              const ndcX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+              const ndcY = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+              setPendingDrop({ ...data, ndc: { x: ndcX, y: ndcY } });
+            } catch { /* ignore bad data */ }
+          }}
+        >
           <Scene />
+
+          <div className="dml-viewport-top-left">
+            <ShapeLibrary />
+          </div>
+
           <div className="dml-viewport-toolbar">
             <Toolbar />
           </div>
+
+          <div className="dml-viewport-right">
+            <ViewControls />
+          </div>
+
           {selectedIds.length >= 2 && (
             <div className="dml-csg-float">
-              <button className="dml-csg-btn" onClick={handleGroup}>
-                <Layers size={16} />
-                <span>Group (CSG)</span>
+              <button className="dml-csg-btn dml-csg-union" onClick={handleUnion}>
+                <Merge size={16} />
+                <span>Union</span>
               </button>
-              <span className="dml-csg-hint">Solid + Hole = Boolean subtract</span>
+              <button className="dml-csg-btn dml-csg-subtract" onClick={handleSubtract}>
+                <Scissors size={16} />
+                <span>Subtract</span>
+              </button>
+              <span className="dml-csg-hint">First selected = target</span>
             </div>
           )}
         </div>

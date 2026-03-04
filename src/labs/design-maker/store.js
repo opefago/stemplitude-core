@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
 
-const SHAPE_DEFAULTS = {
+export const SHAPE_DEFAULTS = {
   box: { geometry: { width: 20, height: 20, depth: 20 }, color: '#6366f1' },
   sphere: { geometry: { radius: 10, widthSegments: 32, heightSegments: 32 }, color: '#ec4899' },
   cylinder: { geometry: { radiusTop: 10, radiusBottom: 10, height: 20, radialSegments: 32 }, color: '#14b8a6' },
@@ -17,7 +17,10 @@ const SHAPE_DEFAULTS = {
   wedge: { geometry: { width: 20, height: 20, depth: 20 }, color: '#84cc16' },
 };
 
-function getHalfHeight(type, geometry) {
+// Mutable cursor state for high-frequency drag position updates (not in Zustand for perf)
+export const dragCursor = { x: 0, y: 0, active: false };
+
+export function getHalfHeight(type, geometry) {
   switch (type) {
     case 'box': case 'wall': case 'wedge':
       return geometry.height / 2;
@@ -36,11 +39,25 @@ function getHalfHeight(type, geometry) {
   }
 }
 
+const MAX_HISTORY = 50;
+
+function cloneObjects(objects) {
+  return objects.map(o => ({
+    ...o,
+    position: [...o.position],
+    rotation: [...o.rotation],
+    scale: [...o.scale],
+    geometry: { ...o.geometry },
+  }));
+}
+
 let objectCounter = 0;
 
 export const useDesignStore = create((set, get) => ({
   objects: [],
   selectedIds: [],
+  _past: [],
+  _future: [],
   transformMode: 'translate',
   cameraMode: 'perspective',
   gridVisible: true,
@@ -52,8 +69,57 @@ export const useDesignStore = create((set, get) => ({
   projectName: 'Untitled Project',
   isDirty: false,
   settingsOpen: false,
+  pendingDrop: null,
+  draggingShape: null,
+  _cameraCmd: null,
+
+  zoomIn: () => set({ _cameraCmd: 'in' }),
+  zoomOut: () => set({ _cameraCmd: 'out' }),
+  cameraHome: () => set({ _cameraCmd: 'home' }),
+  cameraFit: () => set({ _cameraCmd: 'fit' }),
+  clearCameraCmd: () => set({ _cameraCmd: null }),
+
+  setPendingDrop: (drop) => set({ pendingDrop: drop }),
+  clearPendingDrop: () => set({ pendingDrop: null }),
+  setDraggingShape: (shape) => set({ draggingShape: shape }),
+  clearDraggingShape: () => set({ draggingShape: null }),
+
+  _saveSnapshot: () => {
+    const { objects, _past } = get();
+    const snap = cloneObjects(objects);
+    const past = _past.length >= MAX_HISTORY ? _past.slice(1) : [..._past];
+    past.push(snap);
+    set({ _past: past, _future: [] });
+  },
+
+  undo: () => {
+    const { objects, _past, _future } = get();
+    if (_past.length === 0) return;
+    const prev = _past[_past.length - 1];
+    set({
+      _past: _past.slice(0, -1),
+      _future: [..._future, cloneObjects(objects)],
+      objects: prev,
+      selectedIds: [],
+      isDirty: true,
+    });
+  },
+
+  redo: () => {
+    const { objects, _past, _future } = get();
+    if (_future.length === 0) return;
+    const next = _future[_future.length - 1];
+    set({
+      _future: _future.slice(0, -1),
+      _past: [..._past, cloneObjects(objects)],
+      objects: next,
+      selectedIds: [],
+      isDirty: true,
+    });
+  },
 
   addObject: (type, overrides = {}) => {
+    get()._saveSnapshot();
     const defaults = SHAPE_DEFAULTS[type] || SHAPE_DEFAULTS.box;
     objectCounter++;
     const obj = {
@@ -79,24 +145,25 @@ export const useDesignStore = create((set, get) => ({
     return obj.id;
   },
 
-  removeObject: (id) => set(state => ({
+  removeObject: (id) => { get()._saveSnapshot(); set(state => ({
     objects: state.objects.filter(o => o.id !== id),
     selectedIds: state.selectedIds.filter(s => s !== id),
     isDirty: true,
-  })),
+  })); },
 
-  removeSelected: () => set(state => ({
+  removeSelected: () => { get()._saveSnapshot(); set(state => ({
     objects: state.objects.filter(o => !state.selectedIds.includes(o.id)),
     selectedIds: [],
     isDirty: true,
-  })),
+  })); },
 
-  updateObject: (id, updates) => set(state => ({
+  updateObject: (id, updates) => { get()._saveSnapshot(); set(state => ({
     objects: state.objects.map(o => o.id === id ? { ...o, ...updates } : o),
     isDirty: true,
-  })),
+  })); },
 
   duplicateSelected: () => {
+    get()._saveSnapshot();
     const state = get();
     const selected = state.objects.filter(o => state.selectedIds.includes(o.id));
     const dupes = selected.map(o => ({
@@ -136,6 +203,7 @@ export const useDesignStore = create((set, get) => ({
   alignObjects: (axis, edge) => {
     const state = get();
     if (state.selectedIds.length < 2) return;
+    get()._saveSnapshot();
     const selected = state.objects.filter(o => state.selectedIds.includes(o.id));
     const ai = { x: 0, y: 1, z: 2 }[axis];
     let target;
@@ -154,6 +222,7 @@ export const useDesignStore = create((set, get) => ({
   },
 
   mirrorSelected: (axis) => {
+    get()._saveSnapshot();
     const state = get();
     const ai = { x: 0, y: 1, z: 2 }[axis];
     set({
@@ -167,13 +236,14 @@ export const useDesignStore = create((set, get) => ({
     });
   },
 
-  replaceObjects: (oldIds, newObj) => set(state => ({
+  replaceObjects: (oldIds, newObj) => { get()._saveSnapshot(); set(state => ({
     objects: [...state.objects.filter(o => !oldIds.includes(o.id)), newObj],
     selectedIds: [newObj.id],
     isDirty: true,
-  })),
+  })); },
 
   addImportedObject: (bufferGeometry, name = 'Imported') => {
+    get()._saveSnapshot();
     objectCounter++;
     const obj = {
       id: uuidv4(),

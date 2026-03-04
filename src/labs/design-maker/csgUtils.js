@@ -37,22 +37,24 @@ function createBrush(obj) {
   return brush;
 }
 
-export function performCSG(objectsData) {
-  const solids = objectsData.filter(o => !o.isHole);
-  const holes = objectsData.filter(o => o.isHole);
+export function unionCSG(objectsData) {
+  if (objectsData.length < 2) return null;
 
-  if (solids.length === 0) return null;
-
-  let resultBrush = createBrush(solids[0]);
-  for (let i = 1; i < solids.length; i++) {
-    const brush = createBrush(solids[i]);
-    resultBrush = evaluator.evaluate(resultBrush, brush, ADDITION);
+  let result = createBrush(objectsData[0]);
+  for (let i = 1; i < objectsData.length; i++) {
+    const brush = createBrush(objectsData[i]);
+    result = evaluator.evaluate(result, brush, ADDITION);
   }
+  return result;
+}
 
-  for (const hole of holes) {
-    const brush = createBrush(hole);
-    resultBrush = evaluator.evaluate(resultBrush, brush, SUBTRACTION);
+export function subtractCSG(targetData, toolsData) {
+  if (!targetData || toolsData.length === 0) return null;
+
+  let result = createBrush(targetData);
+  for (const tool of toolsData) {
+    const brush = createBrush(tool);
+    result = evaluator.evaluate(result, brush, SUBTRACTION);
   }
-
-  return resultBrush;
+  return result;
 }

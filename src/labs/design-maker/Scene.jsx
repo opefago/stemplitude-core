@@ -1,5 +1,5 @@
 import React, { useRef, useMemo, useCallback, useEffect, Suspense, forwardRef } from 'react';
-import { Canvas, useThree } from '@react-three/fiber';
+import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import {
   OrbitControls, TransformControls, Grid,
   GizmoHelper, GizmoViewcube,
@@ -7,7 +7,7 @@ import {
   Text3D, Center,
 } from '@react-three/drei';
 import * as THREE from 'three';
-import { useDesignStore } from './store';
+import { useDesignStore, SHAPE_DEFAULTS, getHalfHeight, dragCursor } from './store';
 
 const FONT_URL = 'https://cdn.jsdelivr.net/npm/three@0.169.0/examples/fonts/helvetiker_regular.typeface.json';
 
@@ -98,6 +98,8 @@ function ObjectGeometry({ type, params }) {
 const SceneObject = forwardRef(function SceneObject({ obj, isSelected, wireframe, onSelect }, ref) {
   const color = obj.isHole ? '#ff4444' : obj.color;
   const opacity = obj.isHole ? 0.4 : 1;
+  const hasMirror = obj.scale[0] < 0 || obj.scale[1] < 0 || obj.scale[2] < 0;
+  const side = (obj.isHole || hasMirror) ? THREE.DoubleSide : THREE.FrontSide;
 
   if (obj.type === 'text') {
     return (
@@ -131,6 +133,7 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, wireframe
                 wireframe={wireframe}
                 transparent={obj.isHole}
                 opacity={opacity}
+                side={side}
               />
             </Text3D>
           </Center>
@@ -155,7 +158,7 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, wireframe
         wireframe={wireframe}
         transparent={obj.isHole}
         opacity={opacity}
-        side={obj.isHole ? THREE.DoubleSide : THREE.FrontSide}
+        side={side}
       />
     </mesh>
   );
@@ -185,6 +188,10 @@ function CameraSetup() {
 
 function CameraControls({ orbitRef }) {
   const zoomSpeed = useDesignStore(s => s.zoomSpeed);
+  const cameraCmd = useDesignStore(s => s._cameraCmd);
+  const clearCameraCmd = useDesignStore(s => s.clearCameraCmd);
+  const objects = useDesignStore(s => s.objects);
+  const selectedIds = useDesignStore(s => s.selectedIds);
 
   useEffect(() => {
     if (orbitRef.current) {
@@ -195,6 +202,44 @@ function CameraControls({ orbitRef }) {
       };
     }
   }, [orbitRef]);
+
+  useEffect(() => {
+    if (!cameraCmd || !orbitRef.current) return;
+    const controls = orbitRef.current;
+    const camera = controls.object;
+
+    if (cameraCmd === 'in' || cameraCmd === 'out') {
+      const dir = new THREE.Vector3().subVectors(camera.position, controls.target);
+      dir.multiplyScalar(cameraCmd === 'in' ? 0.75 : 1.35);
+      camera.position.copy(controls.target).add(dir);
+    } else if (cameraCmd === 'home') {
+      camera.position.set(60, 60, 60);
+      controls.target.set(0, 0, 0);
+    } else if (cameraCmd === 'fit') {
+      const targets = selectedIds.length > 0
+        ? objects.filter(o => selectedIds.includes(o.id))
+        : objects;
+      if (targets.length > 0) {
+        const box = new THREE.Box3();
+        targets.forEach(o => {
+          const p = new THREE.Vector3(...o.position);
+          box.expandByPoint(p);
+        });
+        const center = new THREE.Vector3();
+        box.getCenter(center);
+        const size = new THREE.Vector3();
+        box.getSize(size);
+        const maxDim = Math.max(size.x, size.y, size.z, 20);
+        const dist = maxDim * 2.5;
+        const offset = new THREE.Vector3(1, 1, 1).normalize().multiplyScalar(dist);
+        camera.position.copy(center).add(offset);
+        controls.target.copy(center);
+      }
+    }
+
+    controls.update();
+    clearCameraCmd();
+  }, [cameraCmd, clearCameraCmd, orbitRef, objects, selectedIds]);
 
   return (
     <OrbitControls
@@ -207,6 +252,107 @@ function CameraControls({ orbitRef }) {
       maxDistance={2000}
     />
   );
+}
+
+function DragPreview() {
+  const groupRef = useRef();
+  const { camera } = useThree();
+  const draggingShape = useDesignStore(s => s.draggingShape);
+  const snapIncrement = useDesignStore(s => s.snapIncrement);
+
+  const raycaster = useMemo(() => new THREE.Raycaster(), []);
+  const plane = useMemo(() => new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), []);
+  const hitPoint = useMemo(() => new THREE.Vector3(), []);
+
+  const defaults = draggingShape ? (SHAPE_DEFAULTS[draggingShape.type] || SHAPE_DEFAULTS.box) : null;
+  const halfH = defaults ? getHalfHeight(draggingShape.type, defaults.geometry) : 10;
+  const color = draggingShape?.isHole ? '#ff4444' : (defaults?.color || '#6366f1');
+
+  useFrame(() => {
+    if (!groupRef.current) return;
+    if (!dragCursor.active || !draggingShape) {
+      groupRef.current.visible = false;
+      return;
+    }
+    groupRef.current.visible = true;
+    raycaster.setFromCamera(dragCursor, camera);
+    if (raycaster.ray.intersectPlane(plane, hitPoint)) {
+      const snap = snapIncrement;
+      groupRef.current.position.set(
+        Math.round(hitPoint.x / snap) * snap,
+        halfH,
+        Math.round(hitPoint.z / snap) * snap
+      );
+    }
+  });
+
+  if (!draggingShape || !defaults) return null;
+
+  const previewType = draggingShape.type === 'text' ? 'box' : draggingShape.type;
+  const previewParams = draggingShape.type === 'text'
+    ? { width: 20, height: 10, depth: 5 }
+    : defaults.geometry;
+
+  return (
+    <group ref={groupRef} visible={false}>
+      <mesh renderOrder={998}>
+        <ObjectGeometry type={previewType} params={previewParams} />
+        <meshStandardMaterial
+          color={color}
+          transparent
+          opacity={0.35}
+          depthWrite={false}
+        />
+      </mesh>
+      <mesh renderOrder={999}>
+        <ObjectGeometry type={previewType} params={previewParams} />
+        <meshBasicMaterial
+          color="#ffffff"
+          wireframe
+          transparent
+          opacity={0.4}
+          depthWrite={false}
+        />
+      </mesh>
+    </group>
+  );
+}
+
+function DropHandler() {
+  const { camera } = useThree();
+  const pendingDrop = useDesignStore(s => s.pendingDrop);
+  const clearPendingDrop = useDesignStore(s => s.clearPendingDrop);
+  const addObject = useDesignStore(s => s.addObject);
+  const snapIncrement = useDesignStore(s => s.snapIncrement);
+
+  useEffect(() => {
+    if (!pendingDrop) return;
+
+    const { ndc, type, isHole, text } = pendingDrop;
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(new THREE.Vector2(ndc.x, ndc.y), camera);
+
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const hit = new THREE.Vector3();
+    const intersected = raycaster.ray.intersectPlane(plane, hit);
+
+    if (intersected) {
+      const snap = snapIncrement;
+      const x = Math.round(hit.x / snap) * snap;
+      const z = Math.round(hit.z / snap) * snap;
+
+      const overrides = { position: [x, 0, z] };
+      if (isHole) overrides.isHole = true;
+      if (type === 'text' && text) {
+        overrides.geometry = { text, size: 10, height: 5 };
+      }
+      addObject(type, overrides);
+    }
+
+    clearPendingDrop();
+  }, [pendingDrop, camera, addObject, clearPendingDrop, snapIncrement]);
+
+  return null;
 }
 
 function SceneContent() {
@@ -327,6 +473,9 @@ function SceneContent() {
           }}
         />
       )}
+
+      <DragPreview />
+      <DropHandler />
 
       <CameraControls orbitRef={orbitRef} />
 
