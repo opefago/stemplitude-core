@@ -2,48 +2,6 @@ export const toolbox = {
   kind: 'categoryToolbox',
   contents: [
     {
-      kind: 'category', name: 'Stage', colour: '215',
-      contents: [
-        { kind: 'block', type: 'game_title' },
-        { kind: 'block', type: 'game_background' },
-        { kind: 'block', type: 'game_set_bg_image' },
-        { kind: 'block', type: 'game_clear_bg_image' },
-        { kind: 'block', type: 'game_width' },
-        { kind: 'block', type: 'game_height' },
-        { kind: 'sep', gap: '16' },
-        { kind: 'block', type: 'game_shake', inputs: {
-          INTENSITY: { shadow: { type: 'math_number', fields: { NUM: 5 } } },
-          DUR: { shadow: { type: 'math_number', fields: { NUM: 300 } } },
-        }},
-        { kind: 'block', type: 'game_flash', inputs: {
-          DUR: { shadow: { type: 'math_number', fields: { NUM: 200 } } },
-        }},
-        { kind: 'block', type: 'game_transition', inputs: {
-          DUR: { shadow: { type: 'math_number', fields: { NUM: 500 } } },
-        }},
-        { kind: 'sep', gap: '16' },
-        { kind: 'block', type: 'game_define_scene', inputs: {
-          NAME: { shadow: { type: 'text', fields: { TEXT: 'menu' } } },
-        }},
-        { kind: 'block', type: 'game_switch_scene', inputs: {
-          NAME: { shadow: { type: 'text', fields: { TEXT: 'menu' } } },
-        }},
-        { kind: 'block', type: 'game_switch_scene_transition', inputs: {
-          NAME: { shadow: { type: 'text', fields: { TEXT: 'level1' } } },
-          DUR: { shadow: { type: 'math_number', fields: { NUM: 500 } } },
-        }},
-        { kind: 'block', type: 'game_get_scene' },
-        { kind: 'sep', gap: '16' },
-        { kind: 'block', type: 'game_camera_follow', inputs: {
-          SMOOTH: { shadow: { type: 'math_number', fields: { NUM: 0.1 } } },
-        }},
-        { kind: 'block', type: 'game_camera_set', inputs: {
-          VAL: { shadow: { type: 'math_number', fields: { NUM: 0 } } },
-        }},
-        { kind: 'block', type: 'game_camera_get' },
-      ],
-    },
-    {
       kind: 'category', name: 'Objects', colour: '160',
       contents: [
         { kind: 'block', type: 'game_create_rect', inputs: {
@@ -123,6 +81,48 @@ export const toolbox = {
           X: { shadow: { type: 'math_number', fields: { NUM: 300 } } },
           Y: { shadow: { type: 'math_number', fields: { NUM: 300 } } },
         }},
+      ],
+    },
+    {
+      kind: 'category', name: 'Stage', colour: '215',
+      contents: [
+        { kind: 'block', type: 'game_title' },
+        { kind: 'block', type: 'game_background' },
+        { kind: 'block', type: 'game_set_bg_image' },
+        { kind: 'block', type: 'game_clear_bg_image' },
+        { kind: 'block', type: 'game_width' },
+        { kind: 'block', type: 'game_height' },
+        { kind: 'sep', gap: '16' },
+        { kind: 'block', type: 'game_shake', inputs: {
+          INTENSITY: { shadow: { type: 'math_number', fields: { NUM: 5 } } },
+          DUR: { shadow: { type: 'math_number', fields: { NUM: 300 } } },
+        }},
+        { kind: 'block', type: 'game_flash', inputs: {
+          DUR: { shadow: { type: 'math_number', fields: { NUM: 200 } } },
+        }},
+        { kind: 'block', type: 'game_transition', inputs: {
+          DUR: { shadow: { type: 'math_number', fields: { NUM: 500 } } },
+        }},
+        { kind: 'sep', gap: '16' },
+        { kind: 'block', type: 'game_define_scene', inputs: {
+          NAME: { shadow: { type: 'text', fields: { TEXT: 'menu' } } },
+        }},
+        { kind: 'block', type: 'game_switch_scene', inputs: {
+          NAME: { shadow: { type: 'text', fields: { TEXT: 'menu' } } },
+        }},
+        { kind: 'block', type: 'game_switch_scene_transition', inputs: {
+          NAME: { shadow: { type: 'text', fields: { TEXT: 'level1' } } },
+          DUR: { shadow: { type: 'math_number', fields: { NUM: 500 } } },
+        }},
+        { kind: 'block', type: 'game_get_scene' },
+        { kind: 'sep', gap: '16' },
+        { kind: 'block', type: 'game_camera_follow', inputs: {
+          SMOOTH: { shadow: { type: 'math_number', fields: { NUM: 0.1 } } },
+        }},
+        { kind: 'block', type: 'game_camera_set', inputs: {
+          VAL: { shadow: { type: 'math_number', fields: { NUM: 0 } } },
+        }},
+        { kind: 'block', type: 'game_camera_get' },
       ],
     },
     {
@@ -385,6 +385,8 @@ export const toolbox = {
         }},
         { kind: 'block', type: 'mp_array_first' },
         { kind: 'block', type: 'mp_array_last' },
+        { kind: 'block', type: 'mp_array_pop_last' },
+        { kind: 'block', type: 'mp_array_pop_first' },
         { kind: 'block', type: 'mp_array_pop_at', inputs: {
           INDEX: { shadow: { type: 'math_number', fields: { NUM: 0 } } },
         }},

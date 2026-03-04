@@ -115,6 +115,28 @@ export function registerBlocks() {
     return v + '.insert(int(' + idx + '), ' + val + ')\n';
   };
 
+
+  Blockly.Blocks['mp_array_pop_last'] = {
+    init() {
+      this.appendDummyInput()
+        .appendField('get and remove last value from')
+        .appendField(new Blockly.FieldVariable('list'), 'VAR');
+      this.setOutput(true, null);
+      this.setColour(200);
+      this.setTooltip('Remove the last item and return it');
+    },
+  };
+  Blockly.Blocks['mp_array_pop_first'] = {
+    init() {
+      this.appendDummyInput()
+        .appendField('get and remove first value from')
+        .appendField(new Blockly.FieldVariable('list'), 'VAR');
+      this.setOutput(true, null);
+      this.setColour(200);
+      this.setTooltip('Remove the first item and return it');
+    },
+  };
+
   Blockly.Blocks['mp_array_pop_at'] = {
     init() {
       this.appendDummyInput().appendField('get and remove from')
@@ -127,12 +149,21 @@ export function registerBlocks() {
       this.setTooltip('Remove the item at a position and return it');
     },
   };
-  pythonGenerator.forBlock['mp_array_pop_at'] = function(block, gen) {
+  function getArrayVarName(block, gen) {
     const fld = block.getField('VAR');
     const variable = fld && fld.getVariable ? fld.getVariable() : null;
     const id = variable ? variable.getId() : block.getFieldValue('VAR');
     const nameDB = gen.nameDB_;
-    const v = nameDB && id ? nameDB.getName(id, Blockly.VARIABLE_CATEGORY_NAME) : (variable && variable.name) || 'list';
+    return nameDB && id ? nameDB.getName(id, Blockly.VARIABLE_CATEGORY_NAME) : (variable && variable.name) || 'list';
+  }
+  pythonGenerator.forBlock['mp_array_pop_last'] = function(block, gen) {
+    return [getArrayVarName(block, gen) + '.pop()', Order.FUNCTION_CALL];
+  };
+  pythonGenerator.forBlock['mp_array_pop_first'] = function(block, gen) {
+    return [getArrayVarName(block, gen) + '.pop(0)', Order.FUNCTION_CALL];
+  };
+  pythonGenerator.forBlock['mp_array_pop_at'] = function(block, gen) {
+    const v = getArrayVarName(block, gen);
     const idx = gen.valueToCode(block, 'INDEX', Order.NONE) || '0';
     return [v + '.pop(int(' + idx + '))', Order.FUNCTION_CALL];
   };
