@@ -882,6 +882,12 @@ export function getGameModuleSource() {
   mod.get_scene = new Sk.builtin.func(function() {
     return pyStr(engine.getScene());
   });
+  mod.scene_transition = new Sk.builtin.func(function(name, type, duration, color) {
+    engine.setSceneWithTransition(
+      gn(name), optJs(type, 'fade'), optJs(duration, 500), optJs(color, 'black')
+    );
+    return NONE;
+  });
 
   // ========== Collision Helpers ==========
   mod.keep_inside = new Sk.builtin.func(function(obj, bx, by, bw, bh) {
@@ -893,6 +899,10 @@ export function getGameModuleSource() {
   });
   mod.bounce_off = new Sk.builtin.func(function(obj, other) {
     return pyBool(engine.bounceOff(eid(obj), eid(other)));
+  });
+  mod.follow = new Sk.builtin.func(function(obj, target, speed) {
+    engine.follow(eid(obj), eid(target), jsv(speed));
+    return NONE;
   });
 
   // ========== Groups ==========
@@ -1293,6 +1303,26 @@ export function getGameModuleSource() {
       if (n === "text") { var o = engine.getObject(this._eid); if (o) o.text = jsv(value); }
     };
   }, "Message", []);
+
+  // ========== Mobile / Touch / Tilt ==========
+  mod.tilt_x = new Sk.builtin.func(function() { return pyFloat(engine.tiltX); });
+  mod.tilt_y = new Sk.builtin.func(function() { return pyFloat(engine.tiltY); });
+  mod.tilt_z = new Sk.builtin.func(function() { return pyFloat(engine.tiltZ); });
+
+  mod.request_tilt = new Sk.builtin.func(function() {
+    engine.requestTiltPermission();
+    return NONE;
+  });
+
+  mod.show_controls = new Sk.builtin.func(function(layout) {
+    engine.showMobileControls(optJs(layout, 'dpad_ab'));
+    return NONE;
+  });
+
+  mod.hide_controls = new Sk.builtin.func(function() {
+    engine.hideMobileControls();
+    return NONE;
+  });
 
   // ========== Game loop ==========
   mod.on_update = new Sk.builtin.func(function(callback) {

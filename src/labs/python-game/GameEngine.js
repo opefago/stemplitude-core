@@ -74,11 +74,24 @@ export class GameEngine {
     this._flashElapsed = 0;
     this._transition = null;
 
+    // Mobile / touch / accelerometer
+    this.tiltX = 0;
+    this.tiltY = 0;
+    this.tiltZ = 0;
+    this._tiltPermission = false;
+    this._mobileControlsVisible = false;
+    this._mobileButtons = {};
+    this._mobileControlsEl = null;
+
     this._boundKeyDown = this._onKeyDown.bind(this);
     this._boundKeyUp = this._onKeyUp.bind(this);
     this._boundMouseMove = this._onMouseMove.bind(this);
     this._boundMouseDown = this._onMouseDown.bind(this);
     this._boundMouseUp = this._onMouseUp.bind(this);
+    this._boundTouchStart = this._onTouchStart.bind(this);
+    this._boundTouchMove = this._onTouchMove.bind(this);
+    this._boundTouchEnd = this._onTouchEnd.bind(this);
+    this._boundDeviceMotion = this._onDeviceMotion.bind(this);
 
     this._setupInput();
     this._render();
@@ -130,6 +143,136 @@ export class GameEngine {
   _onMouseUp() {
     this.mouseDown = false;
     this._mouseJustReleased = true;
+  }
+
+  _getTouchPos(touch) {
+    const rect = this.canvas.getBoundingClientRect();
+    const scaleX = this.width / rect.width;
+    const scaleY = this.height / rect.height;
+    return {
+      x: Math.round((touch.clientX - rect.left) * scaleX),
+      y: Math.round((touch.clientY - rect.top) * scaleY),
+    };
+  }
+
+  _onTouchStart(e) {
+    e.preventDefault();
+    const t = e.changedTouches[0];
+    if (!t) return;
+    const pos = this._getTouchPos(t);
+    this.mouseX = pos.x;
+    this.mouseY = pos.y;
+    this.mouseDown = true;
+    this._mouseJustClicked = true;
+    if (this._onClickCallback) {
+      try { this._onClickCallback(pos.x, pos.y); } catch (_) {}
+    }
+    this._fireObjectClicks(pos.x, pos.y);
+  }
+
+  _onTouchMove(e) {
+    e.preventDefault();
+    const t = e.changedTouches[0];
+    if (!t) return;
+    const pos = this._getTouchPos(t);
+    this.mouseX = pos.x;
+    this.mouseY = pos.y;
+  }
+
+  _onTouchEnd(e) {
+    e.preventDefault();
+    this.mouseDown = false;
+    this._mouseJustReleased = true;
+  }
+
+  _onDeviceMotion(e) {
+    const a = e.accelerationIncludingGravity;
+    if (!a) return;
+    this.tiltX = a.x || 0;
+    this.tiltY = a.y || 0;
+    this.tiltZ = a.z || 0;
+  }
+
+  async requestTiltPermission() {
+    if (this._tiltPermission) return true;
+    if (typeof DeviceMotionEvent !== 'undefined' &&
+        typeof DeviceMotionEvent.requestPermission === 'function') {
+      try {
+        const perm = await DeviceMotionEvent.requestPermission();
+        if (perm !== 'granted') return false;
+      } catch { return false; }
+    }
+    window.addEventListener('devicemotion', this._boundDeviceMotion);
+    this._tiltPermission = true;
+    return true;
+  }
+
+  showMobileControls(layout = 'dpad_ab') {
+    if (this._mobileControlsEl) return;
+    this._mobileControlsVisible = true;
+    const wrapper = this.canvas.parentElement;
+    if (!wrapper) return;
+
+    const el = document.createElement('div');
+    el.className = 'gml-mobile-controls';
+    el.setAttribute('data-layout', layout);
+
+    const buttons = layout === 'dpad_ab'
+      ? [
+          { key: 'up', label: '\u25B2', cls: 'mc-up' },
+          { key: 'down', label: '\u25BC', cls: 'mc-down' },
+          { key: 'left', label: '\u25C0', cls: 'mc-left' },
+          { key: 'right', label: '\u25B6', cls: 'mc-right' },
+          { key: 'a', label: 'A', cls: 'mc-a' },
+          { key: 'b', label: 'B', cls: 'mc-b' },
+        ]
+      : layout === 'dpad'
+      ? [
+          { key: 'up', label: '\u25B2', cls: 'mc-up' },
+          { key: 'down', label: '\u25BC', cls: 'mc-down' },
+          { key: 'left', label: '\u25C0', cls: 'mc-left' },
+          { key: 'right', label: '\u25B6', cls: 'mc-right' },
+        ]
+      : [
+          { key: 'a', label: 'A', cls: 'mc-a' },
+          { key: 'b', label: 'B', cls: 'mc-b' },
+        ];
+
+    buttons.forEach(({ key, label, cls }) => {
+      const btn = document.createElement('button');
+      btn.className = `mc-btn ${cls}`;
+      btn.textContent = label;
+      btn.setAttribute('data-key', key);
+      const press = (e) => {
+        e.preventDefault();
+        if (!this.keys.has(key)) this._justPressed.add(key);
+        this.keys.add(key);
+      };
+      const release = (e) => {
+        e.preventDefault();
+        this.keys.delete(key);
+        this._justReleased.add(key);
+      };
+      btn.addEventListener('touchstart', press, { passive: false });
+      btn.addEventListener('touchend', release, { passive: false });
+      btn.addEventListener('touchcancel', release, { passive: false });
+      btn.addEventListener('mousedown', press);
+      btn.addEventListener('mouseup', release);
+      btn.addEventListener('mouseleave', release);
+      el.appendChild(btn);
+    });
+
+    wrapper.style.position = 'relative';
+    wrapper.appendChild(el);
+    this._mobileControlsEl = el;
+  }
+
+  hideMobileControls() {
+    if (this._mobileControlsEl) {
+      this._mobileControlsEl.remove();
+      this._mobileControlsEl = null;
+    }
+    this._mobileControlsVisible = false;
   }
 
   _clearFrameInput() {
@@ -555,6 +698,10 @@ export class GameEngine {
     this.canvas.addEventListener('mousemove', this._boundMouseMove);
     this.canvas.addEventListener('mousedown', this._boundMouseDown);
     this.canvas.addEventListener('mouseup', this._boundMouseUp);
+    this.canvas.addEventListener('touchstart', this._boundTouchStart, { passive: false });
+    this.canvas.addEventListener('touchmove', this._boundTouchMove, { passive: false });
+    this.canvas.addEventListener('touchend', this._boundTouchEnd, { passive: false });
+    this.canvas.addEventListener('touchcancel', this._boundTouchEnd, { passive: false });
   }
 
   focusCanvas() {
@@ -568,6 +715,14 @@ export class GameEngine {
     this.canvas.removeEventListener('mousemove', this._boundMouseMove);
     this.canvas.removeEventListener('mousedown', this._boundMouseDown);
     this.canvas.removeEventListener('mouseup', this._boundMouseUp);
+    this.canvas.removeEventListener('touchstart', this._boundTouchStart);
+    this.canvas.removeEventListener('touchmove', this._boundTouchMove);
+    this.canvas.removeEventListener('touchend', this._boundTouchEnd);
+    this.canvas.removeEventListener('touchcancel', this._boundTouchEnd);
+    if (this._tiltPermission) {
+      window.removeEventListener('devicemotion', this._boundDeviceMotion);
+    }
+    this.hideMobileControls();
   }
 
   createObject(type, props) {
@@ -679,6 +834,22 @@ export class GameEngine {
     clone._hovered = false;
     this.objects.set(newId, clone);
     return newId;
+  }
+
+  follow(followerId, targetId, speed) {
+    const f = this.objects.get(followerId);
+    const t = this.objects.get(targetId);
+    if (!f || !t) return;
+    const dx = t.x - f.x;
+    const dy = t.y - f.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist > speed) {
+      f.vx = (dx / dist) * speed;
+      f.vy = (dy / dist) * speed;
+    } else {
+      f.vx = 0;
+      f.vy = 0;
+    }
   }
 
   setBackgroundImage(nameOrImage) {
@@ -1137,6 +1308,9 @@ export class GameEngine {
         case 'wipe_down':
           ctx.fillRect(0, 0, w, h * coverAmount);
           break;
+        case 'wipe_up':
+          ctx.fillRect(0, h * (1 - coverAmount), w, h * coverAmount);
+          break;
         case 'circle': {
           const maxR = Math.sqrt(w * w + h * h) / 2;
           const r = maxR * (1 - coverAmount);
@@ -1146,6 +1320,87 @@ export class GameEngine {
           ctx.arc(w / 2, h / 2, r, 0, Math.PI * 2);
           ctx.fill();
           ctx.globalCompositeOperation = 'source-over';
+          break;
+        }
+        case 'curtain': {
+          const half_w = w * coverAmount / 2;
+          ctx.fillRect(0, 0, half_w, h);
+          ctx.fillRect(w - half_w, 0, half_w, h);
+          break;
+        }
+        case 'diagonal': {
+          ctx.save();
+          ctx.beginPath();
+          const extend = w + h;
+          const offset = extend * coverAmount;
+          ctx.moveTo(-h, 0);
+          ctx.lineTo(-h + offset, 0);
+          ctx.lineTo(offset, h);
+          ctx.lineTo(0, h);
+          ctx.closePath();
+          ctx.clip();
+          ctx.fillRect(0, 0, w, h);
+          ctx.restore();
+          break;
+        }
+        case 'blinds': {
+          const slats = 8;
+          const slH = h / slats;
+          for (let i = 0; i < slats; i++) {
+            ctx.fillRect(0, i * slH, w, slH * coverAmount);
+          }
+          break;
+        }
+        case 'pixelate': {
+          const minBlock = 2;
+          const maxBlock = 40;
+          const blockSize = Math.max(minBlock, Math.round(maxBlock * coverAmount));
+          for (let bx = 0; bx < w; bx += blockSize) {
+            for (let by = 0; by < h; by += blockSize) {
+              ctx.globalAlpha = coverAmount;
+              ctx.fillRect(bx, by, blockSize, blockSize);
+            }
+          }
+          ctx.globalAlpha = 1;
+          break;
+        }
+        case 'diamonds': {
+          const cols = 8;
+          const rows = 8;
+          const cw = w / cols;
+          const ch = h / rows;
+          for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+              const cx = c * cw + cw / 2;
+              const cy = r * ch + ch / 2;
+              const s = coverAmount * Math.max(cw, ch) * 0.75;
+              ctx.save();
+              ctx.translate(cx, cy);
+              ctx.rotate(Math.PI / 4);
+              ctx.fillRect(-s, -s, s * 2, s * 2);
+              ctx.restore();
+            }
+          }
+          break;
+        }
+        case 'squares': {
+          const sq = 10;
+          const sw = w / sq;
+          const sh = h / sq;
+          if (!tr._order) {
+            tr._order = [];
+            for (let r = 0; r < sq; r++)
+              for (let c = 0; c < sq; c++) tr._order.push([c, r]);
+            for (let i = tr._order.length - 1; i > 0; i--) {
+              const j = Math.floor(Math.random() * (i + 1));
+              [tr._order[i], tr._order[j]] = [tr._order[j], tr._order[i]];
+            }
+          }
+          const count = Math.floor(coverAmount * tr._order.length);
+          for (let i = 0; i < count; i++) {
+            const [c, r] = tr._order[i];
+            ctx.fillRect(c * sw, r * sh, sw + 1, sh + 1);
+          }
           break;
         }
       }
@@ -1488,6 +1743,13 @@ export class GameEngine {
       this.cameraY = 0;
       try { setup(); } catch (e) { this.onError(e.toString()); }
     }
+  }
+
+  setSceneWithTransition(name, type = 'fade', durationMs = 500, color = 'black') {
+    this.startTransition(type, durationMs, color,
+      () => { this.setScene(name); },
+      null
+    );
   }
 
   registerScene(name, setupFn) {

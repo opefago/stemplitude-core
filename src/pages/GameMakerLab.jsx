@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { Play, Square, RotateCcw, X, Puzzle, Code, Fullscreen, Shrink, HelpCircle, Save, FolderOpen, Trash2, ArrowLeft, Plus } from 'lucide-react';
+import { Play, Square, RotateCcw, X, Puzzle, Code, Fullscreen, Shrink, HelpCircle, Save, FolderOpen, Trash2, ArrowLeft, Plus, Upload, Mic, AudioLines } from 'lucide-react';
 import * as Blockly from 'blockly';
-import 'blockly/blocks';
 import { pythonGenerator } from 'blockly/python';
 import { registerBlocks, generateCode } from '../labs/game-maker/blocks';
 import { toolbox } from '../labs/game-maker/toolbox';
@@ -10,6 +9,8 @@ import { GameEngine } from '../labs/python-game/GameEngine';
 import { AssetManager } from '../labs/python-game/AssetManager';
 import { loadSkulpt, runPythonCode } from '../labs/python-game/skulptRunner';
 import SpritePanel from '../labs/python-game/SpritePanel';
+import SoundMixer from '../labs/python-game/SoundMixer';
+import { getSpriteNames } from '../labs/python-game/sprites';
 import './GameMakerLab.css';
 
 const darkTheme = Blockly.Theme.defineTheme('gameMakerDark', {
@@ -63,6 +64,20 @@ const GameMakerLab = () => {
   const [savedProjects, setSavedProjects] = useState(loadProjectsFromStorage);
   const [saveStatus, setSaveStatus] = useState(null);
 
+  const [promptDialog, setPromptDialog] = useState(null);
+  const promptInputRef = useRef(null);
+
+  const [soundAddDialog, setSoundAddDialog] = useState(null);
+  const soundFileRef = useRef(null);
+  const soundAddCallbackRef = useRef(null);
+  const [spriteAddDialog, setSpriteAddDialog] = useState(null);
+  const spriteAddCallbackRef = useRef(null);
+  const bgAddCallbackRef = useRef(null);
+  const recorderRef = useRef(null);
+  const recordChunksRef = useRef([]);
+  const [isRecording, setIsRecording] = useState(false);
+  const [showMixerOverlay, setShowMixerOverlay] = useState(false);
+
   const assetManagerRef = useRef(new AssetManager());
   const [assetVersion, setAssetVersion] = useState(0);
 
@@ -91,6 +106,32 @@ const GameMakerLab = () => {
   }, []);
 
   useEffect(() => {
+    Blockly.dialog.setPrompt((message, defaultValue, callback) => {
+      setPromptDialog({ message, defaultValue, callback });
+    });
+  }, []);
+
+  useEffect(() => {
+    if (promptDialog && promptInputRef.current) {
+      promptInputRef.current.focus();
+      promptInputRef.current.select();
+    }
+  }, [promptDialog]);
+
+  const handlePromptOk = useCallback(() => {
+    if (!promptDialog) return;
+    const value = promptInputRef.current?.value ?? '';
+    promptDialog.callback(value);
+    setPromptDialog(null);
+  }, [promptDialog]);
+
+  const handlePromptCancel = useCallback(() => {
+    if (!promptDialog) return;
+    promptDialog.callback(null);
+    setPromptDialog(null);
+  }, [promptDialog]);
+
+  useEffect(() => {
     if (!blocklyDiv.current || workspaceRef.current) return;
 
     if (!blocksRegistered) {
@@ -108,6 +149,56 @@ const GameMakerLab = () => {
       move: { scrollbars: true, drag: true, wheel: true },
     });
     workspaceRef.current = workspace;
+
+    workspace.createVariable('player');
+
+    workspace._getSoundNames = () =>
+      assetManagerRef.current.list('sound').map(s => s.name);
+
+    workspace._onAddSound = (callback) => {
+      soundAddCallbackRef.current = callback;
+      setSoundAddDialog(true);
+    };
+
+    workspace._getSpriteNames = () =>
+      assetManagerRef.current.list('sprite').map(s => s.name);
+
+    workspace._onAddSprite = (callback) => {
+      spriteAddCallbackRef.current = callback;
+      setSpriteAddDialog(true);
+    };
+
+    workspace._getBackgroundNames = () =>
+      assetManagerRef.current.list('background').map(b => b.name);
+
+    workspace._onAddBackground = (callback) => {
+      bgAddCallbackRef.current = callback;
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/*';
+      input.onchange = (e) => {
+        const file = e.target.files?.[0];
+        if (!file) { bgAddCallbackRef.current?.(null); bgAddCallbackRef.current = null; return; }
+        const img = new Image();
+        img.onload = () => {
+          const mgr = assetManagerRef.current;
+          const existing = new Set(mgr.list('background').map(b => b.name));
+          let n = 1; while (existing.has(`bg${n}`)) n++;
+          const autoName = `bg${n}`;
+          const canvas = document.createElement('canvas');
+          canvas.width = img.width; canvas.height = img.height;
+          canvas.getContext('2d').drawImage(img, 0, 0);
+          mgr.register(autoName, 'background', 'upload', {
+            id: `bg_${Date.now()}`, image: img, thumbnail: canvas.toDataURL(),
+            width: img.width, height: img.height,
+          });
+          bgAddCallbackRef.current?.(autoName);
+          bgAddCallbackRef.current = null;
+        };
+        img.src = URL.createObjectURL(file);
+      };
+      input.click();
+    };
 
     const updateCode = () => {
       try {
@@ -256,6 +347,131 @@ const GameMakerLab = () => {
     engineRef.current._render();
   }, []);
 
+  const nextSoundName = useCallback(() => {
+    const existing = new Set(am.list('sound').map(s => s.name));
+    let n = 1;
+    while (existing.has(`sound${n}`)) n++;
+    return `sound${n}`;
+  }, [am]);
+
+  const finishSoundAdd = useCallback((name) => {
+    setSoundAddDialog(null);
+    soundAddCallbackRef.current?.(name);
+    soundAddCallbackRef.current = null;
+  }, []);
+
+  const cancelSoundAdd = useCallback(() => {
+    setSoundAddDialog(null);
+    soundAddCallbackRef.current?.(null);
+    soundAddCallbackRef.current = null;
+  }, []);
+
+  const handleSoundUploadFromBlock = useCallback(() => {
+    setSoundAddDialog(null);
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'audio/*';
+    input.onchange = (e) => {
+      const file = e.target.files?.[0];
+      if (!file) { soundAddCallbackRef.current?.(null); soundAddCallbackRef.current = null; return; }
+      const autoName = nextSoundName();
+      const url = URL.createObjectURL(file);
+      handleAddSound({ id: `sound_${Date.now()}`, name: autoName, source: 'uploaded', audioUrl: url });
+      finishSoundAdd(autoName);
+    };
+    input.click();
+  }, [nextSoundName, handleAddSound, finishSoundAdd]);
+
+  const handleSoundRecordFromBlock = useCallback(async () => {
+    if (isRecording) {
+      recorderRef.current?.stop();
+      recorderRef.current = null;
+      setIsRecording(false);
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      recordChunksRef.current = [];
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) recordChunksRef.current.push(e.data); };
+      recorder.onstop = () => {
+        const blob = new Blob(recordChunksRef.current, { type: 'audio/webm' });
+        const url = URL.createObjectURL(blob);
+        const autoName = nextSoundName();
+        handleAddSound({ id: `sound_${Date.now()}`, name: autoName, source: 'recorded', audioUrl: url });
+        stream.getTracks().forEach(t => t.stop());
+        setIsRecording(false);
+        finishSoundAdd(autoName);
+      };
+      recorder.start();
+      recorderRef.current = recorder;
+      setIsRecording(true);
+    } catch {
+      alert('Microphone access denied or not available.');
+    }
+  }, [isRecording, nextSoundName, handleAddSound, finishSoundAdd]);
+
+  const handleSoundMixFromBlock = useCallback(() => {
+    setSoundAddDialog(null);
+    setShowMixerOverlay(true);
+  }, []);
+
+  const handleMixerSaveFromBlock = useCallback((mixName, audioUrl) => {
+    const existing = new Set(am.list('sound').map(s => s.name));
+    if (existing.has(mixName)) {
+      alert(`Sound "${mixName}" already exists. Choose a different name.`);
+      return;
+    }
+    handleAddSound({ id: `sound_${Date.now()}`, name: mixName, source: 'created', audioUrl });
+    setShowMixerOverlay(false);
+    finishSoundAdd(mixName);
+  }, [am, handleAddSound, finishSoundAdd]);
+
+  const cancelSpriteAdd = useCallback(() => {
+    setSpriteAddDialog(null);
+    spriteAddCallbackRef.current?.(null);
+    spriteAddCallbackRef.current = null;
+  }, []);
+
+  const handleSpriteUploadFromBlock = useCallback(() => {
+    setSpriteAddDialog(null);
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = (e) => {
+      const file = e.target.files?.[0];
+      if (!file) { spriteAddCallbackRef.current?.(null); spriteAddCallbackRef.current = null; return; }
+      const img = new Image();
+      img.onload = () => {
+        const existing = new Set(am.list('sprite').map(s => s.name));
+        let n = 1; while (existing.has(`sprite${n}`)) n++;
+        const autoName = `sprite${n}`;
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width; canvas.height = img.height;
+        canvas.getContext('2d').drawImage(img, 0, 0);
+        handleAddSprite({
+          id: `sprite_${Date.now()}`, name: autoName, source: 'uploaded',
+          image: img, thumbnail: canvas.toDataURL(),
+        });
+        setSpriteAddDialog(null);
+        spriteAddCallbackRef.current?.(autoName);
+        spriteAddCallbackRef.current = null;
+      };
+      img.src = URL.createObjectURL(file);
+    };
+    input.click();
+  }, [am, handleAddSprite]);
+
+  const handleSpriteGalleryFromBlock = useCallback(() => {
+    setSpriteAddDialog('gallery');
+  }, []);
+
+  const handleGalleryPick = useCallback((name) => {
+    setSpriteAddDialog(null);
+    spriteAddCallbackRef.current?.(name);
+    spriteAddCallbackRef.current = null;
+  }, []);
+
   useEffect(() => {
     const handler = (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 's') {
@@ -265,11 +481,13 @@ const GameMakerLab = () => {
       if (e.key === 'Escape') {
         if (showProjects) setShowProjects(false);
         if (showHelp) setShowHelp(false);
+        if (soundAddDialog) cancelSoundAdd();
+        if (spriteAddDialog) cancelSpriteAdd();
       }
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [handleSaveProject, showProjects, showHelp]);
+  }, [handleSaveProject, showProjects, showHelp, soundAddDialog, cancelSoundAdd, spriteAddDialog, cancelSpriteAdd]);
 
   return (
     <div className="game-maker-lab">
@@ -486,6 +704,156 @@ const GameMakerLab = () => {
                 <li><strong>Sound</strong> — Play tones and notes</li>
                 <li><strong>Logic / Loops / Math / Variables</strong> — Standard programming blocks</li>
               </ul>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Custom Blockly Prompt Dialog */}
+      {promptDialog && (
+        <div className="gml-prompt-overlay" onClick={handlePromptCancel}>
+          <div className="gml-prompt-dialog" onClick={e => e.stopPropagation()}>
+            <div className="gml-prompt-header">
+              <span>New Variable</span>
+              <button className="gml-prompt-close" onClick={handlePromptCancel}>
+                <X size={18} />
+              </button>
+            </div>
+            <div className="gml-prompt-body">
+              <label className="gml-prompt-label">{promptDialog.message}</label>
+              <input
+                ref={promptInputRef}
+                className="gml-prompt-input"
+                type="text"
+                defaultValue={promptDialog.defaultValue || ''}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handlePromptOk();
+                  if (e.key === 'Escape') handlePromptCancel();
+                }}
+              />
+            </div>
+            <div className="gml-prompt-actions">
+              <button className="gml-prompt-btn gml-prompt-btn-cancel" onClick={handlePromptCancel}>
+                Cancel
+              </button>
+              <button className="gml-prompt-btn gml-prompt-btn-ok" onClick={handlePromptOk}>
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sound Add Dialog */}
+      {soundAddDialog && !isRecording && (
+        <div className="gml-prompt-overlay" onClick={cancelSoundAdd}>
+          <div className="gml-sound-add-dialog" onClick={e => e.stopPropagation()}>
+            <div className="gml-prompt-header">
+              <span>Add Sound</span>
+              <button className="gml-prompt-close" onClick={cancelSoundAdd}>
+                <X size={18} />
+              </button>
+            </div>
+            <div className="gml-sound-add-options">
+              <button className="gml-sound-add-option" onClick={handleSoundUploadFromBlock}>
+                <Upload size={24} />
+                <span>Upload</span>
+                <small>From a file</small>
+              </button>
+              <button className="gml-sound-add-option" onClick={handleSoundRecordFromBlock}>
+                <Mic size={24} />
+                <span>Record</span>
+                <small>Use microphone</small>
+              </button>
+              <button className="gml-sound-add-option" onClick={handleSoundMixFromBlock}>
+                <AudioLines size={24} />
+                <span>Mix</span>
+                <small>Sound mixer</small>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Recording Overlay */}
+      {isRecording && (
+        <div className="gml-prompt-overlay">
+          <div className="gml-sound-add-dialog" onClick={e => e.stopPropagation()}>
+            <div className="gml-prompt-header" style={{ background: 'linear-gradient(135deg, #da3633, #f85149)' }}>
+              <span>Recording...</span>
+            </div>
+            <div className="gml-sound-record-body">
+              <div className="gml-sound-record-indicator" />
+              <p>Recording from microphone</p>
+              <button className="gml-prompt-btn gml-prompt-btn-ok" onClick={handleSoundRecordFromBlock}>
+                Stop Recording
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sound Mixer Overlay */}
+      {showMixerOverlay && (
+        <div className="gml-prompt-overlay">
+          <div className="gml-mixer-wrapper" onClick={e => e.stopPropagation()}>
+            <SoundMixer
+              defaultName={nextSoundName()}
+              existingSounds={customSounds}
+              onSave={handleMixerSaveFromBlock}
+              onClose={() => { setShowMixerOverlay(false); cancelSoundAdd(); }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Sprite Add Dialog */}
+      {spriteAddDialog && spriteAddDialog !== 'gallery' && (
+        <div className="gml-prompt-overlay" onClick={cancelSpriteAdd}>
+          <div className="gml-sound-add-dialog" onClick={e => e.stopPropagation()}>
+            <div className="gml-prompt-header">
+              <span>Add Sprite</span>
+              <button className="gml-prompt-close" onClick={cancelSpriteAdd}>
+                <X size={18} />
+              </button>
+            </div>
+            <div className="gml-sound-add-options">
+              <button className="gml-sound-add-option" onClick={handleSpriteGalleryFromBlock}>
+                <Puzzle size={24} />
+                <span>Gallery</span>
+                <small>Built-in sprites</small>
+              </button>
+              <button className="gml-sound-add-option" onClick={handleSpriteUploadFromBlock}>
+                <Upload size={24} />
+                <span>Upload</span>
+                <small>From a file</small>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sprite Gallery Picker */}
+      {spriteAddDialog === 'gallery' && (
+        <div className="gml-prompt-overlay" onClick={cancelSpriteAdd}>
+          <div className="gml-gallery-dialog" onClick={e => e.stopPropagation()}>
+            <div className="gml-prompt-header">
+              <span>Choose a Sprite</span>
+              <button className="gml-prompt-close" onClick={cancelSpriteAdd}>
+                <X size={18} />
+              </button>
+            </div>
+            <div className="gml-gallery-grid">
+              {getSpriteNames().map(name => (
+                <button
+                  key={name}
+                  className="gml-gallery-item"
+                  onClick={() => handleGalleryPick(name)}
+                  title={name}
+                >
+                  <span className="gml-gallery-name">{name}</span>
+                </button>
+              ))}
             </div>
           </div>
         </div>

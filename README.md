@@ -2,7 +2,7 @@
 
 A modern, beautiful, and animated React website for a kids STEAM center focusing on coding, robotics, electronics, 3D printing, 3D modelling, and AI education.
 
-## 🌟 Features
+## Features
 
 ### Pages
 - **Home** - Hero section with animations, programs snapshot, testimonials, and newsletter signup
@@ -22,14 +22,14 @@ A modern, beautiful, and animated React website for a kids STEAM center focusing
 - **Vite** - Fast build tool and dev server
 
 ### Design Features
-- 🎨 Modern gradient-based color scheme
-- ✨ Smooth animations and transitions
-- 📱 Fully responsive design
-- 🎯 Kid-friendly and eye-catching visuals
-- 🚀 Fast performance with optimized assets
-- ♿ Accessible components
+- Modern gradient-based color scheme
+- Smooth animations and transitions
+- Fully responsive design
+- Kid-friendly and eye-catching visuals
+- Fast performance with optimized assets
+- Accessible components
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 - Node.js 22.x or higher
@@ -66,7 +66,7 @@ The optimized production build will be in the `dist` folder.
 npm run preview
 ```
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 steamplitude/
@@ -104,7 +104,7 @@ steamplitude/
 └── README.md
 ```
 
-## 🎨 Color Palette
+## Color Palette
 
 - **Primary**: #6366f1 (Indigo)
 - **Secondary**: #ec4899 (Pink)
@@ -112,7 +112,7 @@ steamplitude/
 - **Success**: #10b981 (Green)
 - **Gradient STEAM**: Linear gradient from Indigo → Pink → Amber
 
-## 📋 Integration Points
+## Integration Points
 
 ### Airtable Integration (Contact & Enrollment Forms)
 The Contact and Enrollment forms are ready for Airtable integration. You'll need to:
@@ -136,7 +136,7 @@ Newsletter form on homepage can be integrated with:
 - ConvertKit
 - Any email marketing platform
 
-## 🎯 Programs Offered
+## Programs Offered
 
 1. **Coding** - Python, JavaScript, Web Development, Game Development
 2. **Robotics** - VEX, FIRST, Arduino, Raspberry Pi
@@ -145,13 +145,13 @@ Newsletter form on homepage can be integrated with:
 5. **3D Modelling** - Blender, Tinkercad, Animation
 6. **Artificial Intelligence** - Machine Learning, Neural Networks, Computer Vision
 
-## 📱 Responsive Breakpoints
+## Responsive Breakpoints
 
 - Mobile: < 768px
 - Tablet: 768px - 1024px
 - Desktop: > 1024px
 
-## 🔧 Customization
+## Customization
 
 ### Colors
 Edit colors in `src/App.css` under the `:root` selector:
@@ -179,7 +179,7 @@ Animations use Framer Motion. Adjust animation settings in the `motion` componen
 >
 ```
 
-## 🚀 Deployment
+## Deployment
 
 ### Vercel (Recommended)
 1. Push your code to GitHub
@@ -195,14 +195,14 @@ Animations use Framer Motion. Adjust animation settings in the `motion` componen
 ### Other Platforms
 Build the project and serve the `dist` folder as a static site.
 
-## 📄 License
+## License
 
 This project is proprietary software for STEAMplitude.
 
-## 🤝 Support
+## Support
 
 For questions or support, contact: info@steamplitude.com
 
 ---
 
-Built with ❤️ for inspiring the next generation of innovators
+Built for inspiring the next generation of innovators
