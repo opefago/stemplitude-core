@@ -1110,6 +1110,466 @@ export function registerBlocks() {
       output: 'Boolean', colour: 160, inputsInline: true,
       tooltip: 'True if the text is empty (length 0)',
     },
+
+    // ════════ Events (collision / click / timer) ════════
+    {
+      type: 'game_on_overlap',
+      message0: 'when %1 overlaps %2 %3 %4',
+      args0: [
+        { type: 'field_variable_creator', name: 'A', variable: 'player', variableTypes: [''] },
+        { type: 'field_variable_creator', name: 'B', variable: 'enemy', variableTypes: [''] },
+        { type: 'input_dummy' },
+        { type: 'input_statement', name: 'DO' },
+      ],
+      colour: EVENTS_HUE,
+      tooltip: 'Run code once when two objects start overlapping (event)',
+    },
+    {
+      type: 'game_on_click_obj',
+      message0: 'when %1 clicked %2 %3',
+      args0: [
+        { type: 'field_variable_creator', name: 'OBJ', variable: 'player', variableTypes: [''] },
+        { type: 'input_dummy' },
+        { type: 'input_statement', name: 'DO' },
+      ],
+      colour: EVENTS_HUE,
+      tooltip: 'Run code when an object is clicked or tapped (event)',
+    },
+    {
+      type: 'game_on_hover_obj',
+      message0: 'when %1 hovered %2 %3',
+      args0: [
+        { type: 'field_variable_creator', name: 'OBJ', variable: 'player', variableTypes: [''] },
+        { type: 'input_dummy' },
+        { type: 'input_statement', name: 'DO' },
+      ],
+      colour: EVENTS_HUE,
+      tooltip: 'Run code when the mouse hovers over an object (event)',
+    },
+    {
+      type: 'game_after',
+      message0: 'after %1 ms as %2 %3 %4',
+      args0: [
+        { type: 'input_value', name: 'MS', check: 'Number' },
+        { type: 'field_variable_creator', name: 'TIMER', variable: 'timer1', variableTypes: [''] },
+        { type: 'input_dummy' },
+        { type: 'input_statement', name: 'DO' },
+      ],
+      colour: EVENTS_HUE, inputsInline: true,
+      tooltip: 'Run code once after a delay – use the timer name with "cancel timer"',
+    },
+    {
+      type: 'game_every',
+      message0: 'every %1 ms as %2 %3 %4',
+      args0: [
+        { type: 'input_value', name: 'MS', check: 'Number' },
+        { type: 'field_variable_creator', name: 'TIMER', variable: 'timer1', variableTypes: [''] },
+        { type: 'input_dummy' },
+        { type: 'input_statement', name: 'DO' },
+      ],
+      colour: EVENTS_HUE, inputsInline: true,
+      tooltip: 'Run code repeatedly at an interval – use the timer name with "cancel timer"',
+    },
+    {
+      type: 'game_cancel_timer',
+      message0: 'cancel timer %1',
+      args0: [
+        { type: 'field_variable_creator', name: 'VAR', variable: 'timer1', variableTypes: [''] },
+      ],
+      previousStatement: null, nextStatement: null,
+      colour: EVENTS_HUE, inputsInline: true,
+      tooltip: 'Cancel a running after/every timer by its ID',
+    },
+
+    // ════════ Groups ════════
+    {
+      type: 'game_create_group',
+      message0: 'set %1 to new Group',
+      args0: [
+        { type: 'field_variable_creator', name: 'VAR', variable: 'enemies', variableTypes: [''] },
+      ],
+      previousStatement: null, nextStatement: null,
+      colour: OBJECTS_HUE,
+      tooltip: 'Create a new group to manage multiple objects together',
+    },
+    {
+      type: 'game_group_add',
+      message0: 'add %1 to %2',
+      args0: [
+        { type: 'field_variable_creator', name: 'OBJ', variable: 'player', variableTypes: [''] },
+        { type: 'field_variable_creator', name: 'GROUP', variable: 'enemies', variableTypes: [''] },
+      ],
+      previousStatement: null, nextStatement: null,
+      colour: OBJECTS_HUE, inputsInline: true,
+      tooltip: 'Add an object to a group',
+    },
+    {
+      type: 'game_group_remove',
+      message0: 'remove %1 from %2',
+      args0: [
+        { type: 'field_variable_creator', name: 'OBJ', variable: 'player', variableTypes: [''] },
+        { type: 'field_variable_creator', name: 'GROUP', variable: 'enemies', variableTypes: [''] },
+      ],
+      previousStatement: null, nextStatement: null,
+      colour: OBJECTS_HUE, inputsInline: true,
+      tooltip: 'Remove an object from a group',
+    },
+    {
+      type: 'game_group_count',
+      message0: 'count of %1',
+      args0: [
+        { type: 'field_variable_creator', name: 'GROUP', variable: 'enemies', variableTypes: [''] },
+      ],
+      output: 'Number', colour: OBJECTS_HUE,
+      tooltip: 'Number of objects in a group',
+    },
+    {
+      type: 'game_group_any_touch',
+      message0: 'any in %1 touching %2 ?',
+      args0: [
+        { type: 'field_variable_creator', name: 'GROUP', variable: 'enemies', variableTypes: [''] },
+        { type: 'field_variable_creator', name: 'OBJ', variable: 'player', variableTypes: [''] },
+      ],
+      output: 'Boolean', colour: OBJECTS_HUE, inputsInline: true,
+      tooltip: 'True if any object in the group is overlapping the target',
+    },
+    {
+      type: 'game_group_remove_all',
+      message0: 'remove all from %1',
+      args0: [
+        { type: 'field_variable_creator', name: 'GROUP', variable: 'enemies', variableTypes: [''] },
+      ],
+      previousStatement: null, nextStatement: null,
+      colour: OBJECTS_HUE,
+      tooltip: 'Remove all objects in the group from the game',
+    },
+
+    // ════════ TileMap ════════
+    {
+      type: 'game_create_tilemap',
+      message0: 'set %1 to TileMap %2 cols %3 rows tile size %4',
+      args0: [
+        { type: 'field_variable_creator', name: 'VAR', variable: 'tilemap', variableTypes: [''] },
+        { type: 'input_value', name: 'COLS', check: 'Number' },
+        { type: 'input_value', name: 'ROWS', check: 'Number' },
+        { type: 'input_value', name: 'SIZE', check: 'Number' },
+      ],
+      previousStatement: null, nextStatement: null,
+      colour: STAGE_HUE, inputsInline: true,
+      tooltip: 'Create a tile map grid',
+    },
+    {
+      type: 'game_set_tile',
+      message0: 'in %1 set tile col %2 row %3 to type %4',
+      args0: [
+        { type: 'field_variable_creator', name: 'TM', variable: 'tilemap', variableTypes: [''] },
+        { type: 'input_value', name: 'COL', check: 'Number' },
+        { type: 'input_value', name: 'ROW', check: 'Number' },
+        { type: 'input_value', name: 'TYPE', check: 'Number' },
+      ],
+      previousStatement: null, nextStatement: null,
+      colour: STAGE_HUE, inputsInline: true,
+      tooltip: 'Set a single tile in the map',
+    },
+    {
+      type: 'game_get_tile',
+      message0: 'in %1 tile at col %2 row %3',
+      args0: [
+        { type: 'field_variable_creator', name: 'TM', variable: 'tilemap', variableTypes: [''] },
+        { type: 'input_value', name: 'COL', check: 'Number' },
+        { type: 'input_value', name: 'ROW', check: 'Number' },
+      ],
+      output: 'Number', colour: STAGE_HUE, inputsInline: true,
+      tooltip: 'Get the tile type at a grid position',
+    },
+    {
+      type: 'game_set_tile_palette',
+      message0: 'in %1 tile type %2 color %3 solid %4',
+      args0: [
+        { type: 'field_variable_creator', name: 'TM', variable: 'tilemap', variableTypes: [''] },
+        { type: 'input_value', name: 'TYPE', check: 'Number' },
+        { type: 'field_colour', name: 'COLOR', colour: '#8b4513' },
+        { type: 'field_dropdown', name: 'SOLID', options: [['yes', 'True'], ['no', 'False']] },
+      ],
+      previousStatement: null, nextStatement: null,
+      colour: STAGE_HUE, inputsInline: true,
+      tooltip: 'Define how a tile type looks and if it is solid',
+    },
+    {
+      type: 'game_tile_at_pixel',
+      message0: 'in %1 tile at pixel x %2 y %3',
+      args0: [
+        { type: 'field_variable_creator', name: 'TM', variable: 'tilemap', variableTypes: [''] },
+        { type: 'input_value', name: 'X', check: 'Number' },
+        { type: 'input_value', name: 'Y', check: 'Number' },
+      ],
+      output: 'Number', colour: STAGE_HUE, inputsInline: true,
+      tooltip: 'Get the tile type at a pixel position in the world',
+    },
+    {
+      type: 'game_overlaps_solid',
+      message0: '%1 overlaps solid tile in %2 ?',
+      args0: [
+        { type: 'field_variable_creator', name: 'OBJ', variable: 'player', variableTypes: [''] },
+        { type: 'field_variable_creator', name: 'TM', variable: 'tilemap', variableTypes: [''] },
+      ],
+      output: 'Boolean', colour: STAGE_HUE, inputsInline: true,
+      tooltip: 'True if an object is overlapping a solid tile',
+    },
+    {
+      type: 'game_tilemap_push_out',
+      message0: 'push %1 out of solid tiles in %2',
+      args0: [
+        { type: 'field_variable_creator', name: 'OBJ', variable: 'player', variableTypes: [''] },
+        { type: 'field_variable_creator', name: 'TM', variable: 'tilemap', variableTypes: [''] },
+      ],
+      previousStatement: null, nextStatement: null,
+      colour: STAGE_HUE, inputsInline: true,
+      tooltip: 'Push an object out of solid tiles (for platformer collision)',
+    },
+    {
+      type: 'game_set_tile_data',
+      message0: 'in %1 set grid data from %2',
+      args0: [
+        { type: 'field_variable_creator', name: 'TM', variable: 'tilemap', variableTypes: [''] },
+        { type: 'field_variable_creator', name: 'DATA', variable: 'level_data', variableTypes: [''] },
+      ],
+      previousStatement: null, nextStatement: null,
+      colour: STAGE_HUE, inputsInline: true,
+      tooltip: 'Set the entire tile grid from a 2D list of tile types',
+    },
+
+    // ════════ Color Detection ════════
+    {
+      type: 'game_color_at',
+      message0: 'color at x %1 y %2',
+      args0: [
+        { type: 'input_value', name: 'X', check: 'Number' },
+        { type: 'input_value', name: 'Y', check: 'Number' },
+      ],
+      output: 'String', colour: SENSING_HUE, inputsInline: true,
+      tooltip: 'Get the hex color at a screen position (e.g. "#ff0000")',
+    },
+    // game_touching_color is defined imperatively below (uses FieldEyedropper)
+
+    // ════════ Button ════════
+    {
+      type: 'game_create_button',
+      message0: 'Button %1 x: %2 y: %3',
+      args0: [
+        { type: 'field_input', name: 'TEXT', text: 'Play' },
+        { type: 'input_value', name: 'X', check: 'Number' },
+        { type: 'input_value', name: 'Y', check: 'Number' },
+      ],
+      output: null, colour: OBJECTS_HUE, inputsInline: true,
+      tooltip: 'Create a clickable button',
+    },
+
+    // ════════ Save / Load ════════
+    {
+      type: 'game_save',
+      message0: 'save %1 = %2',
+      args0: [
+        { type: 'input_value', name: 'KEY', check: 'String' },
+        { type: 'input_value', name: 'VALUE' },
+      ],
+      previousStatement: null, nextStatement: null,
+      colour: 120, inputsInline: true,
+      tooltip: 'Save a value to local storage (persists between sessions)',
+    },
+    {
+      type: 'game_load',
+      message0: 'load %1 default %2',
+      args0: [
+        { type: 'input_value', name: 'KEY', check: 'String' },
+        { type: 'input_value', name: 'DEFAULT' },
+      ],
+      output: null, colour: 120, inputsInline: true,
+      tooltip: 'Load a saved value (returns default if not found)',
+    },
+    {
+      type: 'game_delete_save',
+      message0: 'delete save %1',
+      args0: [
+        { type: 'input_value', name: 'KEY', check: 'String' },
+      ],
+      previousStatement: null, nextStatement: null,
+      colour: 120, inputsInline: true,
+      tooltip: 'Delete a saved value from local storage',
+    },
+
+    // ════════ Emitter ════════
+    {
+      type: 'game_create_emitter',
+      message0: 'set %1 to emitter %2 at x: %3 y: %4',
+      args0: [
+        { type: 'field_variable_creator', name: 'VAR', variable: 'emitter', variableTypes: [''] },
+        { type: 'field_dropdown', name: 'PRESET', options: [
+          ['fire', 'fire'], ['smoke', 'smoke'], ['sparkle', 'sparkle'],
+          ['snow', 'snow'], ['bubbles', 'bubbles'], ['trail', 'trail'],
+        ]},
+        { type: 'input_value', name: 'X', check: 'Number' },
+        { type: 'input_value', name: 'Y', check: 'Number' },
+      ],
+      previousStatement: null, nextStatement: null,
+      colour: LOOKS_HUE, inputsInline: true,
+      tooltip: 'Create a continuous particle emitter',
+    },
+    {
+      type: 'game_emitter_toggle',
+      message0: '%1 emitter %2',
+      args0: [
+        { type: 'field_dropdown', name: 'STATE', options: [['turn on', 'on'], ['turn off', 'off']] },
+        { type: 'field_variable_creator', name: 'VAR', variable: 'emitter', variableTypes: [''] },
+      ],
+      previousStatement: null, nextStatement: null,
+      colour: LOOKS_HUE, inputsInline: true,
+      tooltip: 'Enable or disable a particle emitter',
+    },
+    {
+      type: 'game_move_emitter',
+      message0: 'move emitter %1 to x: %2 y: %3',
+      args0: [
+        { type: 'field_variable_creator', name: 'VAR', variable: 'emitter', variableTypes: [''] },
+        { type: 'input_value', name: 'X', check: 'Number' },
+        { type: 'input_value', name: 'Y', check: 'Number' },
+      ],
+      previousStatement: null, nextStatement: null,
+      colour: LOOKS_HUE, inputsInline: true,
+      tooltip: 'Move a particle emitter to a new position',
+    },
+    {
+      type: 'game_remove_emitter',
+      message0: 'remove emitter %1',
+      args0: [
+        { type: 'field_variable_creator', name: 'VAR', variable: 'emitter', variableTypes: [''] },
+      ],
+      previousStatement: null, nextStatement: null,
+      colour: LOOKS_HUE,
+      tooltip: 'Remove a particle emitter',
+    },
+
+    // ════════ Line ════════
+    {
+      type: 'game_create_line',
+      message0: 'Line from %1 %2 to %3 %4 color %5 width %6',
+      args0: [
+        { type: 'input_value', name: 'X1', check: 'Number' },
+        { type: 'input_value', name: 'Y1', check: 'Number' },
+        { type: 'input_value', name: 'X2', check: 'Number' },
+        { type: 'input_value', name: 'Y2', check: 'Number' },
+        { type: 'field_colour', name: 'COLOR', colour: '#ffffff' },
+        { type: 'input_value', name: 'WIDTH', check: 'Number' },
+      ],
+      output: null, colour: OBJECTS_HUE, inputsInline: true,
+      tooltip: 'Create a line between two points',
+    },
+
+    // ════════ Object misc ════════
+    {
+      type: 'game_set_fixed',
+      message0: 'pin %1 to screen %2',
+      args0: [
+        { type: 'field_variable_creator', name: 'OBJ', variable: 'player', variableTypes: [''] },
+        { type: 'field_dropdown', name: 'FIXED', options: [['yes', 'True'], ['no', 'False']] },
+      ],
+      previousStatement: null, nextStatement: null,
+      colour: LOOKS_HUE, inputsInline: true,
+      tooltip: 'Pin object to screen (not affected by camera)',
+    },
+    {
+      type: 'game_set_layer',
+      message0: 'set layer of %1 to %2',
+      args0: [
+        { type: 'field_variable_creator', name: 'OBJ', variable: 'player', variableTypes: [''] },
+        { type: 'input_value', name: 'LAYER', check: 'Number' },
+      ],
+      previousStatement: null, nextStatement: null,
+      colour: LOOKS_HUE, inputsInline: true,
+      tooltip: 'Set draw order (higher = drawn on top)',
+    },
+    {
+      type: 'game_is_out',
+      message0: '%1 is off screen?',
+      args0: [
+        { type: 'field_variable_creator', name: 'OBJ', variable: 'player', variableTypes: [''] },
+      ],
+      output: 'Boolean', colour: SENSING_HUE,
+      tooltip: 'True if the object is completely outside the screen',
+    },
+    {
+      type: 'game_hit_test',
+      message0: 'object at x %1 y %2',
+      args0: [
+        { type: 'input_value', name: 'X', check: 'Number' },
+        { type: 'input_value', name: 'Y', check: 'Number' },
+      ],
+      output: null, colour: SENSING_HUE, inputsInline: true,
+      tooltip: 'Get the topmost object at a screen position',
+    },
+
+    // ════════ Math helpers ════════
+    {
+      type: 'game_lerp',
+      message0: 'lerp %1 to %2 by %3',
+      args0: [
+        { type: 'input_value', name: 'A', check: 'Number' },
+        { type: 'input_value', name: 'B', check: 'Number' },
+        { type: 'input_value', name: 'T', check: 'Number' },
+      ],
+      output: 'Number', colour: 230, inputsInline: true,
+      tooltip: 'Linear interpolation between two values (t = 0 to 1)',
+    },
+    {
+      type: 'game_clamp',
+      message0: 'clamp %1 min %2 max %3',
+      args0: [
+        { type: 'input_value', name: 'VAL', check: 'Number' },
+        { type: 'input_value', name: 'MIN', check: 'Number' },
+        { type: 'input_value', name: 'MAX', check: 'Number' },
+      ],
+      output: 'Number', colour: 230, inputsInline: true,
+      tooltip: 'Constrain a value between min and max',
+    },
+    {
+      type: 'game_random_float',
+      message0: 'random float from %1 to %2',
+      args0: [
+        { type: 'input_value', name: 'MIN', check: 'Number' },
+        { type: 'input_value', name: 'MAX', check: 'Number' },
+      ],
+      output: 'Number', colour: 230, inputsInline: true,
+      tooltip: 'Random decimal number between min and max',
+    },
+    {
+      type: 'game_random_color',
+      message0: 'random color',
+      output: 'String', colour: 230,
+      tooltip: 'Generate a random hex color (e.g. "#a3f04c")',
+    },
+    {
+      type: 'game_choice',
+      message0: 'random item from %1',
+      args0: [{ type: 'input_value', name: 'LIST' }],
+      output: null, colour: 230, inputsInline: true,
+      tooltip: 'Pick a random item from a list',
+    },
+    {
+      type: 'game_physics_toggle',
+      message0: '%1 physics',
+      args0: [
+        { type: 'field_dropdown', name: 'STATE', options: [['enable', 'True'], ['disable', 'False']] },
+      ],
+      previousStatement: null, nextStatement: null,
+      colour: OBJECTS_HUE,
+      tooltip: 'Enable or disable the physics system (velocity, acceleration, friction)',
+    },
+    {
+      type: 'game_frame_count',
+      message0: 'frame count',
+      output: 'Number', colour: SENSING_HUE,
+      tooltip: 'Number of frames since the game started',
+    },
   ]);
 
   const ADD_SOUND_ID = '__add_sound__';
@@ -1214,6 +1674,324 @@ export function registerBlocks() {
   }
 
   Blockly.fieldRegistry.register('field_background_picker', FieldBackgroundPicker);
+
+  class FieldEyedropper extends Blockly.Field {
+    constructor(colour) {
+      super(colour || '#ff0000');
+      this.SERIALIZABLE = true;
+      this.CURSOR = 'pointer';
+      this.size_ = new Blockly.utils.Size(28, 16);
+      this.dropdownDiv_ = null;
+    }
+    static fromJson(options) {
+      return new FieldEyedropper(options?.colour);
+    }
+    initView() {
+      this.createBorderRect_();
+      this.borderRect_.setAttribute('rx', 4);
+      this.borderRect_.setAttribute('ry', 4);
+      this.borderRect_.setAttribute('width', 28);
+      this.borderRect_.setAttribute('height', 16);
+      this.borderRect_.style.fill = this.getValue();
+      this.borderRect_.style.stroke = '#fff';
+      this.borderRect_.style.strokeWidth = '0.5';
+      this.borderRect_.style.cursor = 'pointer';
+    }
+    updateSize_() {
+      this.size_ = new Blockly.utils.Size(28, 16);
+    }
+    render_() {
+      super.render_();
+      if (this.borderRect_) {
+        this.borderRect_.style.fill = this.getValue();
+      }
+    }
+    getText() {
+      return this.getValue() || '#ff0000';
+    }
+
+    /* ── HSB ↔ RGB helpers ── */
+    hexToHsb_(hex) {
+      const r = parseInt(hex.slice(1, 3), 16) / 255;
+      const g = parseInt(hex.slice(3, 5), 16) / 255;
+      const b = parseInt(hex.slice(5, 7), 16) / 255;
+      const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+      let h = 0;
+      if (d) {
+        if (max === r) h = ((g - b) / d + 6) % 6;
+        else if (max === g) h = (b - r) / d + 2;
+        else h = (r - g) / d + 4;
+        h = Math.round(h * 60);
+      }
+      const s = max ? Math.round((d / max) * 100) : 0;
+      const v = Math.round(max * 100);
+      return { h, s, v };
+    }
+    hsbToHex_(h, s, v) {
+      s /= 100; v /= 100;
+      const c = v * s, x = c * (1 - Math.abs(((h / 60) % 2) - 1)), m = v - c;
+      let r = 0, g = 0, b = 0;
+      if (h < 60) { r = c; g = x; }
+      else if (h < 120) { r = x; g = c; }
+      else if (h < 180) { g = c; b = x; }
+      else if (h < 240) { g = x; b = c; }
+      else if (h < 300) { r = x; b = c; }
+      else { r = c; b = x; }
+      const toHex = (n) => Math.round((n + m) * 255).toString(16).padStart(2, '0');
+      return '#' + toHex(r) + toHex(g) + toHex(b);
+    }
+
+    /* ── Build a slider row ── */
+    buildSlider_(label, min, max, value, gradientFn) {
+      const row = document.createElement('div');
+      row.style.cssText = 'margin-bottom:14px;';
+
+      const header = document.createElement('div');
+      header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;';
+      const lbl = document.createElement('span');
+      lbl.style.cssText = 'font-weight:600;font-size:13px;color:#ccc;';
+      lbl.textContent = label;
+      const valSpan = document.createElement('span');
+      valSpan.style.cssText = 'font-size:13px;color:#aaa;min-width:28px;text-align:right;';
+      valSpan.textContent = value;
+      header.appendChild(lbl);
+      header.appendChild(valSpan);
+
+      const track = document.createElement('div');
+      track.style.cssText = 'position:relative;height:22px;border-radius:11px;cursor:pointer;';
+      track.style.background = gradientFn(value);
+
+      const thumb = document.createElement('div');
+      thumb.style.cssText = 'position:absolute;top:50%;width:20px;height:20px;border-radius:50%;'
+        + 'background:#fff;border:2px solid #888;box-shadow:0 1px 4px rgba(0,0,0,0.4);'
+        + 'transform:translate(-50%,-50%);cursor:grab;';
+      thumb.style.left = ((value - min) / (max - min) * 100) + '%';
+      track.appendChild(thumb);
+
+      row.appendChild(header);
+      row.appendChild(track);
+
+      const update = (val) => {
+        const clamped = Math.max(min, Math.min(max, Math.round(val)));
+        valSpan.textContent = clamped;
+        thumb.style.left = ((clamped - min) / (max - min) * 100) + '%';
+        return clamped;
+      };
+
+      const onDrag = (e) => {
+        const rect = track.getBoundingClientRect();
+        const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+        const val = update(min + ratio * (max - min));
+        if (row.onChange) row.onChange(val);
+      };
+      track.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        onDrag(e);
+        const onMove = (ev) => onDrag(ev);
+        const onUp = () => { document.removeEventListener('pointermove', onMove); document.removeEventListener('pointerup', onUp); };
+        document.addEventListener('pointermove', onMove);
+        document.addEventListener('pointerup', onUp);
+      });
+
+      row.update = update;
+      row.setGradient = (g) => { track.style.background = g; };
+      return row;
+    }
+
+    /* ── Main editor dropdown ── */
+    showEditor_() {
+      if (this.dropdownDiv_) { this.closeEditor_(); return; }
+
+      const hsb = this.hexToHsb_(this.getValue() || '#ff0000');
+
+      const panel = document.createElement('div');
+      panel.style.cssText = 'background:#1e1e2e;border-radius:12px;padding:16px 18px 12px;'
+        + 'width:220px;box-shadow:0 8px 32px rgba(0,0,0,0.6);font-family:system-ui,sans-serif;'
+        + 'border:1px solid #333;';
+
+      const preview = document.createElement('div');
+      preview.style.cssText = 'width:100%;height:36px;border-radius:8px;margin-bottom:14px;'
+        + 'border:2px solid #444;';
+      preview.style.background = this.getValue();
+      panel.appendChild(preview);
+
+      const hueGrad = () => 'linear-gradient(to right,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)';
+      const satGrad = (h, v) => 'linear-gradient(to right,' + this.hsbToHex_(h, 0, v) + ',' + this.hsbToHex_(h, 100, v) + ')';
+      const briGrad = (h, s) => 'linear-gradient(to right,#000,' + this.hsbToHex_(h, s, 100) + ')';
+
+      const hueRow = this.buildSlider_('Color', 0, 360, hsb.h, hueGrad);
+      const satRow = this.buildSlider_('Saturation', 0, 100, hsb.s, () => satGrad(hsb.h, hsb.v));
+      const briRow = this.buildSlider_('Brightness', 0, 100, hsb.v, () => briGrad(hsb.h, hsb.s));
+
+      const applyColor = () => {
+        const hex = this.hsbToHex_(hsb.h, hsb.s, hsb.v);
+        preview.style.background = hex;
+        satRow.setGradient(satGrad(hsb.h, hsb.v));
+        briRow.setGradient(briGrad(hsb.h, hsb.s));
+        this.setValue(hex);
+      };
+
+      hueRow.onChange = (v) => { hsb.h = v; applyColor(); };
+      satRow.onChange = (v) => { hsb.s = v; applyColor(); };
+      briRow.onChange = (v) => { hsb.v = v; applyColor(); };
+
+      panel.appendChild(hueRow);
+      panel.appendChild(satRow);
+      panel.appendChild(briRow);
+
+      const eyedropBtn = document.createElement('button');
+      eyedropBtn.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:6px;'
+        + 'width:100%;padding:8px 0;background:#2a2a3e;border:1px solid #444;border-radius:8px;'
+        + 'color:#ccc;font-size:13px;cursor:pointer;margin-top:4px;';
+      eyedropBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+        + 'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+        + '<path d="M2 22l1-1h3l9-9"/><path d="M3 21v-3l9-9"/>'
+        + '<path d="M14.5 3.5a2.12 2.12 0 0 1 3 3L12 12l-4 1 1-4z"/></svg>'
+        + '<span>Pick from canvas</span>';
+      eyedropBtn.addEventListener('mouseenter', () => { eyedropBtn.style.background = '#353550'; });
+      eyedropBtn.addEventListener('mouseleave', () => { eyedropBtn.style.background = '#2a2a3e'; });
+      eyedropBtn.addEventListener('click', () => {
+        this.closeEditor_();
+        this.startEyedropper_(hsb);
+      });
+      panel.appendChild(eyedropBtn);
+
+      const srcBlock = this.getSourceBlock();
+      const blockSvg = srcBlock?.getSvgRoot();
+      if (blockSvg) {
+        const blockRect = blockSvg.getBoundingClientRect();
+        panel.style.position = 'fixed';
+        panel.style.zIndex = '100000';
+        panel.style.left = blockRect.left + 'px';
+        panel.style.top = (blockRect.bottom + 6) + 'px';
+      } else {
+        panel.style.position = 'fixed';
+        panel.style.zIndex = '100000';
+        panel.style.left = '100px';
+        panel.style.top = '100px';
+      }
+
+      document.body.appendChild(panel);
+      this.dropdownDiv_ = panel;
+
+      const outsideClick = (e) => {
+        if (!panel.contains(e.target)) {
+          this.closeEditor_();
+          document.removeEventListener('pointerdown', outsideClick, true);
+        }
+      };
+      setTimeout(() => document.addEventListener('pointerdown', outsideClick, true), 0);
+      this.outsideClickHandler_ = outsideClick;
+    }
+
+    closeEditor_() {
+      if (this.dropdownDiv_) {
+        this.dropdownDiv_.remove();
+        this.dropdownDiv_ = null;
+      }
+      if (this.outsideClickHandler_) {
+        document.removeEventListener('pointerdown', this.outsideClickHandler_, true);
+        this.outsideClickHandler_ = null;
+      }
+    }
+
+    /* ── Eyedropper mode ── */
+    startEyedropper_() {
+      const canvas = document.querySelector('.gml-canvas');
+      if (!canvas) return;
+
+      const snap = document.createElement('canvas');
+      snap.width = canvas.width;
+      snap.height = canvas.height;
+      snap.getContext('2d').drawImage(canvas, 0, 0);
+      const snapCtx = snap.getContext('2d');
+
+      const overlay = document.createElement('div');
+      Object.assign(overlay.style, {
+        position: 'fixed', top: '0', left: '0', width: '100vw', height: '100vh',
+        zIndex: '100000', cursor: 'crosshair', background: 'rgba(0,0,0,0.01)',
+      });
+
+      const loupe = document.createElement('div');
+      Object.assign(loupe.style, {
+        position: 'fixed', width: '60px', height: '60px', borderRadius: '50%',
+        border: '3px solid #fff', boxShadow: '0 2px 12px rgba(0,0,0,0.5)',
+        pointerEvents: 'none', display: 'none', zIndex: '100001',
+      });
+      const dot = document.createElement('div');
+      Object.assign(dot.style, {
+        position: 'absolute', top: '50%', left: '50%', width: '10px', height: '10px',
+        marginTop: '-5px', marginLeft: '-5px', border: '1.5px solid #000',
+        borderRadius: '50%', pointerEvents: 'none',
+      });
+      loupe.appendChild(dot);
+      document.body.appendChild(overlay);
+      document.body.appendChild(loupe);
+
+      const rect = canvas.getBoundingClientRect();
+
+      const sampleColor = (clientX, clientY) => {
+        const sx = canvas.width / rect.width, sy = canvas.height / rect.height;
+        const cx = Math.floor((clientX - rect.left) * sx);
+        const cy = Math.floor((clientY - rect.top) * sy);
+        if (cx >= 0 && cy >= 0 && cx < snap.width && cy < snap.height) {
+          const p = snapCtx.getImageData(cx, cy, 1, 1).data;
+          return '#' + ((1 << 24) + (p[0] << 16) + (p[1] << 8) + p[2]).toString(16).slice(1);
+        }
+        return null;
+      };
+      const lum = (hex) => {
+        const r = parseInt(hex.slice(1, 3), 16) / 255;
+        const g = parseInt(hex.slice(3, 5), 16) / 255;
+        const b = parseInt(hex.slice(5, 7), 16) / 255;
+        return 0.299 * r + 0.587 * g + 0.114 * b;
+      };
+
+      const onMove = (e) => {
+        loupe.style.display = 'block';
+        loupe.style.left = (e.clientX + 20) + 'px';
+        loupe.style.top = (e.clientY - 70) + 'px';
+        const c = sampleColor(e.clientX, e.clientY);
+        if (c) {
+          loupe.style.backgroundColor = c;
+          dot.style.borderColor = lum(c) > 0.5 ? '#000' : '#fff';
+        }
+      };
+      const onClick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const c = sampleColor(e.clientX, e.clientY);
+        if (c) this.setValue(c);
+        cleanup();
+      };
+      const onKey = (e) => { if (e.key === 'Escape') cleanup(); };
+      const cleanup = () => {
+        overlay.removeEventListener('pointermove', onMove);
+        overlay.removeEventListener('pointerdown', onClick);
+        document.removeEventListener('keydown', onKey);
+        overlay.remove(); loupe.remove();
+      };
+      overlay.addEventListener('pointermove', onMove);
+      overlay.addEventListener('pointerdown', onClick);
+      document.addEventListener('keydown', onKey);
+    }
+  }
+
+  Blockly.fieldRegistry.register('field_eyedropper', FieldEyedropper);
+
+  Blockly.Blocks['game_touching_color'] = {
+    init() {
+      this.appendDummyInput()
+        .appendField(new FieldVariableCreator('player', null, [''], ''), 'OBJ')
+        .appendField('touching color')
+        .appendField(new FieldEyedropper('#ff0000'), 'COLOR')
+        .appendField('?');
+      this.setOutput(true, 'Boolean');
+      this.setColour(SENSING_HUE);
+      this.setInputsInline(true);
+      this.setTooltip('True if the object is touching a specific color on screen – click the swatch to eyedrop from the game canvas');
+    },
+  };
 
   Blockly.Blocks['game_set_bg_image'] = {
     init() {
@@ -1705,6 +2483,251 @@ export function registerBlocks() {
     return ['len(' + text + ') == 0', Order.RELATIONAL];
   };
 
+  // ────── Events (collision / click / timer) generators ──────
+  pythonGenerator.forBlock['game_on_overlap'] = function(block, gen) {
+    const a = gen.getVariableName(block.getFieldValue('A'));
+    const b = gen.getVariableName(block.getFieldValue('B'));
+    const body = gen.statementToCode(block, 'DO') || gen.INDENT + 'pass\n';
+    return 'def _on_overlap_' + a + '_' + b + '(' + a + ', ' + b + '):\n' + body +
+           'game.on_overlap(' + a + ', ' + b + ', _on_overlap_' + a + '_' + b + ')\n';
+  };
+  pythonGenerator.forBlock['game_on_click_obj'] = function(block, gen) {
+    const obj = gen.getVariableName(block.getFieldValue('OBJ'));
+    const body = gen.statementToCode(block, 'DO') || gen.INDENT + 'pass\n';
+    return 'def _on_click_' + obj + '(' + obj + ', _x, _y):\n' + body +
+           obj + '.on_click(_on_click_' + obj + ')\n';
+  };
+  pythonGenerator.forBlock['game_on_hover_obj'] = function(block, gen) {
+    const obj = gen.getVariableName(block.getFieldValue('OBJ'));
+    const body = gen.statementToCode(block, 'DO') || gen.INDENT + 'pass\n';
+    return 'def _on_hover_' + obj + '(' + obj + ', _x, _y):\n' + body +
+           obj + '.on_hover(_on_hover_' + obj + ')\n';
+  };
+  pythonGenerator.forBlock['game_after'] = function(block, gen) {
+    const timer = gen.getVariableName(block.getFieldValue('TIMER'));
+    const ms = gen.valueToCode(block, 'MS', Order.NONE) || '1000';
+    const body = gen.statementToCode(block, 'DO') || gen.INDENT + 'pass\n';
+    const fn = '_after_' + timer;
+    return 'def ' + fn + '():\n' + body + timer + ' = game.after(' + ms + ', ' + fn + ')\n';
+  };
+  pythonGenerator.forBlock['game_every'] = function(block, gen) {
+    const timer = gen.getVariableName(block.getFieldValue('TIMER'));
+    const ms = gen.valueToCode(block, 'MS', Order.NONE) || '1000';
+    const body = gen.statementToCode(block, 'DO') || gen.INDENT + 'pass\n';
+    const fn = '_every_' + timer;
+    return 'def ' + fn + '():\n' + body + timer + ' = game.every(' + ms + ', ' + fn + ')\n';
+  };
+  pythonGenerator.forBlock['game_cancel_timer'] = function(block, gen) {
+    return 'game.cancel_timer(' + gen.getVariableName(block.getFieldValue('VAR')) + ')\n';
+  };
+
+  // ────── Group generators ──────
+  pythonGenerator.forBlock['game_create_group'] = function(block, gen) {
+    return gen.getVariableName(block.getFieldValue('VAR')) + ' = game.Group()\n';
+  };
+  pythonGenerator.forBlock['game_group_add'] = function(block, gen) {
+    const grp = gen.getVariableName(block.getFieldValue('GROUP'));
+    const obj = gen.getVariableName(block.getFieldValue('OBJ'));
+    return grp + '.add(' + obj + ')\n';
+  };
+  pythonGenerator.forBlock['game_group_remove'] = function(block, gen) {
+    const grp = gen.getVariableName(block.getFieldValue('GROUP'));
+    const obj = gen.getVariableName(block.getFieldValue('OBJ'));
+    return grp + '.remove(' + obj + ')\n';
+  };
+  pythonGenerator.forBlock['game_group_count'] = function(block, gen) {
+    return [gen.getVariableName(block.getFieldValue('GROUP')) + '.count()', Order.FUNCTION_CALL];
+  };
+  pythonGenerator.forBlock['game_group_any_touch'] = function(block, gen) {
+    const grp = gen.getVariableName(block.getFieldValue('GROUP'));
+    const obj = gen.getVariableName(block.getFieldValue('OBJ'));
+    return [grp + '.any_touch(' + obj + ')', Order.FUNCTION_CALL];
+  };
+  pythonGenerator.forBlock['game_group_remove_all'] = function(block, gen) {
+    return gen.getVariableName(block.getFieldValue('GROUP')) + '.remove_all()\n';
+  };
+
+  // ────── TileMap generators ──────
+  pythonGenerator.forBlock['game_create_tilemap'] = function(block, gen) {
+    const v = gen.getVariableName(block.getFieldValue('VAR'));
+    const cols = gen.valueToCode(block, 'COLS', Order.NONE) || '20';
+    const rows = gen.valueToCode(block, 'ROWS', Order.NONE) || '15';
+    const size = gen.valueToCode(block, 'SIZE', Order.NONE) || '32';
+    return v + ' = game.TileMap(' + cols + ', ' + rows + ', ' + size + ')\n';
+  };
+  pythonGenerator.forBlock['game_set_tile'] = function(block, gen) {
+    const tm = gen.getVariableName(block.getFieldValue('TM'));
+    const col = gen.valueToCode(block, 'COL', Order.NONE) || '0';
+    const row = gen.valueToCode(block, 'ROW', Order.NONE) || '0';
+    const type = gen.valueToCode(block, 'TYPE', Order.NONE) || '1';
+    return tm + '.set_tile(' + col + ', ' + row + ', ' + type + ')\n';
+  };
+  pythonGenerator.forBlock['game_get_tile'] = function(block, gen) {
+    const tm = gen.getVariableName(block.getFieldValue('TM'));
+    const col = gen.valueToCode(block, 'COL', Order.NONE) || '0';
+    const row = gen.valueToCode(block, 'ROW', Order.NONE) || '0';
+    return [tm + '.get_tile(' + col + ', ' + row + ')', Order.FUNCTION_CALL];
+  };
+  pythonGenerator.forBlock['game_set_tile_palette'] = function(block, gen) {
+    const tm = gen.getVariableName(block.getFieldValue('TM'));
+    const type = gen.valueToCode(block, 'TYPE', Order.NONE) || '1';
+    const color = block.getFieldValue('COLOR') || '#8b4513';
+    const solid = block.getFieldValue('SOLID');
+    return tm + '.set_palette(' + type + ', "' + color + '", ' + solid + ')\n';
+  };
+  pythonGenerator.forBlock['game_tile_at_pixel'] = function(block, gen) {
+    const tm = gen.getVariableName(block.getFieldValue('TM'));
+    const x = gen.valueToCode(block, 'X', Order.NONE) || '0';
+    const y = gen.valueToCode(block, 'Y', Order.NONE) || '0';
+    return [tm + '.tile_at_pixel(' + x + ', ' + y + ')', Order.FUNCTION_CALL];
+  };
+  pythonGenerator.forBlock['game_overlaps_solid'] = function(block, gen) {
+    const obj = gen.getVariableName(block.getFieldValue('OBJ'));
+    const tm = gen.getVariableName(block.getFieldValue('TM'));
+    return [tm + '.overlaps_solid(' + obj + ')', Order.FUNCTION_CALL];
+  };
+  pythonGenerator.forBlock['game_tilemap_push_out'] = function(block, gen) {
+    const obj = gen.getVariableName(block.getFieldValue('OBJ'));
+    const tm = gen.getVariableName(block.getFieldValue('TM'));
+    return tm + '.push_out(' + obj + ')\n';
+  };
+  pythonGenerator.forBlock['game_set_tile_data'] = function(block, gen) {
+    const tm = gen.getVariableName(block.getFieldValue('TM'));
+    const data = gen.getVariableName(block.getFieldValue('DATA'));
+    return tm + '.set_data(' + data + ')\n';
+  };
+
+  // ────── Color detection generators ──────
+  pythonGenerator.forBlock['game_color_at'] = function(block, gen) {
+    const x = gen.valueToCode(block, 'X', Order.NONE) || '0';
+    const y = gen.valueToCode(block, 'Y', Order.NONE) || '0';
+    return ['game.color_at(' + x + ', ' + y + ')', Order.FUNCTION_CALL];
+  };
+  pythonGenerator.forBlock['game_touching_color'] = function(block, gen) {
+    const obj = gen.getVariableName(block.getFieldValue('OBJ'));
+    const color = block.getFieldValue('COLOR') || '#ff0000';
+    return ['game.touching_color(' + obj + ', "' + color + '")', Order.FUNCTION_CALL];
+  };
+
+  // ────── Button generator ──────
+  pythonGenerator.forBlock['game_create_button'] = function(block, gen) {
+    const text = block.getFieldValue('TEXT') || 'Play';
+    const x = gen.valueToCode(block, 'X', Order.NONE) || '200';
+    const y = gen.valueToCode(block, 'Y', Order.NONE) || '300';
+    return ['game.Button("' + text + '", ' + x + ', ' + y + ')', Order.FUNCTION_CALL];
+  };
+
+  // ────── Save/Load generators ──────
+  pythonGenerator.forBlock['game_save'] = function(block, gen) {
+    const key = gen.valueToCode(block, 'KEY', Order.NONE) || '"save1"';
+    const val = gen.valueToCode(block, 'VALUE', Order.NONE) || '0';
+    return 'game.save(' + key + ', ' + val + ')\n';
+  };
+  pythonGenerator.forBlock['game_load'] = function(block, gen) {
+    const key = gen.valueToCode(block, 'KEY', Order.NONE) || '"save1"';
+    const def = gen.valueToCode(block, 'DEFAULT', Order.NONE) || '0';
+    return ['game.load(' + key + ', ' + def + ')', Order.FUNCTION_CALL];
+  };
+  pythonGenerator.forBlock['game_delete_save'] = function(block, gen) {
+    const key = gen.valueToCode(block, 'KEY', Order.NONE) || '"save1"';
+    return 'game.delete_save(' + key + ')\n';
+  };
+
+  // ────── Emitter generators ──────
+  pythonGenerator.forBlock['game_create_emitter'] = function(block, gen) {
+    const v = gen.getVariableName(block.getFieldValue('VAR'));
+    const preset = block.getFieldValue('PRESET');
+    const x = gen.valueToCode(block, 'X', Order.NONE) || '300';
+    const y = gen.valueToCode(block, 'Y', Order.NONE) || '300';
+    const presetMap = {
+      fire: 'count=25, colors=["#FF0000","#FF4400","#FF8800","#FFCC00","#FFFF00"], speed=3, life=30, size=8, gravity=-0.2, shrink=True, spread=1.57, angle=-1.57',
+      smoke: 'count=12, colors=["#666666","#888888","#AAAAAA"], speed=1.5, life=50, size=12, gravity=-0.05, grow=0.3',
+      sparkle: 'count=15, colors=["#FFD700","#FFF8DC","#FFFFFF"], speed=2, life=30, size=5, shape="star", spin=0.2',
+      snow: 'count=8, colors=["#FFFFFF","#E8E8FF"], speed=1, life=80, size=5, gravity=0.02, spread=0.94, angle=1.57',
+      bubbles: 'count=10, colors=["rgba(100,200,255,0.6)"], speed=2, life=60, size=10, gravity=-0.1, shape="ring", grow=0.2',
+      trail: 'count=5, colors=["#00FFFF","#0088FF","#0044FF"], speed=0.5, life=20, size=6, shrink=True, spread=0.94',
+    };
+    const opts = presetMap[preset] || presetMap.fire;
+    return v + ' = game.Emitter(' + x + ', ' + y + ', ' + opts + ')\n';
+  };
+  pythonGenerator.forBlock['game_emitter_toggle'] = function(block, gen) {
+    const v = gen.getVariableName(block.getFieldValue('VAR'));
+    const state = block.getFieldValue('STATE');
+    return 'game.emitter_' + state + '(' + v + ')\n';
+  };
+  pythonGenerator.forBlock['game_move_emitter'] = function(block, gen) {
+    const v = gen.getVariableName(block.getFieldValue('VAR'));
+    const x = gen.valueToCode(block, 'X', Order.NONE) || '0';
+    const y = gen.valueToCode(block, 'Y', Order.NONE) || '0';
+    return 'game.move_emitter(' + v + ', ' + x + ', ' + y + ')\n';
+  };
+  pythonGenerator.forBlock['game_remove_emitter'] = function(block, gen) {
+    return 'game.remove_emitter(' + gen.getVariableName(block.getFieldValue('VAR')) + ')\n';
+  };
+
+  // ────── Line generator ──────
+  pythonGenerator.forBlock['game_create_line'] = function(block, gen) {
+    const x1 = gen.valueToCode(block, 'X1', Order.NONE) || '0';
+    const y1 = gen.valueToCode(block, 'Y1', Order.NONE) || '0';
+    const x2 = gen.valueToCode(block, 'X2', Order.NONE) || '100';
+    const y2 = gen.valueToCode(block, 'Y2', Order.NONE) || '100';
+    const c = block.getFieldValue('COLOR') || '#ffffff';
+    const w = gen.valueToCode(block, 'WIDTH', Order.NONE) || '2';
+    return ['game.Line(' + x1 + ', ' + y1 + ', ' + x2 + ', ' + y2 + ', "' + c + '", ' + w + ')', Order.FUNCTION_CALL];
+  };
+
+  // ────── Object misc generators ──────
+  pythonGenerator.forBlock['game_set_fixed'] = function(block, gen) {
+    const obj = gen.getVariableName(block.getFieldValue('OBJ'));
+    const fixed = block.getFieldValue('FIXED');
+    return obj + '.fixed = ' + fixed + '\n';
+  };
+  pythonGenerator.forBlock['game_set_layer'] = function(block, gen) {
+    const obj = gen.getVariableName(block.getFieldValue('OBJ'));
+    const layer = gen.valueToCode(block, 'LAYER', Order.NONE) || '0';
+    return obj + '.layer = ' + layer + '\n';
+  };
+  pythonGenerator.forBlock['game_is_out'] = function(block, gen) {
+    return [gen.getVariableName(block.getFieldValue('OBJ')) + '.is_out()', Order.FUNCTION_CALL];
+  };
+  pythonGenerator.forBlock['game_hit_test'] = function(block, gen) {
+    const x = gen.valueToCode(block, 'X', Order.NONE) || '0';
+    const y = gen.valueToCode(block, 'Y', Order.NONE) || '0';
+    return ['game.hit_test(' + x + ', ' + y + ')', Order.FUNCTION_CALL];
+  };
+  pythonGenerator.forBlock['game_physics_toggle'] = function(block) {
+    return 'game.physics_enabled(' + block.getFieldValue('STATE') + ')\n';
+  };
+  pythonGenerator.forBlock['game_frame_count'] = function() {
+    return ['game.frame_count()', Order.FUNCTION_CALL];
+  };
+
+  // ────── Math helpers generators ──────
+  pythonGenerator.forBlock['game_lerp'] = function(block, gen) {
+    const a = gen.valueToCode(block, 'A', Order.NONE) || '0';
+    const b = gen.valueToCode(block, 'B', Order.NONE) || '1';
+    const t = gen.valueToCode(block, 'T', Order.NONE) || '0.5';
+    return ['game.lerp(' + a + ', ' + b + ', ' + t + ')', Order.FUNCTION_CALL];
+  };
+  pythonGenerator.forBlock['game_clamp'] = function(block, gen) {
+    const val = gen.valueToCode(block, 'VAL', Order.NONE) || '0';
+    const mn = gen.valueToCode(block, 'MIN', Order.NONE) || '0';
+    const mx = gen.valueToCode(block, 'MAX', Order.NONE) || '100';
+    return ['game.clamp(' + val + ', ' + mn + ', ' + mx + ')', Order.FUNCTION_CALL];
+  };
+  pythonGenerator.forBlock['game_random_float'] = function(block, gen) {
+    const mn = gen.valueToCode(block, 'MIN', Order.NONE) || '0';
+    const mx = gen.valueToCode(block, 'MAX', Order.NONE) || '1';
+    return ['game.random_float(' + mn + ', ' + mx + ')', Order.FUNCTION_CALL];
+  };
+  pythonGenerator.forBlock['game_random_color'] = function() {
+    return ['game.random_color()', Order.FUNCTION_CALL];
+  };
+  pythonGenerator.forBlock['game_choice'] = function(block, gen) {
+    const lst = gen.valueToCode(block, 'LIST', Order.NONE) || '[]';
+    return ['game.choice(' + lst + ')', Order.FUNCTION_CALL];
+  };
+
   // ═══════════════════ Growable if/else-if/else (ported from MCU lab) ═══════════════════
 
   const MINUS_SVG = 'data:image/svg+xml;utf8,' + encodeURIComponent(
@@ -1886,18 +2909,21 @@ export function registerBlocks() {
 export function generateCode(workspace) {
   pythonGenerator.init(workspace);
 
+  const EVENT_TYPES = ['game_on_overlap', 'game_on_click_obj', 'game_on_hover_obj', 'game_after', 'game_every'];
   const topBlocks = workspace.getTopBlocks(true);
   const startBlocks = [];
   const procBlocks = [];
+  const eventBlocks = [];
   const otherBlocks = [];
   for (const b of topBlocks) {
     if (b.type === 'game_on_start') startBlocks.push(b);
-    else if (b.type.startsWith('procedures_def')) procBlocks.push(b);
+    else if (b.type.startsWith('procedures_def') || b.type === 'game_define_scene') procBlocks.push(b);
+    else if (EVENT_TYPES.includes(b.type)) eventBlocks.push(b);
     else otherBlocks.push(b);
   }
 
   let code = '';
-  for (const b of [...startBlocks, ...procBlocks, ...otherBlocks]) {
+  for (const b of [...startBlocks, ...procBlocks, ...otherBlocks, ...eventBlocks]) {
     code += pythonGenerator.blockToCode(b);
   }
 

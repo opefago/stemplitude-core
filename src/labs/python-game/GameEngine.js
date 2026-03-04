@@ -83,6 +83,12 @@ export class GameEngine {
     this._mobileButtons = {};
     this._mobileControlsEl = null;
 
+    // Tilemaps
+    this._tilemaps = [];
+
+    // Collision event handlers
+    this._overlapHandlers = [];
+
     this._boundKeyDown = this._onKeyDown.bind(this);
     this._boundKeyUp = this._onKeyUp.bind(this);
     this._boundMouseMove = this._onMouseMove.bind(this);
@@ -998,6 +1004,8 @@ export class GameEngine {
     this._currentScene = '';
     this._groups = {};
     this._bubbles = new Map();
+    this._tilemaps = [];
+    this._overlapHandlers = [];
     this.backgroundColor = '#1a1a2e';
     this.gameTitle = 'My Game';
     this.gridVisible = false;
@@ -1011,6 +1019,7 @@ export class GameEngine {
     this._updatePhysics();
     this._updateTweens();
     this._tickEmitters();
+    this._checkOverlaps();
     this._updateScreenEffects();
 
     if (this.updateCallback) {
@@ -1226,6 +1235,10 @@ export class GameEngine {
       shakeY = (Math.random() - 0.5) * 2 * si;
     }
     ctx.translate(-this.cameraX + shakeX, -this.cameraY + shakeY);
+
+    for (const tm of this._tilemaps) {
+      if (tm.visible) this._renderTileMap(ctx, tm);
+    }
 
     const allSorted = [...this.objects.values()].sort((a, b) => a.layer - b.layer);
     const worldObjs = allSorted.filter(o => !o.fixed);
@@ -1735,6 +1748,8 @@ export class GameEngine {
       this._particles = [];
       this._emitters = [];
       this._nextEmitterId = 1;
+      this._overlapHandlers = [];
+      this._tilemaps = [];
       this.updateCallback = null;
       this._onKeyCallback = null;
       this._onKeyUpCallback = null;
@@ -1846,6 +1861,233 @@ export class GameEngine {
       if (a.vy !== undefined) a.vy = -(a.vy || 0);
     }
     return true;
+  }
+
+  // ==================== TileMap ====================
+
+  createTileMap(cols, rows, tileSize) {
+    const id = this._nextId++;
+    const tm = {
+      id, cols, rows, tileSize,
+      data: Array.from({ length: rows }, () => new Array(cols).fill(0)),
+      palette: {},
+      x: 0, y: 0,
+      visible: true,
+    };
+    this._tilemaps.push(tm);
+    return id;
+  }
+
+  getTileMap(id) {
+    return this._tilemaps.find(t => t.id === id) || null;
+  }
+
+  setTile(tmId, col, row, type) {
+    const tm = this.getTileMap(tmId);
+    if (tm && row >= 0 && row < tm.rows && col >= 0 && col < tm.cols) {
+      tm.data[row][col] = type;
+    }
+  }
+
+  getTile(tmId, col, row) {
+    const tm = this.getTileMap(tmId);
+    if (tm && row >= 0 && row < tm.rows && col >= 0 && col < tm.cols) {
+      return tm.data[row][col];
+    }
+    return -1;
+  }
+
+  setTilePalette(tmId, type, options) {
+    const tm = this.getTileMap(tmId);
+    if (tm) {
+      tm.palette[type] = {
+        color: options.color || null,
+        sprite: options.sprite || null,
+        solid: !!options.solid,
+      };
+    }
+  }
+
+  setTileSolid(tmId, type, solid) {
+    const tm = this.getTileMap(tmId);
+    if (tm && tm.palette[type]) {
+      tm.palette[type].solid = !!solid;
+    }
+  }
+
+  tileAtPixel(tmId, px, py) {
+    const tm = this.getTileMap(tmId);
+    if (!tm) return -1;
+    const col = Math.floor((px - tm.x) / tm.tileSize);
+    const row = Math.floor((py - tm.y) / tm.tileSize);
+    if (col < 0 || col >= tm.cols || row < 0 || row >= tm.rows) return -1;
+    return tm.data[row][col];
+  }
+
+  objectOverlapsSolid(tmId, objId) {
+    const tm = this.getTileMap(tmId);
+    const obj = this.objects.get(objId);
+    if (!tm || !obj) return false;
+    const b = this._getBBox(obj);
+    const c0 = Math.floor((b.x - tm.x) / tm.tileSize);
+    const c1 = Math.floor((b.x + b.w - 1 - tm.x) / tm.tileSize);
+    const r0 = Math.floor((b.y - tm.y) / tm.tileSize);
+    const r1 = Math.floor((b.y + b.h - 1 - tm.y) / tm.tileSize);
+    for (let r = r0; r <= r1; r++) {
+      for (let c = c0; c <= c1; c++) {
+        if (r < 0 || r >= tm.rows || c < 0 || c >= tm.cols) continue;
+        const info = tm.palette[tm.data[r][c]];
+        if (info && info.solid) return true;
+      }
+    }
+    return false;
+  }
+
+  tileMapPushOut(tmId, objId) {
+    const tm = this.getTileMap(tmId);
+    const obj = this.objects.get(objId);
+    if (!tm || !obj) return;
+    const ts = tm.tileSize;
+    const b = this._getBBox(obj);
+    const c0 = Math.floor((b.x - tm.x) / ts);
+    const c1 = Math.floor((b.x + b.w - 1 - tm.x) / ts);
+    const r0 = Math.floor((b.y - tm.y) / ts);
+    const r1 = Math.floor((b.y + b.h - 1 - tm.y) / ts);
+    for (let r = r0; r <= r1; r++) {
+      for (let c = c0; c <= c1; c++) {
+        if (r < 0 || r >= tm.rows || c < 0 || c >= tm.cols) continue;
+        const info = tm.palette[tm.data[r][c]];
+        if (!info || !info.solid) continue;
+        const tx = tm.x + c * ts, ty = tm.y + r * ts;
+        const ox = Math.min(b.x + b.w, tx + ts) - Math.max(b.x, tx);
+        const oy = Math.min(b.y + b.h, ty + ts) - Math.max(b.y, ty);
+        if (ox <= 0 || oy <= 0) continue;
+        const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+        const tcx = tx + ts / 2, tcy = ty + ts / 2;
+        if (ox < oy) {
+          obj.x += cx < tcx ? -ox : ox;
+          if (obj.vx !== undefined) obj.vx = 0;
+        } else {
+          obj.y += cy < tcy ? -oy : oy;
+          if (obj.vy !== undefined) obj.vy = 0;
+        }
+      }
+    }
+  }
+
+  removeTileMap(tmId) {
+    this._tilemaps = this._tilemaps.filter(t => t.id !== tmId);
+  }
+
+  _renderTileMap(ctx, tm) {
+    const ts = tm.tileSize;
+    for (let r = 0; r < tm.rows; r++) {
+      for (let c = 0; c < tm.cols; c++) {
+        const type = tm.data[r][c];
+        if (type === 0) continue;
+        const info = tm.palette[type];
+        if (!info) continue;
+        const x = tm.x + c * ts;
+        const y = tm.y + r * ts;
+        if (info.sprite) {
+          const spr = this._resolveCustomSprite(info.sprite);
+          if (spr && spr.image) {
+            ctx.imageSmoothingEnabled = false;
+            ctx.drawImage(spr.image, x, y, ts, ts);
+          } else {
+            const sprInfo = getSpriteInfo(info.sprite);
+            if (sprInfo) {
+              const ck = `${info.sprite}_tile`;
+              let frames = this._spriteCache.get(ck);
+              if (!frames) {
+                frames = sprInfo.frames.map(f => renderPixelArt(f, 1));
+                this._spriteCache.set(ck, frames);
+              }
+              if (frames[0]) {
+                ctx.imageSmoothingEnabled = false;
+                ctx.drawImage(frames[0], x, y, ts, ts);
+              }
+            }
+          }
+        } else if (info.color) {
+          ctx.fillStyle = info.color;
+          ctx.fillRect(x, y, ts, ts);
+        }
+      }
+    }
+  }
+
+  // ==================== Collision Events ====================
+
+  onOverlap(aId, bId, callback) {
+    this._overlapHandlers.push({ a: aId, b: bId, fn: callback, _touching: false });
+  }
+
+  _checkOverlaps() {
+    for (const h of this._overlapHandlers) {
+      const a = this.objects.get(h.a);
+      const b = this.objects.get(h.b);
+      if (!a || !b || !a.visible || !b.visible) { h._touching = false; continue; }
+      const touching = this._aabbTest(a, b);
+      if (touching && !h._touching) {
+        h._touching = true;
+        try { h.fn(h.a, h.b); } catch (e) { this.onError(e.toString()); }
+      } else if (!touching) {
+        h._touching = false;
+      }
+    }
+  }
+
+  _aabbTest(a, b) {
+    const ab = this._getBBox(a);
+    const bb = this._getBBox(b);
+    return ab.x < bb.x + bb.w && ab.x + ab.w > bb.x &&
+           ab.y < bb.y + bb.h && ab.y + ab.h > bb.y;
+  }
+
+  // ==================== Color Detection ====================
+
+  getColorAt(px, py) {
+    const x = Math.round(px), y = Math.round(py);
+    if (x < 0 || x >= this.width || y < 0 || y >= this.height) return '#000000';
+    const data = this.ctx.getImageData(x, y, 1, 1).data;
+    return '#' + data[0].toString(16).padStart(2, '0') +
+           data[1].toString(16).padStart(2, '0') +
+           data[2].toString(16).padStart(2, '0');
+  }
+
+  touchingColor(objId, targetColor) {
+    const obj = this.objects.get(objId);
+    if (!obj || !obj.visible) return false;
+    const b = this._getBBox(obj);
+    const target = this._parseColor(targetColor);
+    if (!target) return false;
+    const step = Math.max(2, Math.min(8, Math.floor(Math.min(b.w, b.h) / 4)));
+    for (let x = b.x; x <= b.x + b.w; x += step) {
+      if (this._colorMatch(x, b.y, target)) return true;
+      if (this._colorMatch(x, b.y + b.h, target)) return true;
+    }
+    for (let y = b.y; y <= b.y + b.h; y += step) {
+      if (this._colorMatch(b.x, y, target)) return true;
+      if (this._colorMatch(b.x + b.w, y, target)) return true;
+    }
+    return false;
+  }
+
+  _parseColor(c) {
+    if (!c) return null;
+    const hex = c.replace('#', '');
+    if (hex.length !== 6) return null;
+    return [parseInt(hex.slice(0, 2), 16), parseInt(hex.slice(2, 4), 16), parseInt(hex.slice(4, 6), 16)];
+  }
+
+  _colorMatch(px, py, target, tolerance = 30) {
+    const x = Math.round(px), y = Math.round(py);
+    if (x < 0 || x >= this.width || y < 0 || y >= this.height) return false;
+    const d = this.ctx.getImageData(x, y, 1, 1).data;
+    return Math.abs(d[0] - target[0]) <= tolerance &&
+           Math.abs(d[1] - target[1]) <= tolerance &&
+           Math.abs(d[2] - target[2]) <= tolerance;
   }
 
   // ==================== Storage ====================

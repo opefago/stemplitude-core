@@ -1304,6 +1304,107 @@ export function getGameModuleSource() {
     };
   }, "Message", []);
 
+  // ========== TileMap ==========
+  mod.TileMap = Sk.misceval.buildClass(mod, function($gbl, $loc) {
+    $loc.__init__ = new Sk.builtin.func(function(self, cols, rows, tile_size) {
+      var c = optJs(cols, 20), r = optJs(rows, 15), ts = optJs(tile_size, 32);
+      self._eid = engine.createTileMap(c, r, ts);
+      return NONE;
+    });
+    $loc.__repr__ = new Sk.builtin.func(function(self) {
+      var tm = engine.getTileMap(self._eid);
+      if (!tm) return pyStr("<TileMap removed>");
+      return pyStr("<TileMap " + tm.cols + "x" + tm.rows + " tile=" + tm.tileSize + ">");
+    });
+    $loc.set_tile = new Sk.builtin.func(function(self, col, row, type) {
+      engine.setTile(self._eid, jsv(col), jsv(row), jsv(type));
+      return NONE;
+    });
+    $loc.get_tile = new Sk.builtin.func(function(self, col, row) {
+      return pyInt(engine.getTile(self._eid, jsv(col), jsv(row)));
+    });
+    $loc.set_palette = new Sk.builtin.func(function(self, type, color, solid, sprite) {
+      engine.setTilePalette(self._eid, jsv(type), {
+        color: optJs(color, null),
+        solid: optJs(solid, false),
+        sprite: optJs(sprite, null),
+      });
+      return NONE;
+    });
+    $loc.set_solid = new Sk.builtin.func(function(self, type, solid) {
+      engine.setTileSolid(self._eid, jsv(type), optJs(solid, true));
+      return NONE;
+    });
+    $loc.tile_at_pixel = new Sk.builtin.func(function(self, px, py) {
+      return pyInt(engine.tileAtPixel(self._eid, jsv(px), jsv(py)));
+    });
+    $loc.overlaps_solid = new Sk.builtin.func(function(self, obj) {
+      return pyBool(engine.objectOverlapsSolid(self._eid, eid(obj)));
+    });
+    $loc.push_out = new Sk.builtin.func(function(self, obj) {
+      engine.tileMapPushOut(self._eid, eid(obj));
+      return NONE;
+    });
+    $loc.set_data = new Sk.builtin.func(function(self, data) {
+      var rows = jsv(data);
+      var tm = engine.getTileMap(self._eid);
+      if (tm && rows && rows.length) {
+        for (var r = 0; r < Math.min(rows.length, tm.rows); r++) {
+          var row = rows[r];
+          if (row) for (var c = 0; c < Math.min(row.length, tm.cols); c++) {
+            tm.data[r][c] = row[c] || 0;
+          }
+        }
+      }
+      return NONE;
+    });
+    $loc.remove = new Sk.builtin.func(function(self) {
+      engine.removeTileMap(self._eid);
+      return NONE;
+    });
+    $loc.tp$getattr = function(pyName, canSuspend) {
+      var n = gn(pyName);
+      var tm = engine.getTileMap(this._eid);
+      if (tm) {
+        if (n === "x") return pyFloat(tm.x);
+        if (n === "y") return pyFloat(tm.y);
+        if (n === "cols") return pyInt(tm.cols);
+        if (n === "rows") return pyInt(tm.rows);
+        if (n === "tile_size") return pyInt(tm.tileSize);
+        if (n === "visible") return pyBool(tm.visible);
+        if (n === "width") return pyInt(tm.cols * tm.tileSize);
+        if (n === "height") return pyInt(tm.rows * tm.tileSize);
+      }
+      return Sk.generic.getAttr.call(this, pyName, canSuspend);
+    };
+    $loc.tp$setattr = function(pyName, value) {
+      var n = gn(pyName);
+      var tm = engine.getTileMap(this._eid);
+      if (tm) {
+        if (n === "x") { tm.x = jsv(value); return; }
+        if (n === "y") { tm.y = jsv(value); return; }
+        if (n === "visible") { tm.visible = !!jsv(value); return; }
+      }
+    };
+  }, "TileMap", []);
+
+  // ========== Collision Events ==========
+  mod.on_overlap = new Sk.builtin.func(function(objA, objB, callback) {
+    engine.onOverlap(eid(objA), eid(objB), function(aId, bId) {
+      try { Sk.misceval.callsimArray(callback, [objA, objB]); }
+      catch(e) { engine.onError(e.toString()); }
+    });
+    return NONE;
+  });
+
+  // ========== Color Detection ==========
+  mod.color_at = new Sk.builtin.func(function(px, py) {
+    return pyStr(engine.getColorAt(jsv(px), jsv(py)));
+  });
+  mod.touching_color = new Sk.builtin.func(function(obj, color) {
+    return pyBool(engine.touchingColor(eid(obj), gn(color)));
+  });
+
   // ========== Mobile / Touch / Tilt ==========
   mod.tilt_x = new Sk.builtin.func(function() { return pyFloat(engine.tiltX); });
   mod.tilt_y = new Sk.builtin.func(function() { return pyFloat(engine.tiltY); });
