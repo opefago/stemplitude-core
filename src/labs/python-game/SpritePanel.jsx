@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react';
-import { Paintbrush, Upload, LayoutGrid, Image, X, Plus, Search, Film, Volume2, Mic, MicOff, Play as PlayIcon, Trash2, AudioLines } from 'lucide-react';
+import { Paintbrush, Upload, LayoutGrid, Image, X, Plus, Search, Film, Volume2, Mic, MicOff, Play as PlayIcon, Trash2, AudioLines, Terminal } from 'lucide-react';
 import { getSpriteNames, getBuiltInSprite, getSpriteInfo, getCategories, renderPixelArt } from './sprites';
 import { getBgCategories, getBgNames, getBgDef, renderBg, renderBgThumb } from './backgrounds';
 import PixelArtEditor from './PixelArtEditor';
@@ -197,7 +197,7 @@ function BgGalleryModal({ addedNames, onPick, onClose }) {
   );
 }
 
-export default function SpritePanel({ sprites, backgrounds, sounds, onAddSprite, onRemoveSprite, onRenameSprite, onAddBackground, onRemoveBackground, onRenameBackground, onSelectBackground, onAddSound, onRemoveSound, onRenameSound }) {
+export default function SpritePanel({ sprites, backgrounds, sounds, consoleLogs, onAddSprite, onRemoveSprite, onRenameSprite, onAddBackground, onRemoveBackground, onRenameBackground, onSelectBackground, onAddSound, onRemoveSound, onRenameSound, onClearConsole }) {
   const [tab, setTab] = useState('sprites');
   const [showPainter, setShowPainter] = useState(false);
   const [showGallery, setShowGallery] = useState(false);
@@ -213,6 +213,13 @@ export default function SpritePanel({ sprites, backgrounds, sounds, onAddSprite,
   const recorderRef = useRef(null);
   const chunksRef = useRef([]);
   const playingAudioRef = useRef(null);
+  const consoleEndRef = useRef(null);
+
+  useEffect(() => {
+    if (tab === 'console' && consoleEndRef.current) {
+      consoleEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [consoleLogs, tab]);
 
   useEffect(() => {
     const onKey = (e) => {
@@ -485,6 +492,10 @@ export default function SpritePanel({ sprites, backgrounds, sounds, onAddSprite,
           <Volume2 size={13} /> Sounds
           {sounds?.length > 0 && <span className="sp-badge">{sounds.length}</span>}
         </button>
+        <button className={`sp-tab ${tab === 'console' ? 'active' : ''}`} onClick={() => { setTab('console'); setShowGallery(false); }}>
+          <Terminal size={13} /> Console
+          {consoleLogs?.length > 0 && <span className="sp-badge sp-badge-console">{consoleLogs.length}</span>}
+        </button>
       </div>
 
       {/* Sprites Tab */}
@@ -608,7 +619,32 @@ export default function SpritePanel({ sprites, backgrounds, sounds, onAddSprite,
         </div>
       )}
 
+      {/* Console Tab */}
+      {tab === 'console' && (
+        <div className="sp-content sp-console-content">
+          <div className="sp-console-toolbar">
+            <span className="sp-console-title">Console Output</span>
+            <button className="sp-console-clear" onClick={onClearConsole} title="Clear console">
+              <Trash2 size={13} /> Clear
+            </button>
+          </div>
+          <div className="sp-console-log">
+            {(!consoleLogs || consoleLogs.length === 0) && (
+              <div className="sp-console-empty">No output yet. Use the <strong>print</strong> block to log values here.</div>
+            )}
+            {(consoleLogs || []).map((entry, i) => (
+              <div key={i} className={`sp-console-entry sp-console-${entry.type || 'log'}`}>
+                <span className="sp-console-time">{entry.time}</span>
+                <span className="sp-console-text">{entry.text}</span>
+              </div>
+            ))}
+            <div ref={consoleEndRef} />
+          </div>
+        </div>
+      )}
+
       {/* Floating Action Button */}
+      {showFab && <div className="sp-fab-backdrop" onClick={() => setShowFab(false)} />}
       <div className="sp-fab-wrap">
         {showFab && (
           <div className="sp-fab-menu">

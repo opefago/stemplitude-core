@@ -57,6 +57,8 @@ const GameMakerLab = () => {
   const [generatedCode, setGeneratedCode] = useState('');
   const [isCanvasFullscreen, setIsCanvasFullscreen] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  const [consoleLogs, setConsoleLogs] = useState([]);
+  const consoleLogsRef = useRef([]);
 
   const [projectId, setProjectId] = useState(() => crypto.randomUUID());
   const [projectName, setProjectName] = useState('Untitled Project');
@@ -150,7 +152,59 @@ const GameMakerLab = () => {
     });
     workspaceRef.current = workspace;
 
-    workspace.createVariable('player');
+    workspace.registerToolboxCategoryCallback('GM_PROCEDURES', function(ws) {
+      const xmlList = [];
+
+      const defBlock = Blockly.utils.xml.createElement('block');
+      defBlock.setAttribute('type', 'procedures_defnoreturn');
+      const defMutation = Blockly.utils.xml.createElement('mutation');
+      const defName = Blockly.utils.xml.createElement('field');
+      defName.setAttribute('name', 'NAME');
+      defName.textContent = 'do something';
+      defBlock.appendChild(defName);
+      xmlList.push(defBlock);
+
+      const procedures = Blockly.Procedures.allProcedures(ws);
+      for (const proc of procedures[0]) {
+        const callBlock = Blockly.utils.xml.createElement('block');
+        callBlock.setAttribute('type', 'procedures_callnoreturn');
+        callBlock.setAttribute('gap', '16');
+        const mutation = Blockly.utils.xml.createElement('mutation');
+        mutation.setAttribute('name', proc[0]);
+        for (const a of proc[1]) {
+          const arg = Blockly.utils.xml.createElement('arg');
+          arg.setAttribute('name', a);
+          mutation.appendChild(arg);
+        }
+        callBlock.appendChild(mutation);
+        xmlList.push(callBlock);
+      }
+      for (const proc of procedures[1]) {
+        const callBlock = Blockly.utils.xml.createElement('block');
+        callBlock.setAttribute('type', 'procedures_callreturn');
+        callBlock.setAttribute('gap', '16');
+        const mutation = Blockly.utils.xml.createElement('mutation');
+        mutation.setAttribute('name', proc[0]);
+        for (const a of proc[1]) {
+          const arg = Blockly.utils.xml.createElement('arg');
+          arg.setAttribute('name', a);
+          mutation.appendChild(arg);
+        }
+        callBlock.appendChild(mutation);
+        xmlList.push(callBlock);
+      }
+
+      const sep = Blockly.utils.xml.createElement('sep');
+      sep.setAttribute('gap', '24');
+      xmlList.push(sep);
+      const retBlock = Blockly.utils.xml.createElement('block');
+      retBlock.setAttribute('type', 'gm_return');
+      xmlList.push(retBlock);
+
+      return xmlList;
+    });
+
+    workspace.getVariableMap().createVariable('player');
 
     workspace._getSoundNames = () =>
       assetManagerRef.current.list('sound').map(s => s.name);
@@ -238,24 +292,45 @@ const GameMakerLab = () => {
     return () => document.removeEventListener('fullscreenchange', handler);
   }, []);
 
+  const addConsoleEntry = useCallback((text, type = 'log') => {
+    const now = new Date();
+    const time = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const entry = { text: String(text), type, time };
+    consoleLogsRef.current = [...consoleLogsRef.current, entry];
+    setConsoleLogs(consoleLogsRef.current);
+  }, []);
+
   const handleRun = useCallback(() => {
     if (!skulptReady || !engineRef.current || !workspaceRef.current) return;
     engineRef.current.reset();
+    consoleLogsRef.current = [];
+    setConsoleLogs([]);
     setIsRunning(true);
     setGameTitle('My Game');
+
+    engineRef.current.onRestart = () => {
+      setTimeout(() => handleRun(), 50);
+    };
 
     const code = generateCode(workspaceRef.current);
     setGeneratedCode(code);
     runPythonCode(
       code,
       engineRef.current,
-      () => {},
-      (err) => { console.warn('[Game Error]', err); setIsRunning(false); }
+      (text) => { if (text && text.trim()) addConsoleEntry(text.trim()); },
+      (err) => {
+        console.warn('[Game Error]', err);
+        addConsoleEntry(String(err), 'error');
+        setIsRunning(false);
+      }
     );
-  }, [skulptReady]);
+  }, [skulptReady, addConsoleEntry]);
 
   const handleStop = useCallback(() => {
-    if (engineRef.current) engineRef.current.stop();
+    if (engineRef.current) {
+      engineRef.current.stop();
+      engineRef.current.onRestart = null;
+    }
     setIsRunning(false);
   }, []);
 
@@ -605,6 +680,7 @@ const GameMakerLab = () => {
             sprites={customSprites}
             backgrounds={customBackgrounds}
             sounds={customSounds}
+            consoleLogs={consoleLogs}
             onAddSprite={handleAddSprite}
             onRemoveSprite={handleRemoveSprite}
             onRenameSprite={handleRenameSprite}
@@ -615,6 +691,7 @@ const GameMakerLab = () => {
             onAddSound={handleAddSound}
             onRemoveSound={handleRemoveSound}
             onRenameSound={handleRenameSound}
+            onClearConsole={() => { consoleLogsRef.current = []; setConsoleLogs([]); }}
           />
         </div>
       </div>

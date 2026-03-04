@@ -976,13 +976,19 @@ export function getGameModuleSource() {
   mod.Score = Sk.misceval.buildClass(mod, function($gbl, $loc) {
     $loc.__init__ = new Sk.builtin.func(function(self, x, y, prefix, color, size) {
       var px = optJs(x, 10), py = optJs(y, 10);
-      var pfx = optJs(prefix, "Score: ");
-      var c = optJs(color, "white"), sz = optJs(size, 24);
+      var pfx = optJs(prefix, "\u2B50 ");
+      var c = optJs(color, "#FFD700"), sz = optJs(size, 22);
       self._value = 0;
       self._prefix = pfx;
+      self._sz = sz;
+      self._bgEid = engine.createObject("rect", {
+        x: px - 6, y: py - 4, width: 120, height: sz + 10,
+        color: "rgba(0,0,0,0.55)", layer: 999, fixed: true
+      });
       self._eid = engine.createObject("text", {
         x: px, y: py, text: pfx + "0", color: c, fontSize: sz,
-        fontFamily: "monospace", bold: true, layer: 1000, fixed: true
+        fontFamily: "monospace", bold: true, layer: 1000, fixed: true,
+        shadowColor: "rgba(0,0,0,0.6)", shadowBlur: 4, shadowX: 1, shadowY: 1
       });
       return NONE;
     });
@@ -994,7 +1000,14 @@ export function getGameModuleSource() {
   }, "Score", []);
 
   function setupScoreProps($loc) {
-    var origGet = $loc.tp$getattr;
+    function _resizeBg(self) {
+      var bg = engine.getObject(self._bgEid);
+      var o = engine.getObject(self._eid);
+      if (bg && o) {
+        var charW = self._sz * 0.6;
+        bg.width = Math.max(120, (self._prefix + String(self._value)).length * charW + 16);
+      }
+    }
     $loc.tp$getattr = function(pyName, canSuspend) {
       var n = gn(pyName);
       if (n === "value") return pyInt(this._value);
@@ -1013,35 +1026,39 @@ export function getGameModuleSource() {
       var n = gn(pyName);
       var jv = jsv(value);
       var o = engine.getObject(this._eid);
-      if (n === "value") { this._value = jv; if (o) o.text = this._prefix + String(jv); return; }
-      if (n === "prefix") { this._prefix = jv; if (o) o.text = jv + String(this._value); return; }
+      if (n === "value") { this._value = jv; if (o) o.text = this._prefix + String(jv); _resizeBg(this); return; }
+      if (n === "prefix") { this._prefix = jv; if (o) o.text = jv + String(this._value); _resizeBg(this); return; }
       if (o) {
-        if (n === "x") { o.x = jv; return; }
-        if (n === "y") { o.y = jv; return; }
+        if (n === "x") { o.x = jv; var bg = engine.getObject(this._bgEid); if (bg) bg.x = jv - 6; return; }
+        if (n === "y") { o.y = jv; var bg = engine.getObject(this._bgEid); if (bg) bg.y = jv - 4; return; }
         if (n === "color") { o.color = jv; return; }
         if (n === "size") { o.fontSize = jv; return; }
-        if (n === "visible") { o.visible = !!jv; return; }
+        if (n === "visible") { o.visible = !!jv; var bg = engine.getObject(this._bgEid); if (bg) bg.visible = !!jv; return; }
       }
     };
     $loc.add = new Sk.builtin.func(function(self, amount) {
       self._value += optJs(amount, 1);
       var o = engine.getObject(self._eid);
       if (o) o.text = self._prefix + String(self._value);
+      _resizeBg(self);
       return pyInt(self._value);
     });
     $loc.reset = new Sk.builtin.func(function(self) {
       self._value = 0;
       var o = engine.getObject(self._eid);
       if (o) o.text = self._prefix + "0";
+      _resizeBg(self);
       return NONE;
     });
   }
 
   mod.Lives = Sk.misceval.buildClass(mod, function($gbl, $loc) {
-    $loc.__init__ = new Sk.builtin.func(function(self, x, y, max, color, size) {
+    $loc.__init__ = new Sk.builtin.func(function(self, x, y, max, color, size, icon) {
       var px = optJs(x, 10), py = optJs(y, 40);
       var mx = optJs(max, 3);
-      var c = optJs(color, "#FF1493"), sz = optJs(size, 22);
+      var c = optJs(color, null) || "#FF1493";
+      var sz = optJs(size, null) || 22;
+      var iconName = optJs(icon, null);
       self._max = mx;
       self._value = mx;
       self._color = c;
@@ -1049,12 +1066,26 @@ export function getGameModuleSource() {
       self._px = px;
       self._py = py;
       self._sz = sz;
+      self._isSprite = !!iconName;
+      var spacing = iconName ? sz + 6 : sz + 4;
+      self._bgEid = engine.createObject("rect", {
+        x: px - 6, y: py - 4, width: mx * spacing + 8, height: sz + 10,
+        color: "rgba(0,0,0,0.55)", layer: 999, fixed: true
+      });
       for (var i = 0; i < mx; i++) {
-        var eid = engine.createObject("text", {
-          x: px + i * (sz + 4), y: py, text: "\\u2764",
-          color: c, fontSize: sz, fontFamily: "sans-serif",
-          layer: 1000, fixed: true
-        });
+        var eid;
+        if (iconName) {
+          eid = engine.createSprite(iconName, px + i * spacing, py, Math.max(1, Math.round(sz / 8)));
+          var sObj = engine.getObject(eid);
+          if (sObj) { sObj.layer = 1000; sObj.fixed = true; }
+        } else {
+          eid = engine.createObject("text", {
+            x: px + i * spacing, y: py, text: "\u2764",
+            color: c, fontSize: sz, fontFamily: "sans-serif",
+            layer: 1000, fixed: true,
+            shadowColor: "rgba(0,0,0,0.5)", shadowBlur: 3, shadowX: 1, shadowY: 1
+          });
+        }
         self._eids.push(eid);
       }
       return NONE;
@@ -1067,6 +1098,20 @@ export function getGameModuleSource() {
   }, "Lives", []);
 
   function setupLivesProps($loc) {
+    function _refreshLives(self) {
+      for (var i = 0; i < self._eids.length; i++) {
+        var o = engine.getObject(self._eids[i]);
+        if (!o) continue;
+        if (self._isSprite) {
+          o.visible = i < self._value;
+          o.opacity = i < self._value ? 1 : 0.2;
+        } else {
+          o.visible = true;
+          o.color = i < self._value ? self._color : "#333";
+          o.opacity = i < self._value ? 1 : 0.3;
+        }
+      }
+    }
     $loc.tp$getattr = function(pyName, canSuspend) {
       var n = gn(pyName);
       if (n === "value") return pyInt(this._value);
@@ -1078,12 +1123,15 @@ export function getGameModuleSource() {
       var jv = jsv(value);
       if (n === "value") {
         this._value = Math.max(0, Math.min(this._max, jv));
+        _refreshLives(this);
+        return;
+      }
+      if (n === "visible") {
+        var bg = engine.getObject(this._bgEid);
+        if (bg) bg.visible = !!jv;
         for (var i = 0; i < this._eids.length; i++) {
           var o = engine.getObject(this._eids[i]);
-          if (o) {
-            o.visible = i < this._value;
-            o.color = i < this._value ? this._color : "#333";
-          }
+          if (o) o.visible = !!jv;
         }
         return;
       }
@@ -1091,19 +1139,13 @@ export function getGameModuleSource() {
     $loc.lose = new Sk.builtin.func(function(self, n) {
       var amount = optJs(n, 1);
       self._value = Math.max(0, self._value - amount);
-      for (var i = 0; i < self._eids.length; i++) {
-        var o = engine.getObject(self._eids[i]);
-        if (o) o.visible = i < self._value;
-      }
+      _refreshLives(self);
       return pyInt(self._value);
     });
     $loc.gain = new Sk.builtin.func(function(self, n) {
       var amount = optJs(n, 1);
       self._value = Math.min(self._max, self._value + amount);
-      for (var i = 0; i < self._eids.length; i++) {
-        var o = engine.getObject(self._eids[i]);
-        if (o) o.visible = i < self._value;
-      }
+      _refreshLives(self);
       return pyInt(self._value);
     });
     $loc.is_dead = new Sk.builtin.func(function(self) {
@@ -1115,10 +1157,17 @@ export function getGameModuleSource() {
     $loc.__init__ = new Sk.builtin.func(function(self, x, y, width, height, color, bg_color) {
       var px = optJs(x, 10), py = optJs(y, 70);
       var bw = optJs(width, 200), bh = optJs(height, 20);
-      var c = optJs(color, "#22c55e"), bgc = optJs(bg_color, "#333");
+      var c = optJs(color, "#22c55e"), bgc = optJs(bg_color, "#222");
       self._value = 100;
       self._max = 100;
       self._w = bw;
+      self._bh = bh;
+      self._px = px;
+      self._py = py;
+      self._frameEid = engine.createObject("rect", {
+        x: px - 2, y: py - 2, width: bw + 4, height: bh + 4,
+        color: "rgba(255,255,255,0.25)", layer: 998, fixed: true
+      });
       self._bgEid = engine.createObject("rect", {
         x: px, y: py, width: bw, height: bh, color: bgc, layer: 999, fixed: true
       });
@@ -1129,7 +1178,8 @@ export function getGameModuleSource() {
         x: px + bw / 2, y: py + 2, text: "100%",
         color: "white", fontSize: Math.max(10, bh - 6),
         fontFamily: "monospace", bold: true, textAlign: "center",
-        layer: 1001, fixed: true
+        layer: 1001, fixed: true,
+        shadowColor: "rgba(0,0,0,0.7)", shadowBlur: 2, shadowX: 1, shadowY: 1
       });
       return NONE;
     });
@@ -1183,15 +1233,21 @@ export function getGameModuleSource() {
       var px = optJs(x, 500), py = optJs(y, 10);
       var secs = optJs(seconds, 0);
       var cd = optJs(count_down, false);
-      var c = optJs(color, "white"), sz = optJs(size, 24);
+      var c = optJs(color, "white"), sz = optJs(size, 22);
       self._seconds = secs;
       self._elapsed = cd ? secs : 0;
       self._countDown = cd;
       self._running = false;
+      var displayText = "\u23F1 " + _fmtTime(cd ? secs : 0);
+      self._bgEid = engine.createObject("rect", {
+        x: px - 6, y: py - 4, width: sz * 5 + 12, height: sz + 10,
+        color: "rgba(0,0,0,0.55)", layer: 999, fixed: true
+      });
       self._eid = engine.createObject("text", {
-        x: px, y: py, text: _fmtTime(cd ? secs : 0),
+        x: px, y: py, text: displayText,
         color: c, fontSize: sz, fontFamily: "monospace", bold: true,
-        layer: 1000, fixed: true
+        layer: 1000, fixed: true,
+        shadowColor: "rgba(0,0,0,0.6)", shadowBlur: 4, shadowX: 1, shadowY: 1
       });
       self._timerId = null;
       return NONE;
@@ -1210,6 +1266,7 @@ export function getGameModuleSource() {
   }
 
   function setupTimerProps($loc) {
+    var TIMER_ICON = "\u23F1 ";
     $loc.tp$getattr = function(pyName, canSuspend) {
       var n = gn(pyName);
       if (n === "elapsed") return pyFloat(this._elapsed);
@@ -1223,7 +1280,14 @@ export function getGameModuleSource() {
       if (n === "value" || n === "elapsed") {
         this._elapsed = jv;
         var o = engine.getObject(this._eid);
-        if (o) o.text = _fmtTime(this._elapsed);
+        if (o) o.text = TIMER_ICON + _fmtTime(this._elapsed);
+        return;
+      }
+      if (n === "visible") {
+        var o = engine.getObject(this._eid);
+        var bg = engine.getObject(this._bgEid);
+        if (o) o.visible = !!jv;
+        if (bg) bg.visible = !!jv;
         return;
       }
     };
@@ -1238,7 +1302,7 @@ export function getGameModuleSource() {
         }
         var o = engine.getObject(self._eid);
         if (o) {
-          o.text = _fmtTime(self._elapsed);
+          o.text = TIMER_ICON + _fmtTime(self._elapsed);
           if (self._countDown && self._elapsed <= 5) o.color = "#ef4444";
         }
       }, true);
@@ -1252,7 +1316,7 @@ export function getGameModuleSource() {
     $loc.reset = new Sk.builtin.func(function(self, secs) {
       self._elapsed = self._countDown ? optJs(secs, self._seconds) : 0;
       var o = engine.getObject(self._eid);
-      if (o) { o.text = _fmtTime(self._elapsed); o.color = "white"; }
+      if (o) { o.text = TIMER_ICON + _fmtTime(self._elapsed); o.color = "white"; }
       return NONE;
     });
     $loc.is_done = new Sk.builtin.func(function(self) {
@@ -1273,7 +1337,8 @@ export function getGameModuleSource() {
       self._eid = engine.createObject("text", {
         x: engine.width / 2, y: engine.height / 2 - sz / 2,
         text: t, color: c, fontSize: sz, fontFamily: "Arial",
-        bold: true, textAlign: "center", layer: 1101, fixed: true
+        bold: true, textAlign: "center", layer: 1101, fixed: true,
+        shadowColor: "rgba(0,0,0,0.8)", shadowBlur: 6, shadowX: 2, shadowY: 2
       });
       if (dur > 0) {
         engine.addTimer(dur, function() {
@@ -1435,6 +1500,15 @@ export function getGameModuleSource() {
   });
   mod.start = new Sk.builtin.func(function() { engine.start(); return NONE; });
   mod.stop = new Sk.builtin.func(function() { engine.stop(); return NONE; });
+  mod.restart = new Sk.builtin.func(function() {
+    engine.stop();
+    if (engine.onRestart) engine.onRestart();
+    return NONE;
+  });
+  mod.remove_all = new Sk.builtin.func(function() {
+    engine.objects.clear();
+    return NONE;
+  });
 
   // Aliases for convenience
   mod.update = mod.on_update;

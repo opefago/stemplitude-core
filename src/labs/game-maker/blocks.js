@@ -790,19 +790,7 @@ export function registerBlocks() {
       colour: HUD_HUE, inputsInline: true,
       tooltip: 'Create a score display on screen',
     },
-    {
-      type: 'hud_create_lives',
-      message0: 'set %1 to Lives at x %2 y %3 max %4',
-      args0: [
-        { type: 'field_variable_creator', name: 'VAR', variable: 'lives', variableTypes: [''] },
-        { type: 'input_value', name: 'X', check: 'Number' },
-        { type: 'input_value', name: 'Y', check: 'Number' },
-        { type: 'input_value', name: 'MAX', check: 'Number' },
-      ],
-      previousStatement: null, nextStatement: null,
-      colour: HUD_HUE, inputsInline: true,
-      tooltip: 'Create a lives display with heart icons',
-    },
+    // hud_create_lives is defined programmatically below (uses dynamic sprite picker for icon)
     {
       type: 'hud_create_healthbar',
       message0: 'set %1 to HealthBar at x %2 y %3',
@@ -931,6 +919,53 @@ export function registerBlocks() {
       ],
       output: 'Boolean', colour: HUD_HUE, inputsInline: true,
       tooltip: 'True when a countdown timer reaches zero',
+    },
+
+    // ════════ HUD Events ════════
+    {
+      type: 'hud_on_score_reach',
+      message0: 'when %1 reaches %2 %3 %4',
+      args0: [
+        { type: 'field_variable_creator', name: 'VAR', variable: 'score', variableTypes: [''] },
+        { type: 'input_value', name: 'VALUE', check: 'Number' },
+        { type: 'input_dummy' },
+        { type: 'input_statement', name: 'DO' },
+      ],
+      colour: HUD_HUE, inputsInline: true,
+      tooltip: 'Run code when the score reaches a specific value',
+    },
+    {
+      type: 'hud_on_zero',
+      message0: 'when %1 reaches zero %2 %3',
+      args0: [
+        { type: 'field_variable_creator', name: 'VAR', variable: 'lives', variableTypes: [''] },
+        { type: 'input_dummy' },
+        { type: 'input_statement', name: 'DO' },
+      ],
+      colour: HUD_HUE,
+      tooltip: 'Run code when lives or health reaches zero',
+    },
+    {
+      type: 'hud_on_timer_done',
+      message0: 'when %1 finishes %2 %3',
+      args0: [
+        { type: 'field_variable_creator', name: 'VAR', variable: 'countdown', variableTypes: [''] },
+        { type: 'input_dummy' },
+        { type: 'input_statement', name: 'DO' },
+      ],
+      colour: HUD_HUE,
+      tooltip: 'Run code when a countdown timer reaches zero',
+    },
+    {
+      type: 'hud_on_value_change',
+      message0: 'when %1 value changes %2 %3',
+      args0: [
+        { type: 'field_variable_creator', name: 'VAR', variable: 'score', variableTypes: [''] },
+        { type: 'input_dummy' },
+        { type: 'input_statement', name: 'DO' },
+      ],
+      colour: HUD_HUE,
+      tooltip: 'Run code every time a HUD component value changes',
     },
 
     // ════════ Tweening ════════
@@ -1181,6 +1216,39 @@ export function registerBlocks() {
       tooltip: 'Cancel a running after/every timer by its ID',
     },
 
+    // ════════ Game Control ════════
+    {
+      type: 'game_stop',
+      message0: 'stop game',
+      previousStatement: null, nextStatement: null,
+      colour: EVENTS_HUE,
+      tooltip: 'Stop the game (game over)',
+    },
+    {
+      type: 'game_restart',
+      message0: 'restart game',
+      previousStatement: null, nextStatement: null,
+      colour: EVENTS_HUE,
+      tooltip: 'Restart the game from the beginning',
+    },
+    {
+      type: 'game_print',
+      message0: 'print %1',
+      args0: [
+        { type: 'input_value', name: 'TEXT' },
+      ],
+      previousStatement: null, nextStatement: null,
+      colour: EVENTS_HUE, inputsInline: true,
+      tooltip: 'Print a value to the console (for debugging)',
+    },
+    {
+      type: 'game_remove_all',
+      message0: 'remove all objects',
+      previousStatement: null, nextStatement: null,
+      colour: 160,
+      tooltip: 'Remove every object from the game',
+    },
+
     // ════════ Groups ════════
     {
       type: 'game_create_group',
@@ -1355,47 +1423,17 @@ export function registerBlocks() {
     // ════════ Button ════════
     {
       type: 'game_create_button',
-      message0: 'Button %1 x: %2 y: %3',
+      message0: 'set %1 to Button %2 color %3 x: %4 y: %5',
       args0: [
+        { type: 'field_variable_creator', name: 'VAR', variable: 'btn', variableTypes: [''] },
         { type: 'field_input', name: 'TEXT', text: 'Play' },
+        { type: 'field_colour', name: 'COLOR', colour: '#FF6B35' },
         { type: 'input_value', name: 'X', check: 'Number' },
         { type: 'input_value', name: 'Y', check: 'Number' },
       ],
-      output: null, colour: OBJECTS_HUE, inputsInline: true,
+      previousStatement: null, nextStatement: null,
+      colour: OBJECTS_HUE, inputsInline: true,
       tooltip: 'Create a clickable button',
-    },
-
-    // ════════ Save / Load ════════
-    {
-      type: 'game_save',
-      message0: 'save %1 = %2',
-      args0: [
-        { type: 'input_value', name: 'KEY', check: 'String' },
-        { type: 'input_value', name: 'VALUE' },
-      ],
-      previousStatement: null, nextStatement: null,
-      colour: 120, inputsInline: true,
-      tooltip: 'Save a value to local storage (persists between sessions)',
-    },
-    {
-      type: 'game_load',
-      message0: 'load %1 default %2',
-      args0: [
-        { type: 'input_value', name: 'KEY', check: 'String' },
-        { type: 'input_value', name: 'DEFAULT' },
-      ],
-      output: null, colour: 120, inputsInline: true,
-      tooltip: 'Load a saved value (returns default if not found)',
-    },
-    {
-      type: 'game_delete_save',
-      message0: 'delete save %1',
-      args0: [
-        { type: 'input_value', name: 'KEY', check: 'String' },
-      ],
-      previousStatement: null, nextStatement: null,
-      colour: 120, inputsInline: true,
-      tooltip: 'Delete a saved value from local storage',
     },
 
     // ════════ Emitter ════════
@@ -2020,6 +2058,30 @@ export function registerBlocks() {
     },
   };
 
+  Blockly.Blocks['hud_create_lives'] = {
+    init() {
+      this.appendDummyInput()
+        .appendField('set')
+        .appendField(new FieldVariableCreator('lives'), 'VAR')
+        .appendField('to Lives icon')
+        .appendField(new Blockly.FieldDropdown(function() {
+          var ws = this.getSourceBlock()?.workspace;
+          var names = ws?._getSpriteNames?.() || [];
+          var opts = [['\u2764 hearts', '__hearts__']];
+          for (var i = 0; i < names.length; i++) opts.push([names[i], names[i]]);
+          return opts;
+        }), 'ICON');
+      this.appendValueInput('X').setCheck('Number').appendField('x:');
+      this.appendValueInput('Y').setCheck('Number').appendField('y:');
+      this.appendValueInput('MAX').setCheck('Number').appendField('max:');
+      this.setInputsInline(true);
+      this.setPreviousStatement(true);
+      this.setNextStatement(true);
+      this.setColour(HUD_HUE);
+      this.setTooltip('Create a lives display with hearts or custom sprite icons');
+    },
+  };
+
   Blockly.Blocks['game_play_custom_sound'] = {
     init() {
       this.appendDummyInput()
@@ -2337,6 +2399,10 @@ export function registerBlocks() {
     const x = gen.valueToCode(block, 'X', Order.NONE) || '10';
     const y = gen.valueToCode(block, 'Y', Order.NONE) || '40';
     const max = gen.valueToCode(block, 'MAX', Order.NONE) || '3';
+    const icon = block.getFieldValue('ICON');
+    if (icon && icon !== '__hearts__') {
+      return v + ' = game.Lives(' + x + ', ' + y + ', ' + max + ', None, None, "' + icon + '")\n';
+    }
     return v + ' = game.Lives(' + x + ', ' + y + ', ' + max + ')\n';
   };
   pythonGenerator.forBlock['hud_create_healthbar'] = function(block, gen) {
@@ -2399,6 +2465,71 @@ export function registerBlocks() {
   pythonGenerator.forBlock['hud_timer_done'] = function(block, gen) {
     const v = gen.getVariableName(block.getFieldValue('VAR'));
     return [v + '.is_done()', Order.FUNCTION_CALL];
+  };
+
+  // ────── HUD Event generators ──────
+  function _addIndent(code, indent) {
+    return code.split('\n').map(function(l) { return l.trim() ? indent + l : l; }).join('\n');
+  }
+  pythonGenerator.forBlock['hud_on_score_reach'] = function(block, gen) {
+    const I = gen.INDENT;
+    const v = gen.getVariableName(block.getFieldValue('VAR'));
+    const val = gen.valueToCode(block, 'VALUE', Order.NONE) || '100';
+    const body = gen.statementToCode(block, 'DO') || I + 'pass\n';
+    const flag = '_reached_' + v;
+    const fn = '_watch_' + v + '_reach';
+    return flag + ' = False\n' +
+      'def ' + fn + '():\n' +
+      I + 'global ' + flag + '\n' +
+      I + 'if not ' + flag + ' and ' + v + '.value >= ' + val + ':\n' +
+      I + I + flag + ' = True\n' +
+      _addIndent(body, I) +
+      'game.on_update(' + fn + ')\n';
+  };
+  pythonGenerator.forBlock['hud_on_zero'] = function(block, gen) {
+    const I = gen.INDENT;
+    const v = gen.getVariableName(block.getFieldValue('VAR'));
+    const body = gen.statementToCode(block, 'DO') || I + 'pass\n';
+    const flag = '_zero_' + v;
+    const fn = '_watch_' + v + '_zero';
+    return flag + ' = False\n' +
+      'def ' + fn + '():\n' +
+      I + 'global ' + flag + '\n' +
+      I + 'if not ' + flag + ' and ' + v + '.is_dead():\n' +
+      I + I + flag + ' = True\n' +
+      _addIndent(body, I) +
+      'game.on_update(' + fn + ')\n';
+  };
+  pythonGenerator.forBlock['hud_on_timer_done'] = function(block, gen) {
+    const I = gen.INDENT;
+    const v = gen.getVariableName(block.getFieldValue('VAR'));
+    const body = gen.statementToCode(block, 'DO') || I + 'pass\n';
+    const flag = '_done_' + v;
+    const fn = '_watch_' + v + '_done';
+    return flag + ' = False\n' +
+      'def ' + fn + '():\n' +
+      I + 'global ' + flag + '\n' +
+      I + 'if not ' + flag + ' and ' + v + '.is_done():\n' +
+      I + I + flag + ' = True\n' +
+      _addIndent(body, I) +
+      'game.on_update(' + fn + ')\n';
+  };
+  pythonGenerator.forBlock['hud_on_value_change'] = function(block, gen) {
+    const I = gen.INDENT;
+    const v = gen.getVariableName(block.getFieldValue('VAR'));
+    const body = gen.statementToCode(block, 'DO') || I + 'pass\n';
+    const prev = '_prev_' + v;
+    const fn = '_watch_' + v + '_change';
+    return prev + ' = None\n' +
+      'def ' + fn + '():\n' +
+      I + 'global ' + prev + '\n' +
+      I + '_cur = ' + v + '.value\n' +
+      I + 'if ' + prev + ' is None:\n' +
+      I + I + prev + ' = _cur\n' +
+      I + 'if _cur != ' + prev + ':\n' +
+      I + I + prev + ' = _cur\n' +
+      _addIndent(body, I) +
+      'game.on_update(' + fn + ')\n';
   };
 
   pythonGenerator.forBlock['game_tween'] = function(block, gen) {
@@ -2520,6 +2651,19 @@ export function registerBlocks() {
   pythonGenerator.forBlock['game_cancel_timer'] = function(block, gen) {
     return 'game.cancel_timer(' + gen.getVariableName(block.getFieldValue('VAR')) + ')\n';
   };
+  pythonGenerator.forBlock['game_stop'] = function() {
+    return 'game.stop()\n';
+  };
+  pythonGenerator.forBlock['game_restart'] = function() {
+    return 'game.restart()\n';
+  };
+  pythonGenerator.forBlock['game_print'] = function(block, gen) {
+    const text = gen.valueToCode(block, 'TEXT', Order.NONE) || '""';
+    return 'print(' + text + ')\n';
+  };
+  pythonGenerator.forBlock['game_remove_all'] = function() {
+    return 'game.remove_all()\n';
+  };
 
   // ────── Group generators ──────
   pythonGenerator.forBlock['game_create_group'] = function(block, gen) {
@@ -2611,26 +2755,12 @@ export function registerBlocks() {
 
   // ────── Button generator ──────
   pythonGenerator.forBlock['game_create_button'] = function(block, gen) {
+    const v = gen.getVariableName(block.getFieldValue('VAR'));
     const text = block.getFieldValue('TEXT') || 'Play';
+    const color = block.getFieldValue('COLOR') || '#FF6B35';
     const x = gen.valueToCode(block, 'X', Order.NONE) || '200';
     const y = gen.valueToCode(block, 'Y', Order.NONE) || '300';
-    return ['game.Button("' + text + '", ' + x + ', ' + y + ')', Order.FUNCTION_CALL];
-  };
-
-  // ────── Save/Load generators ──────
-  pythonGenerator.forBlock['game_save'] = function(block, gen) {
-    const key = gen.valueToCode(block, 'KEY', Order.NONE) || '"save1"';
-    const val = gen.valueToCode(block, 'VALUE', Order.NONE) || '0';
-    return 'game.save(' + key + ', ' + val + ')\n';
-  };
-  pythonGenerator.forBlock['game_load'] = function(block, gen) {
-    const key = gen.valueToCode(block, 'KEY', Order.NONE) || '"save1"';
-    const def = gen.valueToCode(block, 'DEFAULT', Order.NONE) || '0';
-    return ['game.load(' + key + ', ' + def + ')', Order.FUNCTION_CALL];
-  };
-  pythonGenerator.forBlock['game_delete_save'] = function(block, gen) {
-    const key = gen.valueToCode(block, 'KEY', Order.NONE) || '"save1"';
-    return 'game.delete_save(' + key + ')\n';
+    return v + ' = game.Button("' + text + '", ' + x + ', ' + y + ', 0, 0, "' + color + '")\n';
   };
 
   // ────── Emitter generators ──────
@@ -2726,6 +2856,74 @@ export function registerBlocks() {
   pythonGenerator.forBlock['game_choice'] = function(block, gen) {
     const lst = gen.valueToCode(block, 'LIST', Order.NONE) || '[]';
     return ['game.choice(' + lst + ')', Order.FUNCTION_CALL];
+  };
+
+  // ═══════════════════ Return block with toggleable value ═══════════════════
+
+  const RETURN_MINUS_SVG = 'data:image/svg+xml;utf8,' + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24">' +
+    '<circle cx="12" cy="12" r="10" fill="#2c3e50" />' +
+    '<rect x="7" y="11" width="10" height="2" fill="#ffffff" rx="1" />' +
+    '</svg>'
+  );
+  const RETURN_PLUS_SVG = 'data:image/svg+xml;utf8,' + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24">' +
+    '<circle cx="12" cy="12" r="10" fill="#2c3e50" />' +
+    '<rect x="11" y="7" width="2" height="10" fill="#ffffff" rx="1" />' +
+    '<rect x="7" y="11" width="10" height="2" fill="#ffffff" rx="1" />' +
+    '</svg>'
+  );
+
+  Blockly.Blocks['gm_return'] = {
+    hasValue_: true,
+    init() {
+      this.setPreviousStatement(true);
+      this.setColour(290);
+      this.setTooltip('Return from a custom block – click the button to toggle the return value');
+      this.updateShape_();
+    },
+    updateShape_() {
+      if (this.getInput('VALUE')) this.removeInput('VALUE');
+      if (this.getInput('BTN_ROW')) this.removeInput('BTN_ROW');
+      if (this.getInput('EMPTY')) this.removeInput('EMPTY');
+
+      if (this.hasValue_) {
+        const btn = new Blockly.FieldImage(RETURN_MINUS_SVG, 18, 18, '-');
+        btn.setOnClickHandler(() => { this.hasValue_ = false; this.updateShape_(); });
+        this.appendValueInput('VALUE').appendField('return');
+        this.appendDummyInput('BTN_ROW').appendField(btn);
+        this.setInputsInline(true);
+      } else {
+        const btn = new Blockly.FieldImage(RETURN_PLUS_SVG, 18, 18, '+');
+        btn.setOnClickHandler(() => { this.hasValue_ = true; this.updateShape_(); });
+        this.appendDummyInput('EMPTY').appendField('return').appendField(btn);
+        this.setInputsInline(true);
+      }
+    },
+    saveExtraState() {
+      return { hasValue: this.hasValue_ };
+    },
+    loadExtraState(state) {
+      this.hasValue_ = state.hasValue !== false;
+      this.updateShape_();
+    },
+    mutationToDom() {
+      const container = Blockly.utils.xml.createElement('mutation');
+      container.setAttribute('has_value', this.hasValue_ ? '1' : '0');
+      return container;
+    },
+    domToMutation(xml) {
+      this.hasValue_ = xml.getAttribute('has_value') !== '0';
+      this.updateShape_();
+    },
+  };
+
+  pythonGenerator.forBlock['gm_return'] = function(block, gen) {
+    if (block.hasValue_ && block.getInput('VALUE')) {
+      const val = gen.valueToCode(block, 'VALUE', Order.NONE);
+      if (val) return 'return ' + val + '\n';
+    }
+    return 'return\n';
   };
 
   // ═══════════════════ Growable if/else-if/else (ported from MCU lab) ═══════════════════
@@ -2909,7 +3107,7 @@ export function registerBlocks() {
 export function generateCode(workspace) {
   pythonGenerator.init(workspace);
 
-  const EVENT_TYPES = ['game_on_overlap', 'game_on_click_obj', 'game_on_hover_obj', 'game_after', 'game_every'];
+  const EVENT_TYPES = ['game_on_overlap', 'game_on_click_obj', 'game_on_hover_obj', 'game_after', 'game_every', 'hud_on_score_reach', 'hud_on_zero', 'hud_on_timer_done', 'hud_on_value_change'];
   const topBlocks = workspace.getTopBlocks(true);
   const startBlocks = [];
   const procBlocks = [];

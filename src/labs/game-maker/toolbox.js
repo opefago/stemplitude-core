@@ -38,6 +38,7 @@ export const toolbox = {
           Y: { shadow: { type: 'math_number', fields: { NUM: 300 } } },
         }},
         { kind: 'block', type: 'game_clone' },
+        { kind: 'block', type: 'game_remove_all' },
         { kind: 'sep', gap: '16' },
         { kind: 'label', text: 'Physics' },
         { kind: 'block', type: 'game_set_velocity', inputs: {
@@ -84,6 +85,13 @@ export const toolbox = {
         { kind: 'block', type: 'game_follow', inputs: {
           SPEED: { shadow: { type: 'math_number', fields: { NUM: 3 } } },
         }},
+        { kind: 'sep', gap: '16' },
+        { kind: 'label', text: 'Tween' },
+        { kind: 'block', type: 'game_tween', inputs: {
+          TARGET: { shadow: { type: 'math_number', fields: { NUM: 300 } } },
+          DUR: { shadow: { type: 'math_number', fields: { NUM: 500 } } },
+        }},
+        { kind: 'block', type: 'game_cancel_tweens' },
       ],
     },
     {
@@ -103,6 +111,13 @@ export const toolbox = {
           MS: { shadow: { type: 'math_number', fields: { NUM: 1000 } } },
         }},
         { kind: 'block', type: 'game_cancel_timer' },
+        { kind: 'sep', gap: '16' },
+        { kind: 'label', text: 'Game Control' },
+        { kind: 'block', type: 'game_stop' },
+        { kind: 'block', type: 'game_restart' },
+        { kind: 'block', type: 'game_print', inputs: {
+          TEXT: { shadow: { type: 'text', fields: { TEXT: 'hello' } } },
+        }},
       ],
     },
     {
@@ -379,7 +394,7 @@ export const toolbox = {
     },
     {
       kind: 'category', name: 'My Blocks', colour: '290',
-      custom: 'PROCEDURE',
+      custom: 'GM_PROCEDURES',
     },
     { kind: 'sep' },
     {
@@ -471,16 +486,6 @@ export const toolbox = {
       ],
     },
     {
-      kind: 'category', name: 'Tween', colour: '45',
-      contents: [
-        { kind: 'block', type: 'game_tween', inputs: {
-          TARGET: { shadow: { type: 'math_number', fields: { NUM: 300 } } },
-          DUR: { shadow: { type: 'math_number', fields: { NUM: 500 } } },
-        }},
-        { kind: 'block', type: 'game_cancel_tweens' },
-      ],
-    },
-    {
       kind: 'category', name: 'Animation', colour: '45',
       contents: [
         { kind: 'block', type: 'game_anim_play', inputs: {
@@ -496,7 +501,7 @@ export const toolbox = {
       ],
     },
     {
-      kind: 'category', name: 'HUD', colour: '20',
+      kind: 'category', name: 'Game Info', colour: '20',
       contents: [
         { kind: 'block', type: 'hud_create_score', inputs: {
           X: { shadow: { type: 'math_number', fields: { NUM: 10 } } },
@@ -539,22 +544,14 @@ export const toolbox = {
         }},
         { kind: 'block', type: 'hud_is_dead' },
         { kind: 'block', type: 'hud_timer_done' },
-      ],
-    },
-    {
-      kind: 'category', name: 'Save/Load', colour: '120',
-      contents: [
-        { kind: 'block', type: 'game_save', inputs: {
-          KEY: { shadow: { type: 'text', fields: { TEXT: 'highscore' } } },
-          VALUE: { shadow: { type: 'math_number', fields: { NUM: 0 } } },
+        { kind: 'sep', gap: '16' },
+        { kind: 'label', text: 'Events' },
+        { kind: 'block', type: 'hud_on_score_reach', inputs: {
+          VALUE: { shadow: { type: 'math_number', fields: { NUM: 100 } } },
         }},
-        { kind: 'block', type: 'game_load', inputs: {
-          KEY: { shadow: { type: 'text', fields: { TEXT: 'highscore' } } },
-          DEFAULT: { shadow: { type: 'math_number', fields: { NUM: 0 } } },
-        }},
-        { kind: 'block', type: 'game_delete_save', inputs: {
-          KEY: { shadow: { type: 'text', fields: { TEXT: 'highscore' } } },
-        }},
+        { kind: 'block', type: 'hud_on_zero' },
+        { kind: 'block', type: 'hud_on_timer_done' },
+        { kind: 'block', type: 'hud_on_value_change' },
       ],
     },
   ],
