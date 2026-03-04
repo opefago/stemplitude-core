@@ -9,6 +9,16 @@
 import * as Blockly from "blockly";
 import { pythonGenerator } from "blockly/python";
 
+const ICON_SIZE = 16;
+function svgIcon(paths: string, viewBox = "0 0 24 24"): typeof Blockly.FieldImage {
+  const uri = "data:image/svg+xml;utf8," + encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="${viewBox}" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`
+  );
+  return new (Blockly as any).FieldImage(uri, ICON_SIZE, ICON_SIZE);
+}
+
+const SETUP_SVG = '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>';
+
 let communicationBlocksRegistered = false;
 
 export function registerCommunicationBlocks() {
@@ -23,7 +33,7 @@ export function registerCommunicationBlocks() {
   Blockly.Blocks["mp_i2c_init"] = {
     init: function () {
       this.appendDummyInput()
-        .appendField("🔧")
+        .appendField(svgIcon(SETUP_SVG))
         .appendField("connect sensor wires");
       this.appendDummyInput()
         .appendField("    DATA:")
@@ -34,9 +44,9 @@ export function registerCommunicationBlocks() {
       this.setNextStatement(true, null);
       this.setColour(270); // Darker shade for setup blocks
       this.setTooltip(
-        "🔧 SETUP BLOCK - Run this first!\n\n" +
+        "SETUP BLOCK - Run this first!\n\n" +
           "Connect multiple sensors using 2 wires.\n\n" +
-          "💡 Like a shared phone line:\n" +
+          "Tip: Like a shared phone line:\n" +
           "   • DATA wire = Messages go here\n" +
           "   • CLOCK wire = Keeps everyone in sync\n" +
           "   • Use with temperature sensors, displays, etc."
@@ -66,7 +76,7 @@ export function registerCommunicationBlocks() {
       this.setColour(290);
       this.setTooltip(
         "Search for sensors connected to your board.\n\n" +
-          "💡 Returns a list of sensor IDs (like #60, #104)\n" +
+          "Tip: Returns a list of sensor IDs (like #60, #104)\n" +
           "   • Use this to check if sensors are connected\n" +
           "   • Each sensor has a unique ID number"
       );
@@ -91,7 +101,7 @@ export function registerCommunicationBlocks() {
       this.setColour(290);
       this.setTooltip(
         "Send a message to a sensor.\n\n" +
-          "💡 Each sensor has an ID (0-127)\n" +
+          "Tip: Each sensor has an ID (0-127)\n" +
           "   • Common IDs: #60 (displays), #104 (gyroscope)\n" +
           "   • Use 'find connected sensors' to discover IDs"
       );
@@ -123,7 +133,7 @@ export function registerCommunicationBlocks() {
       this.setColour(290);
       this.setTooltip(
         "Read data from a sensor.\n\n" +
-          "💡 Bytes = small pieces of data\n" +
+          "Tip: Bytes = small pieces of data\n" +
           "   • 1 byte = a number or letter\n" +
           "   • Temperature sensor: usually 2 bytes"
       );
@@ -146,7 +156,7 @@ export function registerCommunicationBlocks() {
   Blockly.Blocks["mp_spi_init"] = {
     init: function () {
       this.appendDummyInput()
-        .appendField("🔧")
+        .appendField(svgIcon(SETUP_SVG))
         .appendField("connect fast device");
       this.appendDummyInput()
         .appendField("    CLOCK:")
@@ -159,9 +169,9 @@ export function registerCommunicationBlocks() {
       this.setNextStatement(true, null);
       this.setColour(180); // Darker shade for setup blocks
       this.setTooltip(
-        "🔧 SETUP BLOCK - Run this first!\n\n" +
+        "SETUP BLOCK - Run this first!\n\n" +
           "Connect super-fast devices like SD cards or displays.\n\n" +
-          "💡 Uses 3 wires for speed:\n" +
+          "Tip: Uses 3 wires for speed:\n" +
           "   • CLOCK = Timing signal\n" +
           "   • SEND = Data going out\n" +
           "   • RECEIVE = Data coming in"
@@ -195,7 +205,7 @@ export function registerCommunicationBlocks() {
       this.setColour(200);
       this.setTooltip(
         "Send data at high speed.\n\n" +
-          "💡 Use for:\n" +
+          "Tip: Use for:\n" +
           "   • Writing to SD cards\n" +
           "   • Controlling displays\n" +
           "   • Fast sensor communication"
@@ -225,7 +235,7 @@ export function registerCommunicationBlocks() {
       this.setColour(200);
       this.setTooltip(
         "Read data at high speed.\n\n" +
-          "💡 Perfect for:\n" +
+          "Tip: Perfect for:\n" +
           "   • Reading from SD cards\n" +
           "   • Getting display info"
       );
@@ -246,7 +256,7 @@ export function registerCommunicationBlocks() {
   // Initialize Bluetooth (ADVANCED MODE - with visual distinction)
   Blockly.Blocks["mp_bluetooth_init"] = {
     init: function () {
-      this.appendDummyInput().appendField("🔧").appendField("start Bluetooth");
+      this.appendDummyInput().appendField(svgIcon(SETUP_SVG)).appendField("start Bluetooth");
       this.appendDummyInput()
         .appendField("    name:")
         .appendField(new Blockly.FieldTextInput("MyDevice"), "NAME");
@@ -254,9 +264,9 @@ export function registerCommunicationBlocks() {
       this.setNextStatement(true, null);
       this.setColour(210); // Darker shade for setup blocks
       this.setTooltip(
-        "🔧 SETUP BLOCK - Run this first!\n\n" +
+        "SETUP BLOCK - Run this first!\n\n" +
           "Turn on wireless Bluetooth.\n\n" +
-          "💡 Like making your device visible:\n" +
+          "Tip: Like making your device visible:\n" +
           "   • Choose a cool name!\n" +
           "   • Other devices can find you\n" +
           "   • Works like wireless earbuds"
@@ -364,7 +374,7 @@ print("Service UUID:", _SERVICE_UUID)`;
       this.setColour(230);
       this.setTooltip(
         "Send a message wirelessly via Bluetooth.\n\n" +
-          "💡 Like texting:\n" +
+          "Tip: Like texting:\n" +
           "   • Send to nearby devices\n" +
           "   • No cables needed!\n" +
           "   • Works up to 30 feet away"
@@ -393,7 +403,7 @@ print("Service UUID:", _SERVICE_UUID)`;
       this.setColour(30);
       this.setTooltip(
         "Run code when a BLE message is received.\n\n" +
-          "💡 React to commands:\n" +
+          "Tip: React to commands:\n" +
           "   • Phone sends command\n" +
           "   • ESP32 responds instantly\n" +
           "   • Use 'BLE message' block to get text"
@@ -430,7 +440,7 @@ ble_rx_callback = handle_ble_message`;
       this.setColour(30);
       this.setTooltip(
         "Get the text of the received BLE message.\n\n" +
-          "💡 Use inside 'when BLE receives' block:\n" +
+          "Tip: Use inside 'when BLE receives' block:\n" +
           "   • Get command from phone\n" +
           "   • Check message contents\n" +
           "   • Respond accordingly"
@@ -450,7 +460,7 @@ ble_rx_callback = handle_ble_message`;
       this.setColour(230);
       this.setTooltip(
         "Check if a BLE client is connected.\n\n" +
-          "💡 Returns true or false:\n" +
+          "Tip: Returns true or false:\n" +
           "   • true = Device connected\n" +
           "   • false = No connection"
       );
@@ -480,7 +490,7 @@ ble_rx_callback = handle_ble_message`;
       this.setColour(120);
       this.setTooltip(
         "Connect to the internet via WiFi.\n\n" +
-          "💡 Like connecting your phone:\n" +
+          "Tip: Like connecting your phone:\n" +
           "   • Network name = Your WiFi's name\n" +
           "   • Password = Your WiFi password\n" +
           "   • Takes a few seconds to connect"
@@ -520,7 +530,7 @@ ble_rx_callback = handle_ble_message`;
       this.setColour(120);
       this.setTooltip(
         "Disconnect from WiFi.\n\n" +
-          "💡 Turns off internet connection\n" +
+          "Tip: Turns off internet connection\n" +
           "   • Saves battery power\n" +
           "   • Use when you don't need internet"
       );
@@ -539,7 +549,7 @@ ble_rx_callback = handle_ble_message`;
       this.setColour(120);
       this.setTooltip(
         "Check if you're connected to internet.\n\n" +
-          "💡 Returns true or false:\n" +
+          "Tip: Returns true or false:\n" +
           "   • true = Online and ready!\n" +
           "   • false = Not connected yet"
       );
@@ -559,7 +569,7 @@ ble_rx_callback = handle_ble_message`;
       this.setColour(120);
       this.setTooltip(
         "Get your device's internet address (IP).\n\n" +
-          "💡 Like a phone number for devices:\n" +
+          "Tip: Like a phone number for devices:\n" +
           "   • Format: 192.168.1.100\n" +
           "   • Unique on your network\n" +
           "   • Use for finding your device"
@@ -582,7 +592,7 @@ ble_rx_callback = handle_ble_message`;
       this.setColour(120);
       this.setTooltip(
         "Fetch information from a website.\n\n" +
-          "💡 Like opening a webpage:\n" +
+          "Tip: Like opening a webpage:\n" +
           "   • Returns text/data from the site\n" +
           "   • Perfect for weather, news, APIs\n" +
           "   • Example: Get temperature from weather site"
@@ -619,7 +629,7 @@ ble_rx_callback = handle_ble_message`;
       this.setColour(120);
       this.setTooltip(
         "Upload information to a website.\n\n" +
-          "💡 Like submitting a form:\n" +
+          "Tip: Like submitting a form:\n" +
           "   • Send sensor readings\n" +
           "   • Log temperature data\n" +
           "   • Upload to cloud services"

@@ -393,7 +393,7 @@ export const toolbox = {
       custom: 'VARIABLE',
     },
     {
-      kind: 'category', name: 'My Blocks', colour: '290',
+      kind: 'category', name: 'Functions', colour: '290',
       custom: 'GM_PROCEDURES',
     },
     { kind: 'sep' },

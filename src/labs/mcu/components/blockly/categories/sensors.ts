@@ -11,6 +11,20 @@
 import * as Blockly from "blockly";
 import { pythonGenerator } from "blockly/python";
 
+const ICON_SIZE = 16;
+function svgIcon(paths: string, viewBox = "0 0 24 24"): typeof Blockly.FieldImage {
+  const uri = "data:image/svg+xml;utf8," + encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="${viewBox}" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`
+  );
+  return new (Blockly as any).FieldImage(uri, ICON_SIZE, ICON_SIZE);
+}
+
+const SETUP_SVG = '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>';
+const LCD_SVG = '<rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>';
+const GEAR_SVG = '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1.08 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1.08z"/>';
+const THERMO_SVG = '<path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/>';
+const RULER_SVG = '<path d="M1 3h22v18H1z" fill="none"/><line x1="4" y1="3" x2="4" y2="9"/><line x1="8" y1="3" x2="8" y2="7"/><line x1="12" y1="3" x2="12" y2="9"/><line x1="16" y1="3" x2="16" y2="7"/><line x1="20" y1="3" x2="20" y2="9"/>';
+
 let sensorsBlocksRegistered = false;
 
 export function registerSensorsBlocks() {
@@ -24,7 +38,7 @@ export function registerSensorsBlocks() {
   // Initialize LCD Display (ADVANCED MODE - with visual distinction)
   Blockly.Blocks["mp_lcd_init"] = {
     init: function () {
-      this.appendDummyInput().appendField("🔧").appendField("setup LCD screen");
+      this.appendDummyInput().appendField(svgIcon(SETUP_SVG)).appendField("setup LCD screen");
       this.appendDummyInput()
         .appendField("    rows:")
         .appendField(new Blockly.FieldNumber(2, 1, 4), "ROWS")
@@ -39,9 +53,9 @@ export function registerSensorsBlocks() {
       this.setNextStatement(true, null);
       this.setColour(180); // Darker shade for setup blocks
       this.setTooltip(
-        "🔧 SETUP BLOCK - Run this first!\n\n" +
+        "SETUP BLOCK - Run this first!\n\n" +
           "Setup an LCD screen to show messages.\n\n" +
-          "💡 Like a tiny computer screen:\n" +
+          "Tip: Like a tiny computer screen:\n" +
           "   • 2 rows = 2 lines of text\n" +
           "   • 16 columns = 16 letters per line\n" +
           "   • Connect using DATA and CLOCK wires"
@@ -76,7 +90,7 @@ export function registerSensorsBlocks() {
       this.setColour(200);
       this.setTooltip(
         "Display a message on the LCD screen.\n\n" +
-          "💡 Show text, numbers, or sensor readings!"
+          "Tip: Show text, numbers, or sensor readings!"
       );
     },
   };
@@ -116,9 +130,11 @@ export function registerSensorsBlocks() {
     init: function () {
       this.appendValueInput("TEXT")
         .setCheck(null)
-        .appendField("📺 show on LCD");
+        .appendField(svgIcon(LCD_SVG))
+        .appendField("show on LCD");
       this.appendDummyInput()
-        .appendField("⚙️ pins:")
+        .appendField(svgIcon(GEAR_SVG))
+        .appendField("pins:")
         .appendField("DATA:")
         .appendField(new Blockly.FieldNumber(21, 0, 40), "SDA")
         .appendField("CLK:")
@@ -128,8 +144,8 @@ export function registerSensorsBlocks() {
       this.setColour(200);
       this.setInputsInline(false);
       this.setTooltip(
-        "📺 QUICK START - Show text on LCD (auto-setup!)\n\n" +
-          "💡 This block sets up the LCD automatically\n" +
+        "QUICK START - Show text on LCD (auto-setup!)\n\n" +
+          "This block sets up the LCD automatically\n" +
           "   • No setup block needed!\n" +
           "   • Change pins if yours are different\n" +
           "   • Default: DATA=21, CLOCK=22"
@@ -171,7 +187,7 @@ export function registerSensorsBlocks() {
       this.setColour(200);
       this.setTooltip(
         "Move to a specific position on the screen.\n\n" +
-          "💡 Like moving your typing cursor:\n" +
+          "Tip: Like moving your typing cursor:\n" +
           "   • Row 0 = top line\n" +
           "   • Column 0 = leftmost position"
       );
@@ -193,7 +209,7 @@ export function registerSensorsBlocks() {
   Blockly.Blocks["mp_encoder_init"] = {
     init: function () {
       this.appendDummyInput()
-        .appendField("🔧")
+        .appendField(svgIcon(SETUP_SVG))
         .appendField("setup rotary knob");
       this.appendDummyInput()
         .appendField("    CLK:")
@@ -206,9 +222,9 @@ export function registerSensorsBlocks() {
       this.setNextStatement(true, null);
       this.setColour(270); // Darker shade for setup blocks
       this.setTooltip(
-        "🔧 SETUP BLOCK - Run this first!\n\n" +
+        "SETUP BLOCK - Run this first!\n\n" +
           "Setup a rotary encoder (twist knob).\n\n" +
-          "💡 Like a volume knob:\n" +
+          "Tip: Like a volume knob:\n" +
           "   • Turn to count up or down\n" +
           "   • Press to trigger button"
       );
@@ -238,7 +254,7 @@ export function registerSensorsBlocks() {
       this.setColour(290);
       this.setTooltip(
         "Get the current position of the rotary knob.\n\n" +
-          "💡 Returns a number:\n" +
+          "Tip: Returns a number:\n" +
           "   • Turn right = number goes up\n" +
           "   • Turn left = number goes down"
       );
@@ -258,7 +274,7 @@ export function registerSensorsBlocks() {
       this.setColour(290);
       this.setTooltip(
         "Check if the rotary knob is pressed.\n\n" +
-          "💡 Returns true when button is pushed down"
+          "Tip: Returns true when button is pushed down"
       );
     },
   };
@@ -275,7 +291,7 @@ export function registerSensorsBlocks() {
   // Initialize IR Sensor (ADVANCED MODE - with visual distinction)
   Blockly.Blocks["mp_ir_init"] = {
     init: function () {
-      this.appendDummyInput().appendField("🔧").appendField("setup IR sensor");
+      this.appendDummyInput().appendField(svgIcon(SETUP_SVG)).appendField("setup IR sensor");
       this.appendDummyInput()
         .appendField("    pin:")
         .appendField(new Blockly.FieldNumber(23, 0, 40), "PIN");
@@ -283,9 +299,9 @@ export function registerSensorsBlocks() {
       this.setNextStatement(true, null);
       this.setColour(310); // Darker shade for setup blocks
       this.setTooltip(
-        "🔧 SETUP BLOCK - Run this first!\n\n" +
+        "SETUP BLOCK - Run this first!\n\n" +
           "Setup an infrared sensor to detect objects.\n\n" +
-          "💡 Uses invisible light:\n" +
+          "Tip: Uses invisible light:\n" +
           "   • Detect nearby objects\n" +
           "   • Read remote control signals\n" +
           "   • Works like TV remotes!"
@@ -314,7 +330,7 @@ export function registerSensorsBlocks() {
       this.setColour(330);
       this.setTooltip(
         "Check if something is in front of the IR sensor.\n\n" +
-          "💡 Returns true when object is detected"
+          "Tip: Returns true when object is detected"
       );
     },
   };
@@ -332,7 +348,7 @@ export function registerSensorsBlocks() {
   Blockly.Blocks["mp_dht_init"] = {
     init: function () {
       this.appendDummyInput()
-        .appendField("🔧")
+        .appendField(svgIcon(SETUP_SVG))
         .appendField("setup temp & humidity sensor");
       this.appendDummyInput()
         .appendField("    type:")
@@ -349,9 +365,9 @@ export function registerSensorsBlocks() {
       this.setNextStatement(true, null);
       this.setColour(40); // Darker shade for setup blocks
       this.setTooltip(
-        "🔧 SETUP BLOCK - Run this first!\n\n" +
+        "SETUP BLOCK - Run this first!\n\n" +
           "Setup a DHT sensor to measure temperature and humidity.\n\n" +
-          "💡 Two sensors in one:\n" +
+          "Tip: Two sensors in one:\n" +
           "   • DHT11 = Good for beginners\n" +
           "   • DHT22 = More accurate\n" +
           "   • Measures both temp and moisture"
@@ -391,7 +407,7 @@ export function registerSensorsBlocks() {
       this.setColour(60);
       this.setTooltip(
         "Read the temperature from DHT sensor.\n\n" +
-          "💡 Choose your unit:\n" +
+          "Tip: Choose your unit:\n" +
           "   • Celsius (°C) = Used in most countries\n" +
           "   • Fahrenheit (°F) = Used in USA"
       );
@@ -429,7 +445,7 @@ def read_dht_temp_${unit.toLowerCase()}():
       this.setColour(60);
       this.setTooltip(
         "Read the humidity from DHT sensor.\n\n" +
-          "💡 Measures moisture in air:\n" +
+          "Tip: Measures moisture in air:\n" +
           "   • 0% = Very dry\n" +
           "   • 100% = Very humid\n" +
           "   • Comfortable range: 30-60%"
@@ -460,7 +476,7 @@ def read_dht_humidity():
   Blockly.Blocks["mp_ds18b20_init"] = {
     init: function () {
       this.appendDummyInput()
-        .appendField("🔧")
+        .appendField(svgIcon(SETUP_SVG))
         .appendField("setup waterproof temp sensor");
       this.appendDummyInput()
         .appendField("    pin:")
@@ -469,9 +485,9 @@ def read_dht_humidity():
       this.setNextStatement(true, null);
       this.setColour(10); // Darker shade for setup blocks
       this.setTooltip(
-        "🔧 SETUP BLOCK - Run this first!\n\n" +
+        "SETUP BLOCK - Run this first!\n\n" +
           "Setup a DS18B20 waterproof temperature sensor.\n\n" +
-          "💡 Special features:\n" +
+          "Tip: Special features:\n" +
           "   • Can measure water temperature\n" +
           "   • Very accurate\n" +
           "   • Chain multiple sensors on one wire!"
@@ -510,7 +526,7 @@ ds_roms = ds_sensor.scan()`;
       this.setColour(20);
       this.setTooltip(
         "Read temperature from DS18B20 sensor.\n\n" +
-          "💡 Perfect for:\n" +
+          "Tip: Perfect for:\n" +
           "   • Water temperature\n" +
           "   • Outdoor weather stations\n" +
           "   • Precise measurements"
@@ -545,7 +561,7 @@ def read_ds18b20_temp_${unit.toLowerCase()}():
   Blockly.Blocks["mp_ultrasonic_init"] = {
     init: function () {
       this.appendDummyInput()
-        .appendField("🔧")
+        .appendField(svgIcon(SETUP_SVG))
         .appendField("setup ultrasonic sensor");
       this.appendDummyInput()
         .appendField("    TRIGGER:")
@@ -556,9 +572,9 @@ def read_ds18b20_temp_${unit.toLowerCase()}():
       this.setNextStatement(true, null);
       this.setColour(140); // Darker shade for setup blocks
       this.setTooltip(
-        "🔧 SETUP BLOCK - Run this first!\n\n" +
+        "SETUP BLOCK - Run this first!\n\n" +
           "Setup an ultrasonic distance sensor (HC-SR04).\n\n" +
-          "💡 Uses sound waves like a bat:\n" +
+          "Tip: Uses sound waves like a bat:\n" +
           "   • Sends out high-pitched beep\n" +
           "   • Listens for echo bounce back\n" +
           "   • Measures how far away things are"
@@ -603,7 +619,7 @@ def read_ultrasonic_cm():
       this.setColour(160);
       this.setTooltip(
         "Measure distance in centimeters.\n\n" +
-          "💡 Returns distance:\n" +
+          "Tip: Returns distance:\n" +
           "   • Range: 2cm to 400cm\n" +
           "   • 100cm = 1 meter\n" +
           "   • Perfect for obstacle detection"
@@ -626,7 +642,7 @@ def read_ultrasonic_cm():
       this.setColour(160);
       this.setTooltip(
         "Measure distance in inches.\n\n" +
-          "💡 Returns distance:\n" +
+          "Tip: Returns distance:\n" +
           "   • Range: 1 to 160 inches\n" +
           "   • 12 inches = 1 foot"
       );
@@ -648,7 +664,8 @@ def read_ultrasonic_cm():
   Blockly.Blocks["mp_dht_temp_simple"] = {
     init: function () {
       this.appendDummyInput()
-        .appendField("🌡️ temperature")
+        .appendField(svgIcon(THERMO_SVG))
+        .appendField("temperature")
         .appendField(
           new Blockly.FieldDropdown([
             ["°C", "C"],
@@ -657,7 +674,7 @@ def read_ultrasonic_cm():
           "UNIT"
         );
       this.appendDummyInput()
-        .appendField("⚙️")
+        .appendField(svgIcon(GEAR_SVG))
         .appendField(
           new Blockly.FieldDropdown([
             ["DHT11", "DHT11"],
@@ -671,8 +688,8 @@ def read_ultrasonic_cm():
       this.setColour(60);
       this.setInputsInline(false);
       this.setTooltip(
-        "🌡️ QUICK START - Read temperature (auto-setup!)\n\n" +
-          "💡 This block sets up DHT sensor automatically\n" +
+        "QUICK START - Read temperature (auto-setup!)\n\n" +
+          "This block sets up DHT sensor automatically\n" +
           "   • No setup block needed!\n" +
           "   • DHT11 for beginners, DHT22 for accuracy\n" +
           "   • Change pin if yours is different"
@@ -719,7 +736,8 @@ def read_dht_temp_${unit.toLowerCase()}_${pin}():
   Blockly.Blocks["mp_ultrasonic_distance_simple"] = {
     init: function () {
       this.appendDummyInput()
-        .appendField("📏 distance in")
+        .appendField(svgIcon(RULER_SVG))
+        .appendField("distance in")
         .appendField(
           new Blockly.FieldDropdown([
             ["cm", "CM"],
@@ -728,7 +746,8 @@ def read_dht_temp_${unit.toLowerCase()}_${pin}():
           "UNIT"
         );
       this.appendDummyInput()
-        .appendField("⚙️ pins:")
+        .appendField(svgIcon(GEAR_SVG))
+        .appendField("pins:")
         .appendField("TRIG:")
         .appendField(new Blockly.FieldNumber(23, 0, 40), "TRIG")
         .appendField("ECHO:")
@@ -737,8 +756,8 @@ def read_dht_temp_${unit.toLowerCase()}_${pin}():
       this.setColour(160);
       this.setInputsInline(false);
       this.setTooltip(
-        "📏 QUICK START - Measure distance (auto-setup!)\n\n" +
-          "💡 This block sets up ultrasonic sensor automatically\n" +
+        "QUICK START - Measure distance (auto-setup!)\n\n" +
+          "This block sets up ultrasonic sensor automatically\n" +
           "   • No setup block needed!\n" +
           "   • Works like bat echolocation\n" +
           "   • Range: 2cm to 400cm"

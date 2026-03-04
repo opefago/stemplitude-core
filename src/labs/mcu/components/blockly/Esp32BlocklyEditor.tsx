@@ -936,45 +936,12 @@ export const Esp32BlocklyEditor: React.FC<Props> = ({
         },
       },
     });
-    // Create custom renderer with wider, flatter notches
-    const CustomRenderer = class extends Blockly.blockRendering.Renderer {
-      constructor(name: string) {
-        super(name);
-      }
-
-      protected makeConstants_() {
-        const constants = super.makeConstants_();
-        // Enlarge notches and round outer/inner corners for the C-shaped statement slot
-        constants.NOTCH_WIDTH = 42; // Wider external puzzle notches
-        constants.NOTCH_HEIGHT = 12; // Taller notches
-        constants.CORNER_RADIUS = 10; // More rounded outer corners
-        constants.MIN_BLOCK_HEIGHT = 46; // Slightly taller blocks
-        constants.NOTCH_OFFSET_LEFT = 10; // Push notch a bit further right for visibility
-
-        // Statement input (C-slot) tuning: use any-cast to access renderer-specific constants
-        (constants as any).INSIDE_CORNER_RADIUS = 10; // More rounded inner C-slot corners
-        (constants as any).STATEMENT_INPUT_PADDING_LEFT = 30; // Deeper C-slot indentation
-        (constants as any).STATEMENT_BOTTOM_SPACER = 12; // Thicker bottom of the C-slot
-        (constants as any).TOP_ROW_PRECEDES_STATEMENT_MIN_HEIGHT = 36; // Space above C-slot under hat
-        (constants as any).STATEMENT_INPUT_NOTCH_OFFSET = 24; // Move inner notch away from left edge
-
-        return constants;
-      }
-    };
-
-    // Register the custom renderer only if not already registered
-    try {
-      Blockly.blockRendering.register("wider_notches", CustomRenderer);
-    } catch (e) {
-      // Already registered, that's fine
-    }
-
     const ws = Blockly.inject(divRef.current, {
       toolbox,
       toolboxPosition: "start",
       horizontalLayout: false,
       theme: playfulTheme,
-      // renderer: "wider_notches", // Revert to default renderer
+      renderer: "zelos",
       scrollbars: true,
       trashcan: true,
       move: { scrollbars: true, drag: true, wheel: true },

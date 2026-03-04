@@ -17,6 +17,7 @@ import MCULab from './pages/MCULab';
 import GameDevLab from './pages/GameDevLab';
 import PythonGameLab from './pages/PythonGameLab';
 import GameMakerLab from './pages/GameMakerLab';
+import DesignMakerLab from './pages/DesignMakerLab';
 import FAQ from './pages/FAQ';
 import './App.css';
 
@@ -28,7 +29,8 @@ function AppContent() {
                     location.pathname.startsWith('/playground/micro-maker') ||
                     location.pathname.startsWith('/playground/gamedev') ||
                     location.pathname.startsWith('/playground/python-game') ||
-                    location.pathname.startsWith('/playground/game-maker');
+                    location.pathname.startsWith('/playground/game-maker') ||
+                    location.pathname.startsWith('/playground/design-maker');
 
   return (
     <div className="app">
@@ -46,6 +48,7 @@ function AppContent() {
           <Route path="/playground/gamedev" element={<GameDevLab />} />
           <Route path="/playground/python-game" element={<PythonGameLab />} />
           <Route path="/playground/game-maker" element={<GameMakerLab />} />
+          <Route path="/playground/design-maker" element={<DesignMakerLab />} />
           <Route path="/about" element={<About />} />
           <Route path="/contact" element={<Contact />} />
           <Route path="/enrollment" element={<Enrollment />} />

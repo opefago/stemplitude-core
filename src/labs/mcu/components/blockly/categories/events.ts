@@ -473,7 +473,7 @@ _thread.start_new_thread(${threadName}, ())`;
       this.setColour(30);
       this.setTooltip(
         "Run code when voltage crosses a threshold (0-3.3V).\n\n" +
-          "💡 Useful for detecting:\n" +
+          "Tip: Useful for detecting:\n" +
           "   • Battery low (below 2.5V)\n" +
           "   • Sensor triggered (above 2.0V)\n" +
           "   • Light level changes"

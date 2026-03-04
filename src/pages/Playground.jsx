@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Zap, Cpu, Play, Lock, ArrowRight, Code, Wrench, Gamepad2, Puzzle } from 'lucide-react';
+import { Zap, Cpu, Play, Lock, ArrowRight, Code, Wrench, Gamepad2, Puzzle, Cuboid } from 'lucide-react';
 import './Playground.css';
 
 const Playground = () => {
@@ -64,6 +64,21 @@ const Playground = () => {
       color: '#f0883e',
       status: 'available',
       path: '/playground/python-game'
+    },
+    {
+      id: 'design-maker',
+      title: 'Design Maker',
+      icon: <Cuboid size={48} />,
+      description: 'Tinkercad-inspired 3D modeling platform. Create, combine, and export 3D designs.',
+      features: [
+        '3D shape library & text',
+        'Boolean CSG operations',
+        'Transform & align tools',
+        'Export STL / GLB'
+      ],
+      color: '#6366f1',
+      status: 'available',
+      path: '/playground/design-maker'
     },
     {
       id: 'gamedev-lab',

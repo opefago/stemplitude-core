@@ -213,7 +213,7 @@ export function registerFunctionsBlocks() {
       // Add new parameter displays
       for (let i = 0; i < this.arguments_.length; i++) {
         this.appendDummyInput("PARAM" + i)
-          .appendField("📥")
+          .appendField(">")
           .appendField(this.arguments_[i])
           .setAlign(Blockly.inputs.Align.RIGHT);
         this.moveInputBefore("PARAM" + i, "STACK");

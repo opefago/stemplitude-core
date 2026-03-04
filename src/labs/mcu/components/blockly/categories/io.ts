@@ -155,7 +155,7 @@ export function registerIOBlocks() {
       this.setColour(160);
       this.setTooltip(
         "Read voltage (0-3.3V) from an analog pin.\n\n" +
-          "💡 Voltage is like electrical 'pressure':\n" +
+          "Tip: Voltage is like electrical 'pressure':\n" +
           "   • 0V = No electricity\n" +
           "   • 3.3V = Maximum for ESP32\n" +
           "   • Use with sensors, batteries, potentiometers"
@@ -202,7 +202,7 @@ def adc_to_voltage(pin_num):
       this.setColour(160);
       this.setTooltip(
         "Set pin power level (0-100%).\n\n" +
-          "💡 Power percentage controls:\n" +
+          "Tip: Power percentage controls:\n" +
           "   • 0% = Off (no power)\n" +
           "   • 50% = Half power\n" +
           "   • 100% = Full power\n" +
