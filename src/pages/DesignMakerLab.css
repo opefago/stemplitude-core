@@ -1,28 +1,28 @@
 /* ============================================================
-   Design Maker Lab — Dark theme CSS
+   Design Maker Lab — Soft dark theme CSS (kid-friendly)
    Prefix: dml-
    ============================================================ */
 
 /* --- Variables --- */
 .dml-container {
-  --dml-bg: #0d1117;
-  --dml-surface: #161b22;
-  --dml-surface-2: #1c2333;
-  --dml-surface-hover: #21283b;
-  --dml-border: #30363d;
-  --dml-text: #e6edf3;
-  --dml-text-secondary: #8b949e;
-  --dml-text-muted: #484f58;
-  --dml-accent: #6366f1;
-  --dml-accent-hover: #818cf8;
-  --dml-accent-glow: rgba(99, 102, 241, 0.25);
-  --dml-danger: #f85149;
-  --dml-danger-hover: #ff6b61;
-  --dml-success: #3fb950;
-  --dml-warning: #d29922;
-  --dml-radius: 6px;
-  --dml-radius-lg: 10px;
-  --dml-header-h: 48px;
+  --dml-bg: #151520;
+  --dml-surface: #1e1e30;
+  --dml-surface-2: #262640;
+  --dml-surface-hover: #30304a;
+  --dml-border: #3a3a55;
+  --dml-text: #eef0f8;
+  --dml-text-secondary: #a0a4c0;
+  --dml-text-muted: #606080;
+  --dml-accent: #7c6df0;
+  --dml-accent-hover: #9b8ffa;
+  --dml-accent-glow: rgba(124, 109, 240, 0.3);
+  --dml-danger: #ff6b81;
+  --dml-danger-hover: #ff8fa0;
+  --dml-success: #5dd9a0;
+  --dml-warning: #ffc247;
+  --dml-radius: 10px;
+  --dml-radius-lg: 14px;
+  --dml-header-h: 52px;
 }
 
 /* --- Container & Layout --- */
@@ -33,11 +33,50 @@
   flex-direction: column;
   background: var(--dml-bg);
   color: var(--dml-text);
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: 'Nunito', 'Quicksand', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   font-size: 13px;
   z-index: 1000;
   overflow: hidden;
 }
+
+/* --- Custom Tippy Tooltip Theme --- */
+.tippy-box {
+  background: var(--dml-surface-2, #262640) !important;
+  border: 1px solid var(--dml-border, #3a3a55) !important;
+  border-radius: 10px !important;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4) !important;
+  font-family: 'Nunito', 'Quicksand', 'Inter', sans-serif !important;
+}
+
+.tippy-content {
+  padding: 6px 10px !important;
+}
+
+.tippy-arrow {
+  color: var(--dml-surface-2, #262640) !important;
+}
+
+.dml-tip {
+  text-align: center;
+  line-height: 1.3;
+}
+
+.dml-tip-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #eef0f8;
+}
+
+.dml-tip-shortcut {
+  display: block;
+  font-size: 10px;
+  font-weight: 500;
+  color: #9b8ffa;
+  margin-top: 2px;
+  letter-spacing: 0.5px;
+}
+
 
 /* --- Header --- */
 .dml-header {
@@ -91,8 +130,8 @@
 }
 
 .dml-logo-text {
-  font-weight: 600;
-  font-size: 14px;
+  font-weight: 800;
+  font-size: 15px;
   letter-spacing: -0.3px;
 }
 
@@ -168,9 +207,10 @@
   background: transparent;
   border: 1px solid var(--dml-border);
   color: var(--dml-text-secondary);
-  border-radius: var(--dml-radius);
+  border-radius: 10px;
   cursor: pointer;
   font-size: 12px;
+  font-weight: 600;
   transition: all 0.15s;
   white-space: nowrap;
 }
@@ -179,6 +219,11 @@
   background: var(--dml-surface-hover);
   color: var(--dml-text);
   border-color: var(--dml-text-muted);
+  transform: scale(1.04);
+}
+
+.dml-header-btn:active {
+  transform: scale(0.96);
 }
 
 .dml-header-btn.icon-only {
@@ -240,8 +285,8 @@
 
 /* --- Right Sidebar (Properties) --- */
 .dml-sidebar-right {
-  width: 260px;
-  min-width: 260px;
+  width: 280px;
+  min-width: 280px;
   background: var(--dml-surface);
   border-left: 1px solid var(--dml-border);
   overflow-y: auto;
@@ -295,20 +340,20 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
+  gap: 3px;
   background: var(--dml-surface);
   border: 1px solid var(--dml-border);
-  border-radius: 28px;
-  padding: 6px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+  border-radius: 24px;
+  padding: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
 }
 
 .dml-vc-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
+  width: 42px;
+  height: 42px;
   border: 2px solid transparent;
   background: transparent;
   color: var(--dml-text-secondary);
@@ -318,8 +363,9 @@
 }
 
 .dml-vc-btn:hover {
-  color: var(--dml-text-primary);
-  background: rgba(255, 255, 255, 0.06);
+  color: var(--dml-text);
+  background: var(--dml-surface-hover);
+  transform: scale(1.1);
 }
 
 .dml-vc-btn:active {
@@ -334,8 +380,8 @@
 }
 
 .dml-vc-cube {
-  width: 44px;
-  height: 44px;
+  width: 46px;
+  height: 46px;
   border: 2px solid var(--dml-border);
   margin-top: 2px;
 }
@@ -348,7 +394,7 @@
 .dml-vc-cube.active {
   border-color: var(--dml-accent);
   color: var(--dml-accent);
-  background: rgba(99, 102, 241, 0.1);
+  background: var(--dml-accent-glow);
 }
 
 /* --- CSG Float Button --- */
@@ -362,9 +408,9 @@
   gap: 10px;
   background: var(--dml-surface);
   border: 1px solid var(--dml-border);
-  border-radius: var(--dml-radius-lg);
+  border-radius: 20px;
   padding: 6px 14px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
   z-index: 5;
 }
 
@@ -372,14 +418,18 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 12px;
+  padding: 7px 14px;
   color: #fff;
   border: none;
-  border-radius: var(--dml-radius);
+  border-radius: 10px;
   cursor: pointer;
   font-size: 12px;
-  font-weight: 500;
-  transition: background 0.15s;
+  font-weight: 700;
+  transition: all 0.15s;
+}
+
+.dml-csg-btn:active {
+  transform: scale(0.95);
 }
 
 .dml-csg-union {
@@ -403,36 +453,6 @@
   font-size: 11px;
 }
 
-/* --- View Toggle (Solid / Wire) --- */
-.dml-view-toggle {
-  display: flex;
-  background: var(--dml-bg);
-  border: 1px solid var(--dml-border);
-  border-radius: var(--dml-radius);
-  overflow: hidden;
-}
-
-.dml-view-toggle-btn {
-  padding: 4px 10px;
-  font-size: 11px;
-  font-weight: 500;
-  border: none;
-  background: transparent;
-  color: var(--dml-text-muted);
-  cursor: pointer;
-  transition: all 0.15s;
-  line-height: 1;
-}
-
-.dml-view-toggle-btn:hover {
-  color: var(--dml-text-primary);
-}
-
-.dml-view-toggle-btn.active {
-  background: var(--dml-accent);
-  color: #fff;
-}
-
 /* --- Toolbar --- */
 .dml-toolbar {
   display: flex;
@@ -440,9 +460,9 @@
   gap: 4px;
   background: var(--dml-surface);
   border: 1px solid var(--dml-border);
-  border-radius: var(--dml-radius-lg);
-  padding: 4px 8px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  border-radius: 22px;
+  padding: 6px 12px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
 }
 
 .dml-toolbar-group {
@@ -453,8 +473,9 @@
 
 .dml-toolbar-label {
   font-size: 10px;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.8px;
   color: var(--dml-text-muted);
   padding: 0 6px 0 4px;
   user-select: none;
@@ -462,28 +483,33 @@
 
 .dml-toolbar-sep {
   width: 1px;
-  height: 24px;
+  height: 28px;
   background: var(--dml-border);
-  margin: 0 4px;
+  margin: 0 6px;
 }
 
 .dml-tool-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 40px;
+  height: 40px;
   background: transparent;
-  border: 1px solid transparent;
+  border: 2px solid transparent;
   color: var(--dml-text-secondary);
-  border-radius: var(--dml-radius);
+  border-radius: 10px;
   cursor: pointer;
-  transition: all 0.12s;
+  transition: all 0.15s;
 }
 
 .dml-tool-btn:hover {
   background: var(--dml-surface-hover);
   color: var(--dml-text);
+  transform: scale(1.08);
+}
+
+.dml-tool-btn:active {
+  transform: scale(0.95);
 }
 
 .dml-tool-btn.active {
@@ -493,17 +519,24 @@
 }
 
 .dml-tool-btn.danger:hover {
-  background: rgba(248, 81, 73, 0.15);
+  background: rgba(255, 107, 129, 0.15);
   color: var(--dml-danger);
+}
+
+.dml-tool-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+  transform: none;
 }
 
 .dml-snap-select {
   background: var(--dml-surface-2);
   border: 1px solid var(--dml-border);
   color: var(--dml-text-secondary);
-  padding: 4px 6px;
-  border-radius: var(--dml-radius);
-  font-size: 11px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
   cursor: pointer;
   outline: none;
 }
@@ -512,15 +545,31 @@
   border-color: var(--dml-accent);
 }
 
+/* --- Ruler Dimension Labels --- */
+.dml-ruler-label {
+  background: rgba(30, 30, 48, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #fff;
+  font-family: 'Nunito', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+  user-select: none;
+  pointer-events: none;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
 /* --- Panel Titles --- */
 .dml-panel-title {
-  font-size: 11px;
+  font-size: 13px;
   text-transform: uppercase;
   letter-spacing: 0.8px;
   color: var(--dml-text-muted);
-  padding: 12px 14px 8px;
+  padding: 14px 16px 10px;
   margin: 0;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 /* --- Shapes Dropdown --- */
@@ -783,33 +832,33 @@
 .dml-multi-selection {
   color: var(--dml-text-muted);
   text-align: center;
-  padding: 24px 14px;
-  font-size: 12px;
+  padding: 28px 16px;
+  font-size: 13px;
 }
 
 .dml-prop-section {
-  padding: 8px 14px;
+  padding: 10px 16px;
   border-bottom: 1px solid var(--dml-border);
 }
 
 .dml-prop-section h4 {
-  font-size: 11px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: var(--dml-text-muted);
-  margin: 0 0 8px 0;
-  font-weight: 600;
+  margin: 0 0 10px 0;
+  font-weight: 700;
 }
 
 .dml-name-input {
   width: 100%;
-  padding: 6px 8px;
+  padding: 8px 10px;
   background: var(--dml-surface-2);
   border: 1px solid var(--dml-border);
   color: var(--dml-text);
-  border-radius: var(--dml-radius);
-  font-size: 13px;
-  font-weight: 500;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
   outline: none;
   box-sizing: border-box;
 }
@@ -820,30 +869,32 @@
 
 .dml-type-badge {
   display: inline-block;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--dml-accent);
   background: var(--dml-accent-glow);
-  padding: 2px 8px;
+  padding: 3px 10px;
   border-radius: 10px;
-  margin-top: 6px;
+  margin-top: 8px;
+  font-weight: 600;
   text-transform: capitalize;
 }
 
 .dml-prop-row {
   display: flex;
-  gap: 6px;
+  gap: 8px;
 }
 
 .dml-prop-field {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
   flex: 1;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
 
 .dml-prop-field label {
-  font-size: 10px;
+  font-size: 11px;
+  font-weight: 700;
   color: var(--dml-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.3px;
@@ -852,13 +903,13 @@
 .dml-prop-field input[type="number"],
 .dml-text-prop-input {
   width: 100%;
-  padding: 5px 6px;
+  padding: 7px 8px;
   background: var(--dml-bg);
   border: 1px solid var(--dml-border);
   color: var(--dml-text);
-  border-radius: 4px;
-  font-size: 12px;
-  font-family: 'JetBrains Mono', 'SF Mono', monospace;
+  border-radius: 8px;
+  font-size: 13px;
+  font-family: 'Nunito', 'JetBrains Mono', 'SF Mono', monospace;
   outline: none;
   box-sizing: border-box;
 }
@@ -870,22 +921,23 @@
 .dml-color-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
+  gap: 10px;
+  margin-bottom: 10px;
 }
 
 .dml-color-row label {
-  font-size: 10px;
+  font-size: 11px;
+  font-weight: 700;
   color: var(--dml-text-muted);
   text-transform: uppercase;
-  min-width: 36px;
+  min-width: 40px;
 }
 
 .dml-color-input {
-  width: 28px;
-  height: 28px;
+  width: 34px;
+  height: 34px;
   border: 2px solid var(--dml-border);
-  border-radius: 4px;
+  border-radius: 8px;
   cursor: pointer;
   padding: 0;
   background: none;
@@ -897,42 +949,42 @@
 
 .dml-color-input::-webkit-color-swatch {
   border: none;
-  border-radius: 2px;
+  border-radius: 5px;
 }
 
 .dml-color-hex {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--dml-text-secondary);
-  font-family: 'JetBrains Mono', 'SF Mono', monospace;
+  font-family: 'Nunito', 'JetBrains Mono', 'SF Mono', monospace;
 }
 
 .dml-checkbox-label {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--dml-text-secondary);
-  padding: 4px 0;
+  padding: 6px 0;
 }
 
 .dml-checkbox-label input[type="checkbox"] {
-  width: 14px;
-  height: 14px;
+  width: 18px;
+  height: 18px;
   accent-color: var(--dml-accent);
   cursor: pointer;
 }
 
 .dml-text-muted {
   color: var(--dml-text-muted);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 /* --- Prop Actions --- */
 .dml-prop-actions {
   display: flex;
-  gap: 6px;
-  padding: 12px 14px;
+  gap: 8px;
+  padding: 14px 16px;
 }
 
 .dml-action-btn {
@@ -940,24 +992,30 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 8px 12px;
+  gap: 8px;
+  padding: 10px 14px;
   background: var(--dml-surface-2);
   border: 1px solid var(--dml-border);
   color: var(--dml-text-secondary);
-  border-radius: var(--dml-radius);
+  border-radius: 10px;
   cursor: pointer;
-  font-size: 12px;
-  transition: all 0.12s;
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.15s;
 }
 
 .dml-action-btn:hover {
   background: var(--dml-surface-hover);
   color: var(--dml-text);
+  transform: scale(1.03);
+}
+
+.dml-action-btn:active {
+  transform: scale(0.97);
 }
 
 .dml-action-btn.danger:hover {
-  background: rgba(248, 81, 73, 0.15);
+  background: rgba(255, 107, 129, 0.15);
   color: var(--dml-danger);
   border-color: var(--dml-danger);
 }

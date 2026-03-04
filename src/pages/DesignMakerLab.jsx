@@ -1,6 +1,6 @@
 import React, { useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import Tippy from '@tippyjs/react';
+import Tip from '../labs/design-maker/Tip';
 import {
   Settings, Upload, Download, Share2, X, Merge, Scissors, Pencil,
 } from 'lucide-react';
@@ -281,15 +281,15 @@ export default function DesignMakerLab() {
             onChange={handleImport}
             style={{ display: 'none' }}
           />
-          <Tippy content="Import STL/OBJ">
+          <Tip label="Import STL/OBJ">
             <button className="dml-header-btn" onClick={() => fileInputRef.current?.click()}>
               <Upload size={16} />
               <span>Import</span>
             </button>
-          </Tippy>
+          </Tip>
 
           <div className="dml-dropdown" onMouseLeave={() => setExportOpen(false)}>
-            <Tippy content="Export" disabled={exportOpen}>
+            <Tip label="Export" disabled={exportOpen}>
               <button
                 className="dml-header-btn"
                 onClick={() => setExportOpen(!exportOpen)}
@@ -297,7 +297,7 @@ export default function DesignMakerLab() {
                 <Download size={16} />
                 <span>Export</span>
               </button>
-            </Tippy>
+            </Tip>
             {exportOpen && (
               <div className="dml-dropdown-menu">
                 <button onClick={handleExportSTL}>Export as STL</button>
@@ -306,25 +306,25 @@ export default function DesignMakerLab() {
             )}
           </div>
 
-          <Tippy content="Share">
+          <Tip label="Share">
             <button className="dml-header-btn" onClick={() => alert('Share link copied!')}>
               <Share2 size={16} />
               <span>Share</span>
             </button>
-          </Tippy>
+          </Tip>
 
           <div className="dml-divider" />
 
-          <Tippy content="Settings">
+          <Tip label="Settings">
             <button className="dml-header-btn icon-only" onClick={() => setSettingsOpen(true)}>
               <Settings size={18} />
             </button>
-          </Tippy>
-          <Tippy content="Exit to Playground">
+          </Tip>
+          <Tip label="Exit to Playground">
             <button className="dml-header-btn dml-exit-btn icon-only" onClick={() => navigate('/playground')}>
               <X size={18} />
             </button>
-          </Tippy>
+          </Tip>
         </div>
       </header>
 

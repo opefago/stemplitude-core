@@ -4,12 +4,28 @@ import {
   OrbitControls, TransformControls, Grid,
   GizmoHelper, GizmoViewcube,
   PerspectiveCamera, OrthographicCamera,
-  Text3D, Center,
+  Text3D, Center, Html, Line, Environment,
 } from '@react-three/drei';
 import * as THREE from 'three';
 import { useDesignStore, SHAPE_DEFAULTS, getHalfHeight, dragCursor } from './store';
 
 const FONT_URL = 'https://cdn.jsdelivr.net/npm/three@0.169.0/examples/fonts/helvetiker_regular.typeface.json';
+
+function ToyMaterial({ color, wireframe, transparent, opacity, side }) {
+  return (
+    <meshPhysicalMaterial
+      color={color}
+      wireframe={wireframe}
+      transparent={transparent}
+      opacity={opacity}
+      side={side}
+      roughness={0.35}
+      metalness={0.0}
+      clearcoat={0.4}
+      clearcoatRoughness={0.25}
+    />
+  );
+}
 
 function createHeartShape(size = 10) {
   const s = size;
@@ -95,11 +111,43 @@ function ObjectGeometry({ type, params }) {
   }
 }
 
+function SelectionEdges({ type, params }) {
+  const edges = useMemo(() => {
+    const p = params;
+    let base;
+    switch (type) {
+      case 'box': case 'wall': case 'wedge':
+        base = new THREE.BoxGeometry(p.width, p.height, p.depth); break;
+      case 'sphere':
+        base = new THREE.SphereGeometry(p.radius, 16, 12); break;
+      case 'hemisphere':
+        base = new THREE.SphereGeometry(p.radius, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2); break;
+      case 'cylinder':
+        base = new THREE.CylinderGeometry(p.radiusTop, p.radiusBottom, p.height, 24); break;
+      case 'cone': case 'pyramid':
+        base = new THREE.ConeGeometry(p.radius, p.height, type === 'pyramid' ? 4 : 24); break;
+      case 'torus': case 'tube':
+        base = new THREE.TorusGeometry(p.radius, p.tube, 12, 24); break;
+      case 'imported':
+        if (p.bufferGeometry) { base = p.bufferGeometry; break; }
+        base = new THREE.BoxGeometry(20, 20, 20); break;
+      default:
+        base = new THREE.BoxGeometry(20, 20, 20);
+    }
+    return new THREE.EdgesGeometry(base, 30);
+  }, [type, params]);
+
+  return <primitive object={edges} attach="geometry" />;
+}
+
 const SceneObject = forwardRef(function SceneObject({ obj, isSelected, wireframe, onSelect }, ref) {
   const color = obj.isHole ? '#ff4444' : obj.color;
   const opacity = obj.isHole ? 0.4 : 1;
   const hasMirror = obj.scale[0] < 0 || obj.scale[1] < 0 || obj.scale[2] < 0;
   const side = (obj.isHole || hasMirror) ? THREE.DoubleSide : THREE.FrontSide;
+
+  const outlineRatio = 1.03;
+  const cartoonRatio = 1.025;
 
   if (obj.type === 'text') {
     return (
@@ -128,13 +176,7 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, wireframe
               castShadow
             >
               {obj.geometry.text || 'Text'}
-              <meshStandardMaterial
-                color={color}
-                wireframe={wireframe}
-                transparent={obj.isHole}
-                opacity={opacity}
-                side={side}
-              />
+              <ToyMaterial color={color} wireframe={wireframe} transparent={obj.isHole} opacity={opacity} side={side} />
             </Text3D>
           </Center>
         </Suspense>
@@ -143,24 +185,39 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, wireframe
   }
 
   return (
-    <mesh
+    <group
       ref={ref}
       position={obj.position}
       rotation={obj.rotation}
       scale={obj.scale}
       onClick={onSelect}
-      castShadow
-      receiveShadow
     >
-      <ObjectGeometry type={obj.type} params={obj.geometry} />
-      <meshStandardMaterial
-        color={color}
-        wireframe={wireframe}
-        transparent={obj.isHole}
-        opacity={opacity}
-        side={side}
-      />
-    </mesh>
+      <mesh castShadow receiveShadow>
+        <ObjectGeometry type={obj.type} params={obj.geometry} />
+        <ToyMaterial color={color} wireframe={wireframe} transparent={obj.isHole} opacity={opacity} side={side} />
+      </mesh>
+      {!wireframe && (
+        <mesh scale={[cartoonRatio, cartoonRatio, cartoonRatio]}>
+          <ObjectGeometry type={obj.type} params={obj.geometry} />
+          <meshBasicMaterial color="#2a2a2a" side={THREE.BackSide} />
+        </mesh>
+      )}
+      {isSelected && (
+        <lineSegments
+          scale={[outlineRatio, outlineRatio, outlineRatio]}
+          renderOrder={999}
+        >
+          <SelectionEdges type={obj.type} params={obj.geometry} />
+          <lineBasicMaterial
+            color="#7c6df0"
+            transparent
+            opacity={0.8}
+            depthTest={false}
+            linewidth={2}
+          />
+        </lineSegments>
+      )}
+    </group>
   );
 });
 
@@ -318,6 +375,146 @@ function DragPreview() {
   );
 }
 
+function getObjectDimensions(obj) {
+  const g = obj.geometry;
+  const s = obj.scale;
+  let w, h, d;
+  switch (obj.type) {
+    case 'box': case 'wall': case 'wedge':
+      w = g.width; h = g.height; d = g.depth;
+      break;
+    case 'sphere':
+      w = g.radius * 2; h = g.radius * 2; d = g.radius * 2;
+      break;
+    case 'hemisphere':
+      w = g.radius * 2; h = g.radius; d = g.radius * 2;
+      break;
+    case 'cylinder':
+      w = Math.max(g.radiusTop, g.radiusBottom) * 2; h = g.height; d = Math.max(g.radiusTop, g.radiusBottom) * 2;
+      break;
+    case 'cone': case 'pyramid':
+      w = g.radius * 2; h = g.height; d = g.radius * 2;
+      break;
+    case 'torus': case 'tube':
+      w = (g.radius + g.tube) * 2; h = g.tube * 2; d = (g.radius + g.tube) * 2;
+      break;
+    case 'heart': case 'star':
+      w = (g.outerRadius || g.size) * 2; h = (g.outerRadius || g.size) * 2; d = g.depth;
+      break;
+    case 'text':
+      w = 20; h = g.size || 10; d = g.height || 5;
+      break;
+    case 'imported':
+      if (g.bufferGeometry) {
+        if (!g.bufferGeometry.boundingBox) g.bufferGeometry.computeBoundingBox();
+        const bb = g.bufferGeometry.boundingBox;
+        w = bb.max.x - bb.min.x;
+        h = bb.max.y - bb.min.y;
+        d = bb.max.z - bb.min.z;
+      } else {
+        w = 20; h = 20; d = 20;
+      }
+      break;
+    default:
+      w = 20; h = 20; d = 20;
+  }
+  return {
+    width: Math.abs(w * s[0]),
+    height: Math.abs(h * s[1]),
+    depth: Math.abs(d * s[2]),
+  };
+}
+
+function DimensionLine({ start, end, label, color = '#ff9f43', offset = [0, 0, 0] }) {
+  const mid = useMemo(() => [
+    (start[0] + end[0]) / 2 + offset[0],
+    (start[1] + end[1]) / 2 + offset[1],
+    (start[2] + end[2]) / 2 + offset[2],
+  ], [start, end, offset]);
+
+  return (
+    <group>
+      <Line
+        points={[start, end]}
+        color={color}
+        lineWidth={1.5}
+        dashed
+        dashSize={1}
+        gapSize={0.5}
+      />
+      {/* End caps */}
+      <Line points={[
+        [start[0], start[1] - 0.8, start[2]],
+        [start[0], start[1] + 0.8, start[2]]
+      ]} color={color} lineWidth={1.5} />
+      <Line points={[
+        [end[0], end[1] - 0.8, end[2]],
+        [end[0], end[1] + 0.8, end[2]]
+      ]} color={color} lineWidth={1.5} />
+      <Html position={mid} center style={{ pointerEvents: 'none' }}>
+        <div className="dml-ruler-label">{label}</div>
+      </Html>
+    </group>
+  );
+}
+
+function DimensionRuler({ meshRefs }) {
+  const groupRef = useRef();
+  const objects = useDesignStore(s => s.objects);
+  const selectedIds = useDesignStore(s => s.selectedIds);
+  const rulerVisible = useDesignStore(s => s.rulerVisible);
+  const units = useDesignStore(s => s.units);
+
+  const obj = (rulerVisible && selectedIds.length === 1)
+    ? objects.find(o => o.id === selectedIds[0])
+    : null;
+  const dims = obj ? getObjectDimensions(obj) : null;
+
+  useFrame(() => {
+    if (!groupRef.current) return;
+    if (!obj || !dims) { groupRef.current.visible = false; return; }
+    const mesh = meshRefs.current[obj.id];
+    if (!mesh) { groupRef.current.visible = false; return; }
+    groupRef.current.visible = true;
+    groupRef.current.position.copy(mesh.position);
+  });
+
+  if (!obj || !dims) return null;
+
+  const halfW = dims.width / 2;
+  const halfH = dims.height / 2;
+  const halfD = dims.depth / 2;
+  const gap = 3;
+  const fmt = (v) => `${v.toFixed(1)} ${units}`;
+
+  return (
+    <group ref={groupRef}>
+      {/* Width (X) — along bottom front */}
+      <DimensionLine
+        start={[-halfW, -halfH - gap, halfD]}
+        end={[halfW, -halfH - gap, halfD]}
+        label={fmt(dims.width)}
+        color="#ff6b6b"
+      />
+      {/* Height (Y) — along right side */}
+      <DimensionLine
+        start={[halfW + gap, -halfH, halfD]}
+        end={[halfW + gap, halfH, halfD]}
+        label={fmt(dims.height)}
+        color="#51cf66"
+        offset={[1, 0, 0]}
+      />
+      {/* Depth (Z) — along bottom right */}
+      <DimensionLine
+        start={[halfW, -halfH - gap, -halfD]}
+        end={[halfW, -halfH - gap, halfD]}
+        label={fmt(dims.depth)}
+        color="#339af0"
+      />
+    </group>
+  );
+}
+
 function DropHandler() {
   const { camera } = useThree();
   const pendingDrop = useDesignStore(s => s.pendingDrop);
@@ -401,6 +598,7 @@ function SceneContent() {
       />
       <directionalLight position={[-30, 60, -40]} intensity={0.3} />
       <hemisphereLight args={['#b1e1ff', '#b97a20', 0.25]} />
+      <Environment preset="city" environmentIntensity={0.3} />
 
       {gridVisible && (
         <Grid
@@ -474,6 +672,7 @@ function SceneContent() {
         />
       )}
 
+      <DimensionRuler meshRefs={meshRefs} />
       <DragPreview />
       <DropHandler />
 

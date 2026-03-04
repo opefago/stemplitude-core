@@ -1,7 +1,7 @@
 import React from 'react';
-import Tippy from '@tippyjs/react';
+import Tip from './Tip';
 import {
-  Move, RotateCw, Maximize2, Grid3X3,
+  Move, RotateCw, Maximize2, Grid3X3, Box, BoxSelect, Ruler,
   Copy, Trash2, FlipHorizontal, FlipVertical,
   AlignCenterHorizontal, AlignCenterVertical,
   Undo2, Redo2,
@@ -18,6 +18,8 @@ export default function Toolbar() {
   const setTransformMode = useDesignStore(s => s.setTransformMode);
   const toggleGrid = useDesignStore(s => s.toggleGrid);
   const toggleWireframe = useDesignStore(s => s.toggleWireframe);
+  const rulerVisible = useDesignStore(s => s.rulerVisible);
+  const toggleRuler = useDesignStore(s => s.toggleRuler);
   const setSnapIncrement = useDesignStore(s => s.setSnapIncrement);
   const removeSelected = useDesignStore(s => s.removeSelected);
   const duplicateSelected = useDesignStore(s => s.duplicateSelected);
@@ -34,74 +36,82 @@ export default function Toolbar() {
   return (
     <div className="dml-toolbar">
       <div className="dml-toolbar-group">
-        <Tippy content="Undo (Ctrl+Z)">
+        <Tip label="Undo" shortcut="Ctrl+Z">
           <button className="dml-tool-btn" onClick={undo} disabled={!canUndo}>
-            <Undo2 size={16} />
+            <Undo2 size={20} />
           </button>
-        </Tippy>
-        <Tippy content="Redo (Ctrl+Shift+Z)">
+        </Tip>
+        <Tip label="Redo" shortcut="Ctrl+Shift+Z">
           <button className="dml-tool-btn" onClick={redo} disabled={!canRedo}>
-            <Redo2 size={16} />
+            <Redo2 size={20} />
           </button>
-        </Tippy>
+        </Tip>
       </div>
 
       <div className="dml-toolbar-sep" />
 
       <div className="dml-toolbar-group">
-        <span className="dml-toolbar-label">Transform</span>
-        <Tippy content="Move (T)">
+        <Tip label="Move" shortcut="T">
           <button
             className={`dml-tool-btn ${transformMode === 'translate' ? 'active' : ''}`}
             onClick={() => setTransformMode('translate')}
           >
-            <Move size={16} />
+            <Move size={20} />
           </button>
-        </Tippy>
-        <Tippy content="Rotate (R)">
+        </Tip>
+        <Tip label="Rotate" shortcut="R">
           <button
             className={`dml-tool-btn ${transformMode === 'rotate' ? 'active' : ''}`}
             onClick={() => setTransformMode('rotate')}
           >
-            <RotateCw size={16} />
+            <RotateCw size={20} />
           </button>
-        </Tippy>
-        <Tippy content="Scale (S)">
+        </Tip>
+        <Tip label="Resize" shortcut="S">
           <button
             className={`dml-tool-btn ${transformMode === 'scale' ? 'active' : ''}`}
             onClick={() => setTransformMode('scale')}
           >
-            <Maximize2 size={16} />
+            <Maximize2 size={20} />
           </button>
-        </Tippy>
+        </Tip>
       </div>
 
       <div className="dml-toolbar-sep" />
 
       <div className="dml-toolbar-group">
-        <span className="dml-toolbar-label">View</span>
-        <div className="dml-view-toggle">
+        <Tip label="Solid View">
           <button
-            className={`dml-view-toggle-btn ${!wireframe ? 'active' : ''}`}
+            className={`dml-tool-btn ${!wireframe ? 'active' : ''}`}
             onClick={() => { if (wireframe) toggleWireframe(); }}
           >
-            Solid
+            <Box size={20} />
           </button>
+        </Tip>
+        <Tip label="Wireframe">
           <button
-            className={`dml-view-toggle-btn ${wireframe ? 'active' : ''}`}
+            className={`dml-tool-btn ${wireframe ? 'active' : ''}`}
             onClick={() => { if (!wireframe) toggleWireframe(); }}
           >
-            Wire
+            <BoxSelect size={20} />
           </button>
-        </div>
-        <Tippy content="Toggle Grid (G)">
+        </Tip>
+        <Tip label="Grid" shortcut="G">
           <button
             className={`dml-tool-btn ${gridVisible ? 'active' : ''}`}
             onClick={toggleGrid}
           >
-            <Grid3X3 size={16} />
+            <Grid3X3 size={20} />
           </button>
-        </Tippy>
+        </Tip>
+        <Tip label="Ruler">
+          <button
+            className={`dml-tool-btn ${rulerVisible ? 'active' : ''}`}
+            onClick={toggleRuler}
+          >
+            <Ruler size={20} />
+          </button>
+        </Tip>
       </div>
 
       <div className="dml-toolbar-sep" />
@@ -124,27 +134,26 @@ export default function Toolbar() {
         <>
           <div className="dml-toolbar-sep" />
           <div className="dml-toolbar-group">
-            <span className="dml-toolbar-label">Edit</span>
-            <Tippy content="Duplicate (Ctrl+D)">
+            <Tip label="Duplicate" shortcut="Ctrl+D">
               <button className="dml-tool-btn" onClick={duplicateSelected}>
-                <Copy size={16} />
+                <Copy size={20} />
               </button>
-            </Tippy>
-            <Tippy content="Mirror X">
+            </Tip>
+            <Tip label="Mirror X">
               <button className="dml-tool-btn" onClick={() => mirrorSelected('x')}>
-                <FlipHorizontal size={16} />
+                <FlipHorizontal size={20} />
               </button>
-            </Tippy>
-            <Tippy content="Mirror Z">
+            </Tip>
+            <Tip label="Mirror Z">
               <button className="dml-tool-btn" onClick={() => mirrorSelected('z')}>
-                <FlipVertical size={16} />
+                <FlipVertical size={20} />
               </button>
-            </Tippy>
-            <Tippy content="Delete (Del)">
+            </Tip>
+            <Tip label="Delete" shortcut="Del">
               <button className="dml-tool-btn danger" onClick={removeSelected}>
-                <Trash2 size={16} />
+                <Trash2 size={20} />
               </button>
-            </Tippy>
+            </Tip>
           </div>
         </>
       )}
@@ -154,21 +163,21 @@ export default function Toolbar() {
           <div className="dml-toolbar-sep" />
           <div className="dml-toolbar-group">
             <span className="dml-toolbar-label">Align</span>
-            <Tippy content="Align Center X">
+            <Tip label="Align X">
               <button className="dml-tool-btn" onClick={() => alignObjects('x', 'center')}>
-                <AlignCenterHorizontal size={16} />
+                <AlignCenterHorizontal size={20} />
               </button>
-            </Tippy>
-            <Tippy content="Align Bottom Y">
+            </Tip>
+            <Tip label="Align Y">
               <button className="dml-tool-btn" onClick={() => alignObjects('y', 'min')}>
-                <AlignCenterVertical size={16} />
+                <AlignCenterVertical size={20} />
               </button>
-            </Tippy>
-            <Tippy content="Align Center Z">
+            </Tip>
+            <Tip label="Align Z">
               <button className="dml-tool-btn" onClick={() => alignObjects('z', 'center')}>
-                <AlignCenterHorizontal size={16} />
+                <AlignCenterHorizontal size={20} />
               </button>
-            </Tippy>
+            </Tip>
           </div>
         </>
       )}

@@ -1,5 +1,5 @@
 import React from 'react';
-import Tippy from '@tippyjs/react';
+import Tip from './Tip';
 import { Home, Maximize, Plus, Minus, Box, Cuboid } from 'lucide-react';
 import { useDesignStore } from './store';
 
@@ -13,41 +13,41 @@ export default function ViewControls() {
 
   return (
     <div className="dml-view-controls">
-      <Tippy content="Home View" placement="left">
+      <Tip label="Home" placement="left">
         <button className="dml-vc-btn" onClick={cameraHome}>
-          <Home size={18} />
+          <Home size={20} />
         </button>
-      </Tippy>
+      </Tip>
 
-      <Tippy content="Fit to View" placement="left">
+      <Tip label="Fit All" placement="left">
         <button className="dml-vc-btn" onClick={cameraFit}>
-          <Maximize size={18} />
+          <Maximize size={20} />
         </button>
-      </Tippy>
+      </Tip>
 
       <div className="dml-vc-sep" />
 
-      <Tippy content="Zoom In" placement="left">
+      <Tip label="Zoom In" placement="left">
         <button className="dml-vc-btn" onClick={zoomIn}>
-          <Plus size={18} />
+          <Plus size={20} />
         </button>
-      </Tippy>
-      <Tippy content="Zoom Out" placement="left">
+      </Tip>
+      <Tip label="Zoom Out" placement="left">
         <button className="dml-vc-btn" onClick={zoomOut}>
-          <Minus size={18} />
+          <Minus size={20} />
         </button>
-      </Tippy>
+      </Tip>
 
       <div className="dml-vc-sep" />
 
-      <Tippy content={cameraMode === 'perspective' ? 'Switch to Orthographic' : 'Switch to Perspective'} placement="left">
+      <Tip label={cameraMode === 'perspective' ? 'Orthographic' : 'Perspective'} placement="left">
         <button
           className={`dml-vc-btn dml-vc-cube ${cameraMode === 'orthographic' ? 'active' : ''}`}
           onClick={() => setCameraMode(cameraMode === 'perspective' ? 'orthographic' : 'perspective')}
         >
-          {cameraMode === 'perspective' ? <Cuboid size={20} /> : <Box size={20} />}
+          {cameraMode === 'perspective' ? <Cuboid size={22} /> : <Box size={22} />}
         </button>
-      </Tippy>
+      </Tip>
     </div>
   );
 }
