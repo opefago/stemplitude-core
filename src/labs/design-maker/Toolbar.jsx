@@ -2,21 +2,19 @@ import React, { useState } from 'react';
 import Tip from './Tip';
 import CustomSelect from './CustomSelect';
 import {
-  Move, RotateCw, Maximize2, Grid3X3, Box, BoxSelect, Ruler, PencilRuler,
+  Grid3X3, Box, BoxSelect, Ruler, PencilRuler,
   Copy, Trash2, FlipHorizontal, FlipVertical,
   AlignCenterHorizontal, AlignCenterVertical,
-  Undo2, Redo2, LayoutGrid, Magnet,
+  Undo2, Redo2, LayoutGrid, Magnet, ArrowDownToLine,
 } from 'lucide-react';
 import { useDesignStore } from './store';
 
 export default function Toolbar() {
-  const transformMode = useDesignStore(s => s.transformMode);
   const gridVisible = useDesignStore(s => s.gridVisible);
   const wireframe = useDesignStore(s => s.wireframe);
   const snapIncrement = useDesignStore(s => s.snapIncrement);
   const selectedIds = useDesignStore(s => s.selectedIds);
 
-  const setTransformMode = useDesignStore(s => s.setTransformMode);
   const toggleGrid = useDesignStore(s => s.toggleGrid);
   const toggleWireframe = useDesignStore(s => s.toggleWireframe);
   const rulerVisible = useDesignStore(s => s.rulerVisible);
@@ -28,6 +26,13 @@ export default function Toolbar() {
   const setSnapIncrement = useDesignStore(s => s.setSnapIncrement);
   const removeSelected = useDesignStore(s => s.removeSelected);
   const duplicateSelected = useDesignStore(s => s.duplicateSelected);
+  const dropToFloor = useDesignStore(s => s.dropToFloor);
+  const objects = useDesignStore(s => s.objects);
+
+  const selectionHasLocked = selectedIds.some(id => {
+    const o = objects.find(obj => obj.id === id);
+    return o?.locked;
+  });
   const mirrorSelected = useDesignStore(s => s.mirrorSelected);
   const arraySelected = useDesignStore(s => s.arraySelected);
   const alignObjects = useDesignStore(s => s.alignObjects);
@@ -55,35 +60,6 @@ export default function Toolbar() {
         <Tip label="Redo" shortcut="Ctrl+Shift+Z">
           <button className="dml-tool-btn" onClick={redo} disabled={!canRedo}>
             <Redo2 size={20} />
-          </button>
-        </Tip>
-      </div>
-
-      <div className="dml-toolbar-sep" />
-
-      <div className="dml-toolbar-group">
-        <Tip label="Move" shortcut="T">
-          <button
-            className={`dml-tool-btn ${transformMode === 'translate' ? 'active' : ''}`}
-            onClick={() => setTransformMode('translate')}
-          >
-            <Move size={20} />
-          </button>
-        </Tip>
-        <Tip label="Rotate" shortcut="R">
-          <button
-            className={`dml-tool-btn ${transformMode === 'rotate' ? 'active' : ''}`}
-            onClick={() => setTransformMode('rotate')}
-          >
-            <RotateCw size={20} />
-          </button>
-        </Tip>
-        <Tip label="Resize" shortcut="S">
-          <button
-            className={`dml-tool-btn ${transformMode === 'scale' ? 'active' : ''}`}
-            onClick={() => setTransformMode('scale')}
-          >
-            <Maximize2 size={20} />
           </button>
         </Tip>
       </div>
@@ -169,24 +145,29 @@ export default function Toolbar() {
         <>
           <div className="dml-toolbar-sep" />
           <div className="dml-toolbar-group">
+            <Tip label="Drop to Floor">
+              <button className="dml-tool-btn" onClick={dropToFloor} disabled={selectionHasLocked}>
+                <ArrowDownToLine size={20} />
+              </button>
+            </Tip>
             <Tip label="Duplicate" shortcut="Ctrl+D">
-              <button className="dml-tool-btn" onClick={duplicateSelected}>
+              <button className="dml-tool-btn" onClick={duplicateSelected} disabled={selectionHasLocked}>
                 <Copy size={20} />
               </button>
             </Tip>
             <Tip label="Mirror X">
-              <button className="dml-tool-btn" onClick={() => mirrorSelected('x')}>
+              <button className="dml-tool-btn" onClick={() => mirrorSelected('x')} disabled={selectionHasLocked}>
                 <FlipHorizontal size={20} />
               </button>
             </Tip>
             <Tip label="Mirror Z">
-              <button className="dml-tool-btn" onClick={() => mirrorSelected('z')}>
+              <button className="dml-tool-btn" onClick={() => mirrorSelected('z')} disabled={selectionHasLocked}>
                 <FlipVertical size={20} />
               </button>
             </Tip>
             <div className="dml-array-wrap">
               <Tip label="Linear Array">
-                <button className={`dml-tool-btn ${arrayOpen ? 'active' : ''}`} onClick={() => setArrayOpen(!arrayOpen)}>
+                <button className={`dml-tool-btn ${arrayOpen ? 'active' : ''}`} onClick={() => setArrayOpen(!arrayOpen)} disabled={selectionHasLocked}>
                   <LayoutGrid size={20} />
                 </button>
               </Tip>
@@ -219,7 +200,7 @@ export default function Toolbar() {
               )}
             </div>
             <Tip label="Delete" shortcut="Del">
-              <button className="dml-tool-btn danger" onClick={removeSelected}>
+              <button className="dml-tool-btn danger" onClick={removeSelected} disabled={selectionHasLocked}>
                 <Trash2 size={20} />
               </button>
             </Tip>

@@ -13,6 +13,7 @@ import {
   Grid,
   GizmoHelper,
   GizmoViewcube,
+  GizmoViewport,
   PerspectiveCamera,
   OrthographicCamera,
   Text3D,
@@ -28,7 +29,9 @@ import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js
 import {
   useDesignStore,
   SHAPE_DEFAULTS,
-  getHalfHeight,
+  FLAT_TYPES,
+  FLAT_ROTATION,
+  getFloorY,
   dragCursor,
   sceneCamera,
   sceneInteracting,
@@ -389,7 +392,7 @@ function useObjectGeometry(type, params) {
 }
 
 const SceneObject = forwardRef(function SceneObject(
-  { obj, isSelected, wireframe, onSelect },
+  { obj, isSelected, wireframe, onSelect, onDragStart },
   ref,
 ) {
   const color = obj.isHole ? "#ff4444" : obj.color;
@@ -405,8 +408,10 @@ const SceneObject = forwardRef(function SceneObject(
         position={obj.position}
         rotation={obj.rotation}
         scale={obj.scale}
-        onPointerDown={() => {
+        userData={{ isSceneObject: true }}
+        onPointerDown={(e) => {
           sceneInteracting.active = true;
+          if (e.button === 0) onDragStart(e, obj.id);
         }}
         onPointerUp={() => {
           sceneInteracting.active = false;
@@ -484,8 +489,10 @@ const SceneObject = forwardRef(function SceneObject(
       position={obj.position}
       rotation={obj.rotation}
       scale={obj.scale}
-      onPointerDown={() => {
+      userData={{ isSceneObject: true }}
+      onPointerDown={(e) => {
         sceneInteracting.active = true;
+        if (e.button === 0) onDragStart(e, obj.id);
       }}
       onPointerUp={() => {
         sceneInteracting.active = false;
@@ -523,7 +530,7 @@ function CameraSetup() {
         makeDefault={cameraMode === "perspective"}
         position={[60, 60, 60]}
         fov={50}
-        near={0.1}
+        near={0.5}
         far={10000}
       />
       <OrthographicCamera
@@ -542,6 +549,7 @@ function CameraControls({ orbitRef }) {
   const zoomSpeed = useDesignStore((s) => s.zoomSpeed);
   const cameraCmd = useDesignStore((s) => s._cameraCmd);
   const clearCameraCmd = useDesignStore((s) => s.clearCameraCmd);
+  const { gl } = useThree();
 
   useEffect(() => {
     if (orbitRef.current) {
@@ -552,6 +560,22 @@ function CameraControls({ orbitRef }) {
       };
     }
   }, [orbitRef]);
+
+  useEffect(() => {
+    const dom = gl.domElement;
+    const handleDown = (e) => {
+      if (!orbitRef.current || e.button !== 0) return;
+      if (e.shiftKey) {
+        orbitRef.current.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
+      } else if (e.ctrlKey || e.metaKey) {
+        orbitRef.current.mouseButtons.LEFT = THREE.MOUSE.PAN;
+      } else {
+        orbitRef.current.mouseButtons.LEFT = undefined;
+      }
+    };
+    dom.addEventListener('pointerdown', handleDown, { capture: true });
+    return () => dom.removeEventListener('pointerdown', handleDown, { capture: true });
+  }, [gl, orbitRef]);
 
   useEffect(() => {
     if (!cameraCmd || !orbitRef.current) return;
@@ -628,7 +652,7 @@ function DragPreview() {
     ? SHAPE_DEFAULTS[draggingShape.type] || SHAPE_DEFAULTS.box
     : null;
   const halfH = defaults
-    ? getHalfHeight(draggingShape.type, defaults.geometry)
+    ? getFloorY(draggingShape.type, defaults.geometry, FLAT_TYPES.includes(draggingShape?.type) ? FLAT_ROTATION : null)
     : 10;
   const color = draggingShape?.isHole
     ? "#ff4444"
@@ -665,10 +689,14 @@ function DragPreview() {
     }
   });
 
+  const previewRotation = draggingShape && FLAT_TYPES.includes(draggingShape.type)
+    ? FLAT_ROTATION
+    : [0, 0, 0];
+
   if (!draggingShape || !defaults) return null;
 
   return (
-    <group ref={groupRef} visible={false}>
+    <group ref={groupRef} visible={false} rotation={previewRotation}>
       <mesh renderOrder={998} geometry={previewGeo}>
         <meshStandardMaterial
           color={color}
@@ -846,27 +874,27 @@ function DimensionRuler({ meshRefs }) {
   const halfW = dims.width / 2;
   const halfH = dims.height / 2;
   const halfD = dims.depth / 2;
-  const gap = 3;
+  const gap = 4;
   const fmt = (v) => `${v.toFixed(1)} ${units}`;
 
   return (
     <group ref={groupRef}>
       <DimensionLine
-        start={[-halfW, -halfH - gap, halfD]}
-        end={[halfW, -halfH - gap, halfD]}
+        start={[-halfW, -halfH - gap, halfD + gap]}
+        end={[halfW, -halfH - gap, halfD + gap]}
         label={fmt(dims.width)}
         color="#ff6b6b"
       />
       <DimensionLine
-        start={[halfW + gap, -halfH, halfD]}
-        end={[halfW + gap, halfH, halfD]}
+        start={[halfW + gap, -halfH, halfD + gap]}
+        end={[halfW + gap, halfH, halfD + gap]}
         label={fmt(dims.height)}
         color="#51cf66"
         offset={[1, 0, 0]}
       />
       <DimensionLine
-        start={[halfW, -halfH - gap, -halfD]}
-        end={[halfW, -halfH - gap, halfD]}
+        start={[halfW + gap, -halfH - gap, -halfD]}
+        end={[halfW + gap, -halfH - gap, halfD]}
         label={fmt(dims.depth)}
         color="#339af0"
       />
@@ -1094,8 +1122,7 @@ function getScaleHandles(type, geometry) {
       });
       break;
     }
-    case "sphere":
-    case "hemisphere": {
+    case "sphere": {
       const by = -g.radius;
       handles.push({
         param: "radius",
@@ -1123,6 +1150,36 @@ function getScaleHandles(type, geometry) {
       });
       break;
     }
+    case "hemisphere": {
+      // Hemisphere geometry is centered around Y after construction:
+      // base at -r/2 and top at +r/2.
+      const by = -g.radius / 2;
+      handles.push({
+        param: "radius",
+        dir: [1, 0, 0],
+        pos: [g.radius + o, by, 0],
+        label: "R",
+      });
+      handles.push({
+        param: "radius",
+        dir: [-1, 0, 0],
+        pos: [-g.radius - o, by, 0],
+        label: "R",
+      });
+      handles.push({
+        param: "radius",
+        dir: [0, 0, 1],
+        pos: [0, by, g.radius + o],
+        label: "R",
+      });
+      handles.push({
+        param: "radius",
+        dir: [0, 1, 0],
+        pos: [0, g.radius / 2 + o, 0],
+        label: "R",
+      });
+      break;
+    }
     case "cylinder": {
       const by = -g.height / 2;
       handles.push({
@@ -1139,12 +1196,14 @@ function getScaleHandles(type, geometry) {
         pos: [-g.radiusBottom - o, by, 0],
         label: "R",
       });
-      handles.push({
-        param: "radiusTop",
-        dir: [1, 0, 0],
-        pos: [g.radiusTop + o, g.height / 2, 0],
-        label: "Rt",
-      });
+      if (Math.abs((g.radiusTop ?? 0) - (g.radiusBottom ?? 0)) > 0.001) {
+        handles.push({
+          param: "radiusTop",
+          dir: [1, 0, 0],
+          pos: [g.radiusTop + o, g.height / 2, 0],
+          label: "Rt",
+        });
+      }
       handles.push({
         param: "height",
         dir: [0, 1, 0],
@@ -1191,6 +1250,40 @@ function getScaleHandles(type, geometry) {
         label: "T",
       });
       break;
+    case "heart":
+      handles.push({
+        param: "size",
+        dir: [1, 0, 0],
+        pos: [g.size + o, -g.depth / 2, 0],
+        label: "S",
+      });
+      handles.push({
+        param: "depth",
+        dir: [0, 1, 0],
+        pos: [0, g.depth / 2 + o, 0],
+        label: "D",
+      });
+      break;
+    case "star":
+      handles.push({
+        param: "outerRadius",
+        dir: [1, 0, 0],
+        pos: [g.outerRadius + o, -g.depth / 2, 0],
+        label: "R",
+      });
+      handles.push({
+        param: "outerRadius",
+        dir: [0, 0, 1],
+        pos: [0, -g.depth / 2, g.outerRadius + o],
+        label: "R",
+      });
+      handles.push({
+        param: "depth",
+        dir: [0, 1, 0],
+        pos: [0, g.depth / 2 + o, 0],
+        label: "D",
+      });
+      break;
     default:
       break;
   }
@@ -1202,7 +1295,7 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
   const obj = useDesignStore((s) => {
     if (s.selectedIds.length !== 1) return null;
     const o = s.objects.find((o) => o.id === s.selectedIds[0]);
-    if (!o || o.type === "text" || o.type === "imported") return null;
+    if (!o || o.type === "imported" || o.locked) return null;
     return o;
   });
   const snapIncrement = useDesignStore((s) => s.snapIncrement);
@@ -1241,12 +1334,29 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
   const maxDim = Math.max(rawDims.width, rawDims.height, rawDims.depth);
   const arcR = maxDim * 0.45 + 3;
 
+  const arcBand = 2.0;
   const arcGeo = useMemo(
-    () => new THREE.TorusGeometry(arcR, 0.35, 8, 32, Math.PI / 2),
+    () =>
+      new THREE.RingGeometry(
+        arcR - arcBand,
+        arcR + arcBand,
+        48,
+        1,
+        0,
+        Math.PI / 2,
+      ),
     [arcR],
   );
   const hoverRingGeo = useMemo(
-    () => new THREE.TorusGeometry(arcR, 0.12, 8, 64),
+    () =>
+      new THREE.RingGeometry(
+        arcR - arcBand,
+        arcR + arcBand,
+        64,
+        1,
+        0,
+        Math.PI * 2,
+      ),
     [arcR],
   );
 
@@ -1333,14 +1443,14 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
   const rotationArcs = [
     {
       axis: 0,
-      pos: [0, hh + 3, hd + 3],
+      pos: [-hw - 3, hh / 2, hd + 3],
       arcRot: [0, Math.PI / 2, 0],
       color: "#ef4444",
     },
     {
       axis: 1,
-      pos: [hw + 3, hh + 3, 0],
-      arcRot: [Math.PI / 2, 0, 0],
+      pos: [hw + 3, -hh - 3, 0],
+      arcRot: [-Math.PI / 2, 0, 0],
       color: "#22c55e",
     },
     { axis: 2, pos: [hw + 3, 0, hd + 3], arcRot: [0, 0, 0], color: "#3b82f6" },
@@ -1355,6 +1465,46 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
       .normalize();
     if (pn.lengthSq() < 0.001) pn.copy(camDir);
     interactionPlane.setFromNormalAndCoplanarPoint(pn, point);
+  };
+
+  const resolveScaleParams = (targetObj, handle, targetMesh) => {
+    const axisParamMap = {
+      box: ["width", "height", "depth"],
+      wall: ["width", "height", "depth"],
+      wedge: ["width", "height", "depth"],
+      sphere: ["radius", "radius", "radius"],
+      hemisphere: ["radius", "radius", "radius"],
+      cylinder: ["radiusBottom", "height", "radiusBottom"],
+      cone: ["radius", "height", "radius"],
+      pyramid: ["radius", "height", "radius"],
+      torus: ["radius", "tube", "radius"],
+      tube: ["radius", "tube", "radius"],
+      heart: ["size", "depth", "size"],
+      star: ["outerRadius", "depth", "outerRadius"],
+      text: ["size", "height", "size"],
+    };
+    const axisLinkedMap = {
+      cylinder: ["radiusTop", null, "radiusTop"],
+    };
+
+    const paramAxes = axisParamMap[targetObj.type];
+    if (!paramAxes) return { param: handle.param, linkedParam: handle.linkedParam };
+
+    const q = new THREE.Quaternion();
+    targetMesh.getWorldQuaternion(q);
+    const invQ = q.clone().invert();
+    const localDir = new THREE.Vector3(...handle.dir).applyQuaternion(invQ).normalize();
+    const ax = Math.abs(localDir.x);
+    const ay = Math.abs(localDir.y);
+    const az = Math.abs(localDir.z);
+    const axis = ax >= ay && ax >= az ? 0 : ay >= az ? 1 : 2;
+
+    return {
+      param: paramAxes[axis] || handle.param,
+      linkedParam:
+        (axisLinkedMap[targetObj.type] && axisLinkedMap[targetObj.type][axis]) ||
+        handle.linkedParam,
+    };
   };
 
   const handleDomMove = (domEvent) => {
@@ -1378,12 +1528,12 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
         if (cur) {
           const geoUpdate = {
             ...cur.geometry,
-            [drag.current.handle.param]: val,
+            [drag.current.param]: val,
           };
-          if (drag.current.handle.linkedParam) {
+          if (drag.current.linkedParam) {
             const delta = val - startValue.current;
             const linkedStart = startLinkedValue.current;
-            geoUpdate[drag.current.handle.linkedParam] = Math.max(
+            geoUpdate[drag.current.linkedParam] = Math.max(
               0.5,
               Math.round((linkedStart + delta) * 10) / 10,
             );
@@ -1463,11 +1613,12 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
     beginDrag(e);
     const dirW = new THREE.Vector3(...handle.dir).normalize();
     makeDragPlane(dirW, e.point);
-    drag.current = { type: "scale", handle, dirW };
+    const { param, linkedParam } = resolveScaleParams(obj, handle, mesh);
+    drag.current = { type: "scale", handle, dirW, param, linkedParam };
     startPt.copy(e.point);
-    startValue.current = obj.geometry[handle.param];
-    startLinkedValue.current = handle.linkedParam
-      ? obj.geometry[handle.linkedParam]
+    startValue.current = obj.geometry[param];
+    startLinkedValue.current = linkedParam
+      ? obj.geometry[linkedParam]
       : 0;
   };
 
@@ -1528,7 +1679,7 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
     <>
       {!rotating && (
         <group position={worldPos}>
-          {/* Scale handles - flat triangles pointing outward from each face */}
+          {/* Scale handles - world-axis aligned */}
           {scaleHandles.map((h, i) => {
             const [dx, dy, dz] = h.dir;
             let rotation;
@@ -1587,24 +1738,23 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
         {rotationArcs.map((arc) => {
           if (rotating && hoveredArc !== arc.axis) return null;
           return (
-            <group key={`rot${arc.axis}`} position={arc.pos}>
+            <group
+              key={`rot${arc.axis}`}
+              position={arc.pos}
+              rotation={arc.arcRot}
+            >
               {hoveredArc === arc.axis && (
-                <mesh
-                  rotation={arc.arcRot}
-                  geometry={hoverRingGeo}
-                  renderOrder={998}
-                >
+                <mesh geometry={hoverRingGeo} renderOrder={998}>
                   <meshBasicMaterial
                     color={arc.color}
                     transparent
-                    opacity={0.12}
+                    opacity={0.25}
                     depthTest={false}
                     side={THREE.DoubleSide}
                   />
                 </mesh>
               )}
               <mesh
-                rotation={arc.arcRot}
                 geometry={arcGeo}
                 onPointerEnter={() => setHoveredArc(arc.axis)}
                 onPointerLeave={() => {
@@ -1617,7 +1767,7 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
                 <meshBasicMaterial
                   color={arc.color}
                   transparent
-                  opacity={0.55}
+                  opacity={0.65}
                   depthTest={false}
                   side={THREE.DoubleSide}
                 />
@@ -1765,7 +1915,7 @@ function FaceSnapper({ meshRefs, selectedId, active }) {
 function SceneContent() {
   const meshRefs = useRef({});
   const orbitRef = useRef();
-  const { camera } = useThree();
+  const { camera, gl } = useThree();
   const [transforming, setTransforming] = useState(false);
 
   useEffect(() => {
@@ -1777,10 +1927,146 @@ function SceneContent() {
   const gridVisible = useDesignStore((s) => s.gridVisible);
   const wireframe = useDesignStore((s) => s.wireframe);
   const snapIncrement = useDesignStore((s) => s.snapIncrement);
+  const shadowsEnabled = useDesignStore((s) => s.shadowsEnabled);
   const clearSelection = useDesignStore((s) => s.clearSelection);
   const selectObject = useDesignStore((s) => s.selectObject);
+  const updateObjectSilent = useDesignStore((s) => s.updateObjectSilent);
 
   const selectedId = selectedIds.length === 1 ? selectedIds[0] : null;
+
+  const objDrag = useRef(null);
+  const dragPlane = useMemo(() => new THREE.Plane(), []);
+  const dragRaycaster = useMemo(() => new THREE.Raycaster(), []);
+  const dragHit = useMemo(() => new THREE.Vector3(), []);
+  const dragOffset = useMemo(() => new THREE.Vector3(), []);
+  const surfaceRaycaster = useMemo(() => new THREE.Raycaster(), []);
+  const MIN_DRAG = 3;
+
+  const handleObjDragMove = useCallback(
+    (domEvent) => {
+      if (!objDrag.current) return;
+      const d = objDrag.current;
+      if (!d.dragging) {
+        const dx = domEvent.clientX - d.startMouse.x;
+        const dy = domEvent.clientY - d.startMouse.y;
+        if (Math.abs(dx) < MIN_DRAG && Math.abs(dy) < MIN_DRAG) return;
+        d.dragging = true;
+        useDesignStore.getState()._saveSnapshot();
+        if (orbitRef.current) orbitRef.current.enabled = false;
+        setTransforming(true);
+      }
+      const rect = gl.domElement.getBoundingClientRect();
+      const ndc = new THREE.Vector2(
+        ((domEvent.clientX - rect.left) / rect.width) * 2 - 1,
+        -((domEvent.clientY - rect.top) / rect.height) * 2 + 1,
+      );
+      dragRaycaster.setFromCamera(ndc, camera);
+      if (dragRaycaster.ray.intersectPlane(dragPlane, dragHit)) {
+        const state = useDesignStore.getState();
+        const si = state.snapIncrement;
+        let nx = dragHit.x - dragOffset.x;
+        let nz = dragHit.z - dragOffset.z;
+        if (si) {
+          nx = Math.round(nx / si) * si;
+          nz = Math.round(nz / si) * si;
+        }
+        const cur = state.objects.find((o) => o.id === d.id);
+        if (!cur) return;
+
+        const draggedHalfH = getFloorY(cur.type, cur.geometry, cur.rotation, cur.scale);
+        let ny = cur.position[1];
+
+        if (state.faceSnap) {
+          const otherMeshes = [];
+          for (const [id, group] of Object.entries(meshRefs.current)) {
+            if (id === d.id) continue;
+            group.traverse((child) => {
+              if (child.isMesh) otherMeshes.push(child);
+            });
+          }
+
+          if (otherMeshes.length > 0) {
+            surfaceRaycaster.set(
+              new THREE.Vector3(nx, 500, nz),
+              new THREE.Vector3(0, -1, 0),
+            );
+            const surfaceHits = surfaceRaycaster.intersectObjects(otherMeshes, false);
+            const topHit = surfaceHits.find((h) => {
+              let p = h.object;
+              while (p) {
+                if (p.userData?.isSceneObject) return true;
+                p = p.parent;
+              }
+              return false;
+            });
+
+            if (topHit) {
+              ny = topHit.point.y + draggedHalfH;
+            } else {
+              ny = draggedHalfH;
+            }
+          } else {
+            ny = draggedHalfH;
+          }
+        }
+
+        updateObjectSilent(d.id, { position: [nx, ny, nz] });
+      }
+    },
+    [
+      camera,
+      gl,
+      dragPlane,
+      dragRaycaster,
+      dragHit,
+      dragOffset,
+      surfaceRaycaster,
+      updateObjectSilent,
+    ],
+  );
+
+  const handleObjDragUp = useCallback(() => {
+    if (objDrag.current?.dragging) {
+      setTransforming(false);
+      if (orbitRef.current) orbitRef.current.enabled = true;
+    }
+    objDrag.current = null;
+    sceneInteracting.active = false;
+    window.removeEventListener("pointermove", handleObjDragMove);
+    window.removeEventListener("pointerup", handleObjDragUp);
+  }, [handleObjDragMove]);
+
+  const handleObjDragStart = useCallback(
+    (e, id) => {
+      e.stopPropagation();
+      const obj = useDesignStore.getState().objects.find((o) => o.id === id);
+      if (!obj || obj.locked) return;
+      dragPlane.setFromNormalAndCoplanarPoint(
+        new THREE.Vector3(0, 1, 0),
+        new THREE.Vector3(obj.position[0], obj.position[1], obj.position[2]),
+      );
+      dragOffset.set(
+        e.point.x - obj.position[0],
+        0,
+        e.point.z - obj.position[2],
+      );
+      objDrag.current = {
+        id,
+        dragging: false,
+        startMouse: {
+          x: e.nativeEvent?.clientX ?? e.clientX,
+          y: e.nativeEvent?.clientY ?? e.clientY,
+        },
+      };
+      const nativeEvt = e.nativeEvent || e;
+      if (!nativeEvt.shiftKey) {
+        selectObject(id, false);
+      }
+      window.addEventListener("pointermove", handleObjDragMove);
+      window.addEventListener("pointerup", handleObjDragUp);
+    },
+    [dragPlane, dragOffset, selectObject, handleObjDragMove, handleObjDragUp],
+  );
 
   const visibleObjects = useMemo(
     () => objects.filter((obj) => obj.visible !== false),
@@ -1804,11 +2090,10 @@ function SceneContent() {
       <CameraSetup />
 
       <ambientLight intensity={0.4} />
-      {/* Fix #8: Reduced shadow map from 2048 to 1024 */}
       <directionalLight
         position={[50, 100, 50]}
         intensity={0.8}
-        castShadow
+        castShadow={shadowsEnabled}
         shadow-mapSize-width={1024}
         shadow-mapSize-height={1024}
         shadow-camera-far={500}
@@ -1823,17 +2108,19 @@ function SceneContent() {
 
       {gridVisible && (
         <Grid
-          position={[0, -0.01, 0]}
+          position={[0, 0, 0]}
           args={[200, 200]}
           cellSize={snapIncrement || 1}
           sectionSize={(snapIncrement || 1) * 10}
-          fadeDistance={200}
-          fadeStrength={1}
+          fadeDistance={300}
+          fadeStrength={1.5}
           cellColor="#a8c8e8"
           sectionColor="#6a9fd8"
           cellThickness={0.6}
           sectionThickness={1.2}
+          followCamera
           infiniteGrid
+          side={THREE.DoubleSide}
         />
       )}
 
@@ -1873,8 +2160,9 @@ function SceneContent() {
           wireframe={wireframe}
           onSelect={(e) => {
             e.stopPropagation();
-            selectObject(obj.id, e.shiftKey);
+            if (!objDrag.current?.dragging) selectObject(obj.id, e.shiftKey);
           }}
+          onDragStart={handleObjDragStart}
         />
       ))}
 
@@ -1897,23 +2185,16 @@ function SceneContent() {
 
       <CameraControls orbitRef={orbitRef} />
 
-      <GizmoHelper alignment="top-right" margin={[80, 80]}>
-        <GizmoViewcube
-          color="#21283b"
-          textColor="#e6edf3"
-          strokeColor="#484f58"
-          hoverColor="#6366f1"
-        />
-      </GizmoHelper>
-
-      <mesh
-        rotation={[-Math.PI / 2, 0, 0]}
-        position={[0, -0.05, 0]}
-        receiveShadow
-      >
-        <planeGeometry args={[500, 500]} />
-        <shadowMaterial transparent opacity={0.15} />
-      </mesh>
+      {shadowsEnabled && (
+        <mesh
+          rotation={[-Math.PI / 2, 0, 0]}
+          position={[0, -0.5, 0]}
+          receiveShadow
+        >
+          <planeGeometry args={[500, 500]} />
+          <shadowMaterial transparent opacity={0.15} />
+        </mesh>
+      )}
 
       <EffectComposer autoClear={false}>
         <Outline
@@ -1927,6 +2208,24 @@ function SceneContent() {
           xRay={true}
         />
       </EffectComposer>
+
+      <GizmoHelper alignment="top-right" margin={[80, 80]} renderPriority={2}>
+        <GizmoViewcube
+          color="#21283b"
+          textColor="#e6edf3"
+          strokeColor="#484f58"
+          hoverColor="#6366f1"
+        />
+      </GizmoHelper>
+
+      <GizmoHelper alignment="bottom-left" margin={[80, 80]} renderPriority={2}>
+        <GizmoViewport
+          axisColors={["#ef4444", "#22c55e", "#3b82f6"]}
+          labelColor="#fff"
+          axisHeadScale={1}
+          hideNegativeAxes={false}
+        />
+      </GizmoHelper>
     </>
   );
 }

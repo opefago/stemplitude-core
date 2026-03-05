@@ -120,6 +120,7 @@ export default function DesignMakerLab() {
     if (e.target.tagName !== 'CANVAS') return;
     if (useDesignStore.getState().draggingShape) return;
     if (sceneInteracting.active) return;
+    if (e.shiftKey || e.ctrlKey || e.metaKey) return;
     const rect = viewportRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
@@ -157,16 +158,64 @@ export default function DesignMakerLab() {
       const objs = useDesignStore.getState().objects;
       const hits = [];
       const v = new THREE.Vector3();
+      const euler = new THREE.Euler();
+      const quat = new THREE.Quaternion();
+
+      const mx1 = marquee.x, my1 = marquee.y;
+      const mx2 = marquee.x + marquee.w, my2 = marquee.y + marquee.h;
+
       for (const obj of objs) {
-        v.set(...obj.position);
-        v.project(cam);
-        const sx = ((v.x + 1) / 2) * rect.width;
-        const sy = ((1 - v.y) / 2) * rect.height;
-        if (
-          sx >= marquee.x && sx <= marquee.x + marquee.w &&
-          sy >= marquee.y && sy <= marquee.y + marquee.h &&
-          v.z >= -1 && v.z <= 1
-        ) {
+        if (obj.visible === false) continue;
+        const g = obj.geometry;
+        const s = obj.scale;
+        let hw, hh, hd;
+        switch (obj.type) {
+          case 'box': case 'wall': case 'wedge':
+            hw = g.width / 2; hh = g.height / 2; hd = g.depth / 2; break;
+          case 'sphere':
+            hw = hh = hd = g.radius; break;
+          case 'hemisphere':
+            hw = g.radius; hh = g.radius / 2; hd = g.radius; break;
+          case 'cylinder':
+            hw = Math.max(g.radiusTop, g.radiusBottom); hh = g.height / 2; hd = hw; break;
+          case 'cone': case 'pyramid':
+            hw = g.radius; hh = g.height / 2; hd = g.radius; break;
+          case 'torus': case 'tube':
+            hw = g.radius + g.tube; hh = g.tube; hd = hw; break;
+          case 'heart': case 'star':
+            hw = (g.outerRadius || g.size); hh = hw; hd = g.depth / 2; break;
+          case 'text':
+            hw = 10; hh = (g.size || 10) / 2; hd = (g.height || 5) / 2; break;
+          default:
+            hw = hh = hd = 10;
+        }
+        hw *= Math.abs(s[0]); hh *= Math.abs(s[1]); hd *= Math.abs(s[2]);
+
+        euler.set(obj.rotation[0], obj.rotation[1], obj.rotation[2]);
+        quat.setFromEuler(euler);
+
+        let sxMin = Infinity, sxMax = -Infinity, syMin = Infinity, syMax = -Infinity;
+        let inFront = false;
+        for (let cx = -1; cx <= 1; cx += 2) {
+          for (let cy = -1; cy <= 1; cy += 2) {
+            for (let cz = -1; cz <= 1; cz += 2) {
+              v.set(cx * hw, cy * hh, cz * hd);
+              v.applyQuaternion(quat);
+              v.x += obj.position[0];
+              v.y += obj.position[1];
+              v.z += obj.position[2];
+              v.project(cam);
+              if (v.z >= -1 && v.z <= 1) inFront = true;
+              const sx = ((v.x + 1) / 2) * rect.width;
+              const sy = ((1 - v.y) / 2) * rect.height;
+              if (sx < sxMin) sxMin = sx;
+              if (sx > sxMax) sxMax = sx;
+              if (sy < syMin) syMin = sy;
+              if (sy > syMax) syMax = sy;
+            }
+          }
+        }
+        if (inFront && sxMax >= mx1 && sxMin <= mx2 && syMax >= my1 && syMin <= my2) {
           hits.push(obj.id);
         }
       }
@@ -196,6 +245,9 @@ export default function DesignMakerLab() {
     const handleKeyDown = (e) => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
 
+      const state = useDesignStore.getState();
+      const hasLocked = state.selectedIds.some(id => state.objects.find(o => o.id === id)?.locked);
+
       switch (e.key) {
         case 'z': case 'Z':
           if (e.ctrlKey || e.metaKey) {
@@ -205,7 +257,7 @@ export default function DesignMakerLab() {
           }
           break;
         case 'Delete': case 'Backspace':
-          removeSelected();
+          if (!hasLocked) removeSelected();
           break;
         case 't': case 'T':
           setTransformMode('translate');
@@ -218,7 +270,7 @@ export default function DesignMakerLab() {
           else setTransformMode('scale');
           break;
         case 'd': case 'D':
-          if (e.ctrlKey || e.metaKey) { e.preventDefault(); duplicateSelected(); }
+          if ((e.ctrlKey || e.metaKey) && !hasLocked) { e.preventDefault(); duplicateSelected(); }
           break;
         case 'a': case 'A':
           if (e.ctrlKey || e.metaKey) { e.preventDefault(); selectAll(); }
@@ -227,7 +279,7 @@ export default function DesignMakerLab() {
           toggleGrid();
           break;
         case 'f': case 'F':
-          if (!e.ctrlKey && !e.metaKey) dropToFloor();
+          if (!e.ctrlKey && !e.metaKey && !hasLocked) dropToFloor();
           break;
         case 'm': case 'M':
           if (!e.ctrlKey && !e.metaKey) toggleMeasure();
@@ -303,6 +355,11 @@ export default function DesignMakerLab() {
     );
     setExportOpen(false);
   }, [objects, projectName]);
+
+  const selectionHasLocked = selectedIds.some(id => {
+    const o = objects.find(obj => obj.id === id);
+    return o?.locked;
+  });
 
   const handleUnion = useCallback(() => {
     if (selectedIds.length < 2) return;
@@ -557,19 +614,19 @@ export default function DesignMakerLab() {
 
           {selectedIds.length >= 2 && (
             <div className="dml-csg-float">
-              <button className="dml-csg-btn dml-csg-union" onClick={handleUnion}>
+              <button className="dml-csg-btn dml-csg-union" onClick={handleUnion} disabled={selectionHasLocked}>
                 <Merge size={16} />
                 <span>Union</span>
               </button>
-              <button className="dml-csg-btn dml-csg-subtract" onClick={handleSubtract}>
+              <button className="dml-csg-btn dml-csg-subtract" onClick={handleSubtract} disabled={selectionHasLocked}>
                 <Scissors size={16} />
                 <span>Subtract</span>
               </button>
-              <button className="dml-csg-btn dml-csg-intersect" onClick={handleIntersect}>
+              <button className="dml-csg-btn dml-csg-intersect" onClick={handleIntersect} disabled={selectionHasLocked}>
                 <Waypoints size={16} />
                 <span>Intersect</span>
               </button>
-              <span className="dml-csg-hint">First selected = target</span>
+              <span className="dml-csg-hint">{selectionHasLocked ? 'Unlock objects first' : 'First selected = target'}</span>
             </div>
           )}
         </div>

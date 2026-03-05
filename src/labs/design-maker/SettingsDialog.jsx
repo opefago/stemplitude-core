@@ -9,12 +9,14 @@ export default function SettingsDialog() {
   const zoomSpeed = useDesignStore(s => s.zoomSpeed);
   const backgroundColor = useDesignStore(s => s.backgroundColor);
   const snapIncrement = useDesignStore(s => s.snapIncrement);
+  const shadowsEnabled = useDesignStore(s => s.shadowsEnabled);
 
   const setSettingsOpen = useDesignStore(s => s.setSettingsOpen);
   const setUnits = useDesignStore(s => s.setUnits);
   const setZoomSpeed = useDesignStore(s => s.setZoomSpeed);
   const setBackgroundColor = useDesignStore(s => s.setBackgroundColor);
   const setSnapIncrement = useDesignStore(s => s.setSnapIncrement);
+  const toggleShadows = useDesignStore(s => s.toggleShadows);
 
   if (!settingsOpen) return null;
 
@@ -83,6 +85,18 @@ export default function SettingsDialog() {
                 onChange={(e) => setBackgroundColor(e.target.value)}
               />
               <span>{backgroundColor}</span>
+            </div>
+          </div>
+
+          <div className="dml-setting-row">
+            <label>Shadows</label>
+            <div className="dml-toggle" onClick={toggleShadows}>
+              <input
+                type="checkbox"
+                checked={shadowsEnabled}
+                readOnly
+              />
+              <span className="dml-toggle-label">{shadowsEnabled ? 'On' : 'Off'}</span>
             </div>
           </div>
 

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Trash2, Copy, Lock, Unlock, ArrowDownToLine } from 'lucide-react';
+import { Trash2, Copy, Lock, Unlock } from 'lucide-react';
 import { useDesignStore } from './store';
 import { FONT_MAP, FONT_LABELS } from './Scene';
 import CustomSelect from './CustomSelect';
@@ -53,7 +53,7 @@ function GeometryProps({ obj, updateGeometry }) {
         </>
       );
     case 'sphere': case 'hemisphere':
-      return <NumberInput label="Radius" value={p.radius} onChange={(v) => updateGeometry('radius', v)} />;
+      return <NumberInput label="Radius" value={p.radius} onChange={(v) => updateGeometry('radius', Math.max(0.1, v))} />;
     case 'cylinder':
       return (
         <>
@@ -87,8 +87,9 @@ function GeometryProps({ obj, updateGeometry }) {
     case 'torus': case 'tube':
       return (
         <>
-          <NumberInput label="Radius" value={p.radius} onChange={(v) => updateGeometry('radius', v)} />
-          <NumberInput label="Tube" value={p.tube} onChange={(v) => updateGeometry('tube', v)} step={0.5} />
+          <NumberInput label="Ring Radius" value={p.radius} onChange={(v) => updateGeometry('radius', Math.max(0.5, v))} />
+          <NumberInput label="Tube Radius" value={p.tube} onChange={(v) => updateGeometry('tube', Math.max(0.1, v))} step={0.5} />
+          <NumberInput label="Segments" value={p.tubularSegments || 48} onChange={(v) => updateGeometry('tubularSegments', Math.max(3, Math.floor(v)))} step={1} />
         </>
       );
     case 'wedge':
@@ -150,7 +151,7 @@ export default function ObjectProperties() {
   const updateObject = useDesignStore(s => s.updateObject);
   const removeSelected = useDesignStore(s => s.removeSelected);
   const duplicateSelected = useDesignStore(s => s.duplicateSelected);
-  const dropToFloor = useDesignStore(s => s.dropToFloor);
+  const toggleLock = useDesignStore(s => s.toggleLock);
   const [lockScale, setLockScale] = useState(true);
 
   if (selectedIds.length === 0) {
@@ -168,9 +169,6 @@ export default function ObjectProperties() {
         <h3 className="dml-panel-title">Properties</h3>
         <p className="dml-multi-selection">{selectedIds.length} objects selected</p>
         <div className="dml-prop-actions">
-          <button className="dml-action-btn" onClick={dropToFloor}>
-            <ArrowDownToLine size={14} /> Drop to Floor
-          </button>
           <button className="dml-action-btn" onClick={duplicateSelected}>
             <Copy size={14} /> Duplicate All
           </button>
@@ -214,19 +212,33 @@ export default function ObjectProperties() {
     updateObject(obj.id, { geometry: { ...obj.geometry, [key]: val } });
   };
 
+  const isLocked = !!obj.locked;
+
   return (
     <div className="dml-properties">
       <h3 className="dml-panel-title">Properties</h3>
 
       <div className="dml-prop-section">
-        <input
-          className="dml-name-input"
-          value={obj.name}
-          onChange={(e) => updateObject(obj.id, { name: e.target.value })}
-          spellCheck={false}
-        />
+        <div className="dml-lock-edit-row">
+          <input
+            className="dml-name-input"
+            value={obj.name}
+            onChange={(e) => updateObject(obj.id, { name: e.target.value })}
+            spellCheck={false}
+            disabled={isLocked}
+          />
+          <button
+            className={`dml-lock-edit-btn ${isLocked ? 'locked' : ''}`}
+            onClick={() => toggleLock(obj.id)}
+            title={isLocked ? 'Unlock editing' : 'Lock editing'}
+          >
+            {isLocked ? <Lock size={16} /> : <Unlock size={16} />}
+          </button>
+        </div>
         <span className="dml-type-badge">{obj.type}</span>
       </div>
+
+      <fieldset className="dml-prop-fieldset" disabled={isLocked}>
 
       <div className="dml-prop-section">
         <h4>Position</h4>
@@ -302,9 +314,6 @@ export default function ObjectProperties() {
       </div>
 
       <div className="dml-prop-actions">
-        <button className="dml-action-btn" onClick={dropToFloor}>
-          <ArrowDownToLine size={14} /> Drop to Floor
-        </button>
         <button className="dml-action-btn" onClick={duplicateSelected}>
           <Copy size={14} /> Duplicate
         </button>
@@ -312,6 +321,8 @@ export default function ObjectProperties() {
           <Trash2 size={14} /> Delete
         </button>
       </div>
+
+      </fieldset>
     </div>
   );
 }

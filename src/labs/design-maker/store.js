@@ -22,27 +22,148 @@ export const dragCursor = { x: 0, y: 0, active: false };
 export const sceneCamera = { current: null };
 export const sceneInteracting = { active: false };
 
-export function getHalfHeight(type, geometry) {
+export const FLAT_TYPES = ['heart', 'star', 'tube', 'torus', 'text'];
+export const FLAT_ROTATION = [-Math.PI / 2, 0, 0];
+
+function getRawExtents(type, geometry) {
+  let hx, hy, hz;
   switch (type) {
     case 'box': case 'wall': case 'wedge':
-      return geometry.height / 2;
+      hx = geometry.width / 2; hy = geometry.height / 2; hz = geometry.depth / 2;
+      break;
     case 'sphere':
-      return geometry.radius;
+      hx = hy = hz = geometry.radius;
+      break;
     case 'hemisphere':
-      return geometry.radius / 2;
-    case 'cylinder': case 'cone': case 'pyramid':
-      return geometry.height / 2;
+      hx = hz = geometry.radius; hy = geometry.radius / 2;
+      break;
+    case 'cylinder':
+      hx = hz = Math.max(geometry.radiusTop, geometry.radiusBottom); hy = geometry.height / 2;
+      break;
+    case 'cone': case 'pyramid':
+      hx = hz = geometry.radius; hy = geometry.height / 2;
+      break;
     case 'torus': case 'tube':
-      return geometry.tube + geometry.radius;
+      // TorusGeometry is oriented around Z by default:
+      // X/Y extent = radius + tube, Z extent = tube.
+      hx = geometry.radius + geometry.tube;
+      hy = geometry.radius + geometry.tube;
+      hz = geometry.tube;
+      break;
     case 'heart':
-      return geometry.size * 0.7;
+      // Heart shape is centered on Y/Z in Scene geometry construction.
+      // X/Y come from 2D shape profile; Z comes from extrude depth + bevel.
+      hx = geometry.size * 0.55;
+      hy = geometry.size * 0.7;
+      hz = (geometry.depth + 1.0) / 2;
+      break;
     case 'star':
-      return geometry.outerRadius;
+      // Star profile radius in XY; Z comes from extrude depth + bevel.
+      hx = geometry.outerRadius;
+      hy = geometry.outerRadius;
+      hz = (geometry.depth + 1.0) / 2;
+      break;
     case 'text':
-      return (geometry.size || 10) / 2;
+      // Text is centered by <Center/> in Scene; width scales with glyph count.
+      hx = Math.max((geometry.size || 10), ((geometry.text || 'Text').length * (geometry.size || 10) * 0.3));
+      hy = (geometry.size || 10) / 2;
+      hz = ((geometry.height || 5) + 0.6) / 2;
+      break;
     default:
-      return 10;
+      hx = hy = hz = 10;
   }
+  return [hx, hy, hz];
+}
+
+export function getFloorY(type, geometry, rotation, scale) {
+  const [hx, hy, hz] = getRawExtents(type, geometry);
+  const sx = scale ? Math.abs(scale[0]) : 1;
+  const sy = scale ? Math.abs(scale[1]) : 1;
+  const sz = scale ? Math.abs(scale[2]) : 1;
+
+  if (!rotation || (rotation[0] === 0 && rotation[1] === 0 && rotation[2] === 0)) {
+    return hy * sy;
+  }
+
+  const [rx, ry, rz] = rotation;
+  const cx = Math.cos(rx), sx_ = Math.sin(rx);
+  const cy = Math.cos(ry), sy_ = Math.sin(ry);
+  const cz = Math.cos(rz), sz_ = Math.sin(rz);
+
+  const corners = [
+    [-hx * sx, -hy * sy, -hz * sz], [ hx * sx, -hy * sy, -hz * sz],
+    [-hx * sx,  hy * sy, -hz * sz], [ hx * sx,  hy * sy, -hz * sz],
+    [-hx * sx, -hy * sy,  hz * sz], [ hx * sx, -hy * sy,  hz * sz],
+    [-hx * sx,  hy * sy,  hz * sz], [ hx * sx,  hy * sy,  hz * sz],
+  ];
+
+  let minY = Infinity;
+  for (const [x, y, z] of corners) {
+    // Euler XYZ: R = Rz · Ry · Rx
+    const x1 = x,               y1 = y * cx - z * sx_, z1 = y * sx_ + z * cx;
+    const x2 = x1 * cy + z1 * sy_, y2 = y1,            z2 = -x1 * sy_ + z1 * cy;
+    const ry3 = x2 * sz_ + y2 * cz;
+    if (ry3 < minY) minY = ry3;
+  }
+
+  return -minY;
+}
+
+function getWorldBounds(type, geometry, rotation, scale, position) {
+  const [hx, hy, hz] = getRawExtents(type, geometry);
+  const sx = scale ? Math.abs(scale[0]) : 1;
+  const sy = scale ? Math.abs(scale[1]) : 1;
+  const sz = scale ? Math.abs(scale[2]) : 1;
+  const [px, py, pz] = position || [0, 0, 0];
+
+  const [rx, ry, rz] = rotation || [0, 0, 0];
+  const cx = Math.cos(rx), sx_ = Math.sin(rx);
+  const cy = Math.cos(ry), sy_ = Math.sin(ry);
+  const cz = Math.cos(rz), sz_ = Math.sin(rz);
+
+  const corners = [
+    [-hx * sx, -hy * sy, -hz * sz], [ hx * sx, -hy * sy, -hz * sz],
+    [-hx * sx,  hy * sy, -hz * sz], [ hx * sx,  hy * sy, -hz * sz],
+    [-hx * sx, -hy * sy,  hz * sz], [ hx * sx, -hy * sy,  hz * sz],
+    [-hx * sx,  hy * sy,  hz * sz], [ hx * sx,  hy * sy,  hz * sz],
+  ];
+
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+
+  for (const [x, y, z] of corners) {
+    // Euler XYZ: R = Rz · Ry · Rx
+    const x1 = x,               y1 = y * cx - z * sx_, z1 = y * sx_ + z * cx;
+    const x2 = x1 * cy + z1 * sy_, y2 = y1,            z2 = -x1 * sy_ + z1 * cy;
+    const x3 = x2 * cz - y2 * sz_;
+    const y3 = x2 * sz_ + y2 * cz;
+    const z3 = z2;
+
+    const wx = x3 + px;
+    const wy = y3 + py;
+    const wz = z3 + pz;
+
+    if (wx < minX) minX = wx;
+    if (wy < minY) minY = wy;
+    if (wz < minZ) minZ = wz;
+    if (wx > maxX) maxX = wx;
+    if (wy > maxY) maxY = wy;
+    if (wz > maxZ) maxZ = wz;
+  }
+
+  return {
+    min: [minX, minY, minZ],
+    max: [maxX, maxY, maxZ],
+  };
+}
+
+function overlapsXZ(a, b) {
+  return (
+    a.min[0] <= b.max[0] &&
+    a.max[0] >= b.min[0] &&
+    a.min[2] <= b.max[2] &&
+    a.max[2] >= b.min[2]
+  );
 }
 
 const MAX_HISTORY = 50;
@@ -82,11 +203,12 @@ export const useDesignStore = create((set, get) => ({
   snapIncrement: 1,
   wireframe: false,
   faceSnap: true,
-  rulerVisible: false,
+  rulerVisible: true,
   measureActive: false,
   measurePoints: [],
   units: 'mm',
   zoomSpeed: 1,
+  shadowsEnabled: true,
   backgroundColor: '#f5f5f5',
   projectName: 'Untitled Project',
   isDirty: false,
@@ -153,12 +275,16 @@ export const useDesignStore = create((set, get) => ({
       scale: [1, 1, 1],
       color: defaults.color,
       isHole: false,
+      locked: false,
       visible: true,
       geometry: { ...defaults.geometry },
       ...overrides,
     };
-    const halfH = getHalfHeight(type, obj.geometry);
-    obj.position = [obj.position[0], halfH, obj.position[2]];
+    if (FLAT_TYPES.includes(type) && !overrides.rotation) {
+      obj.rotation = [...FLAT_ROTATION];
+    }
+    const floorY = getFloorY(type, obj.geometry, obj.rotation, obj.scale);
+    obj.position = [obj.position[0], floorY, obj.position[2]];
     set(state => ({
       objects: [...state.objects, obj],
       selectedIds: [obj.id],
@@ -187,6 +313,10 @@ export const useDesignStore = create((set, get) => ({
   updateObjectSilent: (id, updates) => set(state => ({
     objects: state.objects.map(o => o.id === id ? { ...o, ...updates } : o),
     isDirty: true,
+  })),
+
+  toggleLock: (id) => set(state => ({
+    objects: state.objects.map(o => o.id === id ? { ...o, locked: !o.locked } : o),
   })),
 
   duplicateSelected: () => {
@@ -250,6 +380,7 @@ export const useDesignStore = create((set, get) => ({
     return { measurePoints: pts };
   }),
   clearMeasure: () => set({ measurePoints: [] }),
+  toggleShadows: () => set(state => ({ shadowsEnabled: !state.shadowsEnabled })),
   setBackgroundColor: (color) => set({ backgroundColor: color }),
   setUnits: (units) => set({ units }),
   setZoomSpeed: (speed) => set({ zoomSpeed: speed }),
@@ -280,12 +411,38 @@ export const useDesignStore = create((set, get) => ({
   dropToFloor: () => {
     get()._saveSnapshot();
     const state = get();
+    const selectedSet = new Set(state.selectedIds);
     set({
       objects: state.objects.map(o => {
-        if (!state.selectedIds.includes(o.id)) return o;
-        const halfH = getHalfHeight(o.type, o.geometry);
+        if (!selectedSet.has(o.id)) return o;
+        const curBounds = getWorldBounds(
+          o.type,
+          o.geometry,
+          o.rotation,
+          o.scale,
+          o.position,
+        );
+        let targetY = 0;
+
+        if (state.faceSnap) {
+          for (const other of state.objects) {
+            if (selectedSet.has(other.id) || other.id === o.id) continue;
+            const otherBounds = getWorldBounds(
+              other.type,
+              other.geometry,
+              other.rotation,
+              other.scale,
+              other.position,
+            );
+            const beneath = otherBounds.max[1] <= curBounds.min[1] + 0.001;
+            if (beneath && overlapsXZ(curBounds, otherBounds)) {
+              targetY = Math.max(targetY, otherBounds.max[1]);
+            }
+          }
+        }
+
         const pos = [...o.position];
-        pos[1] = halfH * Math.abs(o.scale[1]);
+        pos[1] += targetY - curBounds.min[1];
         return { ...o, position: pos };
       }),
       isDirty: true,

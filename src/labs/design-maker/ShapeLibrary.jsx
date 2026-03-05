@@ -1,10 +1,11 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import Tippy from '@tippyjs/react';
 import {
-  Box, Circle, Triangle, Star, Heart, Square, Type,
-  ChevronDown, Minus, Donut, Shapes, X, GripVertical,
+  ChevronDown, Shapes, X, GripVertical,
 } from 'lucide-react';
 import { useDesignStore } from './store';
+import { getShapeIcons } from './shapeIcons';
+import Tip from './Tip';
 
 const transparentImg = (() => {
   const c = document.createElement('canvas');
@@ -18,24 +19,24 @@ const CATEGORIES = [
     name: 'Primitives',
     color: '#6366f1',
     shapes: [
-      { type: 'box', name: 'Box', icon: Box },
-      { type: 'sphere', name: 'Sphere', icon: Circle },
-      { type: 'cylinder', name: 'Cylinder', icon: Minus },
-      { type: 'cone', name: 'Cone', icon: Triangle },
-      { type: 'torus', name: 'Torus', icon: Donut },
+      { type: 'box', name: 'Box' },
+      { type: 'sphere', name: 'Sphere' },
+      { type: 'cylinder', name: 'Cylinder' },
+      { type: 'cone', name: 'Cone' },
+      { type: 'torus', name: 'Torus' },
     ],
   },
   {
     name: 'Everyday',
     color: '#f97316',
     shapes: [
-      { type: 'wall', name: 'Wall', icon: Square },
-      { type: 'pyramid', name: 'Pyramid', icon: Triangle },
-      { type: 'heart', name: 'Heart', icon: Heart },
-      { type: 'star', name: 'Star', icon: Star },
-      { type: 'hemisphere', name: 'Half Sphere', icon: Circle },
-      { type: 'tube', name: 'Tube', icon: Circle },
-      { type: 'wedge', name: 'Wedge', icon: Triangle },
+      { type: 'wall', name: 'Wall' },
+      { type: 'pyramid', name: 'Pyramid' },
+      { type: 'heart', name: 'Heart' },
+      { type: 'star', name: 'Star' },
+      { type: 'hemisphere', name: 'Half Sphere' },
+      { type: 'tube', name: 'Tube' },
+      { type: 'wedge', name: 'Wedge' },
     ],
   },
   {
@@ -43,8 +44,8 @@ const CATEGORIES = [
     color: '#3b82f6',
     isText: true,
     shapes: [
-      { type: 'text', name: 'Solid Text', icon: Type, isHole: false },
-      { type: 'text', name: 'Hole Text', icon: Type, isHole: true },
+      { type: 'text', name: 'Solid Text', isHole: false },
+      { type: 'text', name: 'Hole Text', isHole: true },
     ],
   },
 ];
@@ -92,6 +93,17 @@ export default function ShapeLibrary() {
     clearDraggingShape();
   }, [clearDraggingShape]);
 
+  const [icons, setIcons] = useState({});
+
+  useEffect(() => {
+    const result = getShapeIcons();
+    if (result instanceof Promise) {
+      result.then(setIcons);
+    } else {
+      setIcons(result);
+    }
+  }, []);
+
   return (
     <div className="dml-shapes-dropdown" ref={panelRef}>
       <Tippy content="Shape Library" disabled={open}>
@@ -135,25 +147,22 @@ export default function ShapeLibrary() {
                 )}
 
                 <div className="dml-shapes-group-grid">
-                  {cat.shapes.map((shape, i) => {
-                    const Icon = shape.icon;
-                    return (
+                  {cat.shapes.map((shape, i) => (
+                    <Tip key={i} label={shape.name} placement="bottom">
                       <div
-                        key={i}
                         className={`dml-shapes-item ${shape.isHole ? 'hole' : ''}`}
                         draggable
                         onDragStart={(e) => handleDragStart(e, shape)}
                         onDragEnd={handleDragEnd}
-                        title={`Drag ${shape.name} to workplane`}
                       >
                         <div className="dml-shapes-item-icon">
-                          <Icon size={22} />
+                          <img src={icons[shape.type]} alt={shape.name} draggable={false} />
                         </div>
                         <span>{shape.name}</span>
                         <GripVertical size={10} className="dml-drag-grip" />
                       </div>
-                    );
-                  })}
+                    </Tip>
+                  ))}
                 </div>
               </div>
             ))}
