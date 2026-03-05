@@ -26,14 +26,18 @@ export function getHalfHeight(type, geometry) {
   switch (type) {
     case 'box': case 'wall': case 'wedge':
       return geometry.height / 2;
-    case 'sphere': case 'hemisphere':
+    case 'sphere':
       return geometry.radius;
+    case 'hemisphere':
+      return geometry.radius / 2;
     case 'cylinder': case 'cone': case 'pyramid':
       return geometry.height / 2;
     case 'torus': case 'tube':
       return geometry.tube + geometry.radius;
-    case 'heart': case 'star':
-      return geometry.depth / 2;
+    case 'heart':
+      return geometry.size * 0.7;
+    case 'star':
+      return geometry.outerRadius;
     case 'text':
       return (geometry.size || 10) / 2;
     default:
@@ -179,6 +183,11 @@ export const useDesignStore = create((set, get) => ({
     objects: state.objects.map(o => o.id === id ? { ...o, ...updates } : o),
     isDirty: true,
   })); },
+
+  updateObjectSilent: (id, updates) => set(state => ({
+    objects: state.objects.map(o => o.id === id ? { ...o, ...updates } : o),
+    isDirty: true,
+  })),
 
   duplicateSelected: () => {
     get()._saveSnapshot();

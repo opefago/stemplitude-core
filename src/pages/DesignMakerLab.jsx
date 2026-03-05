@@ -239,7 +239,7 @@ export default function DesignMakerLab() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [removeSelected, setTransformMode, duplicateSelected, selectAll, clearSelection, toggleGrid, dropToFloor, toggleMeasure, saveProject]);
+  }, [undo, redo, removeSelected, setTransformMode, duplicateSelected, selectAll, clearSelection, toggleGrid, dropToFloor, toggleMeasure, saveProject]);
 
   const handleImport = useCallback(async (e) => {
     const file = e.target.files?.[0];
