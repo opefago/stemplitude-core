@@ -1,13 +1,13 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Tip from './Tip';
 import CustomSelect from './CustomSelect';
 import {
   Grid3X3, Box, BoxSelect, Ruler, PencilRuler,
-  Copy, Trash2, FlipHorizontal, FlipVertical,
+  Copy, Trash2, FlipHorizontal,
   AlignCenterHorizontal, AlignCenterVertical,
   Undo2, Redo2, LayoutGrid, Magnet, ArrowDownToLine,
 } from 'lucide-react';
-import { useDesignStore } from './store';
+import { useDesignStore, getEffectiveSelectionIdsFromState } from './store';
 
 export default function Toolbar() {
   const gridVisible = useDesignStore(s => s.gridVisible);
@@ -23,18 +23,24 @@ export default function Toolbar() {
   const toggleMeasure = useDesignStore(s => s.toggleMeasure);
   const faceSnap = useDesignStore(s => s.faceSnap);
   const toggleFaceSnap = useDesignStore(s => s.toggleFaceSnap);
+  const workplaneMode = useDesignStore(s => s.workplaneMode);
+  const toggleWorkplaneMode = useDesignStore(s => s.toggleWorkplaneMode);
   const setSnapIncrement = useDesignStore(s => s.setSnapIncrement);
   const removeSelected = useDesignStore(s => s.removeSelected);
   const duplicateSelected = useDesignStore(s => s.duplicateSelected);
   const dropToFloor = useDesignStore(s => s.dropToFloor);
   const objects = useDesignStore(s => s.objects);
 
-  const selectionHasLocked = selectedIds.some(id => {
+  const effectiveSelectedIds = getEffectiveSelectionIdsFromState({ objects, selectedIds });
+  const selectionHasLocked = effectiveSelectedIds.some(id => {
     const o = objects.find(obj => obj.id === id);
     return o?.locked;
   });
-  const mirrorSelected = useDesignStore(s => s.mirrorSelected);
+  const mirrorMode = useDesignStore(s => s.mirrorMode);
+  const toggleMirrorMode = useDesignStore(s => s.toggleMirrorMode);
   const arraySelected = useDesignStore(s => s.arraySelected);
+  const setArrayPreview = useDesignStore(s => s.setArrayPreview);
+  const clearArrayPreview = useDesignStore(s => s.clearArrayPreview);
   const alignObjects = useDesignStore(s => s.alignObjects);
   const undo = useDesignStore(s => s.undo);
   const redo = useDesignStore(s => s.redo);
@@ -48,6 +54,28 @@ export default function Toolbar() {
 
   const hasSelection = selectedIds.length > 0;
   const hasMulti = selectedIds.length > 1;
+
+  useEffect(() => {
+    if (!arrayOpen || !hasSelection || selectionHasLocked) {
+      clearArrayPreview();
+      return;
+    }
+    setArrayPreview({
+      axis: arrayAxis,
+      count: Math.max(1, arrayCount),
+      spacing: Number(arraySpacing) || 0,
+    });
+    return () => clearArrayPreview();
+  }, [
+    arrayOpen,
+    hasSelection,
+    selectionHasLocked,
+    arrayAxis,
+    arrayCount,
+    arraySpacing,
+    setArrayPreview,
+    clearArrayPreview,
+  ]);
 
   return (
     <div className="dml-toolbar">
@@ -118,6 +146,15 @@ export default function Toolbar() {
             <Magnet size={20} />
           </button>
         </Tip>
+        <Tip label="Follow Shape">
+          <button
+            className={`dml-tool-btn ${workplaneMode ? 'active' : ''}`}
+            onClick={toggleWorkplaneMode}
+            disabled={!hasSelection || selectedIds.length !== 1}
+          >
+            <span className="dml-tool-mini-text">FS</span>
+          </button>
+        </Tip>
       </div>
 
       <div className="dml-toolbar-sep" />
@@ -155,19 +192,25 @@ export default function Toolbar() {
                 <Copy size={20} />
               </button>
             </Tip>
-            <Tip label="Mirror X">
-              <button className="dml-tool-btn" onClick={() => mirrorSelected('x')} disabled={selectionHasLocked}>
+            <Tip label="Mirror (Pick X/Y/Z in scene)">
+              <button
+                className={`dml-tool-btn ${mirrorMode ? 'active' : ''}`}
+                onClick={toggleMirrorMode}
+                disabled={selectionHasLocked}
+              >
                 <FlipHorizontal size={20} />
-              </button>
-            </Tip>
-            <Tip label="Mirror Z">
-              <button className="dml-tool-btn" onClick={() => mirrorSelected('z')} disabled={selectionHasLocked}>
-                <FlipVertical size={20} />
               </button>
             </Tip>
             <div className="dml-array-wrap">
               <Tip label="Linear Array">
-                <button className={`dml-tool-btn ${arrayOpen ? 'active' : ''}`} onClick={() => setArrayOpen(!arrayOpen)} disabled={selectionHasLocked}>
+                <button
+                  className={`dml-tool-btn ${arrayOpen ? 'active' : ''}`}
+                  onClick={() => {
+                    if (arrayOpen) clearArrayPreview();
+                    setArrayOpen(!arrayOpen);
+                  }}
+                  disabled={selectionHasLocked}
+                >
                   <LayoutGrid size={20} />
                 </button>
               </Tip>
@@ -193,9 +236,27 @@ export default function Toolbar() {
                     <label>Spacing</label>
                     <input type="number" value={arraySpacing} step={5} onChange={e => setArraySpacing(parseFloat(e.target.value) || 10)} />
                   </div>
-                  <button className="dml-array-apply" onClick={() => { arraySelected(arrayAxis, arrayCount, arraySpacing); setArrayOpen(false); }}>
-                    Create Array
-                  </button>
+                  <div className="dml-array-actions">
+                    <button
+                      className="dml-array-apply"
+                      onClick={() => {
+                        arraySelected(arrayAxis, arrayCount, arraySpacing);
+                        clearArrayPreview();
+                        setArrayOpen(false);
+                      }}
+                    >
+                      Apply
+                    </button>
+                    <button
+                      className="dml-array-cancel"
+                      onClick={() => {
+                        clearArrayPreview();
+                        setArrayOpen(false);
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
                 </div>
               )}
             </div>

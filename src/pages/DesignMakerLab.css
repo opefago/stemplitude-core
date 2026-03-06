@@ -474,6 +474,14 @@
   border-left-color: var(--dml-accent);
 }
 
+.dml-tree-group {
+  font-weight: 600;
+}
+
+.dml-tree-child {
+  padding-left: 28px;
+}
+
 .dml-tree-icon {
   font-size: 14px;
   flex-shrink: 0;
@@ -682,8 +690,39 @@
   transform: none;
 }
 
+.dml-csg-icon-btn {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  justify-content: center;
+}
+
+.dml-csg-icon-btn img {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  filter: brightness(0) invert(1);
+  pointer-events: none;
+}
+
 .dml-csg-union {
   background: #22c55e;
+}
+
+.dml-csg-group {
+  background: #6366f1;
+}
+
+.dml-csg-group:hover {
+  background: #4f46e5;
+}
+
+.dml-csg-ungroup {
+  background: #8b5cf6;
+}
+
+.dml-csg-ungroup:hover {
+  background: #7c3aed;
 }
 
 .dml-csg-union:hover {
@@ -709,6 +748,31 @@
 .dml-csg-hint {
   color: var(--dml-text-muted);
   font-size: 11px;
+}
+
+.dml-mirror-hint {
+  position: absolute;
+  top: 78px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(16, 24, 40, 0.9);
+  border: 1px solid var(--dml-border);
+  color: #e6edf3;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.dml-mirror-axis-label {
+  background: rgba(16, 24, 40, 0.85);
+  color: #e6edf3;
+  border: 1px solid var(--dml-border);
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: 700;
 }
 
 /* --- Toolbar --- */
@@ -838,6 +902,12 @@
   opacity: 0.35;
   cursor: default;
   transform: none;
+}
+
+.dml-tool-mini-text {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
 }
 
 /* --- Custom Select --- */
@@ -1013,6 +1083,28 @@
 .dml-array-apply:hover {
   filter: brightness(1.1);
   transform: scale(1.02);
+}
+
+.dml-array-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.dml-array-cancel {
+  border: 1px solid var(--dml-border);
+  border-radius: 8px;
+  padding: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  background: transparent;
+  color: var(--dml-text);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.dml-array-cancel:hover {
+  background: var(--dml-surface-2);
 }
 
 /* --- Ruler Dimension Labels --- */

@@ -397,8 +397,7 @@ const SceneObject = forwardRef(function SceneObject(
 ) {
   const color = obj.isHole ? "#ff4444" : obj.color;
   const opacity = obj.isHole ? 0.4 : 1;
-  const hasMirror = obj.scale[0] < 0 || obj.scale[1] < 0 || obj.scale[2] < 0;
-  const side = obj.isHole || hasMirror ? THREE.DoubleSide : THREE.FrontSide;
+  const side = obj.isHole ? THREE.DoubleSide : THREE.FrontSide;
   const cartoonRatio = 1.025;
 
   if (obj.type === "text") {
@@ -713,6 +712,122 @@ function DragPreview() {
           opacity={0.4}
           depthWrite={false}
         />
+      </mesh>
+    </group>
+  );
+}
+
+function ArrayPreviewGhost({ obj, position }) {
+  const previewType = obj.type === "text" ? "box" : obj.type;
+  const previewParams =
+    obj.type === "text"
+      ? { width: 20, height: obj.geometry.size || 10, depth: obj.geometry.height || 5 }
+      : obj.geometry;
+  const previewGeo = useObjectGeometry(previewType, previewParams);
+
+  return (
+    <group position={position} rotation={obj.rotation} scale={obj.scale}>
+      <mesh geometry={previewGeo} renderOrder={996}>
+        <meshBasicMaterial
+          color="#00f0ff"
+          transparent
+          opacity={0.14}
+          depthTest={false}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+      <mesh geometry={previewGeo} renderOrder={997}>
+        <meshBasicMaterial
+          color="#00f0ff"
+          wireframe
+          transparent
+          opacity={0.7}
+          depthTest={false}
+        />
+      </mesh>
+    </group>
+  );
+}
+
+function ArrayPreview() {
+  const arrayPreview = useDesignStore((s) => s.arrayPreview);
+  const selectedIds = useDesignStore((s) => s.selectedIds);
+  const objects = useDesignStore((s) => s.objects);
+  if (!arrayPreview || selectedIds.length === 0) return null;
+
+  const ai = { x: 0, y: 1, z: 2 }[arrayPreview.axis];
+  const count = Math.max(1, arrayPreview.count || 1);
+  const spacing = Number(arrayPreview.spacing) || 0;
+  const selected = objects.filter((o) => selectedIds.includes(o.id));
+  if (selected.length === 0) return null;
+
+  const ghosts = [];
+  for (let i = 1; i <= count; i++) {
+    selected.forEach((obj) => {
+      const pos = [...obj.position];
+      pos[ai] += spacing * i;
+      ghosts.push({ obj, pos, key: `${obj.id}-${i}` });
+    });
+  }
+
+  return (
+    <>
+      {ghosts.map((g) => (
+        <ArrayPreviewGhost key={g.key} obj={g.obj} position={g.pos} />
+      ))}
+    </>
+  );
+}
+
+function WorkplaneOverlay({ meshRefs, selectedId }) {
+  const workplaneMode = useDesignStore((s) => s.workplaneMode);
+  const objects = useDesignStore((s) => s.objects);
+  if (!workplaneMode || !selectedId) return null;
+  const obj = objects.find((o) => o.id === selectedId);
+  const mesh = meshRefs.current[selectedId];
+  if (!obj || !mesh) return null;
+
+  const dims = getObjectDimensions(obj);
+  const planeSize = Math.max(dims.width, dims.depth, 40) * 1.5;
+  const half = planeSize / 2;
+  const wpY = -dims.height / 2 - 0.25;
+  const worldPos = new THREE.Vector3();
+  mesh.getWorldPosition(worldPos);
+
+  const gridCount = 10;
+  const step = planeSize / gridCount;
+  const gridLines = [];
+  for (let i = 0; i <= gridCount; i++) {
+    const offset = -half + i * step;
+    gridLines.push(
+      <Line key={`gx${i}`} points={[[-half, wpY, offset], [half, wpY, offset]]} color="#4de8ff" lineWidth={0.6} transparent opacity={i === gridCount / 2 ? 0 : 0.3} />,
+      <Line key={`gz${i}`} points={[[offset, wpY, -half], [offset, wpY, half]]} color="#4de8ff" lineWidth={0.6} transparent opacity={i === gridCount / 2 ? 0 : 0.3} />,
+    );
+  }
+
+  return (
+    <group position={[worldPos.x, worldPos.y, worldPos.z]} quaternion={mesh.quaternion}>
+      {/* Filled surface - depthTest off for guaranteed stability, very low opacity */}
+      <mesh position={[0, wpY, 0]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={-1}>
+        <planeGeometry args={[planeSize, planeSize]} />
+        <meshBasicMaterial color="#4de8ff" transparent opacity={0.06} depthTest={false} depthWrite={false} side={THREE.DoubleSide} />
+      </mesh>
+      {gridLines}
+      {/* Frame border */}
+      <Line
+        points={[[-half, wpY, -half], [half, wpY, -half], [half, wpY, half], [-half, wpY, half], [-half, wpY, -half]]}
+        color="#7af3ff"
+        lineWidth={2}
+        transparent
+        opacity={0.9}
+      />
+      {/* Center crosshairs */}
+      <Line points={[[-half, wpY, 0], [half, wpY, 0]]} color="#b0f8ff" lineWidth={1.5} transparent opacity={0.8} />
+      <Line points={[[0, wpY, -half], [0, wpY, half]]} color="#b0f8ff" lineWidth={1.5} transparent opacity={0.8} />
+      {/* Center dot */}
+      <mesh position={[0, wpY + 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={996}>
+        <circleGeometry args={[1, 24]} />
+        <meshBasicMaterial color="#eaffff" transparent opacity={0.9} depthTest={false} depthWrite={false} />
       </mesh>
     </group>
   );
@@ -1081,7 +1196,7 @@ const AXIS_LABELS = ["X", "Y", "Z"];
 
 const HANDLE_OFFSET = 3;
 
-function getScaleHandles(type, geometry) {
+function getScaleHandles(type, geometry, objectDims = null) {
   const handles = [];
   const g = geometry;
   const o = HANDLE_OFFSET;
@@ -1284,6 +1399,41 @@ function getScaleHandles(type, geometry) {
         label: "D",
       });
       break;
+    case "imported": {
+      const d = objectDims || { width: 20, height: 20, depth: 20 };
+      const by = -d.height / 2;
+      handles.push({
+        scaleAxis: 0,
+        dir: [1, 0, 0],
+        pos: [d.width / 2 + o, by, 0],
+        label: "W",
+      });
+      handles.push({
+        scaleAxis: 0,
+        dir: [-1, 0, 0],
+        pos: [-d.width / 2 - o, by, 0],
+        label: "W",
+      });
+      handles.push({
+        scaleAxis: 2,
+        dir: [0, 0, 1],
+        pos: [0, by, d.depth / 2 + o],
+        label: "D",
+      });
+      handles.push({
+        scaleAxis: 2,
+        dir: [0, 0, -1],
+        pos: [0, by, -d.depth / 2 - o],
+        label: "D",
+      });
+      handles.push({
+        scaleAxis: 1,
+        dir: [0, 1, 0],
+        pos: [0, d.height / 2 + o, 0],
+        label: "H",
+      });
+      break;
+    }
     default:
       break;
   }
@@ -1292,10 +1442,11 @@ function getScaleHandles(type, geometry) {
 
 function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
   const updateObjectSilent = useDesignStore((s) => s.updateObjectSilent);
+  const workplaneMode = useDesignStore((s) => s.workplaneMode);
   const obj = useDesignStore((s) => {
     if (s.selectedIds.length !== 1) return null;
     const o = s.objects.find((o) => o.id === s.selectedIds[0]);
-    if (!o || o.type === "imported" || o.locked) return null;
+    if (!o || o.locked) return null;
     return o;
   });
   const snapIncrement = useDesignStore((s) => s.snapIncrement);
@@ -1305,6 +1456,7 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
   const startPt = useMemo(() => new THREE.Vector3(), []);
   const startValue = useRef(0);
   const startLinkedValue = useRef(0);
+  const startObjScale = useRef([1, 1, 1]);
   const startPosition = useRef([0, 0, 0]);
   const prevAngleRef = useRef(0);
   const accumDelta = useRef(0);
@@ -1319,6 +1471,7 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
   const hitPoint = useMemo(() => new THREE.Vector3(), []);
   const caster = useMemo(() => new THREE.Raycaster(), []);
   const centerPt = useMemo(() => new THREE.Vector3(), []);
+  const identityQuat = useMemo(() => new THREE.Quaternion(), []);
 
   const active = !!obj;
   const dims = active
@@ -1359,7 +1512,6 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
       ),
     [arcR],
   );
-
   const scaleTriGeo = useMemo(() => {
     const s = new THREE.Shape();
     s.moveTo(0, 1.5);
@@ -1404,7 +1556,7 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
   const worldPos = new THREE.Vector3();
   mesh.getWorldPosition(worldPos);
 
-  const scaleHandles = getScaleHandles(obj.type, obj.geometry);
+  const scaleHandles = getScaleHandles(obj.type, obj.geometry, rawDims);
 
   const arrowGap = 10;
   const translateArrows = [
@@ -1520,6 +1672,16 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
     if (drag.current.type === "scale") {
       if (caster.ray.intersectPlane(interactionPlane, hitPoint)) {
         const d = hitPoint.clone().sub(startPt).dot(drag.current.dirW);
+        if (drag.current.handle.scaleAxis !== undefined) {
+          const axis = drag.current.handle.scaleAxis;
+          const base = Math.max(drag.current.baseSize || 1, 1);
+          let factor = 1 + d / base;
+          if (!Number.isFinite(factor)) factor = 1;
+          const scale = [...startObjScale.current];
+          scale[axis] = Math.max(0.01, startObjScale.current[axis] * factor);
+          updateObjectSilent(id, { scale });
+          return;
+        }
         const val = Math.max(
           0.5,
           Math.round((startValue.current + d) * 10) / 10,
@@ -1612,11 +1774,28 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
   const onScaleDown = (e, handle) => {
     beginDrag(e);
     const dirW = new THREE.Vector3(...handle.dir).normalize();
+    if (workplaneMode) {
+      const q = new THREE.Quaternion();
+      mesh.getWorldQuaternion(q);
+      dirW.applyQuaternion(q).normalize();
+    }
     makeDragPlane(dirW, e.point);
-    const { param, linkedParam } = resolveScaleParams(obj, handle, mesh);
-    drag.current = { type: "scale", handle, dirW, param, linkedParam };
+    const { param, linkedParam } =
+      workplaneMode || handle.scaleAxis !== undefined
+        ? { param: handle.param, linkedParam: handle.linkedParam }
+        : resolveScaleParams(obj, handle, mesh);
+    const baseSize =
+      handle.scaleAxis === 0
+        ? rawDims.width
+        : handle.scaleAxis === 1
+          ? rawDims.height
+          : handle.scaleAxis === 2
+            ? rawDims.depth
+            : undefined;
+    drag.current = { type: "scale", handle, dirW, param, linkedParam, baseSize };
     startPt.copy(e.point);
-    startValue.current = obj.geometry[param];
+    startObjScale.current = [...obj.scale];
+    startValue.current = param ? obj.geometry[param] : 0;
     startLinkedValue.current = linkedParam
       ? obj.geometry[linkedParam]
       : 0;
@@ -1626,6 +1805,11 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
     beginDrag(e);
     setTransforming(true);
     const dirW = new THREE.Vector3(...arrow.dir).normalize();
+    if (workplaneMode) {
+      const q = new THREE.Quaternion();
+      mesh.getWorldQuaternion(q);
+      dirW.applyQuaternion(q).normalize();
+    }
     makeDragPlane(dirW, e.point);
     drag.current = { type: "translate", dirW };
     startPt.copy(e.point);
@@ -1642,6 +1826,9 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
     beginDrag(e);
     centerPt.copy(worldPos);
     const worldAxis = localAxes[arc.axis].clone();
+    if (workplaneMode) {
+      worldAxis.applyQuaternion(mesh.quaternion).normalize();
+    }
 
     const projected = centerPt.clone().project(camera);
     const rect = gl.domElement.getBoundingClientRect();
@@ -1679,8 +1866,9 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
     <>
       {!rotating && (
         <group position={worldPos}>
-          {/* Scale handles - world-axis aligned */}
-          {scaleHandles.map((h, i) => {
+          {/* Scale/Translate handles - world or local based on workplane mode */}
+          <group quaternion={workplaneMode ? mesh.quaternion : identityQuat}>
+            {scaleHandles.map((h, i) => {
             const [dx, dy, dz] = h.dir;
             let rotation;
             if (dy > 0) {
@@ -1710,39 +1898,433 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
                 </lineSegments>
               </group>
             );
-          })}
+            })}
 
-          {/* Translate arrows - small cones outside each face */}
-          {translateArrows.map((a, i) => (
-            <mesh
-              key={`tr${i}`}
-              position={a.pos}
-              rotation={a.rot}
-              onPointerDown={(e) => onTranslateDown(e, a)}
-              renderOrder={999}
-            >
-              <coneGeometry args={[1.2, 3, 6]} />
-              <meshBasicMaterial
-                color={a.color}
-                depthTest={false}
-                transparent
-                opacity={0.65}
-              />
-            </mesh>
-          ))}
+            {/* Translate arrows - small cones outside each face */}
+            {translateArrows.map((a, i) => (
+              <mesh
+                key={`tr${i}`}
+                position={a.pos}
+                rotation={a.rot}
+                onPointerDown={(e) => onTranslateDown(e, a)}
+                renderOrder={999}
+              >
+                <coneGeometry args={[1.2, 3, 6]} />
+                <meshBasicMaterial
+                  color={a.color}
+                  depthTest={false}
+                  transparent
+                  opacity={0.65}
+                />
+              </mesh>
+            ))}
+          </group>
         </group>
       )}
 
       {/* Rotation arcs - world-space, don't rotate with the object */}
       <group position={worldPos}>
+        <group quaternion={workplaneMode ? mesh.quaternion : identityQuat}>
+          {rotationArcs.map((arc) => {
+            if (rotating && hoveredArc !== arc.axis) return null;
+            return (
+              <group
+                key={`rot${arc.axis}`}
+                position={arc.pos}
+                rotation={arc.arcRot}
+              >
+                {hoveredArc === arc.axis && (
+                  <mesh geometry={hoverRingGeo} renderOrder={998}>
+                    <meshBasicMaterial
+                      color={arc.color}
+                      transparent
+                      opacity={0.25}
+                      depthTest={false}
+                      side={THREE.DoubleSide}
+                    />
+                  </mesh>
+                )}
+                <mesh
+                  geometry={arcGeo}
+                  onPointerEnter={() => setHoveredArc(arc.axis)}
+                  onPointerLeave={() => {
+                    if (!drag.current || drag.current.type !== "rotate")
+                      setHoveredArc(null);
+                  }}
+                  onPointerDown={(e) => onRotateDown(e, arc)}
+                  renderOrder={999}
+                >
+                  <meshBasicMaterial
+                    color={arc.color}
+                    transparent
+                    opacity={0.65}
+                    depthTest={false}
+                    side={THREE.DoubleSide}
+                  />
+                </mesh>
+              </group>
+            );
+          })}
+        </group>
+
+        {/* Rotation angle indicator */}
+        {angleInfo && (
+          <Html
+            center
+            style={{ pointerEvents: "none" }}
+            position={[0, hh + arcR + 4, 0]}
+          >
+            <div
+              className="dml-rotation-label"
+              style={{ color: AXIS_COLORS[angleInfo.axis] }}
+            >
+              {AXIS_LABELS[angleInfo.axis]}: {angleInfo.deg}°
+            </div>
+          </Html>
+        )}
+      </group>
+    </>
+  );
+}
+
+function GroupObjectHandles({ meshRefs, selectedIds, orbitRef, setTransforming }) {
+  const updateObjectSilent = useDesignStore((s) => s.updateObjectSilent);
+  const snapIncrement = useDesignStore((s) => s.snapIncrement);
+  const objects = useDesignStore((s) => s.objects);
+  const { camera, gl } = useThree();
+
+  const selectedObjects = objects.filter((o) => selectedIds.includes(o.id));
+  if (selectedObjects.length < 2) return null;
+  if (selectedObjects.some((o) => o.locked)) return null;
+
+  const box = new THREE.Box3();
+  let hasMesh = false;
+  selectedIds.forEach((id) => {
+    const m = meshRefs.current[id];
+    if (!m) return;
+    const b = new THREE.Box3().setFromObject(m);
+    if (!hasMesh) {
+      box.copy(b);
+      hasMesh = true;
+    } else {
+      box.union(b);
+    }
+  });
+  if (!hasMesh) return null;
+
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const hw = size.x / 2;
+  const hh = size.y / 2;
+  const hd = size.z / 2;
+  const maxDim = Math.max(size.x, size.y, size.z);
+  const arcR = maxDim * 0.55 + 5;
+
+  const drag = useRef(null);
+  const startPt = useMemo(() => new THREE.Vector3(), []);
+  const interactionPlane = useMemo(() => new THREE.Plane(), []);
+  const hitPoint = useMemo(() => new THREE.Vector3(), []);
+  const caster = useMemo(() => new THREE.Raycaster(), []);
+  const prevAngleRef = useRef(0);
+  const accumDelta = useRef(0);
+  const [hoveredArc, setHoveredArc] = useState(null);
+  const [angleInfo, setAngleInfo] = useState(null);
+
+  const arcBand = 2.0;
+  const arcGeo = useMemo(
+    () =>
+      new THREE.RingGeometry(
+        arcR - arcBand,
+        arcR + arcBand,
+        48,
+        1,
+        0,
+        Math.PI / 2,
+      ),
+    [arcR],
+  );
+  const hoverRingGeo = useMemo(
+    () =>
+      new THREE.RingGeometry(
+        arcR - arcBand,
+        arcR + arcBand,
+        64,
+        1,
+        0,
+        Math.PI * 2,
+      ),
+    [arcR],
+  );
+  const scaleTriGeo = useMemo(() => {
+    const s = new THREE.Shape();
+    s.moveTo(0, 1.5);
+    s.lineTo(-1.3, -0.9);
+    s.lineTo(1.3, -0.9);
+    s.closePath();
+    const geo = new THREE.ExtrudeGeometry(s, {
+      depth: 0.25,
+      bevelEnabled: false,
+    });
+    geo.translate(0, 0, -0.125);
+    return geo;
+  }, []);
+  const scaleTriEdges = useMemo(
+    () => new THREE.EdgesGeometry(scaleTriGeo),
+    [scaleTriGeo],
+  );
+
+  const makeDragPlane = (axisDir, point) => {
+    const camDir = new THREE.Vector3();
+    camera.getWorldDirection(camDir);
+    const pn = new THREE.Vector3()
+      .crossVectors(axisDir, camDir)
+      .cross(axisDir)
+      .normalize();
+    if (pn.lengthSq() < 0.001) pn.copy(camDir);
+    interactionPlane.setFromNormalAndCoplanarPoint(pn, point);
+  };
+
+  const handleDomMove = (domEvent) => {
+    if (!drag.current) return;
+    const rect = gl.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(
+      ((domEvent.clientX - rect.left) / rect.width) * 2 - 1,
+      -((domEvent.clientY - rect.top) / rect.height) * 2 + 1,
+    );
+    caster.setFromCamera(ndc, camera);
+
+    if (drag.current.type === "translate") {
+      if (caster.ray.intersectPlane(interactionPlane, hitPoint)) {
+        const d = hitPoint.clone().sub(startPt).dot(drag.current.dirW);
+        const si = useDesignStore.getState().snapIncrement;
+        const snapped = si ? Math.round(d / si) * si : d;
+        drag.current.ids.forEach((id) => {
+          const s = drag.current.start[id];
+          if (!s) return;
+          updateObjectSilent(id, {
+            position: [
+              s.position[0] + drag.current.dirW.x * snapped,
+              s.position[1] + drag.current.dirW.y * snapped,
+              s.position[2] + drag.current.dirW.z * snapped,
+            ],
+          });
+        });
+      }
+      return;
+    }
+
+    if (drag.current.type === "scale") {
+      if (caster.ray.intersectPlane(interactionPlane, hitPoint)) {
+        const d = hitPoint.clone().sub(startPt).dot(drag.current.dirW);
+        let factor = Math.max(0.05, 1 + d / drag.current.baseSize);
+        if (domEvent.shiftKey) factor = Math.round(factor * 10) / 10;
+        const axis = drag.current.axis;
+        const c = drag.current.center;
+        drag.current.ids.forEach((id) => {
+          const s = drag.current.start[id];
+          if (!s) return;
+          const pos = [...s.position];
+          pos[axis] = c[axis] + (s.position[axis] - c[axis]) * factor;
+          const scale = [...s.scale];
+          scale[axis] = s.scale[axis] * factor;
+          updateObjectSilent(id, { position: pos, scale });
+        });
+      }
+      return;
+    }
+
+    if (drag.current.type === "rotate") {
+      const mx = domEvent.clientX - rect.left;
+      const my = domEvent.clientY - rect.top;
+      const cur = Math.atan2(my - drag.current.screenCy, mx - drag.current.screenCx);
+      let step = cur - prevAngleRef.current;
+      while (step > Math.PI) step -= 2 * Math.PI;
+      while (step < -Math.PI) step += 2 * Math.PI;
+      step *= drag.current.sign;
+      accumDelta.current += step;
+      prevAngleRef.current = cur;
+      let total = accumDelta.current;
+      if (domEvent.shiftKey) {
+        const snap = THREE.MathUtils.degToRad(15);
+        total = Math.round(total / snap) * snap;
+      }
+      const deltaQ = new THREE.Quaternion().setFromAxisAngle(drag.current.worldAxis, total);
+      const c = new THREE.Vector3(...drag.current.center);
+      drag.current.ids.forEach((id) => {
+        const s = drag.current.start[id];
+        if (!s) return;
+        const p = new THREE.Vector3(...s.position).sub(c).applyQuaternion(deltaQ).add(c);
+        const qStart = new THREE.Quaternion().setFromEuler(
+          new THREE.Euler(s.rotation[0], s.rotation[1], s.rotation[2], "XYZ"),
+        );
+        const qNew = deltaQ.clone().multiply(qStart);
+        const e = new THREE.Euler().setFromQuaternion(qNew, "XYZ");
+        updateObjectSilent(id, { position: [p.x, p.y, p.z], rotation: [e.x, e.y, e.z] });
+      });
+      setAngleInfo({
+        axis: drag.current.axis,
+        deg: Math.round(THREE.MathUtils.radToDeg(total)),
+      });
+    }
+  };
+
+  const handleDomUp = () => {
+    if (!drag.current) return;
+    if (drag.current.type === "translate") setTransforming(false);
+    if (drag.current.type === "rotate") {
+      setHoveredArc(null);
+      setAngleInfo(null);
+    }
+    drag.current = null;
+    sceneInteracting.active = false;
+    if (orbitRef.current) orbitRef.current.enabled = true;
+    window.removeEventListener("pointermove", handleDomMove);
+    window.removeEventListener("pointerup", handleDomUp);
+  };
+
+  const beginDrag = (e) => {
+    e.stopPropagation();
+    sceneInteracting.active = true;
+    if (orbitRef.current) orbitRef.current.enabled = false;
+    useDesignStore.getState()._saveSnapshot();
+    window.addEventListener("pointermove", handleDomMove);
+    window.addEventListener("pointerup", handleDomUp);
+  };
+
+  const captureStart = () => {
+    const state = useDesignStore.getState();
+    const start = {};
+    selectedIds.forEach((id) => {
+      const o = state.objects.find((x) => x.id === id);
+      if (!o) return;
+      start[id] = {
+        position: [...o.position],
+        rotation: [...o.rotation],
+        scale: [...o.scale],
+      };
+    });
+    return start;
+  };
+
+  const onTranslateDown = (e, dir) => {
+    beginDrag(e);
+    setTransforming(true);
+    const dirW = new THREE.Vector3(...dir).normalize();
+    makeDragPlane(dirW, e.point);
+    drag.current = { type: "translate", ids: [...selectedIds], start: captureStart(), dirW };
+    startPt.copy(e.point);
+  };
+
+  const onScaleDown = (e, axis) => {
+    beginDrag(e);
+    const dirMap = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)];
+    const dirW = dirMap[axis].clone();
+    makeDragPlane(dirW, e.point);
+    drag.current = {
+      type: "scale",
+      ids: [...selectedIds],
+      start: captureStart(),
+      axis,
+      dirW,
+      center: [center.x, center.y, center.z],
+      baseSize: Math.max(axis === 0 ? size.x : axis === 1 ? size.y : size.z, 1),
+    };
+    startPt.copy(e.point);
+  };
+
+  const onRotateDown = (e, axis) => {
+    beginDrag(e);
+    const localAxes = [
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(0, 1, 0),
+      new THREE.Vector3(0, 0, 1),
+    ];
+    const worldAxis = localAxes[axis].clone();
+    const projected = center.clone().project(camera);
+    const rect = gl.domElement.getBoundingClientRect();
+    const cx = ((projected.x + 1) / 2) * rect.width;
+    const cy = ((1 - projected.y) / 2) * rect.height;
+    const ne = e.nativeEvent || e;
+    prevAngleRef.current = Math.atan2(ne.clientY - rect.top - cy, ne.clientX - rect.left - cx);
+    accumDelta.current = 0;
+    const camDir = new THREE.Vector3();
+    camera.getWorldDirection(camDir);
+    const sign = worldAxis.dot(camDir) >= 0 ? 1 : -1;
+    drag.current = {
+      type: "rotate",
+      ids: [...selectedIds],
+      start: captureStart(),
+      axis,
+      worldAxis,
+      center: [center.x, center.y, center.z],
+      screenCx: cx,
+      screenCy: cy,
+      sign,
+    };
+    setHoveredArc(axis);
+  };
+
+  const rotating = hoveredArc !== null && drag.current?.type === "rotate";
+
+  const translateArrows = [
+    { dir: [1, 0, 0], pos: [hw + 10, 0, 0], rot: [0, 0, -Math.PI / 2], color: "#ef4444" },
+    { dir: [-1, 0, 0], pos: [-hw - 10, 0, 0], rot: [0, 0, Math.PI / 2], color: "#ef4444" },
+    { dir: [0, 1, 0], pos: [0, hh + 10, 0], rot: [0, 0, 0], color: "#22c55e" },
+    { dir: [0, 0, 1], pos: [0, 0, hd + 10], rot: [Math.PI / 2, 0, 0], color: "#3b82f6" },
+    { dir: [0, 0, -1], pos: [0, 0, -hd - 10], rot: [-Math.PI / 2, 0, 0], color: "#3b82f6" },
+  ];
+  const scaleHandles = [
+    // X/Z handles sit on the base ring of the combined selection (y = -hh)
+    { axis: 0, pos: [hw + 5, -hh, 0], rot: [-Math.PI / 2, 0, -Math.PI / 2], color: "#ef4444" },
+    { axis: 0, pos: [-hw - 5, -hh, 0], rot: [-Math.PI / 2, 0, Math.PI / 2], color: "#ef4444" },
+    { axis: 2, pos: [0, -hh, hd + 5], rot: [Math.PI / 2, 0, 0], color: "#3b82f6" },
+    { axis: 2, pos: [0, -hh, -hd - 5], rot: [-Math.PI / 2, 0, 0], color: "#3b82f6" },
+    // Y handle remains at top
+    { axis: 1, pos: [0, hh + 5, 0], rot: [0, 0, 0], color: "#22c55e" },
+  ];
+  const rotationArcs = [
+    { axis: 0, pos: [-hw - 3, hh / 2, hd + 3], arcRot: [0, Math.PI / 2, 0], color: "#ef4444" },
+    { axis: 1, pos: [hw + 3, -hh - 3, 0], arcRot: [-Math.PI / 2, 0, 0], color: "#22c55e" },
+    { axis: 2, pos: [hw + 3, 0, hd + 3], arcRot: [0, 0, 0], color: "#3b82f6" },
+  ];
+
+  return (
+    <>
+      {!rotating && (
+        <group position={[center.x, center.y, center.z]}>
+          {scaleHandles.map((h, i) => (
+            <group key={`gsc${i}`} position={h.pos} rotation={h.rot}>
+              <mesh
+                onPointerDown={(e) => onScaleDown(e, h.axis)}
+                renderOrder={999}
+                geometry={scaleTriGeo}
+              >
+                <meshBasicMaterial color="#1a1a2e" depthTest={false} />
+              </mesh>
+              <lineSegments renderOrder={1000} geometry={scaleTriEdges}>
+                <lineBasicMaterial color="white" depthTest={false} />
+              </lineSegments>
+            </group>
+          ))}
+          {translateArrows.map((a, i) => (
+            <mesh
+              key={`gtr${i}`}
+              position={a.pos}
+              rotation={a.rot}
+              onPointerDown={(e) => onTranslateDown(e, a.dir)}
+              renderOrder={999}
+            >
+              <coneGeometry args={[1.2, 3, 6]} />
+              <meshBasicMaterial color={a.color} depthTest={false} transparent opacity={0.65} />
+            </mesh>
+          ))}
+        </group>
+      )}
+      <group position={[center.x, center.y, center.z]}>
         {rotationArcs.map((arc) => {
           if (rotating && hoveredArc !== arc.axis) return null;
           return (
-            <group
-              key={`rot${arc.axis}`}
-              position={arc.pos}
-              rotation={arc.arcRot}
-            >
+            <group key={`grot${arc.axis}`} position={arc.pos} rotation={arc.arcRot}>
               {hoveredArc === arc.axis && (
                 <mesh geometry={hoverRingGeo} renderOrder={998}>
                   <meshBasicMaterial
@@ -1758,10 +2340,9 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
                 geometry={arcGeo}
                 onPointerEnter={() => setHoveredArc(arc.axis)}
                 onPointerLeave={() => {
-                  if (!drag.current || drag.current.type !== "rotate")
-                    setHoveredArc(null);
+                  if (!drag.current || drag.current.type !== "rotate") setHoveredArc(null);
                 }}
-                onPointerDown={(e) => onRotateDown(e, arc)}
+                onPointerDown={(e) => onRotateDown(e, arc.axis)}
                 renderOrder={999}
               >
                 <meshBasicMaterial
@@ -1775,18 +2356,9 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
             </group>
           );
         })}
-
-        {/* Rotation angle indicator */}
         {angleInfo && (
-          <Html
-            center
-            style={{ pointerEvents: "none" }}
-            position={[0, hh + arcR + 4, 0]}
-          >
-            <div
-              className="dml-rotation-label"
-              style={{ color: AXIS_COLORS[angleInfo.axis] }}
-            >
+          <Html center style={{ pointerEvents: "none" }} position={[0, hh + arcR + 4, 0]}>
+            <div className="dml-rotation-label" style={{ color: AXIS_COLORS[angleInfo.axis] }}>
               {AXIS_LABELS[angleInfo.axis]}: {angleInfo.deg}°
             </div>
           </Html>
@@ -1912,6 +2484,199 @@ function FaceSnapper({ meshRefs, selectedId, active }) {
   );
 }
 
+function MirrorHintOverlay() {
+  const mirrorHint = useDesignStore((s) => s.mirrorHint);
+  const [show, setShow] = useState(null);
+
+  useEffect(() => {
+    if (!mirrorHint) return;
+    setShow(mirrorHint);
+    const t = setTimeout(() => setShow(null), 900);
+    return () => clearTimeout(t);
+  }, [mirrorHint]);
+
+  if (!show) return null;
+
+  const label =
+    show.axis === "x" ? "Mirror X \u2194" : show.axis === "y" ? "Mirror Y \u2195" : "Mirror Z \u2194";
+
+  return (
+    <Html fullscreen style={{ pointerEvents: "none" }}>
+      <div className="dml-mirror-hint">{label}</div>
+    </Html>
+  );
+}
+
+function MirrorPreviewObject({ obj, axis, centerAxis }) {
+  const previewType = obj.type === "text" ? "box" : obj.type;
+  const previewParams =
+    obj.type === "text"
+      ? { width: 20, height: obj.geometry.size || 10, depth: obj.geometry.height || 5 }
+      : obj.geometry;
+  const geometry = useObjectGeometry(previewType, previewParams);
+  const edges = useMemo(() => new THREE.EdgesGeometry(geometry), [geometry]);
+
+  const pos = [...obj.position];
+  const scale = [...obj.scale];
+  const ai = { x: 0, y: 1, z: 2 }[axis];
+  pos[ai] = 2 * centerAxis - pos[ai];
+  scale[ai] *= -1;
+
+  return (
+    <group position={pos} rotation={obj.rotation} scale={scale}>
+      <mesh geometry={geometry} renderOrder={997} raycast={() => null}>
+        <meshBasicMaterial
+          color="#00f0ff"
+          transparent
+          opacity={0.12}
+          depthTest={false}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+      <lineSegments geometry={edges} renderOrder={998} raycast={() => null}>
+        <lineBasicMaterial color="#00f0ff" depthTest={false} />
+      </lineSegments>
+    </group>
+  );
+}
+
+function MirrorAxisGizmo({ meshRefs, selectedIds }) {
+  const mirrorMode = useDesignStore((s) => s.mirrorMode);
+  const mirrorSelected = useDesignStore((s) => s.mirrorSelected);
+  const objects = useDesignStore((s) => s.objects);
+  const [hoveredAxis, setHoveredAxis] = useState(null);
+
+  if (!mirrorMode || selectedIds.length === 0) return null;
+  const selected = objects.filter((o) => selectedIds.includes(o.id));
+  if (selected.some((o) => o.locked)) return null;
+
+  const box = new THREE.Box3();
+  let hasMesh = false;
+  selectedIds.forEach((id) => {
+    const m = meshRefs.current[id];
+    if (!m) return;
+    const b = new THREE.Box3().setFromObject(m);
+    if (!hasMesh) {
+      box.copy(b);
+      hasMesh = true;
+    } else {
+      box.union(b);
+    }
+  });
+  if (!hasMesh) return null;
+
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const len = Math.max(size.x, size.y, size.z) * 0.7 + 10;
+  const axisCenter = {
+    x:
+      selected.reduce((sum, o) => sum + o.position[0], 0) /
+      Math.max(selected.length, 1),
+    y:
+      selected.reduce((sum, o) => sum + o.position[1], 0) /
+      Math.max(selected.length, 1),
+    z:
+      selected.reduce((sum, o) => sum + o.position[2], 0) /
+      Math.max(selected.length, 1),
+  };
+
+  const axes = [
+    {
+      axis: "x",
+      color: "#ef4444",
+      dir: [1, 0, 0],
+      conePos: [len, 0, 0],
+      coneNeg: [-len, 0, 0],
+      rotPos: [-Math.PI / 2, 0, -Math.PI / 2],
+      rotNeg: [-Math.PI / 2, 0, Math.PI / 2],
+      labelPos: [len + 4, 0, 0],
+    },
+    {
+      axis: "y",
+      color: "#22c55e",
+      dir: [0, 1, 0],
+      conePos: [0, len, 0],
+      coneNeg: [0, -len, 0],
+      rotPos: [0, 0, 0],
+      rotNeg: [Math.PI, 0, 0],
+      labelPos: [0, len + 4, 0],
+    },
+    {
+      axis: "z",
+      color: "#3b82f6",
+      dir: [0, 0, 1],
+      conePos: [0, 0, len],
+      coneNeg: [0, 0, -len],
+      rotPos: [Math.PI / 2, 0, 0],
+      rotNeg: [-Math.PI / 2, 0, 0],
+      labelPos: [0, 0, len + 4],
+    },
+  ];
+
+  return (
+    <>
+      {hoveredAxis &&
+        selected.map((obj) => (
+          <MirrorPreviewObject
+            key={`mirror-preview-${obj.id}`}
+            obj={obj}
+            axis={hoveredAxis}
+            centerAxis={axisCenter[hoveredAxis]}
+          />
+        ))}
+      <group position={[center.x, center.y, center.z]}>
+        {axes.map((a) => (
+          <group key={a.axis}>
+            <Line
+              points={[
+                [-a.dir[0] * len, -a.dir[1] * len, -a.dir[2] * len],
+                [a.dir[0] * len, a.dir[1] * len, a.dir[2] * len],
+              ]}
+              color={a.color}
+              lineWidth={2}
+              transparent
+              opacity={0.95}
+            />
+            <mesh
+              position={a.conePos}
+              rotation={a.rotPos}
+              onPointerEnter={() => setHoveredAxis(a.axis)}
+              onPointerLeave={() => setHoveredAxis(null)}
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                mirrorSelected(a.axis);
+                setHoveredAxis(null);
+              }}
+              renderOrder={1000}
+            >
+              <coneGeometry args={[1.4, 3.2, 8]} />
+              <meshBasicMaterial color={a.color} depthTest={false} transparent opacity={0.95} />
+            </mesh>
+            <mesh
+              position={a.coneNeg}
+              rotation={a.rotNeg}
+              onPointerEnter={() => setHoveredAxis(a.axis)}
+              onPointerLeave={() => setHoveredAxis(null)}
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                mirrorSelected(a.axis);
+                setHoveredAxis(null);
+              }}
+              renderOrder={1000}
+            >
+              <coneGeometry args={[1.4, 3.2, 8]} />
+              <meshBasicMaterial color={a.color} depthTest={false} transparent opacity={0.95} />
+            </mesh>
+            <Html position={a.labelPos} center style={{ pointerEvents: "none" }}>
+              <div className="dml-mirror-axis-label">{a.axis.toUpperCase()}</div>
+            </Html>
+          </group>
+        ))}
+      </group>
+    </>
+  );
+}
+
 function SceneContent() {
   const meshRefs = useRef({});
   const orbitRef = useRef();
@@ -1928,6 +2693,7 @@ function SceneContent() {
   const wireframe = useDesignStore((s) => s.wireframe);
   const snapIncrement = useDesignStore((s) => s.snapIncrement);
   const shadowsEnabled = useDesignStore((s) => s.shadowsEnabled);
+  const mirrorMode = useDesignStore((s) => s.mirrorMode);
   const clearSelection = useDesignStore((s) => s.clearSelection);
   const selectObject = useDesignStore((s) => s.selectObject);
   const updateObjectSilent = useDesignStore((s) => s.updateObjectSilent);
@@ -1970,7 +2736,7 @@ function SceneContent() {
           nx = Math.round(nx / si) * si;
           nz = Math.round(nz / si) * si;
         }
-        const cur = state.objects.find((o) => o.id === d.id);
+        const cur = state.objects.find((o) => o.id === d.anchorId);
         if (!cur) return;
 
         const draggedHalfH = getFloorY(cur.type, cur.geometry, cur.rotation, cur.scale);
@@ -1979,7 +2745,7 @@ function SceneContent() {
         if (state.faceSnap) {
           const otherMeshes = [];
           for (const [id, group] of Object.entries(meshRefs.current)) {
-            if (id === d.id) continue;
+            if (d.ids.includes(id)) continue;
             group.traverse((child) => {
               if (child.isMesh) otherMeshes.push(child);
             });
@@ -2010,7 +2776,18 @@ function SceneContent() {
           }
         }
 
-        updateObjectSilent(d.id, { position: [nx, ny, nz] });
+        const anchorStart = d.startPositions[d.anchorId];
+        if (!anchorStart) return;
+        const dx = nx - anchorStart[0];
+        const dy = ny - anchorStart[1];
+        const dz = nz - anchorStart[2];
+        d.ids.forEach((id) => {
+          const start = d.startPositions[id];
+          if (!start) return;
+          updateObjectSilent(id, {
+            position: [start[0] + dx, start[1] + dy, start[2] + dz],
+          });
+        });
       }
     },
     [
@@ -2039,8 +2816,25 @@ function SceneContent() {
   const handleObjDragStart = useCallback(
     (e, id) => {
       e.stopPropagation();
-      const obj = useDesignStore.getState().objects.find((o) => o.id === id);
+      const state = useDesignStore.getState();
+      const obj = state.objects.find((o) => o.id === id);
       if (!obj || obj.locked) return;
+      const nativeEvt = e.nativeEvent || e;
+      if (!nativeEvt.shiftKey) {
+        selectObject(id, false);
+      }
+      const selectedAfter = useDesignStore.getState().selectedIds;
+      const dragIds = selectedAfter.includes(id) ? selectedAfter : [id];
+      const hasLocked = dragIds.some((sid) => {
+        const so = useDesignStore.getState().objects.find((o) => o.id === sid);
+        return !!so?.locked;
+      });
+      if (hasLocked) return;
+      const startPositions = {};
+      dragIds.forEach((sid) => {
+        const so = useDesignStore.getState().objects.find((o) => o.id === sid);
+        if (so) startPositions[sid] = [...so.position];
+      });
       dragPlane.setFromNormalAndCoplanarPoint(
         new THREE.Vector3(0, 1, 0),
         new THREE.Vector3(obj.position[0], obj.position[1], obj.position[2]),
@@ -2051,17 +2845,15 @@ function SceneContent() {
         e.point.z - obj.position[2],
       );
       objDrag.current = {
-        id,
+        anchorId: id,
+        ids: dragIds,
+        startPositions,
         dragging: false,
         startMouse: {
-          x: e.nativeEvent?.clientX ?? e.clientX,
-          y: e.nativeEvent?.clientY ?? e.clientY,
+          x: nativeEvt.clientX,
+          y: nativeEvt.clientY,
         },
       };
-      const nativeEvt = e.nativeEvent || e;
-      if (!nativeEvt.shiftKey) {
-        selectObject(id, false);
-      }
       window.addEventListener("pointermove", handleObjDragMove);
       window.addEventListener("pointerup", handleObjDragUp);
     },
@@ -2166,12 +2958,24 @@ function SceneContent() {
         />
       ))}
 
-      <ObjectHandles
-        meshRefs={meshRefs}
-        selectedId={selectedId}
-        orbitRef={orbitRef}
-        setTransforming={setTransforming}
-      />
+      {!mirrorMode &&
+        (selectedIds.length > 1 ? (
+          <GroupObjectHandles
+            meshRefs={meshRefs}
+            selectedIds={selectedIds}
+            orbitRef={orbitRef}
+            setTransforming={setTransforming}
+          />
+        ) : (
+          <ObjectHandles
+            meshRefs={meshRefs}
+            selectedId={selectedId}
+            orbitRef={orbitRef}
+            setTransforming={setTransforming}
+          />
+        ))}
+
+      <MirrorAxisGizmo meshRefs={meshRefs} selectedIds={selectedIds} />
 
       <FaceSnapper
         meshRefs={meshRefs}
@@ -2181,7 +2985,10 @@ function SceneContent() {
       <DimensionRuler meshRefs={meshRefs} />
       <MeasureTool />
       <DragPreview />
+      <ArrayPreview />
+      <WorkplaneOverlay meshRefs={meshRefs} selectedId={selectedId} />
       <DropHandler />
+      <MirrorHintOverlay />
 
       <CameraControls orbitRef={orbitRef} />
 

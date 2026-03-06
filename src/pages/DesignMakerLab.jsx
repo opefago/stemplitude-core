@@ -2,7 +2,7 @@ import React, { useEffect, useCallback, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Tip from '../labs/design-maker/Tip';
 import {
-  Settings, Upload, Download, Share2, X, Merge, Scissors, Pencil, Waypoints,
+  Settings, Upload, Download, Share2, X, Pencil,
 } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import * as THREE from 'three';
@@ -13,7 +13,13 @@ import ObjectProperties from '../labs/design-maker/ObjectProperties';
 import SceneTree from '../labs/design-maker/SceneTree';
 import SettingsDialog from '../labs/design-maker/SettingsDialog';
 import ViewControls from '../labs/design-maker/ViewControls';
-import { useDesignStore, dragCursor, sceneCamera, sceneInteracting } from '../labs/design-maker/store';
+import {
+  useDesignStore,
+  dragCursor,
+  sceneCamera,
+  sceneInteracting,
+  getEffectiveSelectionIdsFromState,
+} from '../labs/design-maker/store';
 import { unionCSG, subtractCSG, intersectCSG } from '../labs/design-maker/csgUtils';
 import './DesignMakerLab.css';
 
@@ -81,6 +87,7 @@ export default function DesignMakerLab() {
   const duplicateSelected = useDesignStore(s => s.duplicateSelected);
   const selectAll = useDesignStore(s => s.selectAll);
   const clearSelection = useDesignStore(s => s.clearSelection);
+  const setSelectedIds = useDesignStore(s => s.setSelectedIds);
   const setTransformMode = useDesignStore(s => s.setTransformMode);
   const toggleGrid = useDesignStore(s => s.toggleGrid);
   const addImportedObject = useDesignStore(s => s.addImportedObject);
@@ -90,6 +97,8 @@ export default function DesignMakerLab() {
   const undo = useDesignStore(s => s.undo);
   const redo = useDesignStore(s => s.redo);
   const dropToFloor = useDesignStore(s => s.dropToFloor);
+  const groupSelected = useDesignStore(s => s.groupSelected);
+  const ungroupSelected = useDesignStore(s => s.ungroupSelected);
   const toggleMeasure = useDesignStore(s => s.toggleMeasure);
   const saveProject = useDesignStore(s => s.saveProject);
   const loadProject = useDesignStore(s => s.loadProject);
@@ -220,7 +229,7 @@ export default function DesignMakerLab() {
         }
       }
       if (hits.length > 0) {
-        useDesignStore.setState({ selectedIds: hits });
+        setSelectedIds(hits);
       } else {
         clearSelection();
       }
@@ -228,7 +237,7 @@ export default function DesignMakerLab() {
     marqueeStart.current = null;
     setMarquee(null);
     setTimeout(() => setMarqueeActive(false), 50);
-  }, [marquee, clearSelection]);
+  }, [marquee, clearSelection, setSelectedIds]);
 
   useEffect(() => {
     window.addEventListener('mouseup', handleMarqueeUp);
@@ -246,7 +255,8 @@ export default function DesignMakerLab() {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
 
       const state = useDesignStore.getState();
-      const hasLocked = state.selectedIds.some(id => state.objects.find(o => o.id === id)?.locked);
+      const effectiveIds = getEffectiveSelectionIdsFromState(state);
+      const hasLocked = effectiveIds.some(id => state.objects.find(o => o.id === id)?.locked);
 
       switch (e.key) {
         case 'z': case 'Z':
@@ -276,7 +286,16 @@ export default function DesignMakerLab() {
           if (e.ctrlKey || e.metaKey) { e.preventDefault(); selectAll(); }
           break;
         case 'g': case 'G':
-          toggleGrid();
+          if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            if (e.shiftKey) {
+              if (!hasLocked) ungroupSelected();
+            } else if (!hasLocked) {
+              groupSelected();
+            }
+          } else {
+            toggleGrid();
+          }
           break;
         case 'f': case 'F':
           if (!e.ctrlKey && !e.metaKey && !hasLocked) dropToFloor();
@@ -291,7 +310,7 @@ export default function DesignMakerLab() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [undo, redo, removeSelected, setTransformMode, duplicateSelected, selectAll, clearSelection, toggleGrid, dropToFloor, toggleMeasure, saveProject]);
+  }, [undo, redo, removeSelected, setTransformMode, duplicateSelected, selectAll, clearSelection, toggleGrid, dropToFloor, toggleMeasure, saveProject, groupSelected, ungroupSelected]);
 
   const handleImport = useCallback(async (e) => {
     const file = e.target.files?.[0];
@@ -356,9 +375,15 @@ export default function DesignMakerLab() {
     setExportOpen(false);
   }, [objects, projectName]);
 
-  const selectionHasLocked = selectedIds.some(id => {
-    const o = objects.find(obj => obj.id === id);
+  const effectiveSelectedIds = getEffectiveSelectionIdsFromState({ objects, selectedIds });
+  const selectionHasLocked = effectiveSelectedIds.some(id => {
+    const o = objects.find((obj) => obj.id === id);
     return o?.locked;
+  });
+  const canGroup = effectiveSelectedIds.length > 1;
+  const canUngroup = effectiveSelectedIds.some((id) => {
+    const o = objects.find((obj) => obj.id === id);
+    return !!o?.groupId;
   });
 
   const handleUnion = useCallback(() => {
@@ -614,18 +639,39 @@ export default function DesignMakerLab() {
 
           {selectedIds.length >= 2 && (
             <div className="dml-csg-float">
-              <button className="dml-csg-btn dml-csg-union" onClick={handleUnion} disabled={selectionHasLocked}>
-                <Merge size={16} />
-                <span>Union</span>
-              </button>
-              <button className="dml-csg-btn dml-csg-subtract" onClick={handleSubtract} disabled={selectionHasLocked}>
-                <Scissors size={16} />
-                <span>Subtract</span>
-              </button>
-              <button className="dml-csg-btn dml-csg-intersect" onClick={handleIntersect} disabled={selectionHasLocked}>
-                <Waypoints size={16} />
-                <span>Intersect</span>
-              </button>
+              <Tip label="Group" shortcut="Ctrl+G">
+                <button
+                  className="dml-csg-btn dml-csg-icon-btn dml-csg-group"
+                  onClick={groupSelected}
+                  disabled={!canGroup || selectionHasLocked}
+                >
+                  <img src="/assets/floating-object/group.svg" alt="Group" />
+                </button>
+              </Tip>
+              <Tip label="Ungroup" shortcut="Ctrl+Shift+G">
+                <button
+                  className="dml-csg-btn dml-csg-icon-btn dml-csg-ungroup"
+                  onClick={ungroupSelected}
+                  disabled={!canUngroup || selectionHasLocked}
+                >
+                  <img src="/assets/floating-object/ungroup.svg" alt="Ungroup" />
+                </button>
+              </Tip>
+              <Tip label="Union">
+                <button className="dml-csg-btn dml-csg-icon-btn dml-csg-union" onClick={handleUnion} disabled={selectionHasLocked}>
+                  <img src="/assets/floating-object/union.svg" alt="Union" />
+                </button>
+              </Tip>
+              <Tip label="Subtract">
+                <button className="dml-csg-btn dml-csg-icon-btn dml-csg-subtract" onClick={handleSubtract} disabled={selectionHasLocked}>
+                  <img src="/assets/floating-object/subtract.svg" alt="Subtract" />
+                </button>
+              </Tip>
+              <Tip label="Intersect">
+                <button className="dml-csg-btn dml-csg-icon-btn dml-csg-intersect" onClick={handleIntersect} disabled={selectionHasLocked}>
+                  <img src="/assets/floating-object/intersect.svg" alt="Intersect" />
+                </button>
+              </Tip>
               <span className="dml-csg-hint">{selectionHasLocked ? 'Unlock objects first' : 'First selected = target'}</span>
             </div>
           )}

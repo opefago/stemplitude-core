@@ -169,13 +169,69 @@ function overlapsXZ(a, b) {
 const MAX_HISTORY = 50;
 
 function cloneObjects(objects) {
-  return objects.map(o => ({
+  return objects.map((o) => ({
     ...o,
     position: [...o.position],
     rotation: [...o.rotation],
     scale: [...o.scale],
     geometry: { ...o.geometry },
   }));
+}
+
+function cloneGroups(groups) {
+  return groups.map((g) => ({
+    ...g,
+  }));
+}
+
+function cloneSnapshot(objects, groups) {
+  return {
+    objects: cloneObjects(objects),
+    groups: cloneGroups(groups || []),
+  };
+}
+
+function buildGroupMembers(objects) {
+  const map = new Map();
+  for (const o of objects) {
+    if (!o.groupId) continue;
+    if (!map.has(o.groupId)) map.set(o.groupId, []);
+    map.get(o.groupId).push(o.id);
+  }
+  return map;
+}
+
+function expandSelection(objects, selectedIds) {
+  const members = buildGroupMembers(objects);
+  const expanded = new Set(selectedIds);
+  for (const id of selectedIds) {
+    const obj = objects.find((o) => o.id === id);
+    if (!obj?.groupId) continue;
+    const ids = members.get(obj.groupId) || [];
+    ids.forEach((gid) => expanded.add(gid));
+  }
+  return [...expanded];
+}
+
+function reconcileGroups(objects, groups) {
+  const members = buildGroupMembers(objects);
+  const validGroupIds = new Set();
+  members.forEach((ids, gid) => {
+    if (ids.length >= 2) {
+      validGroupIds.add(gid);
+    }
+  });
+
+  const filtered = (groups || []).filter((g) => validGroupIds.has(g.id));
+  const known = new Set(filtered.map((g) => g.id));
+  validGroupIds.forEach((gid) => {
+    if (!known.has(gid)) filtered.push({ id: gid, name: "Group" });
+  });
+  return filtered;
+}
+
+export function getEffectiveSelectionIdsFromState(state) {
+  return expandSelection(state.objects, state.selectedIds);
 }
 
 let objectCounter = 0;
@@ -193,6 +249,7 @@ function saveProjectList(list) {
 
 export const useDesignStore = create((set, get) => ({
   objects: [],
+  groups: [],
   selectedIds: [],
   _past: [],
   _future: [],
@@ -216,6 +273,10 @@ export const useDesignStore = create((set, get) => ({
   pendingDrop: null,
   draggingShape: null,
   _cameraCmd: null,
+  mirrorHint: null,
+  mirrorMode: false,
+  arrayPreview: null,
+  workplaneMode: false,
 
   zoomIn: () => set({ _cameraCmd: 'in' }),
   zoomOut: () => set({ _cameraCmd: 'out' }),
@@ -227,36 +288,40 @@ export const useDesignStore = create((set, get) => ({
   clearPendingDrop: () => set({ pendingDrop: null }),
   setDraggingShape: (shape) => set({ draggingShape: shape }),
   clearDraggingShape: () => set({ draggingShape: null }),
+  setArrayPreview: (preview) => set({ arrayPreview: preview }),
+  clearArrayPreview: () => set({ arrayPreview: null }),
 
   _saveSnapshot: () => {
-    const { objects, _past } = get();
-    const snap = cloneObjects(objects);
+    const { objects, groups, _past } = get();
+    const snap = cloneSnapshot(objects, groups);
     const past = _past.length >= MAX_HISTORY ? _past.slice(1) : [..._past];
     past.push(snap);
     set({ _past: past, _future: [] });
   },
 
   undo: () => {
-    const { objects, _past, _future } = get();
+    const { objects, groups, _past, _future } = get();
     if (_past.length === 0) return;
     const prev = _past[_past.length - 1];
     set({
       _past: _past.slice(0, -1),
-      _future: [..._future, cloneObjects(objects)],
-      objects: prev,
+      _future: [..._future, cloneSnapshot(objects, groups)],
+      objects: prev.objects,
+      groups: prev.groups || [],
       selectedIds: [],
       isDirty: true,
     });
   },
 
   redo: () => {
-    const { objects, _past, _future } = get();
+    const { objects, groups, _past, _future } = get();
     if (_future.length === 0) return;
     const next = _future[_future.length - 1];
     set({
       _future: _future.slice(0, -1),
-      _past: [..._past, cloneObjects(objects)],
-      objects: next,
+      _past: [..._past, cloneSnapshot(objects, groups)],
+      objects: next.objects,
+      groups: next.groups || [],
       selectedIds: [],
       isDirty: true,
     });
@@ -276,6 +341,7 @@ export const useDesignStore = create((set, get) => ({
       color: defaults.color,
       isHole: false,
       locked: false,
+      groupId: null,
       visible: true,
       geometry: { ...defaults.geometry },
       ...overrides,
@@ -287,23 +353,34 @@ export const useDesignStore = create((set, get) => ({
     obj.position = [obj.position[0], floorY, obj.position[2]];
     set(state => ({
       objects: [...state.objects, obj],
+      groups: reconcileGroups([...state.objects, obj], state.groups),
       selectedIds: [obj.id],
       isDirty: true,
     }));
     return obj.id;
   },
 
-  removeObject: (id) => { get()._saveSnapshot(); set(state => ({
-    objects: state.objects.filter(o => o.id !== id),
-    selectedIds: state.selectedIds.filter(s => s !== id),
-    isDirty: true,
-  })); },
+  removeObject: (id) => { get()._saveSnapshot(); set((state) => {
+    const objects = state.objects.filter((o) => o.id !== id);
+    const groups = reconcileGroups(objects, state.groups);
+    return {
+      objects,
+      groups,
+      selectedIds: state.selectedIds.filter((s) => s !== id),
+      isDirty: true,
+    };
+  }); },
 
-  removeSelected: () => { get()._saveSnapshot(); set(state => ({
-    objects: state.objects.filter(o => !state.selectedIds.includes(o.id)),
-    selectedIds: [],
-    isDirty: true,
-  })); },
+  removeSelected: () => { get()._saveSnapshot(); set((state) => {
+    const effective = new Set(expandSelection(state.objects, state.selectedIds));
+    const objects = state.objects.filter((o) => !effective.has(o.id));
+    return {
+      objects,
+      groups: reconcileGroups(objects, state.groups),
+      selectedIds: [],
+      isDirty: true,
+    };
+  }); },
 
   updateObject: (id, updates) => { get()._saveSnapshot(); set(state => ({
     objects: state.objects.map(o => o.id === id ? { ...o, ...updates } : o),
@@ -322,15 +399,28 @@ export const useDesignStore = create((set, get) => ({
   duplicateSelected: () => {
     get()._saveSnapshot();
     const state = get();
-    const selected = state.objects.filter(o => state.selectedIds.includes(o.id));
-    const dupes = selected.map(o => ({
+    const effective = expandSelection(state.objects, state.selectedIds);
+    const selected = state.objects.filter((o) => effective.includes(o.id));
+    const groupMap = new Map();
+    const dupes = selected.map((o) => {
+      let newGroupId = null;
+      if (o.groupId) {
+        if (!groupMap.has(o.groupId)) groupMap.set(o.groupId, uuidv4());
+        newGroupId = groupMap.get(o.groupId);
+      }
+      return ({
       ...o,
       id: uuidv4(),
-      name: o.name + ' Copy',
+      name: `${o.name} Copy`,
       position: [o.position[0] + 10, o.position[1], o.position[2] + 10],
-    }));
+      groupId: newGroupId,
+    });
+    });
+    const nextObjects = [...state.objects, ...dupes];
+    const extraGroups = [...groupMap.values()].map((id, i) => ({ id, name: `Group Copy ${i + 1}` }));
     set({
-      objects: [...state.objects, ...dupes],
+      objects: nextObjects,
+      groups: reconcileGroups(nextObjects, [...state.groups, ...extraGroups]),
       selectedIds: dupes.map(o => o.id),
       isDirty: true,
     });
@@ -339,34 +429,99 @@ export const useDesignStore = create((set, get) => ({
   arraySelected: (axis, count, spacing) => {
     get()._saveSnapshot();
     const state = get();
-    const selected = state.objects.filter(o => state.selectedIds.includes(o.id));
+    const effective = expandSelection(state.objects, state.selectedIds);
+    const selected = state.objects.filter((o) => effective.includes(o.id));
     const ai = { x: 0, y: 1, z: 2 }[axis];
     const allDupes = [];
+    const groupMap = new Map();
     for (let i = 1; i <= count; i++) {
-      selected.forEach(o => {
+      selected.forEach((o) => {
         const pos = [...o.position];
         pos[ai] += spacing * i;
-        allDupes.push({ ...o, id: uuidv4(), name: `${o.name} ${i + 1}`, position: pos });
+        let groupId = null;
+        if (o.groupId) {
+          const key = `${o.groupId}:${i}`;
+          if (!groupMap.has(key)) groupMap.set(key, uuidv4());
+          groupId = groupMap.get(key);
+        }
+        allDupes.push({ ...o, id: uuidv4(), name: `${o.name} ${i + 1}`, position: pos, groupId });
       });
     }
+    const nextObjects = [...state.objects, ...allDupes];
+    const extraGroups = [...new Set([...groupMap.values()])].map((id, i) => ({ id, name: `Array Group ${i + 1}` }));
     set({
-      objects: [...state.objects, ...allDupes],
+      objects: nextObjects,
+      groups: reconcileGroups(nextObjects, [...state.groups, ...extraGroups]),
       selectedIds: [...state.selectedIds, ...allDupes.map(o => o.id)],
       isDirty: true,
     });
   },
 
-  selectObject: (id, addToSelection = false) => set(state => {
+  setSelectedIds: (ids) => set((state) => ({
+    selectedIds: expandSelection(state.objects, ids),
+  })),
+
+  selectObject: (id, addToSelection = false) => set((state) => {
+    if (!id) return { selectedIds: [] };
+    const obj = state.objects.find((o) => o.id === id);
+    const targetIds = obj?.groupId
+      ? state.objects.filter((o) => o.groupId === obj.groupId).map((o) => o.id)
+      : [id];
     if (addToSelection) {
-      const has = state.selectedIds.includes(id);
-      return { selectedIds: has ? state.selectedIds.filter(s => s !== id) : [...state.selectedIds, id] };
+      const allSelected = targetIds.every((tid) => state.selectedIds.includes(tid));
+      if (allSelected) {
+        return {
+          selectedIds: state.selectedIds.filter((sid) => !targetIds.includes(sid)),
+        };
+      }
+      return { selectedIds: [...new Set([...state.selectedIds, ...targetIds])] };
     }
-    return { selectedIds: id ? [id] : [] };
+    return { selectedIds: targetIds };
   }),
 
-  clearSelection: () => set({ selectedIds: [] }),
+  groupSelected: () => {
+    get()._saveSnapshot();
+    const state = get();
+    const ids = expandSelection(state.objects, state.selectedIds);
+    if (ids.length < 2) return;
+    const groupId = uuidv4();
+    const objects = state.objects.map((o) => (ids.includes(o.id) ? { ...o, groupId } : { ...o }));
+    const groups = reconcileGroups(objects, [...state.groups, { id: groupId, name: `Group ${state.groups.length + 1}` }]);
+    set({
+      objects,
+      groups,
+      selectedIds: ids,
+      isDirty: true,
+    });
+  },
+
+  ungroupSelected: () => {
+    get()._saveSnapshot();
+    const state = get();
+    const ids = expandSelection(state.objects, state.selectedIds);
+    const selectedGroups = new Set(
+      state.objects.filter((o) => ids.includes(o.id) && o.groupId).map((o) => o.groupId),
+    );
+    if (selectedGroups.size === 0) return;
+    const objects = state.objects.map((o) => (
+      selectedGroups.has(o.groupId) ? { ...o, groupId: null } : { ...o }
+    ));
+    const groups = reconcileGroups(objects, state.groups);
+    set({
+      objects,
+      groups,
+      selectedIds: ids,
+      isDirty: true,
+    });
+  },
+
+  clearSelection: () => set({ selectedIds: [], mirrorMode: false, workplaneMode: false }),
   selectAll: () => set(state => ({ selectedIds: state.objects.map(o => o.id) })),
   setTransformMode: (mode) => set({ transformMode: mode }),
+  toggleMirrorMode: () => set((state) => ({ mirrorMode: !state.mirrorMode })),
+  setMirrorMode: (v) => set({ mirrorMode: !!v }),
+  toggleWorkplaneMode: () => set((state) => ({ workplaneMode: !state.workplaneMode })),
+  setWorkplaneMode: (v) => set({ workplaneMode: !!v }),
   setCameraMode: (mode) => set({ cameraMode: mode }),
   toggleGrid: () => set(state => ({ gridVisible: !state.gridVisible })),
   setSnapIncrement: (snap) => set({ snapIncrement: snap }),
@@ -389,9 +544,10 @@ export const useDesignStore = create((set, get) => ({
 
   alignObjects: (axis, edge) => {
     const state = get();
-    if (state.selectedIds.length < 2) return;
+    const effective = expandSelection(state.objects, state.selectedIds);
+    if (effective.length < 2) return;
     get()._saveSnapshot();
-    const selected = state.objects.filter(o => state.selectedIds.includes(o.id));
+    const selected = state.objects.filter(o => effective.includes(o.id));
     const ai = { x: 0, y: 1, z: 2 }[axis];
     let target;
     if (edge === 'min') target = Math.min(...selected.map(o => o.position[ai]));
@@ -399,7 +555,7 @@ export const useDesignStore = create((set, get) => ({
     else target = selected.reduce((s, o) => s + o.position[ai], 0) / selected.length;
     set({
       objects: state.objects.map(o => {
-        if (!state.selectedIds.includes(o.id)) return o;
+        if (!effective.includes(o.id)) return o;
         const pos = [...o.position];
         pos[ai] = target;
         return { ...o, position: pos };
@@ -411,7 +567,7 @@ export const useDesignStore = create((set, get) => ({
   dropToFloor: () => {
     get()._saveSnapshot();
     const state = get();
-    const selectedSet = new Set(state.selectedIds);
+    const selectedSet = new Set(expandSelection(state.objects, state.selectedIds));
     set({
       objects: state.objects.map(o => {
         if (!selectedSet.has(o.id)) return o;
@@ -452,24 +608,28 @@ export const useDesignStore = create((set, get) => ({
   mirrorSelected: (axis) => {
     get()._saveSnapshot();
     const state = get();
+    const effective = expandSelection(state.objects, state.selectedIds);
     const ai = { x: 0, y: 1, z: 2 }[axis];
-    const selected = state.objects.filter(o => state.selectedIds.includes(o.id));
+    const selected = state.objects.filter(o => effective.includes(o.id));
     const center = selected.reduce((sum, o) => sum + o.position[ai], 0) / (selected.length || 1);
     set({
       objects: state.objects.map(o => {
-        if (!state.selectedIds.includes(o.id)) return o;
+        if (!effective.includes(o.id)) return o;
         const pos = [...o.position];
         pos[ai] = 2 * center - pos[ai];
         const scale = [...o.scale];
         scale[ai] *= -1;
         return { ...o, position: pos, scale };
       }),
+      mirrorHint: { axis, at: Date.now() },
+      mirrorMode: false,
       isDirty: true,
     });
   },
 
   replaceObjects: (oldIds, newObj) => { get()._saveSnapshot(); set(state => ({
-    objects: [...state.objects.filter(o => !oldIds.includes(o.id)), newObj],
+    objects: [...state.objects.filter(o => !oldIds.includes(o.id)), { ...newObj, groupId: null }],
+    groups: reconcileGroups([...state.objects.filter(o => !oldIds.includes(o.id)), { ...newObj, groupId: null }], state.groups),
     selectedIds: [newObj.id],
     isDirty: true,
   })); },
@@ -486,11 +646,13 @@ export const useDesignStore = create((set, get) => ({
       scale: [1, 1, 1],
       color: '#6366f1',
       isHole: false,
+      groupId: null,
       visible: true,
       geometry: { bufferGeometry },
     };
     set(state => ({
       objects: [...state.objects, obj],
+      groups: reconcileGroups([...state.objects, obj], state.groups),
       selectedIds: [obj.id],
       isDirty: true,
     }));
@@ -508,6 +670,7 @@ export const useDesignStore = create((set, get) => ({
       id,
       name: state.projectName,
       objects: saveable,
+      groups: state.groups || [],
       backgroundColor: state.backgroundColor,
       updatedAt: Date.now(),
     };
@@ -524,6 +687,7 @@ export const useDesignStore = create((set, get) => ({
     objectCounter = project.objects.length;
     set({
       objects: project.objects,
+      groups: project.groups || [],
       projectId: project.id,
       projectName: project.name,
       backgroundColor: project.backgroundColor || '#f5f5f5',
@@ -538,6 +702,7 @@ export const useDesignStore = create((set, get) => ({
     objectCounter = 0;
     set({
       objects: [],
+      groups: [],
       projectId: null,
       projectName: 'Untitled Project',
       selectedIds: [],

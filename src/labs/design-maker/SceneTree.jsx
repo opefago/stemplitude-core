@@ -10,8 +10,10 @@ const TYPE_ICONS = {
 
 export default function SceneTree() {
   const objects = useDesignStore(s => s.objects);
+  const groups = useDesignStore(s => s.groups);
   const selectedIds = useDesignStore(s => s.selectedIds);
   const selectObject = useDesignStore(s => s.selectObject);
+  const setSelectedIds = useDesignStore(s => s.setSelectedIds);
   const updateObject = useDesignStore(s => s.updateObject);
   const removeObject = useDesignStore(s => s.removeObject);
 
@@ -33,7 +35,68 @@ export default function SceneTree() {
 
   return (
     <div className="dml-scene-tree">
+      {groups.map((g) => {
+        const members = objects.filter((o) => o.groupId === g.id);
+        if (members.length === 0) return null;
+        const allSelected = members.every((m) => selectedIds.includes(m.id));
+        return (
+          <div key={g.id} className="dml-tree-group-wrap">
+            <div
+              className={`dml-tree-item dml-tree-group ${allSelected ? 'selected' : ''}`}
+              onClick={() => setSelectedIds(members.map((m) => m.id))}
+            >
+              <span className="dml-tree-icon">🔗</span>
+              <span className="dml-tree-name">{g.name || 'Group'} ({members.length})</span>
+            </div>
+            {members.map((obj, i) => {
+              const isSelected = selectedIds.includes(obj.id);
+              return (
+                <div
+                  key={obj.id}
+                  className={`dml-tree-item dml-tree-child ${isSelected ? 'selected' : ''}`}
+                  onClick={(e) => selectObject(obj.id, e.shiftKey)}
+                >
+                  <span className="dml-tree-icon" style={{ color: obj.isHole ? '#ff6b81' : obj.color }}>
+                    {TYPE_ICONS[obj.type] || '◆'}
+                  </span>
+                  <span className="dml-tree-name">{obj.name}</span>
+                  <div className="dml-tree-actions">
+                    <button
+                      className="dml-tree-btn"
+                      onClick={(e) => { e.stopPropagation(); moveObject(objects.findIndex((o) => o.id === obj.id), -1); }}
+                      disabled={objects.findIndex((o) => o.id === obj.id) === 0}
+                    >
+                      <ChevronUp size={12} />
+                    </button>
+                    <button
+                      className="dml-tree-btn"
+                      onClick={(e) => { e.stopPropagation(); moveObject(objects.findIndex((o) => o.id === obj.id), 1); }}
+                      disabled={objects.findIndex((o) => o.id === obj.id) === objects.length - 1}
+                    >
+                      <ChevronDown size={12} />
+                    </button>
+                    <button
+                      className="dml-tree-btn"
+                      onClick={(e) => { e.stopPropagation(); updateObject(obj.id, { visible: !obj.visible }); }}
+                    >
+                      {obj.visible !== false ? <Eye size={12} /> : <EyeOff size={12} />}
+                    </button>
+                    <button
+                      className="dml-tree-btn danger"
+                      onClick={(e) => { e.stopPropagation(); removeObject(obj.id); }}
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+
       {objects.map((obj, i) => {
+        if (obj.groupId) return null;
         const isSelected = selectedIds.includes(obj.id);
         return (
           <div

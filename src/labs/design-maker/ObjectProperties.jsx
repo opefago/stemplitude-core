@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Trash2, Copy, Lock, Unlock } from 'lucide-react';
+import { Trash2, Copy, Lock, Unlock, Link2, Unlink2 } from 'lucide-react';
 import { useDesignStore } from './store';
 import { FONT_MAP, FONT_LABELS } from './Scene';
 import CustomSelect from './CustomSelect';
@@ -152,6 +152,8 @@ export default function ObjectProperties() {
   const removeSelected = useDesignStore(s => s.removeSelected);
   const duplicateSelected = useDesignStore(s => s.duplicateSelected);
   const toggleLock = useDesignStore(s => s.toggleLock);
+  const groupSelected = useDesignStore(s => s.groupSelected);
+  const ungroupSelected = useDesignStore(s => s.ungroupSelected);
   const [lockScale, setLockScale] = useState(true);
 
   if (selectedIds.length === 0) {
@@ -164,11 +166,19 @@ export default function ObjectProperties() {
   }
 
   if (selectedIds.length > 1) {
+    const selectedObjects = objects.filter(o => selectedIds.includes(o.id));
+    const canUngroup = selectedObjects.some((o) => !!o.groupId);
     return (
       <div className="dml-properties">
         <h3 className="dml-panel-title">Properties</h3>
         <p className="dml-multi-selection">{selectedIds.length} objects selected</p>
         <div className="dml-prop-actions">
+          <button className="dml-action-btn" onClick={groupSelected}>
+            <Link2 size={14} /> Group
+          </button>
+          <button className="dml-action-btn" onClick={ungroupSelected} disabled={!canUngroup}>
+            <Unlink2 size={14} /> Ungroup
+          </button>
           <button className="dml-action-btn" onClick={duplicateSelected}>
             <Copy size={14} /> Duplicate All
           </button>
