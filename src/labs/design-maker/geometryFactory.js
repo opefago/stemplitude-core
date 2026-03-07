@@ -249,7 +249,10 @@ registerShape("hemisphere", (p) => {
     0,
     Math.PI / 2,
   );
-  const cap = new THREE.CircleGeometry(p.radius, p.capSegments || p.widthSegments || 32);
+  const cap = new THREE.CircleGeometry(
+    p.radius,
+    p.capSegments || p.widthSegments || 32,
+  );
   cap.rotateX(Math.PI / 2);
   const geo = mergeGeometries([dome, cap]);
   geo.translate(0, -p.radius / 2, 0);

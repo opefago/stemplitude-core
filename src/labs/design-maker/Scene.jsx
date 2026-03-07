@@ -11,6 +11,7 @@ import { Canvas, useThree, useFrame } from "@react-three/fiber";
 import {
   OrbitControls,
   Grid,
+  Hud,
   GizmoHelper,
   GizmoViewcube,
   GizmoViewport,
@@ -28,6 +29,7 @@ import * as THREE from "three";
 import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
 import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
+import { mergeVertices } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 
 import {
   useDesignStore,
@@ -150,6 +152,371 @@ function useObjectGeometry(type, params) {
   return useMemo(() => createGeometry(type, params), [type, params]);
 }
 
+function computeSurfaceIds(geometry, startSurfaceId) {
+  const count = geometry?.attributes?.position?.count || 0;
+  if (!count)
+    return { ids: new Float32Array(0), nextSurfaceId: startSurfaceId + 1 };
+
+  const pos = geometry.attributes.position.array;
+  const rawIndex = geometry.index?.array || null;
+  const indexArray =
+    rawIndex || Uint32Array.from({ length: count }, (_, i) => i);
+  const ids = new Float32Array(count);
+  const triCount = Math.floor(indexArray.length / 3);
+  if (triCount === 0) {
+    ids.fill(startSurfaceId);
+    return { ids, nextSurfaceId: startSurfaceId + 1 };
+  }
+
+  // Build logical vertices by position only (merges split triangulation vertices).
+  const posQuant = 1e4;
+  const logicalKeyToId = new Map();
+  const vertexToLogical = new Uint32Array(count);
+  let logicalCount = 0;
+  for (let i = 0; i < count; i += 1) {
+    const key = `${Math.round(pos[i * 3] * posQuant)}|${Math.round(pos[i * 3 + 1] * posQuant)}|${Math.round(pos[i * 3 + 2] * posQuant)}`;
+    let lid = logicalKeyToId.get(key);
+    if (lid === undefined) {
+      lid = logicalCount;
+      logicalCount += 1;
+      logicalKeyToId.set(key, lid);
+    }
+    vertexToLogical[i] = lid;
+  }
+
+  // Triangle normals and edge-sharing adjacency.
+  const triNormals = new Float32Array(triCount * 3);
+  const triNeighbors = Array.from({ length: triCount }, () => new Set());
+  const edgeMap = new Map();
+  const edgeKey = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+  const addEdge = (a, b, tri) => {
+    const key = edgeKey(a, b);
+    const arr = edgeMap.get(key);
+    if (arr) arr.push(tri);
+    else edgeMap.set(key, [tri]);
+  };
+
+  for (let t = 0; t < triCount; t += 1) {
+    const i0 = indexArray[t * 3];
+    const i1 = indexArray[t * 3 + 1];
+    const i2 = indexArray[t * 3 + 2];
+
+    const ax = pos[i0 * 3];
+    const ay = pos[i0 * 3 + 1];
+    const az = pos[i0 * 3 + 2];
+    const bx = pos[i1 * 3];
+    const by = pos[i1 * 3 + 1];
+    const bz = pos[i1 * 3 + 2];
+    const cx = pos[i2 * 3];
+    const cy = pos[i2 * 3 + 1];
+    const cz = pos[i2 * 3 + 2];
+
+    const abx = bx - ax;
+    const aby = by - ay;
+    const abz = bz - az;
+    const acx = cx - ax;
+    const acy = cy - ay;
+    const acz = cz - az;
+    let nx = aby * acz - abz * acy;
+    let ny = abz * acx - abx * acz;
+    let nz = abx * acy - aby * acx;
+    const len = Math.hypot(nx, ny, nz) || 1;
+    nx /= len;
+    ny /= len;
+    nz /= len;
+    triNormals[t * 3] = nx;
+    triNormals[t * 3 + 1] = ny;
+    triNormals[t * 3 + 2] = nz;
+
+    const l0 = vertexToLogical[i0];
+    const l1 = vertexToLogical[i1];
+    const l2 = vertexToLogical[i2];
+    addEdge(l0, l1, t);
+    addEdge(l1, l2, t);
+    addEdge(l2, l0, t);
+  }
+
+  edgeMap.forEach((tris) => {
+    if (tris.length < 2) return;
+    for (let i = 0; i < tris.length; i += 1) {
+      for (let j = i + 1; j < tris.length; j += 1) {
+        triNeighbors[tris[i]].add(tris[j]);
+        triNeighbors[tris[j]].add(tris[i]);
+      }
+    }
+  });
+
+  // Grow surfaces across smooth triangle neighbors only.
+  const triVisited = new Uint8Array(triCount);
+  const minDot = Math.cos((40 * Math.PI) / 180);
+  let surfaceId = startSurfaceId;
+
+  for (let t = 0; t < triCount; t += 1) {
+    if (triVisited[t]) continue;
+    const stack = [t];
+    triVisited[t] = 1;
+    while (stack.length > 0) {
+      const tri = stack.pop();
+      const i0 = indexArray[tri * 3];
+      const i1 = indexArray[tri * 3 + 1];
+      const i2 = indexArray[tri * 3 + 2];
+      ids[i0] = surfaceId;
+      ids[i1] = surfaceId;
+      ids[i2] = surfaceId;
+
+      const nx = triNormals[tri * 3];
+      const ny = triNormals[tri * 3 + 1];
+      const nz = triNormals[tri * 3 + 2];
+      triNeighbors[tri].forEach((nTri) => {
+        if (triVisited[nTri]) return;
+        const dot =
+          nx * triNormals[nTri * 3] +
+          ny * triNormals[nTri * 3 + 1] +
+          nz * triNormals[nTri * 3 + 2];
+        if (dot < minDot) return;
+        triVisited[nTri] = 1;
+        stack.push(nTri);
+      });
+    }
+    surfaceId += 1;
+  }
+
+  return { ids, nextSurfaceId: surfaceId };
+}
+
+const IMPORTED_SURFACE_LAYER = 29;
+
+function ImportedSurfaceIdOutline({
+  meshRefs,
+  visibleObjects,
+  enabled = true,
+}) {
+  const { gl, scene, camera, size } = useThree();
+  const geometryCacheRef = useRef(new WeakMap());
+  const nextSurfaceIdRef = useRef(1);
+  const clearColorRef = useMemo(() => new THREE.Color(), []);
+
+  const target = useMemo(() => {
+    const rt = new THREE.WebGLRenderTarget(1, 1, {
+      depthBuffer: true,
+      stencilBuffer: false,
+    });
+    rt.texture.minFilter = THREE.NearestFilter;
+    rt.texture.magFilter = THREE.NearestFilter;
+    rt.texture.type = THREE.HalfFloatType;
+    rt.texture.generateMipmaps = false;
+    rt.depthTexture = new THREE.DepthTexture(1, 1, THREE.UnsignedIntType);
+    rt.depthTexture.minFilter = THREE.NearestFilter;
+    rt.depthTexture.magFilter = THREE.NearestFilter;
+    return rt;
+  }, []);
+
+  const depthOnlyMaterial = useMemo(() => {
+    const mat = new THREE.MeshDepthMaterial();
+    mat.depthTest = true;
+    mat.depthWrite = true;
+    mat.colorWrite = false;
+    return mat;
+  }, []);
+
+  const surfaceIdMaterial = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        uniforms: {
+          maxSurfaceId: { value: 1 },
+        },
+        vertexShader: `
+          attribute float surfaceId;
+          varying float vSurfaceId;
+          void main() {
+            vSurfaceId = surfaceId;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }
+        `,
+        fragmentShader: `
+          varying float vSurfaceId;
+          uniform float maxSurfaceId;
+          void main() {
+            float sid = round(vSurfaceId) / max(maxSurfaceId, 1.0);
+            gl_FragColor = vec4(sid, 0.0, 0.0, 1.0);
+          }
+        `,
+      }),
+    [],
+  );
+
+  const overlayMaterial = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        transparent: true,
+        depthTest: false,
+        depthWrite: false,
+        uniforms: {
+          tSurface: { value: target.texture },
+          tDepth: { value: target.depthTexture },
+          texel: { value: new THREE.Vector2(1, 1) },
+          outlineColor: { value: new THREE.Color(0x0d0d0d) },
+          cameraNear: { value: camera.near },
+          cameraFar: { value: camera.far },
+          depthParams: { value: new THREE.Vector2(1.05, 24.0) },
+          depthWeight: { value: 0.0 },
+        },
+        vertexShader: `
+          varying vec2 vUv;
+          void main() {
+            vUv = uv;
+            gl_Position = vec4(position.xy, 0.0, 1.0);
+          }
+        `,
+        fragmentShader: `
+          #include <packing>
+          varying vec2 vUv;
+          uniform sampler2D tSurface;
+          uniform sampler2D tDepth;
+          uniform vec2 texel;
+          uniform vec3 outlineColor;
+          uniform float cameraNear;
+          uniform float cameraFar;
+          uniform vec2 depthParams;
+          uniform float depthWeight;
+
+          float readDepth(vec2 uv) {
+            float fragCoordZ = texture2D(tDepth, uv).x;
+            float viewZ = perspectiveDepthToViewZ(fragCoordZ, cameraNear, cameraFar);
+            return viewZToOrthographicDepth(viewZ, cameraNear, cameraFar);
+          }
+
+          float sampleSid(vec2 uv) {
+            return texture2D(tSurface, uv).r;
+          }
+
+          void main() {
+            float sid = sampleSid(vUv);
+            if (sid <= 0.00001) {
+              gl_FragColor = vec4(0.0);
+              return;
+            }
+
+            float sidDiff = 0.0;
+            sidDiff += abs(sid - sampleSid(vUv + vec2(texel.x, 0.0)));
+            sidDiff += abs(sid - sampleSid(vUv + vec2(-texel.x, 0.0)));
+            sidDiff += abs(sid - sampleSid(vUv + vec2(0.0, texel.y)));
+            sidDiff += abs(sid - sampleSid(vUv + vec2(0.0, -texel.y)));
+            sidDiff += abs(sid - sampleSid(vUv + vec2(texel.x, texel.y)));
+            sidDiff += abs(sid - sampleSid(vUv + vec2(-texel.x, texel.y)));
+            sidDiff += abs(sid - sampleSid(vUv + vec2(texel.x, -texel.y)));
+            sidDiff += abs(sid - sampleSid(vUv + vec2(-texel.x, -texel.y)));
+
+            float d = readDepth(vUv);
+            float dd = 0.0;
+            dd += abs(d - readDepth(vUv + vec2(texel.x, 0.0)));
+            dd += abs(d - readDepth(vUv + vec2(-texel.x, 0.0)));
+            dd += abs(d - readDepth(vUv + vec2(0.0, texel.y)));
+            dd += abs(d - readDepth(vUv + vec2(0.0, -texel.y)));
+
+            float depthEdge = clamp(pow(clamp(dd * depthParams.y, 0.0, 1.0), depthParams.x), 0.0, 1.0);
+            float sidEdge = sidDiff > 0.00001 ? 1.0 : 0.0;
+            float edge = clamp(sidEdge + depthEdge * depthWeight, 0.0, 1.0);
+            gl_FragColor = vec4(outlineColor, edge);
+          }
+        `,
+      }),
+    [camera.far, camera.near, target.depthTexture, target.texture],
+  );
+
+  useEffect(() => {
+    target.setSize(size.width, size.height);
+    overlayMaterial.uniforms.texel.value.set(1 / size.width, 1 / size.height);
+  }, [overlayMaterial, size.height, size.width, target]);
+
+  useEffect(
+    () => () => {
+      depthOnlyMaterial.dispose();
+      surfaceIdMaterial.dispose();
+      overlayMaterial.dispose();
+      target.dispose();
+    },
+    [depthOnlyMaterial, overlayMaterial, surfaceIdMaterial, target],
+  );
+
+  useFrame(() => {
+    if (!enabled) return;
+
+    const importedGroups = [];
+    visibleObjects.forEach((obj) => {
+      if (obj.type !== "imported") return;
+      const group = meshRefs.current[obj.id];
+      if (group) importedGroups.push(group);
+    });
+    if (importedGroups.length === 0) return;
+
+    let maxSurfaceId = 1;
+    const touchedMeshes = [];
+
+    importedGroups.forEach((group) => {
+      group.traverse((child) => {
+        if (!child.isMesh || !child.geometry) return;
+        const geom = child.geometry;
+        let cached = geometryCacheRef.current.get(geom);
+        if (!cached) {
+          const { ids, nextSurfaceId } = computeSurfaceIds(
+            geom,
+            nextSurfaceIdRef.current,
+          );
+          geom.setAttribute("surfaceId", new THREE.BufferAttribute(ids, 1));
+          cached = { maxSurfaceId: nextSurfaceId - 1 };
+          geometryCacheRef.current.set(geom, cached);
+          nextSurfaceIdRef.current = nextSurfaceId;
+        }
+        maxSurfaceId = Math.max(maxSurfaceId, cached.maxSurfaceId);
+        child.layers.enable(IMPORTED_SURFACE_LAYER);
+        touchedMeshes.push(child);
+      });
+    });
+
+    surfaceIdMaterial.uniforms.maxSurfaceId.value = Math.max(maxSurfaceId, 1);
+    overlayMaterial.uniforms.cameraNear.value = camera.near;
+    overlayMaterial.uniforms.cameraFar.value = camera.far;
+
+    const prevTarget = gl.getRenderTarget();
+    const prevOverride = scene.overrideMaterial;
+    const prevMask = camera.layers.mask;
+    const prevAutoClear = gl.autoClear;
+    const prevClearAlpha = gl.getClearAlpha();
+    gl.getClearColor(clearColorRef);
+
+    gl.setRenderTarget(target);
+    gl.autoClear = true;
+    gl.setClearColor(0x000000, 0);
+    gl.clear(true, true, true);
+
+    scene.overrideMaterial = depthOnlyMaterial;
+    camera.layers.set(0);
+    gl.render(scene, camera);
+
+    scene.overrideMaterial = surfaceIdMaterial;
+    camera.layers.set(IMPORTED_SURFACE_LAYER);
+    gl.render(scene, camera);
+
+    touchedMeshes.forEach((m) => m.layers.disable(IMPORTED_SURFACE_LAYER));
+
+    scene.overrideMaterial = prevOverride;
+    camera.layers.mask = prevMask;
+    gl.setRenderTarget(prevTarget);
+    gl.autoClear = prevAutoClear;
+    gl.setClearColor(clearColorRef, prevClearAlpha);
+  });
+
+  return (
+    <Hud renderPriority={2}>
+      <mesh frustumCulled={false}>
+        <planeGeometry args={[2, 2]} />
+        <primitive object={overlayMaterial} attach="material" />
+      </mesh>
+    </Hud>
+  );
+}
+
 function ThickEdges({
   geometry,
   opacity = 0.8,
@@ -157,13 +524,110 @@ function ThickEdges({
   depthTest = true,
   depthWrite = true,
   thresholdAngle = 18,
+  cleanForEdges = false,
+  loopOnly = false,
 }) {
   const gl = useThree((s) => s.gl);
 
   const lineObj = useMemo(() => {
-    const edges = new THREE.EdgesGeometry(geometry, thresholdAngle);
+    let edgeSource = geometry;
+    if (cleanForEdges) {
+      const prep = geometry.index ? geometry.toNonIndexed() : geometry.clone();
+      prep.deleteAttribute("normal");
+      prep.deleteAttribute("uv");
+      prep.deleteAttribute("uv2");
+      prep.computeBoundingBox();
+      const bb = prep.boundingBox;
+      const maxDim = bb
+        ? Math.max(
+            bb.max.x - bb.min.x,
+            bb.max.y - bb.min.y,
+            bb.max.z - bb.min.z,
+          )
+        : 1;
+      const weldTolerance = Math.max(1e-3, maxDim * 2e-3);
+      edgeSource = mergeVertices(prep, weldTolerance);
+      prep.dispose();
+    }
+    const edges = new THREE.EdgesGeometry(edgeSource, thresholdAngle);
+    if (edgeSource !== geometry) edgeSource.dispose();
     const geo = new LineSegmentsGeometry();
-    geo.setPositions(edges.attributes.position.array);
+    let positions = edges.attributes.position.array;
+
+    if (loopOnly && positions.length > 0) {
+      const quant = 1e5;
+      const keyOf = (x, y, z) =>
+        `${Math.round(x * quant)}|${Math.round(y * quant)}|${Math.round(z * quant)}`;
+      const vertexMap = new Map();
+      const degree = new Map();
+      const segs = [];
+      let vid = 0;
+
+      for (let i = 0; i < positions.length; i += 6) {
+        const a = [positions[i], positions[i + 1], positions[i + 2]];
+        const b = [positions[i + 3], positions[i + 4], positions[i + 5]];
+        const ka = keyOf(a[0], a[1], a[2]);
+        const kb = keyOf(b[0], b[1], b[2]);
+        if (!vertexMap.has(ka)) vertexMap.set(ka, vid++);
+        if (!vertexMap.has(kb)) vertexMap.set(kb, vid++);
+        const ia = vertexMap.get(ka);
+        const ib = vertexMap.get(kb);
+        segs.push({ ia, ib, a, b });
+        degree.set(ia, (degree.get(ia) || 0) + 1);
+        degree.set(ib, (degree.get(ib) || 0) + 1);
+      }
+
+      const adjacency = new Map();
+      segs.forEach((s, idx) => {
+        if (!adjacency.has(s.ia)) adjacency.set(s.ia, []);
+        if (!adjacency.has(s.ib)) adjacency.set(s.ib, []);
+        adjacency.get(s.ia).push(idx);
+        adjacency.get(s.ib).push(idx);
+      });
+
+      const visited = new Array(segs.length).fill(false);
+      const kept = [];
+
+      for (let i = 0; i < segs.length; i++) {
+        if (visited[i]) continue;
+        const queue = [i];
+        visited[i] = true;
+        const component = [];
+        const verts = new Set();
+
+        while (queue.length > 0) {
+          const eIdx = queue.pop();
+          const s = segs[eIdx];
+          component.push(eIdx);
+          verts.add(s.ia);
+          verts.add(s.ib);
+          const next = [
+            ...(adjacency.get(s.ia) || []),
+            ...(adjacency.get(s.ib) || []),
+          ];
+          next.forEach((nIdx) => {
+            if (!visited[nIdx]) {
+              visited[nIdx] = true;
+              queue.push(nIdx);
+            }
+          });
+        }
+
+        const hasDangling = Array.from(verts).some(
+          (v) => (degree.get(v) || 0) <= 1,
+        );
+        if (!hasDangling) kept.push(...component);
+      }
+
+      const filtered = [];
+      kept.forEach((idx) => {
+        const s = segs[idx];
+        filtered.push(s.a[0], s.a[1], s.a[2], s.b[0], s.b[1], s.b[2]);
+      });
+      positions = new Float32Array(filtered);
+    }
+
+    geo.setPositions(positions);
     edges.dispose();
     const rendererSize = gl.getSize(new THREE.Vector2());
     const mat = new LineMaterial({
@@ -179,7 +643,17 @@ function ThickEdges({
     const obj = new LineSegments2(geo, mat);
     obj.renderOrder = 1;
     return obj;
-  }, [geometry, lineWidth, opacity, depthTest, depthWrite, thresholdAngle, gl]);
+  }, [
+    geometry,
+    lineWidth,
+    opacity,
+    depthTest,
+    depthWrite,
+    thresholdAngle,
+    cleanForEdges,
+    loopOnly,
+    gl,
+  ]);
 
   useEffect(() => {
     const onResize = () => {
@@ -293,7 +767,7 @@ const SceneObject = forwardRef(function SceneObject(
   const edgeThresholdAngle = roundedHoleEdges
     ? (HOLE_EDGE_THRESHOLD_BY_TYPE[obj.type] ?? 14)
     : isImported
-      ? 50
+      ? 88
       : isTorus
         ? 50
         : 18;
@@ -365,6 +839,8 @@ const SceneObject = forwardRef(function SceneObject(
               depthTest
               depthWrite={!obj.isHole}
               thresholdAngle={edgeThresholdAngle}
+              cleanForEdges={isImported}
+              loopOnly={isImported}
             />
           )}
         </>
@@ -3294,6 +3770,11 @@ function SceneContent() {
       <MirrorHintOverlay />
 
       <CameraControls orbitRef={orbitRef} />
+      <ImportedSurfaceIdOutline
+        meshRefs={meshRefs}
+        visibleObjects={visibleObjects}
+        enabled={false}
+      />
       {shadowsEnabled && (
         <mesh
           rotation={[-Math.PI / 2, 0, 0]}

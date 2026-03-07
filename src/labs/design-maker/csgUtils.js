@@ -1,52 +1,61 @@
-import { Evaluator, Brush, ADDITION, SUBTRACTION, INTERSECTION } from 'three-bvh-csg';
-import * as THREE from 'three';
-import { mergeVertices, toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { createGeometry } from './geometryFactory';
+import {
+  Evaluator,
+  Brush,
+  ADDITION,
+  SUBTRACTION,
+  INTERSECTION,
+} from "three-bvh-csg";
+import * as THREE from "three";
+import {
+  mergeVertices,
+  toCreasedNormals,
+} from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { createGeometry } from "./geometryFactory";
 
 const evaluator = new Evaluator();
 const CURVED_CSG_TYPES = new Set([
-  'sphere',
-  'cylinder',
-  'cone',
-  'torus',
-  'tube',
-  'hemisphere',
-  'ellipsoid',
-  'ring',
-  'paraboloid',
+  "sphere",
+  "cylinder",
+  "cone",
+  "torus",
+  "tube",
+  "hemisphere",
+  "ellipsoid",
+  "ring",
+  "paraboloid",
 ]);
 
 function upgradeCSGParams(type, geometry = {}) {
   const params = { ...geometry };
   switch (type) {
-    case 'sphere':
+    case "sphere":
       params.widthSegments = Math.max(params.widthSegments || 0, 48);
       params.heightSegments = Math.max(params.heightSegments || 0, 32);
       break;
-    case 'cylinder':
+    case "cylinder":
       params.radialSegments = Math.max(params.radialSegments || 0, 64);
       break;
-    case 'cone':
+    case "cone":
       params.radialSegments = Math.max(params.radialSegments || 0, 64);
       break;
-    case 'torus':
-    case 'tube':
+    case "torus":
+    case "tube":
       params.radialSegments = Math.max(params.radialSegments || 0, 24);
       params.tubularSegments = Math.max(params.tubularSegments || 0, 96);
       break;
-    case 'hemisphere':
+    case "hemisphere":
       params.widthSegments = Math.max(params.widthSegments || 0, 48);
       params.heightSegments = Math.max(params.heightSegments || 0, 24);
       params.capSegments = Math.max(params.capSegments || 0, 48);
       break;
-    case 'ellipsoid':
+    case "ellipsoid":
       params.widthSegments = Math.max(params.widthSegments || 0, 48);
       params.heightSegments = Math.max(params.heightSegments || 0, 32);
       break;
-    case 'ring':
+    case "ring":
       params.curveSegments = Math.max(params.curveSegments || 0, 96);
       break;
-    case 'paraboloid':
+    case "paraboloid":
       params.profileSteps = Math.max(params.profileSteps || 0, 64);
       params.radialSegments = Math.max(params.radialSegments || 0, 64);
       break;
@@ -57,9 +66,12 @@ function upgradeCSGParams(type, geometry = {}) {
 }
 
 function prepareBrushGeometry(obj) {
-  const base = createGeometry(obj.type, upgradeCSGParams(obj.type, obj.geometry));
+  const base = createGeometry(
+    obj.type,
+    upgradeCSGParams(obj.type, obj.geometry),
+  );
   const geometry = base.clone();
-  geometry.deleteAttribute('normal');
+  geometry.deleteAttribute("normal");
   geometry.computeBoundingBox();
   geometry.computeBoundingSphere();
   return geometry;
@@ -70,21 +82,17 @@ function finalizeResultBrush(result) {
   const source = result.geometry;
   // Drop seam-splitting attributes before welding so curved hole walls smooth.
   const prep = source.index ? source.toNonIndexed() : source.clone();
-  prep.deleteAttribute('normal');
-  prep.deleteAttribute('uv');
-  prep.deleteAttribute('uv2');
+  prep.deleteAttribute("normal");
+  prep.deleteAttribute("uv");
+  prep.deleteAttribute("uv2");
   prep.computeBoundingBox();
   const bb = prep.boundingBox;
   const maxDim = bb
-    ? Math.max(
-        bb.max.x - bb.min.x,
-        bb.max.y - bb.min.y,
-        bb.max.z - bb.min.z,
-      )
+    ? Math.max(bb.max.x - bb.min.x, bb.max.y - bb.min.y, bb.max.z - bb.min.z)
     : 1;
   const weldTolerance = Math.max(2e-4, maxDim * 2e-4);
   const welded = mergeVertices(prep, weldTolerance);
-  welded.deleteAttribute('normal');
+  welded.deleteAttribute("normal");
   welded.computeVertexNormals();
   const smoothed = toCreasedNormals(welded, Math.PI / 3.5);
   smoothed.computeBoundingBox();
@@ -124,8 +132,8 @@ export function unionCSG(objectsData) {
  * if there is only one solid.
  */
 export function mergeCSG(objectsData) {
-  const solids = objectsData.filter(o => !o.isHole);
-  const holes = objectsData.filter(o => o.isHole);
+  const solids = objectsData.filter((o) => !o.isHole);
+  const holes = objectsData.filter((o) => o.isHole);
 
   if (solids.length === 0) return null;
 

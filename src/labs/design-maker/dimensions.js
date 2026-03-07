@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+import * as THREE from "three";
 
 /**
  * Shared dimension / bounding-box helpers.
@@ -8,71 +8,95 @@ import * as THREE from 'three';
 export function getRawExtents(type, geometry) {
   let hx, hy, hz;
   switch (type) {
-    case 'box': case 'wall': case 'wedge':
-      hx = geometry.width / 2; hy = geometry.height / 2; hz = geometry.depth / 2;
+    case "box":
+    case "wall":
+    case "wedge":
+      hx = geometry.width / 2;
+      hy = geometry.height / 2;
+      hz = geometry.depth / 2;
       break;
-    case 'sphere':
+    case "sphere":
       hx = hy = hz = geometry.radius;
       break;
-    case 'hemisphere':
-      hx = hz = geometry.radius; hy = geometry.radius / 2;
+    case "hemisphere":
+      hx = hz = geometry.radius;
+      hy = geometry.radius / 2;
       break;
-    case 'cylinder':
-      hx = hz = Math.max(geometry.radiusTop, geometry.radiusBottom); hy = geometry.height / 2;
+    case "cylinder":
+      hx = hz = Math.max(geometry.radiusTop, geometry.radiusBottom);
+      hy = geometry.height / 2;
       break;
-    case 'cone': case 'pyramid':
-      hx = hz = geometry.radius; hy = geometry.height / 2;
+    case "cone":
+    case "pyramid":
+      hx = hz = geometry.radius;
+      hy = geometry.height / 2;
       break;
-    case 'torus': case 'tube':
+    case "torus":
+    case "tube":
       hx = geometry.radius + geometry.tube;
       hy = geometry.radius + geometry.tube;
       hz = geometry.tube;
       break;
-    case 'heart':
+    case "heart":
       hx = geometry.size * 0.55;
       hy = geometry.size * 0.7;
       hz = (geometry.depth + 1.0) / 2;
       break;
-    case 'star': case 'starSix':
+    case "star":
+    case "starSix":
       hx = geometry.outerRadius;
       hy = geometry.outerRadius;
       hz = (geometry.depth + 1.0) / 2;
       break;
-    case 'text':
-      hx = Math.max((geometry.size || 10), ((geometry.text || 'Text').length * (geometry.size || 10) * 0.3));
+    case "text":
+      hx = Math.max(
+        geometry.size || 10,
+        (geometry.text || "Text").length * (geometry.size || 10) * 0.3,
+      );
       hy = (geometry.size || 10) / 2;
       hz = ((geometry.height || 5) + 0.6) / 2;
       break;
-    case 'tetrahedron':
+    case "tetrahedron":
       hx = hy = hz = geometry.radius * 0.57735;
       break;
-    case 'dodecahedron':
+    case "dodecahedron":
       hx = hy = hz = geometry.radius * 0.93417;
       break;
-    case 'octahedron':
+    case "octahedron":
       hx = hy = hz = geometry.radius;
       break;
-    case 'icosahedron':
+    case "icosahedron":
       hx = hy = hz = geometry.radius * 0.85065;
       break;
-    case 'ellipsoid':
-      hx = geometry.radiusX; hy = geometry.radiusY; hz = geometry.radiusZ;
+    case "ellipsoid":
+      hx = geometry.radiusX;
+      hy = geometry.radiusY;
+      hz = geometry.radiusZ;
       break;
-    case 'triangularPrism': case 'hexagonalPrism': case 'pentagonalPrism':
-      hx = hz = geometry.radius; hy = geometry.height / 2;
+    case "triangularPrism":
+    case "hexagonalPrism":
+    case "pentagonalPrism":
+      hx = hz = geometry.radius;
+      hy = geometry.height / 2;
       break;
-    case 'pentagonalPyramid': case 'squarePyramid':
-      hx = hz = geometry.radius; hy = geometry.height / 2;
+    case "pentagonalPyramid":
+    case "squarePyramid":
+      hx = hz = geometry.radius;
+      hy = geometry.height / 2;
       break;
-    case 'ring':
-      hx = geometry.outerRadius; hy = geometry.outerRadius; hz = geometry.height / 2;
+    case "ring":
+      hx = geometry.outerRadius;
+      hy = geometry.outerRadius;
+      hz = geometry.height / 2;
       break;
-    case 'paraboloid':
-      hx = hz = geometry.radius; hy = geometry.height / 2;
+    case "paraboloid":
+      hx = hz = geometry.radius;
+      hy = geometry.height / 2;
       break;
-    case 'imported':
+    case "imported":
       if (geometry.bufferGeometry) {
-        if (!geometry.bufferGeometry.boundingBox) geometry.bufferGeometry.computeBoundingBox();
+        if (!geometry.bufferGeometry.boundingBox)
+          geometry.bufferGeometry.computeBoundingBox();
         const bb = geometry.bufferGeometry.boundingBox;
         hx = (bb.max.x - bb.min.x) / 2;
         hy = (bb.max.y - bb.min.y) / 2;
@@ -88,7 +112,7 @@ export function getRawExtents(type, geometry) {
 }
 
 function getLocalBounds(type, geometry) {
-  if (type === 'imported' && geometry?.bufferGeometry) {
+  if (type === "imported" && geometry?.bufferGeometry) {
     const bg = geometry.bufferGeometry;
     if (!bg.boundingBox) bg.computeBoundingBox();
     const bb = bg.boundingBox;
@@ -113,16 +137,16 @@ function getPolyhedronVertices(type, radius) {
 
   let geo;
   switch (type) {
-    case 'tetrahedron':
+    case "tetrahedron":
       geo = new THREE.TetrahedronGeometry(radius);
       break;
-    case 'dodecahedron':
+    case "dodecahedron":
       geo = new THREE.DodecahedronGeometry(radius);
       break;
-    case 'octahedron':
+    case "octahedron":
       geo = new THREE.OctahedronGeometry(radius);
       break;
-    case 'icosahedron':
+    case "icosahedron":
       geo = new THREE.IcosahedronGeometry(radius);
       break;
     default:
@@ -141,10 +165,10 @@ function getPolyhedronVertices(type, radius) {
 
 function getExactLocalVertices(type, geometry) {
   switch (type) {
-    case 'tetrahedron':
-    case 'dodecahedron':
-    case 'octahedron':
-    case 'icosahedron':
+    case "tetrahedron":
+    case "dodecahedron":
+    case "octahedron":
+    case "icosahedron":
       return getPolyhedronVertices(type, geometry.radius || 10);
     default:
       return null;
@@ -158,7 +182,10 @@ export function getFloorY(type, geometry, rotation, scale) {
   const sy = scale ? Math.abs(scale[1]) : 1;
   const sz = scale ? Math.abs(scale[2]) : 1;
 
-  if (!rotation || (rotation[0] === 0 && rotation[1] === 0 && rotation[2] === 0)) {
+  if (
+    !rotation ||
+    (rotation[0] === 0 && rotation[1] === 0 && rotation[2] === 0)
+  ) {
     if (exactVerts) {
       let minY = Infinity;
       for (const [, y] of exactVerts) {
@@ -172,7 +199,7 @@ export function getFloorY(type, geometry, rotation, scale) {
 
   const [rx, ry, rz] = rotation;
   const q = new THREE.Quaternion().setFromEuler(
-    new THREE.Euler(rx, ry, rz, 'XYZ'),
+    new THREE.Euler(rx, ry, rz, "XYZ"),
   );
   const v = new THREE.Vector3();
 
@@ -183,10 +210,14 @@ export function getFloorY(type, geometry, rotation, scale) {
   const maxY0 = localBounds.max[1] * sy;
   const maxZ = localBounds.max[2] * sz;
   const corners = [
-    [minX, minY0, minZ], [maxX, minY0, minZ],
-    [minX, maxY0, minZ], [maxX, maxY0, minZ],
-    [minX, minY0, maxZ], [maxX, minY0, maxZ],
-    [minX, maxY0, maxZ], [maxX, maxY0, maxZ],
+    [minX, minY0, minZ],
+    [maxX, minY0, minZ],
+    [minX, maxY0, minZ],
+    [maxX, maxY0, minZ],
+    [minX, minY0, maxZ],
+    [maxX, minY0, maxZ],
+    [minX, maxY0, maxZ],
+    [maxX, maxY0, maxZ],
   ];
 
   const sourcePoints = exactVerts
@@ -211,7 +242,7 @@ export function getWorldBounds(type, geometry, rotation, scale, position) {
 
   const [rx, ry, rz] = rotation || [0, 0, 0];
   const q = new THREE.Quaternion().setFromEuler(
-    new THREE.Euler(rx, ry, rz, 'XYZ'),
+    new THREE.Euler(rx, ry, rz, "XYZ"),
   );
   const v = new THREE.Vector3();
 
@@ -222,18 +253,26 @@ export function getWorldBounds(type, geometry, rotation, scale, position) {
   const maxY0 = localBounds.max[1] * sy;
   const maxZ0 = localBounds.max[2] * sz;
   const corners = [
-    [minX0, minY0, minZ0], [maxX0, minY0, minZ0],
-    [minX0, maxY0, minZ0], [maxX0, maxY0, minZ0],
-    [minX0, minY0, maxZ0], [maxX0, minY0, maxZ0],
-    [minX0, maxY0, maxZ0], [maxX0, maxY0, maxZ0],
+    [minX0, minY0, minZ0],
+    [maxX0, minY0, minZ0],
+    [minX0, maxY0, minZ0],
+    [maxX0, maxY0, minZ0],
+    [minX0, minY0, maxZ0],
+    [maxX0, minY0, maxZ0],
+    [minX0, maxY0, maxZ0],
+    [maxX0, maxY0, maxZ0],
   ];
 
   const sourcePoints = exactVerts
     ? exactVerts.map(([x, y, z]) => [x * sx, y * sy, z * sz])
     : corners;
 
-  let minX = Infinity, minY = Infinity, minZ = Infinity;
-  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  let minX = Infinity,
+    minY = Infinity,
+    minZ = Infinity;
+  let maxX = -Infinity,
+    maxY = -Infinity,
+    maxZ = -Infinity;
 
   for (const [x, y, z] of sourcePoints) {
     v.set(x, y, z).applyQuaternion(q);
@@ -274,46 +313,110 @@ export function getObjectDimensions(obj) {
   const s = obj.scale;
   let w, h, d;
   switch (obj.type) {
-    case 'box': case 'wall': case 'wedge':
-      w = g.width; h = g.height; d = g.depth; break;
-    case 'sphere':
-      w = g.radius * 2; h = g.radius * 2; d = g.radius * 2; break;
-    case 'hemisphere':
-      w = g.radius * 2; h = g.radius; d = g.radius * 2; break;
-    case 'cylinder':
-      w = Math.max(g.radiusTop, g.radiusBottom) * 2; h = g.height;
-      d = Math.max(g.radiusTop, g.radiusBottom) * 2; break;
-    case 'cone': case 'pyramid':
-      w = g.radius * 2; h = g.height; d = g.radius * 2; break;
-    case 'torus': case 'tube':
-      w = (g.radius + g.tube) * 2; h = g.tube * 2; d = (g.radius + g.tube) * 2; break;
-    case 'heart':
-      w = g.size * 2; h = g.size * 2; d = g.depth; break;
-    case 'star': case 'starSix':
-      w = g.outerRadius * 2; h = g.outerRadius * 2; d = g.depth; break;
-    case 'text':
-      w = 20; h = g.size || 10; d = g.height || 5; break;
-    case 'tetrahedron': case 'dodecahedron': case 'octahedron': case 'icosahedron':
-      w = g.radius * 2; h = g.radius * 2; d = g.radius * 2; break;
-    case 'ellipsoid':
-      w = g.radiusX * 2; h = g.radiusY * 2; d = g.radiusZ * 2; break;
-    case 'triangularPrism': case 'hexagonalPrism': case 'pentagonalPrism':
-      w = g.radius * 2; h = g.height; d = g.radius * 2; break;
-    case 'pentagonalPyramid': case 'squarePyramid':
-      w = g.radius * 2; h = g.height; d = g.radius * 2; break;
-    case 'ring':
-      w = g.outerRadius * 2; h = g.outerRadius * 2; d = g.height; break;
-    case 'paraboloid':
-      w = g.radius * 2; h = g.height; d = g.radius * 2; break;
-    case 'imported':
+    case "box":
+    case "wall":
+    case "wedge":
+      w = g.width;
+      h = g.height;
+      d = g.depth;
+      break;
+    case "sphere":
+      w = g.radius * 2;
+      h = g.radius * 2;
+      d = g.radius * 2;
+      break;
+    case "hemisphere":
+      w = g.radius * 2;
+      h = g.radius;
+      d = g.radius * 2;
+      break;
+    case "cylinder":
+      w = Math.max(g.radiusTop, g.radiusBottom) * 2;
+      h = g.height;
+      d = Math.max(g.radiusTop, g.radiusBottom) * 2;
+      break;
+    case "cone":
+    case "pyramid":
+      w = g.radius * 2;
+      h = g.height;
+      d = g.radius * 2;
+      break;
+    case "torus":
+    case "tube":
+      w = (g.radius + g.tube) * 2;
+      h = g.tube * 2;
+      d = (g.radius + g.tube) * 2;
+      break;
+    case "heart":
+      w = g.size * 2;
+      h = g.size * 2;
+      d = g.depth;
+      break;
+    case "star":
+    case "starSix":
+      w = g.outerRadius * 2;
+      h = g.outerRadius * 2;
+      d = g.depth;
+      break;
+    case "text":
+      w = 20;
+      h = g.size || 10;
+      d = g.height || 5;
+      break;
+    case "tetrahedron":
+    case "dodecahedron":
+    case "octahedron":
+    case "icosahedron":
+      w = g.radius * 2;
+      h = g.radius * 2;
+      d = g.radius * 2;
+      break;
+    case "ellipsoid":
+      w = g.radiusX * 2;
+      h = g.radiusY * 2;
+      d = g.radiusZ * 2;
+      break;
+    case "triangularPrism":
+    case "hexagonalPrism":
+    case "pentagonalPrism":
+      w = g.radius * 2;
+      h = g.height;
+      d = g.radius * 2;
+      break;
+    case "pentagonalPyramid":
+    case "squarePyramid":
+      w = g.radius * 2;
+      h = g.height;
+      d = g.radius * 2;
+      break;
+    case "ring":
+      w = g.outerRadius * 2;
+      h = g.outerRadius * 2;
+      d = g.height;
+      break;
+    case "paraboloid":
+      w = g.radius * 2;
+      h = g.height;
+      d = g.radius * 2;
+      break;
+    case "imported":
       if (g.bufferGeometry) {
-        if (!g.bufferGeometry.boundingBox) g.bufferGeometry.computeBoundingBox();
+        if (!g.bufferGeometry.boundingBox)
+          g.bufferGeometry.computeBoundingBox();
         const bb = g.bufferGeometry.boundingBox;
-        w = bb.max.x - bb.min.x; h = bb.max.y - bb.min.y; d = bb.max.z - bb.min.z;
-      } else { w = 20; h = 20; d = 20; }
+        w = bb.max.x - bb.min.x;
+        h = bb.max.y - bb.min.y;
+        d = bb.max.z - bb.min.z;
+      } else {
+        w = 20;
+        h = 20;
+        d = 20;
+      }
       break;
     default:
-      w = 20; h = 20; d = 20;
+      w = 20;
+      h = 20;
+      d = 20;
   }
   return {
     width: Math.abs(w * s[0]),
