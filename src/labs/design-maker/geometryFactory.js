@@ -242,14 +242,14 @@ registerShape(
 registerShape("hemisphere", (p) => {
   const dome = new THREE.SphereGeometry(
     p.radius,
-    32,
-    16,
+    p.widthSegments || 32,
+    p.heightSegments || 16,
     0,
     Math.PI * 2,
     0,
     Math.PI / 2,
   );
-  const cap = new THREE.CircleGeometry(p.radius, 32);
+  const cap = new THREE.CircleGeometry(p.radius, p.capSegments || p.widthSegments || 32);
   cap.rotateX(Math.PI / 2);
   const geo = mergeGeometries([dome, cap]);
   geo.translate(0, -p.radius / 2, 0);
@@ -370,7 +370,11 @@ registerShape(
 // ---------------------------------------------------------------------------
 
 registerShape("ellipsoid", (p) => {
-  const geo = new THREE.SphereGeometry(1, 32, 32);
+  const geo = new THREE.SphereGeometry(
+    1,
+    p.widthSegments || 32,
+    p.heightSegments || 32,
+  );
   const pos = geo.attributes.position;
   for (let i = 0; i < pos.count; i++) {
     pos.setXYZ(
@@ -395,7 +399,7 @@ registerShape("ring", (p) => {
   const geo = new THREE.ExtrudeGeometry(shape, {
     depth: p.height,
     bevelEnabled: false,
-    curveSegments: 48,
+    curveSegments: p.curveSegments || 48,
   });
   geo.translate(0, 0, -p.height / 2);
   return geo;
@@ -403,7 +407,7 @@ registerShape("ring", (p) => {
 
 registerShape("paraboloid", (p) => {
   const pts = [];
-  const steps = 32;
+  const steps = p.profileSteps || 32;
   pts.push(new THREE.Vector2(0, -p.height / 2));
   for (let i = 0; i <= steps; i++) {
     const t = i / steps;
@@ -411,7 +415,7 @@ registerShape("paraboloid", (p) => {
     const r = p.radius * Math.sqrt(t);
     pts.push(new THREE.Vector2(r, y));
   }
-  return new THREE.LatheGeometry(pts, 32);
+  return new THREE.LatheGeometry(pts, p.radialSegments || 32);
 });
 
 const starExtrudeCreator = (p) => {

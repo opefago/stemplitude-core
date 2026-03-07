@@ -134,19 +134,6 @@ function ToyMaterial({
       />
     );
   }
-  if (isImported) {
-    return (
-      <meshStandardMaterial
-        color={color}
-        wireframe={wireframe}
-        transparent={transparent}
-        opacity={opacity}
-        side={side}
-        roughness={0.92}
-        metalness={0.02}
-      />
-    );
-  }
   return (
     <meshToonMaterial
       color={color}
@@ -221,7 +208,7 @@ const SceneObject = forwardRef(function SceneObject(
   const color = obj.isHole ? "#ff4444" : obj.color;
   const opacity = obj.isHole ? 0.4 : 1;
   const side = obj.isHole ? THREE.DoubleSide : THREE.FrontSide;
-  const cartoonRatio = 1.025;
+  const cartoonRatio = 1.012;
 
   if (obj.type === "text") {
     return (
@@ -306,15 +293,15 @@ const SceneObject = forwardRef(function SceneObject(
   const edgeThresholdAngle = roundedHoleEdges
     ? (HOLE_EDGE_THRESHOLD_BY_TYPE[obj.type] ?? 14)
     : isImported
-      ? 89.7
+      ? 50
       : isTorus
         ? 50
         : 18;
   const edgeOpacity = isImported ? 1 : obj.isHole ? 0.6 : 0.8;
   const showInnerEdges = !isImported;
   const showCartoonHull = !obj.isHole;
-  const hullScale = isImported ? 1.012 : cartoonRatio;
-  const hullOffset = isImported ? 8 : 5;
+  const hullScale = cartoonRatio;
+  const hullOffset = 5;
   const outlineGeo = useMemo(() => {
     if (!isTorus) return null;
     const p = obj.geometry;
@@ -363,7 +350,7 @@ const SceneObject = forwardRef(function SceneObject(
               <meshBasicMaterial
                 color="#0d0d0d"
                 side={THREE.BackSide}
-                depthWrite={false}
+                depthWrite={true}
                 polygonOffset
                 polygonOffsetFactor={hullOffset}
                 polygonOffsetUnits={hullOffset}
@@ -3182,17 +3169,14 @@ function SceneContent() {
     [objects],
   );
 
-  const selectedOutlineMeshes = useMemo(() => {
-    const meshes = [];
-    selectedIds.forEach((id) => {
-      const group = meshRefs.current[id];
-      if (!group) return;
-      group.traverse((child) => {
-        if (child.isMesh) meshes.push(child);
-      });
+  const selectedOutlineMeshes = [];
+  selectedIds.forEach((id) => {
+    const group = meshRefs.current[id];
+    if (!group) return;
+    group.traverse((child) => {
+      if (child.isMesh) selectedOutlineMeshes.push(child);
     });
-    return meshes;
-  }, [selectedIds, visibleObjects]);
+  });
 
   return (
     <>
@@ -3310,7 +3294,6 @@ function SceneContent() {
       <MirrorHintOverlay />
 
       <CameraControls orbitRef={orbitRef} />
-
       {shadowsEnabled && (
         <mesh
           rotation={[-Math.PI / 2, 0, 0]}
@@ -3325,6 +3308,7 @@ function SceneContent() {
       <EffectComposer autoClear={false}>
         <Outline
           selection={selectedOutlineMeshes}
+          selectionLayer={100}
           edgeStrength={30}
           pulseSpeed={0.5}
           visibleEdgeColor={0x00d4ff}

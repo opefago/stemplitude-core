@@ -4,6 +4,66 @@ import { mergeVertices, toCreasedNormals } from 'three/examples/jsm/utils/Buffer
 import { createGeometry } from './geometryFactory';
 
 const evaluator = new Evaluator();
+const CURVED_CSG_TYPES = new Set([
+  'sphere',
+  'cylinder',
+  'cone',
+  'torus',
+  'tube',
+  'hemisphere',
+  'ellipsoid',
+  'ring',
+  'paraboloid',
+]);
+
+function upgradeCSGParams(type, geometry = {}) {
+  const params = { ...geometry };
+  switch (type) {
+    case 'sphere':
+      params.widthSegments = Math.max(params.widthSegments || 0, 48);
+      params.heightSegments = Math.max(params.heightSegments || 0, 32);
+      break;
+    case 'cylinder':
+      params.radialSegments = Math.max(params.radialSegments || 0, 64);
+      break;
+    case 'cone':
+      params.radialSegments = Math.max(params.radialSegments || 0, 64);
+      break;
+    case 'torus':
+    case 'tube':
+      params.radialSegments = Math.max(params.radialSegments || 0, 24);
+      params.tubularSegments = Math.max(params.tubularSegments || 0, 96);
+      break;
+    case 'hemisphere':
+      params.widthSegments = Math.max(params.widthSegments || 0, 48);
+      params.heightSegments = Math.max(params.heightSegments || 0, 24);
+      params.capSegments = Math.max(params.capSegments || 0, 48);
+      break;
+    case 'ellipsoid':
+      params.widthSegments = Math.max(params.widthSegments || 0, 48);
+      params.heightSegments = Math.max(params.heightSegments || 0, 32);
+      break;
+    case 'ring':
+      params.curveSegments = Math.max(params.curveSegments || 0, 96);
+      break;
+    case 'paraboloid':
+      params.profileSteps = Math.max(params.profileSteps || 0, 64);
+      params.radialSegments = Math.max(params.radialSegments || 0, 64);
+      break;
+    default:
+      break;
+  }
+  return params;
+}
+
+function prepareBrushGeometry(obj) {
+  const base = createGeometry(obj.type, upgradeCSGParams(obj.type, obj.geometry));
+  const geometry = base.clone();
+  geometry.deleteAttribute('normal');
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
 
 function finalizeResultBrush(result) {
   if (!result?.geometry) return result;
@@ -22,9 +82,11 @@ function finalizeResultBrush(result) {
         bb.max.z - bb.min.z,
       )
     : 1;
-  const weldTolerance = Math.max(1e-4, maxDim * 1e-4);
+  const weldTolerance = Math.max(2e-4, maxDim * 2e-4);
   const welded = mergeVertices(prep, weldTolerance);
-  const smoothed = toCreasedNormals(welded, Math.PI / 3);
+  welded.deleteAttribute('normal');
+  welded.computeVertexNormals();
+  const smoothed = toCreasedNormals(welded, Math.PI / 3.5);
   smoothed.computeBoundingBox();
   smoothed.computeBoundingSphere();
   prep.dispose();
@@ -35,7 +97,7 @@ function finalizeResultBrush(result) {
 }
 
 function createBrush(obj) {
-  const geometry = createGeometry(obj.type, obj.geometry);
+  const geometry = prepareBrushGeometry(obj);
   const material = new THREE.MeshStandardMaterial({ color: obj.color });
   const brush = new Brush(geometry, material);
   brush.position.set(...obj.position);
