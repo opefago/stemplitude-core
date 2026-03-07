@@ -1,33 +1,41 @@
-import * as THREE from 'three';
 import { Evaluator, Brush, ADDITION, SUBTRACTION, INTERSECTION } from 'three-bvh-csg';
+import * as THREE from 'three';
+import { mergeVertices, toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { createGeometry } from './geometryFactory';
 
 const evaluator = new Evaluator();
 
-function createGeometryForCSG(obj) {
-  const p = obj.geometry;
-  switch (obj.type) {
-    case 'box': case 'wall': case 'wedge':
-      return new THREE.BoxGeometry(p.width, p.height, p.depth);
-    case 'sphere':
-      return new THREE.SphereGeometry(p.radius, p.widthSegments || 32, p.heightSegments || 32);
-    case 'cylinder':
-      return new THREE.CylinderGeometry(p.radiusTop, p.radiusBottom, p.height, p.radialSegments || 32);
-    case 'cone': case 'pyramid':
-      return new THREE.ConeGeometry(p.radius, p.height, p.radialSegments || 32);
-    case 'torus': case 'tube':
-      return new THREE.TorusGeometry(p.radius, p.tube, p.radialSegments || 16, p.tubularSegments || 48);
-    case 'hemisphere':
-      return new THREE.SphereGeometry(p.radius, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
-    case 'imported':
-      if (p.bufferGeometry) return p.bufferGeometry.clone();
-      return new THREE.BoxGeometry(20, 20, 20);
-    default:
-      return new THREE.BoxGeometry(20, 20, 20);
-  }
+function finalizeResultBrush(result) {
+  if (!result?.geometry) return result;
+  const source = result.geometry;
+  // Drop seam-splitting attributes before welding so curved hole walls smooth.
+  const prep = source.index ? source.toNonIndexed() : source.clone();
+  prep.deleteAttribute('normal');
+  prep.deleteAttribute('uv');
+  prep.deleteAttribute('uv2');
+  prep.computeBoundingBox();
+  const bb = prep.boundingBox;
+  const maxDim = bb
+    ? Math.max(
+        bb.max.x - bb.min.x,
+        bb.max.y - bb.min.y,
+        bb.max.z - bb.min.z,
+      )
+    : 1;
+  const weldTolerance = Math.max(1e-4, maxDim * 1e-4);
+  const welded = mergeVertices(prep, weldTolerance);
+  const smoothed = toCreasedNormals(welded, Math.PI / 3);
+  smoothed.computeBoundingBox();
+  smoothed.computeBoundingSphere();
+  prep.dispose();
+  if (source !== welded) source.dispose();
+  if (smoothed !== welded) welded.dispose();
+  result.geometry = smoothed;
+  return result;
 }
 
 function createBrush(obj) {
-  const geometry = createGeometryForCSG(obj);
+  const geometry = createGeometry(obj.type, obj.geometry);
   const material = new THREE.MeshStandardMaterial({ color: obj.color });
   const brush = new Brush(geometry, material);
   brush.position.set(...obj.position);
@@ -45,7 +53,32 @@ export function unionCSG(objectsData) {
     const brush = createBrush(objectsData[i]);
     result = evaluator.evaluate(result, brush, ADDITION);
   }
-  return result;
+  return finalizeResultBrush(result);
+}
+
+/**
+ * Hole-aware merge: union all solids together, then subtract all holes.
+ * Falls back to plain union if there are no holes, or plain subtract
+ * if there is only one solid.
+ */
+export function mergeCSG(objectsData) {
+  const solids = objectsData.filter(o => !o.isHole);
+  const holes = objectsData.filter(o => o.isHole);
+
+  if (solids.length === 0) return null;
+
+  let result = createBrush(solids[0]);
+  for (let i = 1; i < solids.length; i++) {
+    const brush = createBrush(solids[i]);
+    result = evaluator.evaluate(result, brush, ADDITION);
+  }
+
+  for (const hole of holes) {
+    const brush = createBrush(hole);
+    result = evaluator.evaluate(result, brush, SUBTRACTION);
+  }
+
+  return finalizeResultBrush(result);
 }
 
 export function subtractCSG(targetData, toolsData) {
@@ -56,7 +89,7 @@ export function subtractCSG(targetData, toolsData) {
     const brush = createBrush(tool);
     result = evaluator.evaluate(result, brush, SUBTRACTION);
   }
-  return result;
+  return finalizeResultBrush(result);
 }
 
 export function intersectCSG(objectsData) {
@@ -67,5 +100,5 @@ export function intersectCSG(objectsData) {
     const brush = createBrush(objectsData[i]);
     result = evaluator.evaluate(result, brush, INTERSECTION);
   }
-  return result;
+  return finalizeResultBrush(result);
 }

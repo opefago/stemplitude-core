@@ -1,89 +1,13 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
 import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
-import { SHAPE_DEFAULTS, FLAT_TYPES } from './store';
+import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
+import { createGeometry } from './geometryFactory';
+import { SHAPE_DEFAULTS, FLAT_TYPES, ICON_TYPES } from './store';
 
 const FONT_URL = 'https://cdn.jsdelivr.net/npm/three@0.169.0/examples/fonts/helvetiker_regular.typeface.json';
-
-function createHeartShape(size) {
-  const s = new THREE.Shape();
-  const x = 0, y = 0;
-  s.moveTo(x, y + size * 0.35);
-  s.bezierCurveTo(x, y + size * 0.35, x - size * 0.05, y + size * 0.7, x - size * 0.45, y + size * 0.7);
-  s.bezierCurveTo(x - size * 0.9, y + size * 0.7, x - size * 0.9, y + size * 0.35, x - size * 0.9, y + size * 0.35);
-  s.bezierCurveTo(x - size * 0.9, y + size * 0.1, x - size * 0.7, y - size * 0.25, x, y - size * 0.6);
-  s.bezierCurveTo(x + size * 0.7, y - size * 0.25, x + size * 0.9, y + size * 0.1, x + size * 0.9, y + size * 0.35);
-  s.bezierCurveTo(x + size * 0.9, y + size * 0.35, x + size * 0.9, y + size * 0.7, x + size * 0.45, y + size * 0.7);
-  s.bezierCurveTo(x + size * 0.05, y + size * 0.7, x, y + size * 0.35, x, y + size * 0.35);
-  return s;
-}
-
-function createStarShape(outerR, innerR, points) {
-  const s = new THREE.Shape();
-  for (let i = 0; i < points * 2; i++) {
-    const r = i % 2 === 0 ? outerR : innerR;
-    const angle = (i * Math.PI) / points - Math.PI / 2;
-    const px = Math.cos(angle) * r;
-    const py = Math.sin(angle) * r;
-    if (i === 0) s.moveTo(px, py);
-    else s.lineTo(px, py);
-  }
-  s.closePath();
-  return s;
-}
-
-function createGeometry(type, params) {
-  const p = params;
-  switch (type) {
-    case 'box': case 'wall':
-      return new THREE.BoxGeometry(p.width, p.height, p.depth);
-    case 'sphere':
-      return new THREE.SphereGeometry(p.radius, 32, 32);
-    case 'cylinder':
-      return new THREE.CylinderGeometry(p.radiusTop, p.radiusBottom, p.height, 32);
-    case 'cone': case 'pyramid':
-      return new THREE.ConeGeometry(p.radius, p.height, p.radialSegments || 32);
-    case 'torus': case 'tube':
-      return new THREE.TorusGeometry(p.radius, p.tube, p.radialSegments || 16, p.tubularSegments || 48);
-    case 'hemisphere': {
-      const dome = new THREE.SphereGeometry(p.radius, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
-      const cap = new THREE.CircleGeometry(p.radius, 32);
-      cap.rotateX(Math.PI / 2);
-      const geo = mergeGeometries([dome, cap]);
-      geo.translate(0, -p.radius / 2, 0);
-      return geo;
-    }
-    case 'heart': {
-      const shape = createHeartShape(p.size);
-      const geo = new THREE.ExtrudeGeometry(shape, { depth: p.depth, bevelEnabled: true, bevelThickness: 0.5, bevelSize: 0.3, bevelSegments: 3 });
-      geo.computeBoundingBox();
-      const bb = geo.boundingBox;
-      geo.translate(0, -(bb.min.y + bb.max.y) / 2, -(bb.min.z + bb.max.z) / 2);
-      return geo;
-    }
-    case 'star': {
-      const shape = createStarShape(p.outerRadius, p.innerRadius, p.points);
-      const geo = new THREE.ExtrudeGeometry(shape, { depth: p.depth, bevelEnabled: true, bevelThickness: 0.5, bevelSize: 0.3, bevelSegments: 3 });
-      geo.computeBoundingBox();
-      const bb = geo.boundingBox;
-      geo.translate(0, -(bb.min.y + bb.max.y) / 2, -(bb.min.z + bb.max.z) / 2);
-      return geo;
-    }
-    case 'wedge': {
-      const w = p.width / 2, hh = p.height / 2, d = p.depth / 2;
-      const positions = new Float32Array([-w,-hh,d, w,-hh,d, w,-hh,-d, -w,-hh,-d, w,hh,-d, -w,hh,-d]);
-      const indices = [0,2,1, 0,3,2, 3,5,4, 3,4,2, 0,1,4, 0,4,5, 0,5,3, 1,2,4];
-      const g = new THREE.BufferGeometry();
-      g.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-      g.setIndex(indices);
-      g.computeVertexNormals();
-      return g;
-    }
-    default:
-      return new THREE.BoxGeometry(20, 20, 20);
-  }
-}
 
 const SIZE = 64;
 const PIXEL_RATIO = 2;
@@ -107,8 +31,35 @@ function renderIcon(renderer, scene, camera, gradientMap, type, geometry, color)
   const material = new THREE.MeshToonMaterial({ color: baseColor, gradientMap });
   const mesh = new THREE.Mesh(geometry, material);
 
+  const outlineMat = new THREE.MeshBasicMaterial({
+    color: 0x000000,
+    side: THREE.BackSide,
+    polygonOffset: true,
+    polygonOffsetFactor: 5,
+    polygonOffsetUnits: 5,
+  });
+  const outlineMesh = new THREE.Mesh(geometry, outlineMat);
+  outlineMesh.scale.multiplyScalar(1.1);
+
+  const edges = new THREE.EdgesGeometry(geometry, 18);
+  const lineGeo = new LineSegmentsGeometry();
+  lineGeo.setPositions(edges.attributes.position.array);
+  edges.dispose();
+  const res = SIZE * PIXEL_RATIO;
+  const lineMat = new LineMaterial({
+    color: 0x000000,
+    linewidth: 2.5,
+    transparent: true,
+    opacity: 0.85,
+    worldUnits: false,
+    resolution: new THREE.Vector2(res, res),
+  });
+  const edgeLines = new LineSegments2(lineGeo, lineMat);
+
   if (FLAT_TYPES.includes(type)) {
     mesh.rotation.x = -Math.PI / 2;
+    outlineMesh.rotation.x = -Math.PI / 2;
+    edgeLines.rotation.x = -Math.PI / 2;
   }
 
   const box = new THREE.Box3().setFromObject(mesh);
@@ -117,6 +68,8 @@ function renderIcon(renderer, scene, camera, gradientMap, type, geometry, color)
   const maxDim = Math.max(size.x, size.y, size.z);
 
   mesh.position.sub(center);
+  outlineMesh.position.copy(mesh.position);
+  edgeLines.position.copy(mesh.position);
 
   const dist = maxDim / (2 * Math.tan((camera.fov * Math.PI) / 360)) * 1.6;
   if (type === 'text') {
@@ -128,13 +81,20 @@ function renderIcon(renderer, scene, camera, gradientMap, type, geometry, color)
   }
   camera.lookAt(0, 0, 0);
 
+  scene.add(outlineMesh);
   scene.add(mesh);
+  scene.add(edgeLines);
   renderer.render(scene, camera);
+  scene.remove(edgeLines);
   scene.remove(mesh);
+  scene.remove(outlineMesh);
 
   const dataUrl = renderer.domElement.toDataURL('image/png');
   geometry.dispose();
   material.dispose();
+  outlineMat.dispose();
+  lineGeo.dispose();
+  lineMat.dispose();
   return dataUrl;
 }
 
@@ -163,10 +123,7 @@ async function generateIcons() {
 
   const results = {};
 
-  const nonTextTypes = ['box', 'sphere', 'cylinder', 'cone', 'torus', 'wall', 'pyramid',
-    'heart', 'star', 'hemisphere', 'tube', 'wedge'];
-
-  for (const type of nonTextTypes) {
+  for (const type of ICON_TYPES) {
     const defaults = SHAPE_DEFAULTS[type] || SHAPE_DEFAULTS.box;
     let geoParams = type === 'wall'
       ? { ...defaults.geometry, depth: 6 }

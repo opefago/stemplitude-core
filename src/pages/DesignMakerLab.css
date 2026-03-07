@@ -313,6 +313,105 @@
   text-align: center;
 }
 
+/* ── Delete Confirmation Dialog ── */
+
+.dml-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200000;
+  animation: dml-confirm-fade-in 0.15s ease-out;
+}
+
+@keyframes dml-confirm-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes dml-confirm-pop-in {
+  from { opacity: 0; transform: scale(0.92) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.dml-confirm-dialog {
+  background: var(--dml-surface);
+  border: 1px solid var(--dml-border);
+  border-radius: 16px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255,255,255,0.04);
+  padding: 28px 32px 24px;
+  max-width: 360px;
+  width: 90vw;
+  text-align: center;
+  animation: dml-confirm-pop-in 0.2s ease-out;
+}
+
+.dml-confirm-icon {
+  margin-bottom: 12px;
+}
+
+.dml-confirm-title {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--dml-text);
+}
+
+.dml-confirm-msg {
+  margin: 0 0 22px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--dml-text-muted);
+}
+
+.dml-confirm-msg strong {
+  color: var(--dml-text);
+  font-weight: 600;
+}
+
+.dml-confirm-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+
+.dml-confirm-cancel,
+.dml-confirm-delete {
+  padding: 8px 22px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: background 0.15s, transform 0.1s;
+}
+
+.dml-confirm-cancel {
+  background: var(--dml-hover);
+  color: var(--dml-text);
+}
+
+.dml-confirm-cancel:hover {
+  background: var(--dml-border);
+}
+
+.dml-confirm-delete {
+  background: #ef4444;
+  color: #fff;
+}
+
+.dml-confirm-delete:hover {
+  background: #dc2626;
+}
+
+.dml-confirm-cancel:active,
+.dml-confirm-delete:active {
+  transform: scale(0.96);
+}
+
 .dml-header-btn {
   display: flex;
   align-items: center;
@@ -483,10 +582,11 @@
 }
 
 .dml-tree-icon {
-  font-size: 14px;
   flex-shrink: 0;
   width: 18px;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .dml-tree-name {
@@ -664,6 +764,22 @@
   padding: 6px 14px;
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
   z-index: 5;
+}
+
+.dml-csg-sep {
+  width: 1px;
+  height: 24px;
+  background: var(--dml-border);
+  flex-shrink: 0;
+}
+
+.dml-csg-ops {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border-radius: 10px;
+  background: rgba(139, 92, 246, 0.08);
 }
 
 .dml-csg-btn {
@@ -1259,6 +1375,65 @@
 .dml-shapes-close:hover {
   background: var(--dml-surface-hover);
   color: var(--dml-text);
+}
+
+.dml-shapes-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 12px 4px;
+  padding: 6px 10px;
+  background: var(--dml-bg);
+  border: 1px solid var(--dml-border);
+  border-radius: 8px;
+  transition: border-color 0.15s;
+}
+
+.dml-shapes-search:focus-within {
+  border-color: var(--dml-accent);
+}
+
+.dml-shapes-search-icon {
+  color: var(--dml-text-muted);
+  flex-shrink: 0;
+}
+
+.dml-shapes-search-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  outline: none;
+  color: var(--dml-text);
+  font-size: 12px;
+  font-family: inherit;
+}
+
+.dml-shapes-search-input::placeholder {
+  color: var(--dml-text-muted);
+}
+
+.dml-shapes-search-clear {
+  background: none;
+  border: none;
+  color: var(--dml-text-muted);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dml-shapes-search-clear:hover {
+  color: var(--dml-text);
+  background: var(--dml-surface-hover);
+}
+
+.dml-shapes-no-results {
+  color: var(--dml-text-muted);
+  font-size: 12px;
+  text-align: center;
+  padding: 20px 10px;
 }
 
 .dml-shapes-panel-body {
@@ -2003,4 +2178,202 @@
   .dml-sidebar-right {
     display: none;
   }
+}
+
+/* ── RichTip: progress ring ── */
+.dml-richtip-ring {
+  position: fixed;
+  pointer-events: none;
+  z-index: 100000;
+  filter: drop-shadow(0 0 5px rgba(192, 132, 252, 0.8))
+          drop-shadow(0 0 14px rgba(124, 58, 237, 0.4));
+  animation: dml-ring-fadein 300ms ease-out;
+}
+
+.dml-richtip-ring-pct {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.7);
+  font-family: 'Inter', system-ui, sans-serif;
+  letter-spacing: -0.02em;
+}
+
+@keyframes dml-ring-fadein {
+  from { opacity: 0; transform: scale(0.5); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* ── RichTip: popup ── */
+.dml-richtip-popup {
+  position: fixed;
+  z-index: 99999;
+  width: 380px;
+  background: #2a2a42;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255,255,255,0.04);
+  padding-bottom: 10px;
+  font-family: var(--dml-font, 'Inter', system-ui, sans-serif);
+}
+
+.dml-richtip-above {
+  animation: dml-richtip-in-above 280ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.dml-richtip-below {
+  animation: dml-richtip-in-below 280ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes dml-richtip-in-above {
+  from { opacity: 0; transform: translateY(10px) scale(0.95); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes dml-richtip-in-below {
+  from { opacity: 0; transform: translateY(-10px) scale(0.95); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Notch / speech-bubble arrow */
+.dml-richtip-notch {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  background: #2a2a42;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  transform: translateX(-50%) rotate(45deg);
+  z-index: -1;
+}
+
+.dml-richtip-above .dml-richtip-notch {
+  bottom: -9px;
+  border-top: none;
+  border-left: none;
+}
+
+.dml-richtip-below .dml-richtip-notch {
+  top: -9px;
+  border-bottom: none;
+  border-right: none;
+}
+
+.dml-richtip-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px 12px;
+}
+
+.dml-richtip-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #eef0f8;
+  letter-spacing: -0.01em;
+}
+
+.dml-richtip-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: rgba(255, 255, 255, 0.07);
+  border-radius: 9px;
+  color: #888;
+  cursor: pointer;
+  transition: background 120ms, color 120ms, transform 120ms;
+}
+.dml-richtip-close:hover {
+  background: rgba(255, 255, 255, 0.13);
+  color: #ccc;
+  transform: scale(1.08);
+}
+
+/* Video player */
+.dml-richtip-video-wrap {
+  position: relative;
+  margin: 0 14px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #13131d;
+  border: 1px solid rgba(255,255,255,0.06);
+  min-height: 220px;
+}
+
+.dml-richtip-video {
+  display: block;
+  width: 100%;
+  min-height: 220px;
+  object-fit: cover;
+  border-radius: 12px;
+}
+
+.dml-richtip-playpause {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: rgba(30, 30, 46, 0.7);
+  backdrop-filter: blur(10px);
+  color: rgba(255, 255, 255, 0.85);
+  cursor: pointer;
+  transition: background 180ms, transform 180ms, box-shadow 180ms;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+.dml-richtip-playpause:hover {
+  background: rgba(139, 92, 246, 0.35);
+  transform: scale(1.1);
+  box-shadow: 0 3px 12px rgba(139, 92, 246, 0.3);
+}
+.dml-richtip-playpause:active {
+  transform: scale(0.92);
+}
+
+/* Description */
+.dml-richtip-desc {
+  margin: 14px 18px 16px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #b0b4c8;
+}
+
+/* Shortcut keys */
+.dml-richtip-shortcut {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 18px 16px;
+}
+
+.dml-richtip-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 26px;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: 'Inter', system-ui, sans-serif;
+  color: #c4b5fd;
+  background: rgba(139, 92, 246, 0.12);
+  border: 1px solid rgba(139, 92, 246, 0.25);
+  border-radius: 6px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+}
+
+.dml-richtip-plus {
+  font-size: 11px;
+  color: #666;
+  margin: 0 1px;
 }

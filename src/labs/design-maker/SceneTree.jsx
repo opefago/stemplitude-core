@@ -1,27 +1,43 @@
-import React from 'react';
-import { Eye, EyeOff, Trash2, ChevronUp, ChevronDown } from 'lucide-react';
-import { useDesignStore } from './store';
+import React from "react";
+import { Eye, EyeOff, Trash2, ChevronUp, ChevronDown } from "lucide-react";
+import { useDesignStore, TYPE_ICON_PATHS } from "./store";
 
-const TYPE_ICONS = {
-  box: '▣', sphere: '●', cylinder: '◎', cone: '▲', torus: '◉',
-  wall: '▬', pyramid: '△', heart: '♥', star: '★', hemisphere: '◓',
-  tube: '○', wedge: '◢', text: 'T', imported: '◆',
-};
+function ShapeIcon({ type, color, size = 14 }) {
+  const d = TYPE_ICON_PATHS[type] || TYPE_ICON_PATHS.imported;
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke={color}
+      strokeWidth="1.3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ flexShrink: 0 }}
+    >
+      <path d={d} />
+    </svg>
+  );
+}
 
 export default function SceneTree() {
-  const objects = useDesignStore(s => s.objects);
-  const groups = useDesignStore(s => s.groups);
-  const selectedIds = useDesignStore(s => s.selectedIds);
-  const selectObject = useDesignStore(s => s.selectObject);
-  const setSelectedIds = useDesignStore(s => s.setSelectedIds);
-  const updateObject = useDesignStore(s => s.updateObject);
-  const removeObject = useDesignStore(s => s.removeObject);
+  const objects = useDesignStore((s) => s.objects);
+  const groups = useDesignStore((s) => s.groups);
+  const selectedIds = useDesignStore((s) => s.selectedIds);
+  const selectObject = useDesignStore((s) => s.selectObject);
+  const setSelectedIds = useDesignStore((s) => s.setSelectedIds);
+  const updateObject = useDesignStore((s) => s.updateObject);
+  const removeObject = useDesignStore((s) => s.removeObject);
 
   const moveObject = (index, dir) => {
     const newObjects = [...objects];
     const target = index + dir;
     if (target < 0 || target >= newObjects.length) return;
-    [newObjects[index], newObjects[target]] = [newObjects[target], newObjects[index]];
+    [newObjects[index], newObjects[target]] = [
+      newObjects[target],
+      newObjects[index],
+    ];
     useDesignStore.setState({ objects: newObjects });
   };
 
@@ -42,48 +58,75 @@ export default function SceneTree() {
         return (
           <div key={g.id} className="dml-tree-group-wrap">
             <div
-              className={`dml-tree-item dml-tree-group ${allSelected ? 'selected' : ''}`}
+              className={`dml-tree-item dml-tree-group ${allSelected ? "selected" : ""}`}
               onClick={() => setSelectedIds(members.map((m) => m.id))}
             >
               <span className="dml-tree-icon">🔗</span>
-              <span className="dml-tree-name">{g.name || 'Group'} ({members.length})</span>
+              <span className="dml-tree-name">
+                {g.name || "Group"} ({members.length})
+              </span>
             </div>
             {members.map((obj, i) => {
               const isSelected = selectedIds.includes(obj.id);
               return (
                 <div
                   key={obj.id}
-                  className={`dml-tree-item dml-tree-child ${isSelected ? 'selected' : ''}`}
+                  className={`dml-tree-item dml-tree-child ${isSelected ? "selected" : ""}`}
                   onClick={(e) => selectObject(obj.id, e.shiftKey)}
                 >
-                  <span className="dml-tree-icon" style={{ color: obj.isHole ? '#ff6b81' : obj.color }}>
-                    {TYPE_ICONS[obj.type] || '◆'}
+                  <span className="dml-tree-icon">
+                    <ShapeIcon type={obj.type} color={obj.isHole ? "#ff6b81" : obj.color} />
                   </span>
                   <span className="dml-tree-name">{obj.name}</span>
                   <div className="dml-tree-actions">
                     <button
                       className="dml-tree-btn"
-                      onClick={(e) => { e.stopPropagation(); moveObject(objects.findIndex((o) => o.id === obj.id), -1); }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        moveObject(
+                          objects.findIndex((o) => o.id === obj.id),
+                          -1,
+                        );
+                      }}
                       disabled={objects.findIndex((o) => o.id === obj.id) === 0}
                     >
                       <ChevronUp size={12} />
                     </button>
                     <button
                       className="dml-tree-btn"
-                      onClick={(e) => { e.stopPropagation(); moveObject(objects.findIndex((o) => o.id === obj.id), 1); }}
-                      disabled={objects.findIndex((o) => o.id === obj.id) === objects.length - 1}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        moveObject(
+                          objects.findIndex((o) => o.id === obj.id),
+                          1,
+                        );
+                      }}
+                      disabled={
+                        objects.findIndex((o) => o.id === obj.id) ===
+                        objects.length - 1
+                      }
                     >
                       <ChevronDown size={12} />
                     </button>
                     <button
                       className="dml-tree-btn"
-                      onClick={(e) => { e.stopPropagation(); updateObject(obj.id, { visible: !obj.visible }); }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        updateObject(obj.id, { visible: !obj.visible });
+                      }}
                     >
-                      {obj.visible !== false ? <Eye size={12} /> : <EyeOff size={12} />}
+                      {obj.visible !== false ? (
+                        <Eye size={12} />
+                      ) : (
+                        <EyeOff size={12} />
+                      )}
                     </button>
                     <button
                       className="dml-tree-btn danger"
-                      onClick={(e) => { e.stopPropagation(); removeObject(obj.id); }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeObject(obj.id);
+                      }}
                     >
                       <Trash2 size={12} />
                     </button>
@@ -101,37 +144,53 @@ export default function SceneTree() {
         return (
           <div
             key={obj.id}
-            className={`dml-tree-item ${isSelected ? 'selected' : ''}`}
+            className={`dml-tree-item ${isSelected ? "selected" : ""}`}
             onClick={(e) => selectObject(obj.id, e.shiftKey)}
           >
-            <span className="dml-tree-icon" style={{ color: obj.isHole ? '#ff6b81' : obj.color }}>
-              {TYPE_ICONS[obj.type] || '◆'}
+            <span className="dml-tree-icon">
+              <ShapeIcon type={obj.type} color={obj.isHole ? "#ff6b81" : obj.color} />
             </span>
             <span className="dml-tree-name">{obj.name}</span>
             <div className="dml-tree-actions">
               <button
                 className="dml-tree-btn"
-                onClick={(e) => { e.stopPropagation(); moveObject(i, -1); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  moveObject(i, -1);
+                }}
                 disabled={i === 0}
               >
                 <ChevronUp size={12} />
               </button>
               <button
                 className="dml-tree-btn"
-                onClick={(e) => { e.stopPropagation(); moveObject(i, 1); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  moveObject(i, 1);
+                }}
                 disabled={i === objects.length - 1}
               >
                 <ChevronDown size={12} />
               </button>
               <button
                 className="dml-tree-btn"
-                onClick={(e) => { e.stopPropagation(); updateObject(obj.id, { visible: !obj.visible }); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  updateObject(obj.id, { visible: !obj.visible });
+                }}
               >
-                {obj.visible !== false ? <Eye size={12} /> : <EyeOff size={12} />}
+                {obj.visible !== false ? (
+                  <Eye size={12} />
+                ) : (
+                  <EyeOff size={12} />
+                )}
               </button>
               <button
                 className="dml-tree-btn danger"
-                onClick={(e) => { e.stopPropagation(); removeObject(obj.id); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  removeObject(obj.id);
+                }}
               >
                 <Trash2 size={12} />
               </button>

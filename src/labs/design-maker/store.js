@@ -1,20 +1,94 @@
 import { create } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
+import { BufferGeometryLoader } from 'three';
+import { getFloorY, getWorldBounds, overlapsXZ } from './dimensions';
 
+/**
+ * Central shape registry. Add new shapes here — every derived list
+ * (FLAT_TYPES, ICON_TYPES, TYPE_ICONS, etc.) updates automatically.
+ *
+ * Properties:
+ *   geometry – default geometry params for this shape
+ *   color    – default object color
+ *   icon     – unicode glyph shown in the scene tree
+ *   flat     – geometry created in XY plane, needs FLAT_ROTATION on drop
+ *   isText   – rendered via Text3D, icon generated separately
+ */
 export const SHAPE_DEFAULTS = {
-  box: { geometry: { width: 20, height: 20, depth: 20, edgeRadius: 0, edgeStyle: 'none' }, color: '#6366f1' },
-  sphere: { geometry: { radius: 10, widthSegments: 32, heightSegments: 32 }, color: '#ec4899' },
-  cylinder: { geometry: { radiusTop: 10, radiusBottom: 10, height: 20, radialSegments: 32, edgeRadius: 0, edgeStyle: 'none' }, color: '#14b8a6' },
-  cone: { geometry: { radius: 10, height: 20, radialSegments: 32 }, color: '#f97316' },
-  torus: { geometry: { radius: 10, tube: 3, radialSegments: 16, tubularSegments: 48 }, color: '#8b5cf6' },
-  text: { geometry: { text: 'Hello', size: 10, height: 5, font: 'helvetiker' }, color: '#3b82f6' },
-  wall: { geometry: { width: 40, height: 20, depth: 2, edgeRadius: 0, edgeStyle: 'none' }, color: '#64748b' },
-  pyramid: { geometry: { radius: 10, height: 20, radialSegments: 4 }, color: '#22c55e' },
-  heart: { geometry: { size: 10, depth: 5 }, color: '#ef4444' },
-  star: { geometry: { outerRadius: 10, innerRadius: 5, points: 5, depth: 5 }, color: '#eab308' },
-  hemisphere: { geometry: { radius: 10 }, color: '#06b6d4' },
-  tube: { geometry: { radius: 10, tube: 2, radialSegments: 8, tubularSegments: 48 }, color: '#a855f7' },
-  wedge: { geometry: { width: 20, height: 20, depth: 20 }, color: '#84cc16' },
+  box:        { geometry: { width: 20, height: 20, depth: 20, edgeRadius: 0, edgeStyle: 'none' }, color: '#6366f1',
+                icon: 'M3 5.5L8 3l5 2.5v5L8 13l-5-2.5z M3 5.5L8 8l5-2.5 M8 8v5' },
+  sphere:     { geometry: { radius: 10, widthSegments: 32, heightSegments: 32 }, color: '#ec4899',
+                icon: 'M8 2a6 6 0 1 0 0 12A6 6 0 0 0 8 2z M2.5 8h11 M8 2c-2 0-3.5 2.7-3.5 6s1.5 6 3.5 6 3.5-2.7 3.5-6S10 2 8 2z' },
+  cylinder:   { geometry: { radiusTop: 10, radiusBottom: 10, height: 20, radialSegments: 32, edgeRadius: 0, edgeStyle: 'none' }, color: '#14b8a6',
+                icon: 'M3 4.5c0-1.1 2.2-2 5-2s5 .9 5 2v7c0 1.1-2.2 2-5 2s-5-.9-5-2z M3 4.5c0 1.1 2.2 2 5 2s5-.9 5-2' },
+  cone:       { geometry: { radius: 10, height: 20, radialSegments: 32 }, color: '#f97316',
+                icon: 'M8 2L3 12.5c0 .8 2.2 1.5 5 1.5s5-.7 5-1.5z M3 12.5c0 .8 2.2 1.5 5 1.5s5-.7 5-1.5' },
+  torus:      { geometry: { radius: 10, tube: 3, radialSegments: 16, tubularSegments: 48 }, color: '#8b5cf6', flat: true,
+                icon: 'M8 4C4.1 4 1 5.8 1 8s3.1 4 7 4 7-1.8 7-4-3.1-4-7-4z M8 6c1.7 0 3 .9 3 2s-1.3 2-3 2-3-.9-3-2 1.3-2 3-2z' },
+  text:       { geometry: { text: 'Hello', size: 10, height: 5, font: 'helvetiker' }, color: '#3b82f6', flat: true, isText: true,
+                icon: 'M3 4h10 M8 4v9 M5.5 4v0 M10.5 4v0' },
+  wall:       { geometry: { width: 40, height: 20, depth: 2, edgeRadius: 0, edgeStyle: 'none' }, color: '#64748b',
+                icon: 'M2 4h12v7H2z M2 4l2-1.5h12L14 4 M14 4h2V11l-2 0 M14 2.5v7' },
+  pyramid:    { geometry: { radius: 10, height: 20, radialSegments: 4 }, color: '#22c55e',
+                icon: 'M8 2L2 12h12z M8 2l4.5 8 M8 2L3.5 10' },
+  heart:      { geometry: { size: 10, depth: 5 }, color: '#ef4444', flat: true,
+                icon: 'M8 13.7C4 10.3 1.5 7.8 1.5 5.5 1.5 3.4 3.2 2 5.2 2c1.2 0 2.3.6 2.8 1.4C8.5 2.6 9.6 2 10.8 2c2 0 3.7 1.4 3.7 3.5 0 2.3-2.5 4.8-6.5 8.2z' },
+  star:       { geometry: { outerRadius: 10, innerRadius: 5, points: 5, depth: 5 }, color: '#eab308', flat: true,
+                icon: 'M8 1.5l2 4.5 4.9.7-3.5 3.4.8 4.9L8 12.5 3.8 15l.8-4.9L1.1 6.7 6 6z' },
+  hemisphere: { geometry: { radius: 10 }, color: '#06b6d4',
+                icon: 'M2 10a6 6 0 0 1 12 0z M2 10h12' },
+  tube:       { geometry: { radius: 10, tube: 2, radialSegments: 8, tubularSegments: 48 }, color: '#a855f7', flat: true,
+                icon: 'M8 3C4.7 3 2 5.2 2 8s2.7 5 6 5 6-2.2 6-5-2.7-5-6-5z M8 5.5c1.9 0 3.5 1.1 3.5 2.5S9.9 10.5 8 10.5 4.5 9.4 4.5 8 6.1 5.5 8 5.5z' },
+  wedge:      { geometry: { width: 20, height: 20, depth: 20 }, color: '#84cc16',
+                icon: 'M3 12L3 4 13 12z M3 4l5-1.5L13 12 M8 2.5L3 4' },
+  tetrahedron:{ geometry: { radius: 10 }, color: '#10b981',
+                icon: 'M8 2L2 13h12z M8 2l4 7 M6 9h4' },
+  dodecahedron:{ geometry: { radius: 10 }, color: '#f59e0b',
+                icon: 'M8 2l5 4v4l-5 4-5-4V6z M3 6l5 2 5-2 M8 8v6' },
+  octahedron: { geometry: { radius: 10 }, color: '#06b6d4',
+                icon: 'M8 1l6 7-6 7-6-7z M2 8h12' },
+  icosahedron:{ geometry: { radius: 10 }, color: '#7c3aed',
+                icon: 'M8 2L3 5v6l5 3 5-3V5z M3 5l5 2 5-2 M8 7v7' },
+  ellipsoid:  { geometry: { radiusX: 12, radiusY: 8, radiusZ: 10 }, color: '#db2777',
+                icon: 'M8 3C4 3 1.5 5.5 1.5 8S4 13 8 13s6.5-2.5 6.5-5S12 3 8 3z M1.5 8h13' },
+  triangularPrism: { geometry: { radius: 10, height: 20 }, color: '#0d9488',
+                icon: 'M4 12L8 3l4 9H4z M8 3l3.5 6 M4 12l1.5-1h5l1.5 1' },
+  hexagonalPrism: { geometry: { radius: 10, height: 20 }, color: '#4f46e5',
+                icon: 'M5 2.5L2 8l3 5.5h6L14 8l-3-5.5z M5 2.5l1.5 1h3l1.5-1' },
+  pentagonalPrism: { geometry: { radius: 10, height: 20 }, color: '#9333ea',
+                icon: 'M8 2L3 5.5l2 7h6l2-7z M3 5.5l5 1.5 5-1.5' },
+  pentagonalPyramid: { geometry: { radius: 10, height: 20 }, color: '#ea580c',
+                icon: 'M8 2L3 7l2 6h6l2-6z M3 7h10' },
+  squarePyramid: { geometry: { radius: 10, height: 20 }, color: '#16a34a',
+                icon: 'M8 2L2 12h12z M8 2l4.5 8 M8 2L3.5 10 M2 12h12' },
+  ring:       { geometry: { outerRadius: 10, innerRadius: 6, height: 3 }, color: '#ca8a04', flat: true,
+                icon: 'M8 4C4.7 4 2 5.8 2 8s2.7 4 6 4 6-1.8 6-4-2.7-4-6-4z M8 6c2 0 3.5.9 3.5 2S10 10 8 10 4.5 9.1 4.5 8 6 6 8 6z' },
+  paraboloid: { geometry: { radius: 10, height: 20 }, color: '#e11d48',
+                icon: 'M3 12c0-5 2.2-9 5-9s5 4 5 9z M3 12h10' },
+  starSix:    { geometry: { outerRadius: 10, innerRadius: 5, points: 6, depth: 5 }, color: '#d97706', flat: true,
+                icon: 'M8 1l2.5 4.5H15L12.5 8 15 10.5h-4.5L8 15l-2.5-4.5H1L3.5 8 1 5.5h4.5z' },
+};
+
+const IMPORTED_ICON = 'M4 2l4 2 4-2v8l-4 2-4-2z M4 4l4 2 4-2 M8 6v6';
+
+export const TYPE_ICON_PATHS = Object.fromEntries([
+  ...Object.entries(SHAPE_DEFAULTS).map(([k, v]) => [k, v.icon]),
+  ['imported', IMPORTED_ICON],
+]);
+
+export const ALL_SHAPE_TYPES = Object.keys(SHAPE_DEFAULTS);
+
+export const FLAT_TYPES = Object.entries(SHAPE_DEFAULTS)
+  .filter(([, v]) => v.flat)
+  .map(([k]) => k);
+
+export const ICON_TYPES = Object.entries(SHAPE_DEFAULTS)
+  .filter(([, v]) => !v.isText)
+  .map(([k]) => k);
+
+export const FLAT_ROTATION = [-Math.PI / 2, 0, 0];
+export const DEFAULT_SHAPE_ROTATIONS = {
+  tetrahedron: [1.219916915922639, 0.9086510911493443, 1.219916915922639],
 };
 
 // Mutable cursor state for high-frequency drag position updates (not in Zustand for perf)
@@ -22,149 +96,7 @@ export const dragCursor = { x: 0, y: 0, active: false };
 export const sceneCamera = { current: null };
 export const sceneInteracting = { active: false };
 
-export const FLAT_TYPES = ['heart', 'star', 'tube', 'torus', 'text'];
-export const FLAT_ROTATION = [-Math.PI / 2, 0, 0];
-
-function getRawExtents(type, geometry) {
-  let hx, hy, hz;
-  switch (type) {
-    case 'box': case 'wall': case 'wedge':
-      hx = geometry.width / 2; hy = geometry.height / 2; hz = geometry.depth / 2;
-      break;
-    case 'sphere':
-      hx = hy = hz = geometry.radius;
-      break;
-    case 'hemisphere':
-      hx = hz = geometry.radius; hy = geometry.radius / 2;
-      break;
-    case 'cylinder':
-      hx = hz = Math.max(geometry.radiusTop, geometry.radiusBottom); hy = geometry.height / 2;
-      break;
-    case 'cone': case 'pyramid':
-      hx = hz = geometry.radius; hy = geometry.height / 2;
-      break;
-    case 'torus': case 'tube':
-      // TorusGeometry is oriented around Z by default:
-      // X/Y extent = radius + tube, Z extent = tube.
-      hx = geometry.radius + geometry.tube;
-      hy = geometry.radius + geometry.tube;
-      hz = geometry.tube;
-      break;
-    case 'heart':
-      // Heart shape is centered on Y/Z in Scene geometry construction.
-      // X/Y come from 2D shape profile; Z comes from extrude depth + bevel.
-      hx = geometry.size * 0.55;
-      hy = geometry.size * 0.7;
-      hz = (geometry.depth + 1.0) / 2;
-      break;
-    case 'star':
-      // Star profile radius in XY; Z comes from extrude depth + bevel.
-      hx = geometry.outerRadius;
-      hy = geometry.outerRadius;
-      hz = (geometry.depth + 1.0) / 2;
-      break;
-    case 'text':
-      // Text is centered by <Center/> in Scene; width scales with glyph count.
-      hx = Math.max((geometry.size || 10), ((geometry.text || 'Text').length * (geometry.size || 10) * 0.3));
-      hy = (geometry.size || 10) / 2;
-      hz = ((geometry.height || 5) + 0.6) / 2;
-      break;
-    default:
-      hx = hy = hz = 10;
-  }
-  return [hx, hy, hz];
-}
-
-export function getFloorY(type, geometry, rotation, scale) {
-  const [hx, hy, hz] = getRawExtents(type, geometry);
-  const sx = scale ? Math.abs(scale[0]) : 1;
-  const sy = scale ? Math.abs(scale[1]) : 1;
-  const sz = scale ? Math.abs(scale[2]) : 1;
-
-  if (!rotation || (rotation[0] === 0 && rotation[1] === 0 && rotation[2] === 0)) {
-    return hy * sy;
-  }
-
-  const [rx, ry, rz] = rotation;
-  const cx = Math.cos(rx), sx_ = Math.sin(rx);
-  const cy = Math.cos(ry), sy_ = Math.sin(ry);
-  const cz = Math.cos(rz), sz_ = Math.sin(rz);
-
-  const corners = [
-    [-hx * sx, -hy * sy, -hz * sz], [ hx * sx, -hy * sy, -hz * sz],
-    [-hx * sx,  hy * sy, -hz * sz], [ hx * sx,  hy * sy, -hz * sz],
-    [-hx * sx, -hy * sy,  hz * sz], [ hx * sx, -hy * sy,  hz * sz],
-    [-hx * sx,  hy * sy,  hz * sz], [ hx * sx,  hy * sy,  hz * sz],
-  ];
-
-  let minY = Infinity;
-  for (const [x, y, z] of corners) {
-    // Euler XYZ: R = Rz · Ry · Rx
-    const x1 = x,               y1 = y * cx - z * sx_, z1 = y * sx_ + z * cx;
-    const x2 = x1 * cy + z1 * sy_, y2 = y1,            z2 = -x1 * sy_ + z1 * cy;
-    const ry3 = x2 * sz_ + y2 * cz;
-    if (ry3 < minY) minY = ry3;
-  }
-
-  return -minY;
-}
-
-function getWorldBounds(type, geometry, rotation, scale, position) {
-  const [hx, hy, hz] = getRawExtents(type, geometry);
-  const sx = scale ? Math.abs(scale[0]) : 1;
-  const sy = scale ? Math.abs(scale[1]) : 1;
-  const sz = scale ? Math.abs(scale[2]) : 1;
-  const [px, py, pz] = position || [0, 0, 0];
-
-  const [rx, ry, rz] = rotation || [0, 0, 0];
-  const cx = Math.cos(rx), sx_ = Math.sin(rx);
-  const cy = Math.cos(ry), sy_ = Math.sin(ry);
-  const cz = Math.cos(rz), sz_ = Math.sin(rz);
-
-  const corners = [
-    [-hx * sx, -hy * sy, -hz * sz], [ hx * sx, -hy * sy, -hz * sz],
-    [-hx * sx,  hy * sy, -hz * sz], [ hx * sx,  hy * sy, -hz * sz],
-    [-hx * sx, -hy * sy,  hz * sz], [ hx * sx, -hy * sy,  hz * sz],
-    [-hx * sx,  hy * sy,  hz * sz], [ hx * sx,  hy * sy,  hz * sz],
-  ];
-
-  let minX = Infinity, minY = Infinity, minZ = Infinity;
-  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-
-  for (const [x, y, z] of corners) {
-    // Euler XYZ: R = Rz · Ry · Rx
-    const x1 = x,               y1 = y * cx - z * sx_, z1 = y * sx_ + z * cx;
-    const x2 = x1 * cy + z1 * sy_, y2 = y1,            z2 = -x1 * sy_ + z1 * cy;
-    const x3 = x2 * cz - y2 * sz_;
-    const y3 = x2 * sz_ + y2 * cz;
-    const z3 = z2;
-
-    const wx = x3 + px;
-    const wy = y3 + py;
-    const wz = z3 + pz;
-
-    if (wx < minX) minX = wx;
-    if (wy < minY) minY = wy;
-    if (wz < minZ) minZ = wz;
-    if (wx > maxX) maxX = wx;
-    if (wy > maxY) maxY = wy;
-    if (wz > maxZ) maxZ = wz;
-  }
-
-  return {
-    min: [minX, minY, minZ],
-    max: [maxX, maxY, maxZ],
-  };
-}
-
-function overlapsXZ(a, b) {
-  return (
-    a.min[0] <= b.max[0] &&
-    a.max[0] >= b.min[0] &&
-    a.min[2] <= b.max[2] &&
-    a.max[2] >= b.min[2]
-  );
-}
+export { getFloorY };
 
 const MAX_HISTORY = 50;
 
@@ -348,6 +280,8 @@ export const useDesignStore = create((set, get) => ({
     };
     if (FLAT_TYPES.includes(type) && !overrides.rotation) {
       obj.rotation = [...FLAT_ROTATION];
+    } else if (DEFAULT_SHAPE_ROTATIONS[type] && !overrides.rotation) {
+      obj.rotation = [...DEFAULT_SHAPE_ROTATIONS[type]];
     }
     const floorY = getFloorY(type, obj.geometry, obj.rotation, obj.scale);
     obj.position = [obj.position[0], floorY, obj.position[2]];
@@ -389,6 +323,14 @@ export const useDesignStore = create((set, get) => ({
 
   updateObjectSilent: (id, updates) => set(state => ({
     objects: state.objects.map(o => o.id === id ? { ...o, ...updates } : o),
+    isDirty: true,
+  })),
+
+  batchUpdateObjects: (updates) => set(state => ({
+    objects: state.objects.map(o => {
+      const u = updates[o.id];
+      return u ? { ...o, ...u } : o;
+    }),
     isDirty: true,
   })),
 
@@ -663,7 +605,14 @@ export const useDesignStore = create((set, get) => ({
     let id = state.projectId || uuidv4();
     const saveable = state.objects.map(o => {
       const { geometry, ...rest } = o;
-      if (o.type === 'imported') return { ...rest, geometry: {} };
+      if (o.type === 'imported') {
+        if (geometry.bufferGeometry) {
+          try {
+            return { ...rest, geometry: { bufferGeometryJSON: geometry.bufferGeometry.toJSON() } };
+          } catch { return { ...rest, geometry: {} }; }
+        }
+        return { ...rest, geometry: {} };
+      }
       return { ...rest, geometry };
     });
     const project = {
@@ -672,11 +621,12 @@ export const useDesignStore = create((set, get) => ({
       objects: saveable,
       groups: state.groups || [],
       backgroundColor: state.backgroundColor,
+      objectCounter,
       updatedAt: Date.now(),
     };
     const list = loadProjectList().filter(p => p.id !== id);
     list.unshift(project);
-    saveProjectList(list);
+    try { saveProjectList(list); } catch (e) { console.warn('Project save failed (storage full?):', e); }
     set({ projectId: id, isDirty: false });
   },
 
@@ -684,9 +634,18 @@ export const useDesignStore = create((set, get) => ({
     const list = loadProjectList();
     const project = list.find(p => p.id === id);
     if (!project) return;
-    objectCounter = project.objects.length;
+    objectCounter = project.objectCounter || project.objects.length;
+    const restoredObjects = project.objects.map(o => {
+      if (o.type === 'imported' && o.geometry.bufferGeometryJSON) {
+        try {
+          const loader = new BufferGeometryLoader();
+          return { ...o, geometry: { bufferGeometry: loader.parse(o.geometry.bufferGeometryJSON) } };
+        } catch { return o; }
+      }
+      return o;
+    });
     set({
-      objects: project.objects,
+      objects: restoredObjects,
       groups: project.groups || [],
       projectId: project.id,
       projectName: project.name,

@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import Tippy from '@tippyjs/react';
 import {
-  ChevronDown, Shapes, X, GripVertical,
+  ChevronDown, Shapes, X, GripVertical, Search,
 } from 'lucide-react';
 import { useDesignStore } from './store';
 import { getShapeIcons } from './shapeIcons';
@@ -24,19 +24,7 @@ const CATEGORIES = [
       { type: 'cylinder', name: 'Cylinder' },
       { type: 'cone', name: 'Cone' },
       { type: 'torus', name: 'Torus' },
-    ],
-  },
-  {
-    name: 'Everyday',
-    color: '#f97316',
-    shapes: [
-      { type: 'wall', name: 'Wall' },
-      { type: 'pyramid', name: 'Pyramid' },
-      { type: 'heart', name: 'Heart' },
-      { type: 'star', name: 'Star' },
-      { type: 'hemisphere', name: 'Half Sphere' },
-      { type: 'tube', name: 'Tube' },
-      { type: 'wedge', name: 'Wedge' },
+      { type: 'ellipsoid', name: 'Ellipsoid' },
     ],
   },
   {
@@ -48,11 +36,66 @@ const CATEGORIES = [
       { type: 'text', name: 'Hole Text', isHole: true },
     ],
   },
+  {
+    name: 'Polyhedra',
+    color: '#10b981',
+    shapes: [
+      { type: 'tetrahedron', name: 'Tetrahedron' },
+      { type: 'octahedron', name: 'Octahedron' },
+      { type: 'icosahedron', name: 'Icosahedron' },
+      { type: 'dodecahedron', name: 'Dodecahedron' },
+    ],
+  },
+  {
+    name: 'Prisms & Pyramids',
+    color: '#8b5cf6',
+    shapes: [
+      { type: 'triangularPrism', name: 'Triangular Prism' },
+      { type: 'pentagonalPrism', name: 'Pentagonal Prism' },
+      { type: 'hexagonalPrism', name: 'Hexagonal Prism' },
+      { type: 'pyramid', name: 'Pyramid' },
+      { type: 'squarePyramid', name: 'Square Pyramid' },
+      { type: 'pentagonalPyramid', name: 'Pentagonal Pyramid' },
+      { type: 'wedge', name: 'Wedge' },
+    ],
+  },
+  {
+    name: 'Everyday',
+    color: '#f97316',
+    shapes: [
+      { type: 'wall', name: 'Wall' },
+      { type: 'heart', name: 'Heart' },
+      { type: 'star', name: 'Star' },
+      { type: 'starSix', name: 'Star (6-pointed)' },
+      { type: 'hemisphere', name: 'Half Sphere' },
+      { type: 'tube', name: 'Tube' },
+      { type: 'ring', name: 'Ring' },
+      { type: 'paraboloid', name: 'Paraboloid' },
+    ],
+  },
+  {
+    name: 'Holes',
+    color: '#ef4444',
+    shapes: [
+      { type: 'box', name: 'Box Hole', isHole: true },
+      { type: 'sphere', name: 'Sphere Hole', isHole: true },
+      { type: 'cylinder', name: 'Cylinder Hole', isHole: true },
+      { type: 'cone', name: 'Cone Hole', isHole: true },
+      { type: 'torus', name: 'Torus Hole', isHole: true },
+      { type: 'pyramid', name: 'Pyramid Hole', isHole: true },
+      { type: 'star', name: 'Star Hole', isHole: true },
+      { type: 'tube', name: 'Tube Hole', isHole: true },
+      { type: 'wedge', name: 'Wedge Hole', isHole: true },
+      { type: 'ring', name: 'Ring Hole', isHole: true },
+    ],
+  },
 ];
 
 export default function ShapeLibrary() {
   const [open, setOpen] = useState(false);
   const [textInput, setTextInput] = useState('Hello');
+  const [search, setSearch] = useState('');
+  const searchRef = useRef(null);
   const panelRef = useRef(null);
   const setDraggingShape = useDesignStore(s => s.setDraggingShape);
   const clearDraggingShape = useDesignStore(s => s.clearDraggingShape);
@@ -74,6 +117,21 @@ export default function ShapeLibrary() {
       document.removeEventListener('keydown', handleEsc);
     };
   }, [open]);
+
+  useEffect(() => {
+    if (open && searchRef.current) searchRef.current.focus();
+  }, [open]);
+
+  const filteredCategories = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return CATEGORIES;
+    return CATEGORIES.map(cat => ({
+      ...cat,
+      shapes: cat.shapes.filter(s =>
+        s.name.toLowerCase().includes(q) || s.type.toLowerCase().includes(q),
+      ),
+    })).filter(cat => cat.shapes.length > 0);
+  }, [search]);
 
   const handleDragStart = useCallback((e, shape) => {
     const payload = {
@@ -127,8 +185,29 @@ export default function ShapeLibrary() {
             </button>
           </div>
 
+          <div className="dml-shapes-search">
+            <Search size={14} className="dml-shapes-search-icon" />
+            <input
+              ref={searchRef}
+              type="text"
+              className="dml-shapes-search-input"
+              placeholder="Search shapes..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onClick={(e) => e.stopPropagation()}
+            />
+            {search && (
+              <button className="dml-shapes-search-clear" onClick={() => setSearch('')}>
+                <X size={12} />
+              </button>
+            )}
+          </div>
+
           <div className="dml-shapes-panel-body">
-            {CATEGORIES.map(cat => (
+            {filteredCategories.length === 0 && (
+              <p className="dml-shapes-no-results">No shapes match "{search}"</p>
+            )}
+            {filteredCategories.map(cat => (
               <div key={cat.name} className="dml-shapes-group">
                 <div className="dml-shapes-group-label">
                   <span className="dml-shapes-group-dot" style={{ background: cat.color }} />

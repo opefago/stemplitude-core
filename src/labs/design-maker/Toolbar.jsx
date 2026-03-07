@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import Tip from './Tip';
+import RichTip from './RichTip';
 import CustomSelect from './CustomSelect';
 import {
   Grid3X3, Box, BoxSelect, Ruler, PencilRuler,
@@ -8,6 +8,7 @@ import {
   Undo2, Redo2, LayoutGrid, Magnet, ArrowDownToLine,
 } from 'lucide-react';
 import { useDesignStore, getEffectiveSelectionIdsFromState } from './store';
+import TC from './tooltipContent';
 
 export default function Toolbar() {
   const gridVisible = useDesignStore(s => s.gridVisible);
@@ -80,73 +81,73 @@ export default function Toolbar() {
   return (
     <div className="dml-toolbar">
       <div className="dml-toolbar-group">
-        <Tip label="Undo" shortcut="Ctrl+Z">
+        <RichTip label="Undo" shortcut="Ctrl+Z" description={TC.undo.description} video={TC.undo.video}>
           <button className="dml-tool-btn" onClick={undo} disabled={!canUndo}>
             <Undo2 size={20} />
           </button>
-        </Tip>
-        <Tip label="Redo" shortcut="Ctrl+Shift+Z">
+        </RichTip>
+        <RichTip label="Redo" shortcut="Ctrl+Shift+Z" description={TC.redo.description} video={TC.redo.video}>
           <button className="dml-tool-btn" onClick={redo} disabled={!canRedo}>
             <Redo2 size={20} />
           </button>
-        </Tip>
+        </RichTip>
       </div>
 
       <div className="dml-toolbar-sep" />
 
       <div className="dml-toolbar-group">
         <div className="dml-btn-joined">
-          <Tip label="Solid View">
+          <RichTip label="Solid View" description={TC.solidView.description} video={TC.solidView.video}>
             <button
               className={`dml-joined-btn ${!wireframe ? 'active' : ''}`}
               onClick={() => { if (wireframe) toggleWireframe(); }}
             >
               <Box size={18} />
             </button>
-          </Tip>
-          <Tip label="Wireframe">
+          </RichTip>
+          <RichTip label="Wireframe" description={TC.wireframe.description} video={TC.wireframe.video}>
             <button
               className={`dml-joined-btn ${wireframe ? 'active' : ''}`}
               onClick={() => { if (!wireframe) toggleWireframe(); }}
             >
               <BoxSelect size={18} />
             </button>
-          </Tip>
+          </RichTip>
         </div>
         <div className="dml-toolbar-vsep" />
-        <Tip label="Grid" shortcut="G">
+        <RichTip label="Grid" shortcut="G" description={TC.grid.description} video={TC.grid.video}>
           <button
             className={`dml-tool-btn ${gridVisible ? 'active' : ''}`}
             onClick={toggleGrid}
           >
             <Grid3X3 size={20} />
           </button>
-        </Tip>
-        <Tip label="Ruler">
+        </RichTip>
+        <RichTip label="Ruler" description={TC.ruler.description} video={TC.ruler.video}>
           <button
             className={`dml-tool-btn ${rulerVisible ? 'active' : ''}`}
             onClick={toggleRuler}
           >
             <Ruler size={20} />
           </button>
-        </Tip>
-        <Tip label="Measure" shortcut="M">
+        </RichTip>
+        <RichTip label="Measure" shortcut="M" description={TC.measure.description} video={TC.measure.video}>
           <button
             className={`dml-tool-btn ${measureActive ? 'active' : ''}`}
             onClick={toggleMeasure}
           >
             <PencilRuler size={20} />
           </button>
-        </Tip>
-        <Tip label="Snap to Face">
+        </RichTip>
+        <RichTip label="Snap to Face" description={TC.snapToFace.description} video={TC.snapToFace.video}>
           <button
             className={`dml-tool-btn ${faceSnap ? 'active' : ''}`}
             onClick={toggleFaceSnap}
           >
             <Magnet size={20} />
           </button>
-        </Tip>
-        <Tip label="Follow Shape">
+        </RichTip>
+        <RichTip label="Follow Shape" description={TC.followShape.description} video={TC.followShape.video}>
           <button
             className={`dml-tool-btn ${workplaneMode ? 'active' : ''}`}
             onClick={toggleWorkplaneMode}
@@ -154,7 +155,7 @@ export default function Toolbar() {
           >
             <span className="dml-tool-mini-text">FS</span>
           </button>
-        </Tip>
+        </RichTip>
       </div>
 
       <div className="dml-toolbar-sep" />
@@ -182,17 +183,17 @@ export default function Toolbar() {
         <>
           <div className="dml-toolbar-sep" />
           <div className="dml-toolbar-group">
-            <Tip label="Drop to Floor">
+            <RichTip label="Drop to Floor" description={TC.dropToFloor.description} video={TC.dropToFloor.video}>
               <button className="dml-tool-btn" onClick={dropToFloor} disabled={selectionHasLocked}>
                 <ArrowDownToLine size={20} />
               </button>
-            </Tip>
-            <Tip label="Duplicate" shortcut="Ctrl+D">
+            </RichTip>
+            <RichTip label="Duplicate" shortcut="Ctrl+D" description={TC.duplicate.description} video={TC.duplicate.video}>
               <button className="dml-tool-btn" onClick={duplicateSelected} disabled={selectionHasLocked}>
                 <Copy size={20} />
               </button>
-            </Tip>
-            <Tip label="Mirror (Pick X/Y/Z in scene)">
+            </RichTip>
+            <RichTip label="Mirror" shortcut="Click axis in scene" description={TC.mirror.description} video={TC.mirror.video}>
               <button
                 className={`dml-tool-btn ${mirrorMode ? 'active' : ''}`}
                 onClick={toggleMirrorMode}
@@ -200,9 +201,9 @@ export default function Toolbar() {
               >
                 <FlipHorizontal size={20} />
               </button>
-            </Tip>
+            </RichTip>
             <div className="dml-array-wrap">
-              <Tip label="Linear Array">
+              <RichTip label="Linear Array" description={TC.linearArray.description} video={TC.linearArray.video}>
                 <button
                   className={`dml-tool-btn ${arrayOpen ? 'active' : ''}`}
                   onClick={() => {
@@ -213,7 +214,7 @@ export default function Toolbar() {
                 >
                   <LayoutGrid size={20} />
                 </button>
-              </Tip>
+              </RichTip>
               {arrayOpen && (
                 <div className="dml-array-popover">
                   <div className="dml-array-row">
@@ -260,11 +261,11 @@ export default function Toolbar() {
                 </div>
               )}
             </div>
-            <Tip label="Delete" shortcut="Del">
+            <RichTip label="Delete" shortcut="Del" description={TC.delete.description} video={TC.delete.video}>
               <button className="dml-tool-btn danger" onClick={removeSelected} disabled={selectionHasLocked}>
                 <Trash2 size={20} />
               </button>
-            </Tip>
+            </RichTip>
           </div>
         </>
       )}
@@ -274,21 +275,21 @@ export default function Toolbar() {
           <div className="dml-toolbar-sep" />
           <div className="dml-toolbar-group">
             <span className="dml-toolbar-label">Align</span>
-            <Tip label="Align X">
+            <RichTip label="Align X" description={TC.alignX.description} video={TC.alignX.video}>
               <button className="dml-tool-btn" onClick={() => alignObjects('x', 'center')}>
                 <AlignCenterHorizontal size={20} />
               </button>
-            </Tip>
-            <Tip label="Align Y">
+            </RichTip>
+            <RichTip label="Align Y" description={TC.alignY.description} video={TC.alignY.video}>
               <button className="dml-tool-btn" onClick={() => alignObjects('y', 'min')}>
                 <AlignCenterVertical size={20} />
               </button>
-            </Tip>
-            <Tip label="Align Z">
+            </RichTip>
+            <RichTip label="Align Z" description={TC.alignZ.description} video={TC.alignZ.video}>
               <button className="dml-tool-btn" onClick={() => alignObjects('z', 'center')}>
                 <AlignCenterHorizontal size={20} />
               </button>
-            </Tip>
+            </RichTip>
           </div>
         </>
       )}

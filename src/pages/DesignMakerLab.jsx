@@ -1,12 +1,15 @@
 import React, { useEffect, useCallback, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import Tip from '../labs/design-maker/Tip';
+import RichTip from '../labs/design-maker/RichTip';
+import TC from '../labs/design-maker/tooltipContent';
 import {
   Settings, Upload, Download, Share2, X, Pencil,
 } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import * as THREE from 'three';
 import Scene, { setMarqueeActive } from '../labs/design-maker/Scene';
+import { createGeometry } from '../labs/design-maker/geometryFactory';
+import { getRawExtents } from '../labs/design-maker/dimensions';
 import ShapeLibrary from '../labs/design-maker/ShapeLibrary';
 import Toolbar from '../labs/design-maker/Toolbar';
 import ObjectProperties from '../labs/design-maker/ObjectProperties';
@@ -20,31 +23,8 @@ import {
   sceneInteracting,
   getEffectiveSelectionIdsFromState,
 } from '../labs/design-maker/store';
-import { unionCSG, subtractCSG, intersectCSG } from '../labs/design-maker/csgUtils';
+import { unionCSG, mergeCSG, subtractCSG, intersectCSG } from '../labs/design-maker/csgUtils';
 import './DesignMakerLab.css';
-
-function createGeometryFromObj(obj) {
-  const p = obj.geometry;
-  switch (obj.type) {
-    case 'box': case 'wall': case 'wedge':
-      return new THREE.BoxGeometry(p.width, p.height, p.depth);
-    case 'sphere':
-      return new THREE.SphereGeometry(p.radius, p.widthSegments || 32, p.heightSegments || 32);
-    case 'cylinder':
-      return new THREE.CylinderGeometry(p.radiusTop, p.radiusBottom, p.height, p.radialSegments || 32);
-    case 'cone': case 'pyramid':
-      return new THREE.ConeGeometry(p.radius, p.height, p.radialSegments || 32);
-    case 'torus': case 'tube':
-      return new THREE.TorusGeometry(p.radius, p.tube, p.radialSegments || 16, p.tubularSegments || 48);
-    case 'hemisphere':
-      return new THREE.SphereGeometry(p.radius, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
-    case 'imported':
-      if (p.bufferGeometry) return p.bufferGeometry.clone();
-      return new THREE.BoxGeometry(20, 20, 20);
-    default:
-      return new THREE.BoxGeometry(20, 20, 20);
-  }
-}
 
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
@@ -57,14 +37,40 @@ function downloadBlob(blob, filename) {
 
 function buildExportScene(objects) {
   const scene = new THREE.Scene();
+  const _pos = new THREE.Vector3();
+  const _quat = new THREE.Quaternion();
+  const _scale = new THREE.Vector3();
+  const _euler = new THREE.Euler();
+  const _matrix = new THREE.Matrix4();
+
   objects.forEach(obj => {
-    const geometry = createGeometryFromObj(obj);
+    const srcGeo = createGeometry(obj.type, obj.geometry);
+    const geometry = srcGeo.clone();
     const material = new THREE.MeshStandardMaterial({ color: obj.color });
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.set(...obj.position);
-    mesh.rotation.set(...obj.rotation);
-    mesh.scale.set(...obj.scale);
-    scene.add(mesh);
+
+    _pos.set(...obj.position);
+    _euler.set(...obj.rotation);
+    _quat.setFromEuler(_euler);
+    _scale.set(...obj.scale);
+    _matrix.compose(_pos, _quat, _scale);
+    geometry.applyMatrix4(_matrix);
+
+    const negCount = obj.scale.filter(s => s < 0).length;
+    if (negCount % 2 === 1) {
+      const idx = geometry.index;
+      if (idx) {
+        const arr = idx.array;
+        for (let i = 0; i < arr.length; i += 3) {
+          const tmp = arr[i];
+          arr[i] = arr[i + 2];
+          arr[i + 2] = tmp;
+        }
+        idx.needsUpdate = true;
+      }
+    }
+    geometry.computeVertexNormals();
+
+    scene.add(new THREE.Mesh(geometry, material));
   });
   return scene;
 }
@@ -108,6 +114,7 @@ export default function DesignMakerLab() {
   const [projectsOpen, setProjectsOpen] = useState(false);
   const [projectList, setProjectList] = useState([]);
   const projectsRef = useRef(null);
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [sidebarTab, setSidebarTab] = useState('properties');
 
   useEffect(() => {
@@ -117,8 +124,8 @@ export default function DesignMakerLab() {
         setProjectsOpen(false);
       }
     };
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
+    document.addEventListener('click', handleClick);
+    return () => document.removeEventListener('click', handleClick);
   }, [projectsOpen]);
   const [marquee, setMarquee] = useState(null);
   const marqueeStart = useRef(null);
@@ -175,30 +182,10 @@ export default function DesignMakerLab() {
 
       for (const obj of objs) {
         if (obj.visible === false) continue;
-        const g = obj.geometry;
-        const s = obj.scale;
-        let hw, hh, hd;
-        switch (obj.type) {
-          case 'box': case 'wall': case 'wedge':
-            hw = g.width / 2; hh = g.height / 2; hd = g.depth / 2; break;
-          case 'sphere':
-            hw = hh = hd = g.radius; break;
-          case 'hemisphere':
-            hw = g.radius; hh = g.radius / 2; hd = g.radius; break;
-          case 'cylinder':
-            hw = Math.max(g.radiusTop, g.radiusBottom); hh = g.height / 2; hd = hw; break;
-          case 'cone': case 'pyramid':
-            hw = g.radius; hh = g.height / 2; hd = g.radius; break;
-          case 'torus': case 'tube':
-            hw = g.radius + g.tube; hh = g.tube; hd = hw; break;
-          case 'heart': case 'star':
-            hw = (g.outerRadius || g.size); hh = hw; hd = g.depth / 2; break;
-          case 'text':
-            hw = 10; hh = (g.size || 10) / 2; hd = (g.height || 5) / 2; break;
-          default:
-            hw = hh = hd = 10;
-        }
-        hw *= Math.abs(s[0]); hh *= Math.abs(s[1]); hd *= Math.abs(s[2]);
+        const [ehx, ehy, ehz] = getRawExtents(obj.type, obj.geometry);
+        let hw = ehx * Math.abs(obj.scale[0]);
+        let hh = ehy * Math.abs(obj.scale[1]);
+        let hd = ehz * Math.abs(obj.scale[2]);
 
         euler.set(obj.rotation[0], obj.rotation[1], obj.rotation[2]);
         quat.setFromEuler(euler);
@@ -386,27 +373,28 @@ export default function DesignMakerLab() {
     return !!o?.groupId;
   });
 
-  const handleUnion = useCallback(() => {
+  const handleMerge = useCallback(() => {
     if (selectedIds.length < 2) return;
     const selected = objects.filter(o => selectedIds.includes(o.id));
+    const solids = selected.filter(o => !o.isHole);
     try {
-      const result = unionCSG(selected);
+      const result = mergeCSG(selected);
       if (result) {
         replaceObjects(selectedIds, {
           id: uuidv4(),
-          name: 'Union',
+          name: 'Merge',
           type: 'imported',
           position: [0, 0, 0],
           rotation: [0, 0, 0],
           scale: [1, 1, 1],
-          color: selected[0].color,
+          color: (solids[0] || selected[0]).color,
           isHole: false,
           visible: true,
           geometry: { bufferGeometry: result.geometry },
         });
       }
     } catch (err) {
-      console.error('Union failed:', err);
+      console.error('Merge failed:', err);
     }
   }, [selectedIds, objects, replaceObjects]);
 
@@ -499,7 +487,7 @@ export default function DesignMakerLab() {
                       {p.name}
                       <span className="dml-projects-item-date">{new Date(p.updatedAt).toLocaleDateString()}</span>
                     </button>
-                    <button className="dml-projects-item-del" onClick={(e) => { e.stopPropagation(); deleteProject(p.id); setProjectList(getProjectList()); }}>
+                    <button className="dml-projects-item-del" onClick={(e) => { e.stopPropagation(); setDeleteConfirm(p); }}>
                       ×
                     </button>
                   </div>
@@ -521,15 +509,15 @@ export default function DesignMakerLab() {
             onChange={handleImport}
             style={{ display: 'none' }}
           />
-          <Tip label="Import STL/OBJ">
+          <RichTip label="Import STL/OBJ" description={TC.importModel.description} video={TC.importModel.video}>
             <button className="dml-header-btn" onClick={() => fileInputRef.current?.click()}>
               <Upload size={16} />
               <span>Import</span>
             </button>
-          </Tip>
+          </RichTip>
 
           <div className="dml-dropdown" onMouseLeave={() => setExportOpen(false)}>
-            <Tip label="Export" disabled={exportOpen}>
+            <RichTip label="Export" description={TC.exportModel.description} video={TC.exportModel.video} disabled={exportOpen}>
               <button
                 className="dml-header-btn"
                 onClick={() => setExportOpen(!exportOpen)}
@@ -537,7 +525,7 @@ export default function DesignMakerLab() {
                 <Download size={16} />
                 <span>Export</span>
               </button>
-            </Tip>
+            </RichTip>
             {exportOpen && (
               <div className="dml-dropdown-menu">
                 <button onClick={handleExportSTL}>Export as STL</button>
@@ -546,25 +534,25 @@ export default function DesignMakerLab() {
             )}
           </div>
 
-          <Tip label="Share">
+          <RichTip label="Share">
             <button className="dml-header-btn" onClick={() => alert('Share link copied!')}>
               <Share2 size={16} />
               <span>Share</span>
             </button>
-          </Tip>
+          </RichTip>
 
           <div className="dml-divider" />
 
-          <Tip label="Settings">
+          <RichTip label="Settings" description={TC.settings.description} video={TC.settings.video}>
             <button className="dml-header-btn icon-only" onClick={() => setSettingsOpen(true)}>
               <Settings size={18} />
             </button>
-          </Tip>
-          <Tip label="Exit to Playground">
+          </RichTip>
+          <RichTip label="Exit to Playground">
             <button className="dml-header-btn dml-exit-btn icon-only" onClick={() => navigate('/playground')}>
               <X size={18} />
             </button>
-          </Tip>
+          </RichTip>
         </div>
       </header>
 
@@ -639,7 +627,7 @@ export default function DesignMakerLab() {
 
           {selectedIds.length >= 2 && (
             <div className="dml-csg-float">
-              <Tip label="Group" shortcut="Ctrl+G">
+              <RichTip label="Group" shortcut="Ctrl+G" description={TC.group.description} video={TC.group.video} placement="bottom">
                 <button
                   className="dml-csg-btn dml-csg-icon-btn dml-csg-group"
                   onClick={groupSelected}
@@ -647,8 +635,8 @@ export default function DesignMakerLab() {
                 >
                   <img src="/assets/floating-object/group.svg" alt="Group" />
                 </button>
-              </Tip>
-              <Tip label="Ungroup" shortcut="Ctrl+Shift+G">
+              </RichTip>
+              <RichTip label="Ungroup" shortcut="Ctrl+Shift+G" description={TC.ungroup.description} video={TC.ungroup.video} placement="bottom">
                 <button
                   className="dml-csg-btn dml-csg-icon-btn dml-csg-ungroup"
                   onClick={ungroupSelected}
@@ -656,22 +644,25 @@ export default function DesignMakerLab() {
                 >
                   <img src="/assets/floating-object/ungroup.svg" alt="Ungroup" />
                 </button>
-              </Tip>
-              <Tip label="Union">
-                <button className="dml-csg-btn dml-csg-icon-btn dml-csg-union" onClick={handleUnion} disabled={selectionHasLocked}>
-                  <img src="/assets/floating-object/union.svg" alt="Union" />
+              </RichTip>
+              <div className="dml-csg-sep" />
+              <div className="dml-csg-ops">
+              <RichTip label="Merge" description={TC.merge.description} video={TC.merge.video} placement="bottom">
+                <button className="dml-csg-btn dml-csg-icon-btn dml-csg-union" onClick={handleMerge} disabled={selectionHasLocked}>
+                  <img src="/assets/floating-object/union.svg" alt="Merge" />
                 </button>
-              </Tip>
-              <Tip label="Subtract">
+              </RichTip>
+              <RichTip label="Subtract" description={TC.subtract.description} video={TC.subtract.video} placement="bottom">
                 <button className="dml-csg-btn dml-csg-icon-btn dml-csg-subtract" onClick={handleSubtract} disabled={selectionHasLocked}>
                   <img src="/assets/floating-object/subtract.svg" alt="Subtract" />
                 </button>
-              </Tip>
-              <Tip label="Intersect">
+              </RichTip>
+              <RichTip label="Intersect" description={TC.intersect.description} video={TC.intersect.video} placement="bottom">
                 <button className="dml-csg-btn dml-csg-icon-btn dml-csg-intersect" onClick={handleIntersect} disabled={selectionHasLocked}>
                   <img src="/assets/floating-object/intersect.svg" alt="Intersect" />
                 </button>
-              </Tip>
+              </RichTip>
+              </div>
               <span className="dml-csg-hint">{selectionHasLocked ? 'Unlock objects first' : 'First selected = target'}</span>
             </div>
           )}
@@ -695,6 +686,34 @@ export default function DesignMakerLab() {
       </div>
 
       <SettingsDialog />
+
+      {deleteConfirm && (
+        <div className="dml-confirm-overlay" onClick={() => setDeleteConfirm(null)}>
+          <div className="dml-confirm-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="dml-confirm-icon">
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+                <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                <line x1="10" y1="11" x2="10" y2="17" />
+                <line x1="14" y1="11" x2="14" y2="17" />
+              </svg>
+            </div>
+            <h3 className="dml-confirm-title">Delete Project</h3>
+            <p className="dml-confirm-msg">
+              Are you sure you want to delete <strong>{deleteConfirm.name}</strong>? This action cannot be undone.
+            </p>
+            <div className="dml-confirm-actions">
+              <button className="dml-confirm-cancel" onClick={() => setDeleteConfirm(null)}>Cancel</button>
+              <button className="dml-confirm-delete" onClick={() => {
+                deleteProject(deleteConfirm.id);
+                setProjectList(getProjectList());
+                setDeleteConfirm(null);
+              }}>Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -23,22 +23,36 @@ import {
   Environment,
 } from "@react-three/drei";
 import { EffectComposer, Outline } from "@react-three/postprocessing";
-import { KernelSize } from "postprocessing";
+import { BlendFunction, KernelSize } from "postprocessing";
 import * as THREE from "three";
-import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
+import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
+import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
+
 import {
   useDesignStore,
   SHAPE_DEFAULTS,
   FLAT_TYPES,
   FLAT_ROTATION,
-  getFloorY,
+  DEFAULT_SHAPE_ROTATIONS,
   dragCursor,
   sceneCamera,
   sceneInteracting,
 } from "./store";
+import { createGeometry } from "./geometryFactory";
+import { getObjectDimensions, getFloorY } from "./dimensions";
 
 const toonGradientMap = (() => {
   const colors = new Uint8Array([60, 100, 160, 220, 255]);
+  const tex = new THREE.DataTexture(colors, colors.length, 1, THREE.RedFormat);
+  tex.minFilter = THREE.NearestFilter;
+  tex.magFilter = THREE.NearestFilter;
+  tex.needsUpdate = true;
+  return tex;
+})();
+
+const smoothToonGradientMap = (() => {
+  const colors = new Uint8Array([96, 124, 152, 180, 208, 236, 255]);
   const tex = new THREE.DataTexture(colors, colors.length, 1, THREE.RedFormat);
   tex.minFilter = THREE.NearestFilter;
   tex.magFilter = THREE.NearestFilter;
@@ -76,7 +90,63 @@ export const FONT_LABELS = {
 const X_AXIS_POSITIONS = new Float32Array([-200, 0, 0, 200, 0, 0]);
 const Z_AXIS_POSITIONS = new Float32Array([0, 0, -200, 0, 0, 200]);
 
-function ToyMaterial({ color, wireframe, transparent, opacity, side }) {
+const holeCheckerTex = (() => {
+  const sz = 4;
+  const data = new Uint8Array(sz * sz * 4);
+  for (let y = 0; y < sz; y++) {
+    for (let x = 0; x < sz; x++) {
+      const i = (y * sz + x) * 4;
+      const isLight = (Math.floor(x / 2) + Math.floor(y / 2)) % 2 === 0;
+      const v = isLight ? 230 : 210;
+      data[i] = v;
+      data[i + 1] = v;
+      data[i + 2] = v;
+      data[i + 3] = 255;
+    }
+  }
+  const tex = new THREE.DataTexture(data, sz, sz, THREE.RGBAFormat);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(2, 2);
+  tex.minFilter = THREE.NearestFilter;
+  tex.magFilter = THREE.NearestFilter;
+  tex.needsUpdate = true;
+  return tex;
+})();
+
+function ToyMaterial({
+  color,
+  wireframe,
+  transparent,
+  opacity,
+  side,
+  isHole,
+  isImported,
+}) {
+  if (isHole && !wireframe) {
+    return (
+      <meshBasicMaterial
+        map={holeCheckerTex}
+        transparent
+        opacity={0.85}
+        side={side}
+        depthWrite={false}
+      />
+    );
+  }
+  if (isImported) {
+    return (
+      <meshStandardMaterial
+        color={color}
+        wireframe={wireframe}
+        transparent={transparent}
+        opacity={opacity}
+        side={side}
+        roughness={0.92}
+        metalness={0.02}
+      />
+    );
+  }
   return (
     <meshToonMaterial
       color={color}
@@ -84,311 +154,64 @@ function ToyMaterial({ color, wireframe, transparent, opacity, side }) {
       transparent={transparent}
       opacity={opacity}
       side={side}
-      gradientMap={toonGradientMap}
+      gradientMap={isImported ? smoothToonGradientMap : toonGradientMap}
     />
   );
 }
 
-function createHeartShape(size = 10) {
-  const s = size;
-  const shape = new THREE.Shape();
-  shape.moveTo(0, s * 0.3);
-  shape.bezierCurveTo(0, s * 0.5, -s * 0.5, s * 0.7, -s * 0.5, s * 0.3);
-  shape.bezierCurveTo(-s * 0.5, -s * 0.1, 0, -s * 0.3, 0, -s * 0.6);
-  shape.bezierCurveTo(0, -s * 0.3, s * 0.5, -s * 0.1, s * 0.5, s * 0.3);
-  shape.bezierCurveTo(s * 0.5, s * 0.7, 0, s * 0.5, 0, s * 0.3);
-  return shape;
-}
-
-function createStarShape(outer = 10, inner = 5, points = 5) {
-  const shape = new THREE.Shape();
-  for (let i = 0; i < points * 2; i++) {
-    const r = i % 2 === 0 ? outer : inner;
-    const angle = (i / (points * 2)) * Math.PI * 2 - Math.PI / 2;
-    const x = Math.cos(angle) * r;
-    const y = Math.sin(angle) * r;
-    if (i === 0) shape.moveTo(x, y);
-    else shape.lineTo(x, y);
-  }
-  shape.closePath();
-  return shape;
-}
-
-// Fillet: smooth curved edges
-function createFilletBoxGeometry(width, height, depth, radius) {
-  const r = Math.min(radius, width / 2, height / 2);
-  const hw = width / 2 - r;
-  const hh = height / 2 - r;
-  const shape = new THREE.Shape();
-  shape.moveTo(-hw, hh + r);
-  shape.quadraticCurveTo(-hw - r, hh + r, -hw - r, hh);
-  shape.lineTo(-hw - r, -hh);
-  shape.quadraticCurveTo(-hw - r, -hh - r, -hw, -hh - r);
-  shape.lineTo(hw, -hh - r);
-  shape.quadraticCurveTo(hw + r, -hh - r, hw + r, -hh);
-  shape.lineTo(hw + r, hh);
-  shape.quadraticCurveTo(hw + r, hh + r, hw, hh + r);
-  shape.lineTo(-hw, hh + r);
-  const geo = new THREE.ExtrudeGeometry(shape, {
-    depth: depth,
-    bevelEnabled: true,
-    bevelThickness: r,
-    bevelSize: r,
-    bevelSegments: Math.max(3, Math.ceil(r * 2)),
-    curveSegments: Math.max(4, Math.ceil(r * 2)),
-  });
-  geo.translate(0, 0, -depth / 2);
-  geo.rotateX(Math.PI / 2);
-  return geo;
-}
-
-// Chamfer: flat 45-degree angled cut
-function createChamferBoxGeometry(width, height, depth, radius) {
-  const r = Math.min(radius, width / 2, height / 2);
-  const hw = width / 2 - r;
-  const hh = height / 2 - r;
-  const shape = new THREE.Shape();
-  shape.moveTo(-hw, hh + r);
-  shape.lineTo(-hw - r, hh);
-  shape.lineTo(-hw - r, -hh);
-  shape.lineTo(-hw, -hh - r);
-  shape.lineTo(hw, -hh - r);
-  shape.lineTo(hw + r, -hh);
-  shape.lineTo(hw + r, hh);
-  shape.lineTo(hw, hh + r);
-  shape.lineTo(-hw, hh + r);
-  const geo = new THREE.ExtrudeGeometry(shape, {
-    depth: depth,
-    bevelEnabled: true,
-    bevelThickness: r,
-    bevelSize: r,
-    bevelSegments: 1,
-    curveSegments: 1,
-  });
-  geo.translate(0, 0, -depth / 2);
-  geo.rotateX(Math.PI / 2);
-  return geo;
-}
-
-function createFilletCylinderGeometry(
-  radiusTop,
-  radiusBottom,
-  height,
-  radialSegments,
-  edgeRadius,
-) {
-  const r = Math.min(edgeRadius, height / 2, radiusTop, radiusBottom);
-  const halfH = height / 2;
-  const pts = [];
-  const segments = Math.max(4, Math.ceil(r * 2));
-  for (let i = 0; i <= segments; i++) {
-    const t = (i / segments) * (Math.PI / 2);
-    pts.push(
-      new THREE.Vector2(
-        radiusTop - r + Math.cos(t) * r,
-        halfH - r + Math.sin(t) * r,
-      ),
-    );
-  }
-  const bodySegments = 4;
-  for (let i = 1; i <= bodySegments; i++) {
-    const t = i / bodySegments;
-    const rad = radiusTop + (radiusBottom - radiusTop) * t;
-    const y = halfH - t * height;
-    if (i < bodySegments) pts.push(new THREE.Vector2(rad, y));
-  }
-  for (let i = 0; i <= segments; i++) {
-    const t = (i / segments) * (Math.PI / 2);
-    pts.push(
-      new THREE.Vector2(
-        radiusBottom - r + Math.cos(Math.PI / 2 - t) * r,
-        -halfH + r - Math.sin(Math.PI / 2 - t) * r,
-      ),
-    );
-  }
-  return new THREE.LatheGeometry(pts, radialSegments || 32);
-}
-
-function createChamferCylinderGeometry(
-  radiusTop,
-  radiusBottom,
-  height,
-  radialSegments,
-  edgeRadius,
-) {
-  const r = Math.min(edgeRadius, height / 2, radiusTop, radiusBottom);
-  const halfH = height / 2;
-  const pts = [
-    new THREE.Vector2(radiusTop - r, halfH),
-    new THREE.Vector2(radiusTop, halfH - r),
-    new THREE.Vector2(radiusBottom, -halfH + r),
-    new THREE.Vector2(radiusBottom - r, -halfH),
-  ];
-  return new THREE.LatheGeometry(pts, radialSegments || 32);
-}
-
-// Fix #2: Memoize all geometry creation (including primitives) in a single useMemo
 function useObjectGeometry(type, params) {
-  return useMemo(() => {
-    const p = params;
-    switch (type) {
-      case "box":
-      case "wall":
-        if (p.edgeRadius > 0 && p.edgeStyle === "fillet") {
-          return createFilletBoxGeometry(
-            p.width,
-            p.height,
-            p.depth,
-            p.edgeRadius,
-          );
-        }
-        if (p.edgeRadius > 0 && p.edgeStyle === "chamfer") {
-          return createChamferBoxGeometry(
-            p.width,
-            p.height,
-            p.depth,
-            p.edgeRadius,
-          );
-        }
-        return new THREE.BoxGeometry(p.width, p.height, p.depth);
-      case "sphere":
-        return new THREE.SphereGeometry(
-          p.radius,
-          p.widthSegments || 32,
-          p.heightSegments || 32,
-        );
-      case "cylinder":
-        if (p.edgeRadius > 0 && p.edgeStyle === "fillet") {
-          return createFilletCylinderGeometry(
-            p.radiusTop,
-            p.radiusBottom,
-            p.height,
-            p.radialSegments || 32,
-            p.edgeRadius,
-          );
-        }
-        if (p.edgeRadius > 0 && p.edgeStyle === "chamfer") {
-          return createChamferCylinderGeometry(
-            p.radiusTop,
-            p.radiusBottom,
-            p.height,
-            p.radialSegments || 32,
-            p.edgeRadius,
-          );
-        }
-        return new THREE.CylinderGeometry(
-          p.radiusTop,
-          p.radiusBottom,
-          p.height,
-          p.radialSegments || 32,
-        );
-      case "cone":
-      case "pyramid":
-        return new THREE.ConeGeometry(
-          p.radius,
-          p.height,
-          p.radialSegments || 32,
-        );
-      case "torus":
-      case "tube":
-        return new THREE.TorusGeometry(
-          p.radius,
-          p.tube,
-          p.radialSegments || 16,
-          p.tubularSegments || 48,
-        );
-      case "hemisphere": {
-        const dome = new THREE.SphereGeometry(
-          p.radius,
-          32,
-          16,
-          0,
-          Math.PI * 2,
-          0,
-          Math.PI / 2,
-        );
-        const cap = new THREE.CircleGeometry(p.radius, 32);
-        cap.rotateX(Math.PI / 2);
-        const geo = mergeGeometries([dome, cap]);
-        geo.translate(0, -p.radius / 2, 0);
-        return geo;
-      }
-      case "heart": {
-        const shape = createHeartShape(p.size);
-        const geo = new THREE.ExtrudeGeometry(shape, {
-          depth: p.depth,
-          bevelEnabled: true,
-          bevelThickness: 0.5,
-          bevelSize: 0.3,
-          bevelSegments: 3,
-        });
-        geo.computeBoundingBox();
-        const bb = geo.boundingBox;
-        geo.translate(
-          0,
-          -(bb.min.y + bb.max.y) / 2,
-          -(bb.min.z + bb.max.z) / 2,
-        );
-        return geo;
-      }
-      case "star": {
-        const shape = createStarShape(p.outerRadius, p.innerRadius, p.points);
-        const geo = new THREE.ExtrudeGeometry(shape, {
-          depth: p.depth,
-          bevelEnabled: true,
-          bevelThickness: 0.5,
-          bevelSize: 0.3,
-          bevelSegments: 3,
-        });
-        geo.computeBoundingBox();
-        const bb = geo.boundingBox;
-        geo.translate(
-          0,
-          -(bb.min.y + bb.max.y) / 2,
-          -(bb.min.z + bb.max.z) / 2,
-        );
-        return geo;
-      }
-      case "wedge": {
-        const w = p.width / 2,
-          hh = p.height / 2,
-          d = p.depth / 2;
-        const positions = new Float32Array([
-          -w,
-          -hh,
-          d,
-          w,
-          -hh,
-          d,
-          w,
-          -hh,
-          -d,
-          -w,
-          -hh,
-          -d,
-          w,
-          hh,
-          -d,
-          -w,
-          hh,
-          -d,
-        ]);
-        const indices = [
-          0, 2, 1, 0, 3, 2, 3, 5, 4, 3, 4, 2, 0, 1, 4, 0, 4, 5, 0, 5, 3, 1, 2,
-          4,
-        ];
-        const g = new THREE.BufferGeometry();
-        g.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-        g.setIndex(indices);
-        g.computeVertexNormals();
-        return g;
-      }
-      case "imported":
-        return p.bufferGeometry || new THREE.BoxGeometry(20, 20, 20);
-      default:
-        return new THREE.BoxGeometry(20, 20, 20);
-    }
-  }, [type, params]);
+  return useMemo(() => createGeometry(type, params), [type, params]);
+}
+
+function ThickEdges({
+  geometry,
+  opacity = 0.8,
+  lineWidth = 1.5,
+  depthTest = true,
+  depthWrite = true,
+  thresholdAngle = 18,
+}) {
+  const gl = useThree((s) => s.gl);
+
+  const lineObj = useMemo(() => {
+    const edges = new THREE.EdgesGeometry(geometry, thresholdAngle);
+    const geo = new LineSegmentsGeometry();
+    geo.setPositions(edges.attributes.position.array);
+    edges.dispose();
+    const rendererSize = gl.getSize(new THREE.Vector2());
+    const mat = new LineMaterial({
+      color: 0x000000,
+      linewidth: lineWidth,
+      transparent: true,
+      opacity,
+      depthTest,
+      depthWrite,
+      worldUnits: false,
+      resolution: rendererSize,
+    });
+    const obj = new LineSegments2(geo, mat);
+    obj.renderOrder = 1;
+    return obj;
+  }, [geometry, lineWidth, opacity, depthTest, depthWrite, thresholdAngle, gl]);
+
+  useEffect(() => {
+    const onResize = () => {
+      const s = gl.getSize(new THREE.Vector2());
+      lineObj.material.resolution.set(s.x, s.y);
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [lineObj, gl]);
+
+  useEffect(
+    () => () => {
+      lineObj.geometry.dispose();
+      lineObj.material.dispose();
+    },
+    [lineObj],
+  );
+
+  return <primitive object={lineObj} />;
 }
 
 const SceneObject = forwardRef(function SceneObject(
@@ -443,10 +266,11 @@ const SceneObject = forwardRef(function SceneObject(
                 transparent={obj.isHole}
                 opacity={opacity}
                 side={side}
+                isHole={obj.isHole}
               />
             </Text3D>
           </Center>
-          {!wireframe && (
+          {!wireframe && !obj.isHole && (
             <Center>
               <Text3D
                 font={FONT_MAP[obj.geometry.font] || FONT_MAP.helvetiker}
@@ -459,7 +283,13 @@ const SceneObject = forwardRef(function SceneObject(
                 scale={[cartoonRatio, cartoonRatio, cartoonRatio]}
               >
                 {obj.geometry.text || "Text"}
-                <meshBasicMaterial color="#1a1a1a" side={THREE.BackSide} />
+                <meshBasicMaterial
+                  color="#1a1a1a"
+                  side={THREE.BackSide}
+                  polygonOffset
+                  polygonOffsetFactor={5}
+                  polygonOffsetUnits={5}
+                />
               </Text3D>
             </Center>
           )}
@@ -471,6 +301,20 @@ const SceneObject = forwardRef(function SceneObject(
   const geometry = useObjectGeometry(obj.type, obj.geometry);
 
   const isTorus = obj.type === "torus" || obj.type === "tube";
+  const isImported = obj.type === "imported";
+  const roundedHoleEdges = obj.isHole && HOLE_ROUNDED_EDGE_TYPES.has(obj.type);
+  const edgeThresholdAngle = roundedHoleEdges
+    ? (HOLE_EDGE_THRESHOLD_BY_TYPE[obj.type] ?? 14)
+    : isImported
+      ? 89.7
+      : isTorus
+        ? 50
+        : 18;
+  const edgeOpacity = isImported ? 1 : obj.isHole ? 0.6 : 0.8;
+  const showInnerEdges = !isImported;
+  const showCartoonHull = !obj.isHole;
+  const hullScale = isImported ? 1.012 : cartoonRatio;
+  const hullOffset = isImported ? 8 : 5;
   const outlineGeo = useMemo(() => {
     if (!isTorus) return null;
     const p = obj.geometry;
@@ -498,24 +342,45 @@ const SceneObject = forwardRef(function SceneObject(
       }}
       onClick={onSelect}
     >
-      <mesh castShadow receiveShadow geometry={geometry}>
+      <mesh castShadow={!obj.isHole} receiveShadow geometry={geometry}>
         <ToyMaterial
           color={color}
           wireframe={wireframe}
           transparent={obj.isHole}
           opacity={opacity}
           side={side}
+          isHole={obj.isHole}
+          isImported={isImported}
         />
       </mesh>
       {!wireframe && (
-        <mesh
-          scale={
-            isTorus ? undefined : [cartoonRatio, cartoonRatio, cartoonRatio]
-          }
-          geometry={isTorus ? outlineGeo : geometry}
-        >
-          <meshBasicMaterial color="#1a1a1a" side={THREE.BackSide} />
-        </mesh>
+        <>
+          {showCartoonHull && (
+            <mesh
+              scale={isTorus ? undefined : [hullScale, hullScale, hullScale]}
+              geometry={isTorus ? outlineGeo : geometry}
+            >
+              <meshBasicMaterial
+                color="#0d0d0d"
+                side={THREE.BackSide}
+                depthWrite={false}
+                polygonOffset
+                polygonOffsetFactor={hullOffset}
+                polygonOffsetUnits={hullOffset}
+              />
+            </mesh>
+          )}
+          {showInnerEdges && (
+            <ThickEdges
+              geometry={geometry}
+              lineWidth={isImported ? 2.6 : 2}
+              opacity={edgeOpacity}
+              depthTest
+              depthWrite={!obj.isHole}
+              thresholdAngle={edgeThresholdAngle}
+            />
+          )}
+        </>
       )}
     </group>
   );
@@ -572,8 +437,9 @@ function CameraControls({ orbitRef }) {
         orbitRef.current.mouseButtons.LEFT = undefined;
       }
     };
-    dom.addEventListener('pointerdown', handleDown, { capture: true });
-    return () => dom.removeEventListener('pointerdown', handleDown, { capture: true });
+    dom.addEventListener("pointerdown", handleDown, { capture: true });
+    return () =>
+      dom.removeEventListener("pointerdown", handleDown, { capture: true });
   }, [gl, orbitRef]);
 
   useEffect(() => {
@@ -650,8 +516,14 @@ function DragPreview() {
   const defaults = draggingShape
     ? SHAPE_DEFAULTS[draggingShape.type] || SHAPE_DEFAULTS.box
     : null;
+  const previewRotation =
+    draggingShape && FLAT_TYPES.includes(draggingShape.type)
+      ? FLAT_ROTATION
+      : draggingShape && DEFAULT_SHAPE_ROTATIONS[draggingShape.type]
+        ? DEFAULT_SHAPE_ROTATIONS[draggingShape.type]
+        : [0, 0, 0];
   const halfH = defaults
-    ? getFloorY(draggingShape.type, defaults.geometry, FLAT_TYPES.includes(draggingShape?.type) ? FLAT_ROTATION : null)
+    ? getFloorY(draggingShape.type, defaults.geometry, previewRotation)
     : 10;
   const color = draggingShape?.isHole
     ? "#ff4444"
@@ -688,10 +560,6 @@ function DragPreview() {
     }
   });
 
-  const previewRotation = draggingShape && FLAT_TYPES.includes(draggingShape.type)
-    ? FLAT_ROTATION
-    : [0, 0, 0];
-
   if (!draggingShape || !defaults) return null;
 
   return (
@@ -721,7 +589,11 @@ function ArrayPreviewGhost({ obj, position }) {
   const previewType = obj.type === "text" ? "box" : obj.type;
   const previewParams =
     obj.type === "text"
-      ? { width: 20, height: obj.geometry.size || 10, depth: obj.geometry.height || 5 }
+      ? {
+          width: 20,
+          height: obj.geometry.size || 10,
+          depth: obj.geometry.height || 5,
+        }
       : obj.geometry;
   const previewGeo = useObjectGeometry(previewType, previewParams);
 
@@ -800,114 +672,108 @@ function WorkplaneOverlay({ meshRefs, selectedId }) {
   for (let i = 0; i <= gridCount; i++) {
     const offset = -half + i * step;
     gridLines.push(
-      <Line key={`gx${i}`} points={[[-half, wpY, offset], [half, wpY, offset]]} color="#4de8ff" lineWidth={0.6} transparent opacity={i === gridCount / 2 ? 0 : 0.3} />,
-      <Line key={`gz${i}`} points={[[offset, wpY, -half], [offset, wpY, half]]} color="#4de8ff" lineWidth={0.6} transparent opacity={i === gridCount / 2 ? 0 : 0.3} />,
+      <Line
+        key={`gx${i}`}
+        points={[
+          [-half, wpY, offset],
+          [half, wpY, offset],
+        ]}
+        color="#4de8ff"
+        lineWidth={0.6}
+        transparent
+        opacity={i === gridCount / 2 ? 0 : 0.3}
+      />,
+      <Line
+        key={`gz${i}`}
+        points={[
+          [offset, wpY, -half],
+          [offset, wpY, half],
+        ]}
+        color="#4de8ff"
+        lineWidth={0.6}
+        transparent
+        opacity={i === gridCount / 2 ? 0 : 0.3}
+      />,
     );
   }
 
   return (
-    <group position={[worldPos.x, worldPos.y, worldPos.z]} quaternion={mesh.quaternion}>
+    <group
+      position={[worldPos.x, worldPos.y, worldPos.z]}
+      quaternion={mesh.quaternion}
+    >
       {/* Filled surface - depthTest off for guaranteed stability, very low opacity */}
-      <mesh position={[0, wpY, 0]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={-1}>
+      <mesh
+        position={[0, wpY, 0]}
+        rotation={[-Math.PI / 2, 0, 0]}
+        renderOrder={-1}
+      >
         <planeGeometry args={[planeSize, planeSize]} />
-        <meshBasicMaterial color="#4de8ff" transparent opacity={0.06} depthTest={false} depthWrite={false} side={THREE.DoubleSide} />
+        <meshBasicMaterial
+          color="#4de8ff"
+          transparent
+          opacity={0.06}
+          depthTest={false}
+          depthWrite={false}
+          side={THREE.DoubleSide}
+        />
       </mesh>
       {gridLines}
       {/* Frame border */}
       <Line
-        points={[[-half, wpY, -half], [half, wpY, -half], [half, wpY, half], [-half, wpY, half], [-half, wpY, -half]]}
+        points={[
+          [-half, wpY, -half],
+          [half, wpY, -half],
+          [half, wpY, half],
+          [-half, wpY, half],
+          [-half, wpY, -half],
+        ]}
         color="#7af3ff"
         lineWidth={2}
         transparent
         opacity={0.9}
       />
       {/* Center crosshairs */}
-      <Line points={[[-half, wpY, 0], [half, wpY, 0]]} color="#b0f8ff" lineWidth={1.5} transparent opacity={0.8} />
-      <Line points={[[0, wpY, -half], [0, wpY, half]]} color="#b0f8ff" lineWidth={1.5} transparent opacity={0.8} />
+      <Line
+        points={[
+          [-half, wpY, 0],
+          [half, wpY, 0],
+        ]}
+        color="#b0f8ff"
+        lineWidth={1.5}
+        transparent
+        opacity={0.8}
+      />
+      <Line
+        points={[
+          [0, wpY, -half],
+          [0, wpY, half],
+        ]}
+        color="#b0f8ff"
+        lineWidth={1.5}
+        transparent
+        opacity={0.8}
+      />
       {/* Center dot */}
-      <mesh position={[0, wpY + 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={996}>
+      <mesh
+        position={[0, wpY + 0.01, 0]}
+        rotation={[-Math.PI / 2, 0, 0]}
+        renderOrder={996}
+      >
         <circleGeometry args={[1, 24]} />
-        <meshBasicMaterial color="#eaffff" transparent opacity={0.9} depthTest={false} depthWrite={false} />
+        <meshBasicMaterial
+          color="#eaffff"
+          transparent
+          opacity={0.9}
+          depthTest={false}
+          depthWrite={false}
+        />
       </mesh>
     </group>
   );
 }
 
-function getObjectDimensions(obj) {
-  const g = obj.geometry;
-  const s = obj.scale;
-  let w, h, d;
-  switch (obj.type) {
-    case "box":
-    case "wall":
-    case "wedge":
-      w = g.width;
-      h = g.height;
-      d = g.depth;
-      break;
-    case "sphere":
-      w = g.radius * 2;
-      h = g.radius * 2;
-      d = g.radius * 2;
-      break;
-    case "hemisphere":
-      w = g.radius * 2;
-      h = g.radius;
-      d = g.radius * 2;
-      break;
-    case "cylinder":
-      w = Math.max(g.radiusTop, g.radiusBottom) * 2;
-      h = g.height;
-      d = Math.max(g.radiusTop, g.radiusBottom) * 2;
-      break;
-    case "cone":
-    case "pyramid":
-      w = g.radius * 2;
-      h = g.height;
-      d = g.radius * 2;
-      break;
-    case "torus":
-    case "tube":
-      w = (g.radius + g.tube) * 2;
-      h = g.tube * 2;
-      d = (g.radius + g.tube) * 2;
-      break;
-    case "heart":
-    case "star":
-      w = (g.outerRadius || g.size) * 2;
-      h = (g.outerRadius || g.size) * 2;
-      d = g.depth;
-      break;
-    case "text":
-      w = 20;
-      h = g.size || 10;
-      d = g.height || 5;
-      break;
-    case "imported":
-      if (g.bufferGeometry) {
-        if (!g.bufferGeometry.boundingBox)
-          g.bufferGeometry.computeBoundingBox();
-        const bb = g.bufferGeometry.boundingBox;
-        w = bb.max.x - bb.min.x;
-        h = bb.max.y - bb.min.y;
-        d = bb.max.z - bb.min.z;
-      } else {
-        w = 20;
-        h = 20;
-        d = 20;
-      }
-      break;
-    default:
-      w = 20;
-      h = 20;
-      d = 20;
-  }
-  return {
-    width: Math.abs(w * s[0]),
-    height: Math.abs(h * s[1]),
-    depth: Math.abs(d * s[2]),
-  };
-}
+// getObjectDimensions imported from ./dimensions
 
 function DimensionLine({
   start,
@@ -963,15 +829,16 @@ function DimensionRuler({ meshRefs }) {
   const groupRef = useRef();
   const rulerVisible = useDesignStore((s) => s.rulerVisible);
   const units = useDesignStore((s) => s.units);
+  const importedSizeRef = useRef(null);
   const obj = useDesignStore((s) => {
     if (!s.rulerVisible || s.selectedIds.length !== 1) return null;
     return s.objects.find((o) => o.id === s.selectedIds[0]) || null;
   });
-  const dims = obj ? getObjectDimensions(obj) : null;
+  const fallbackDims = obj ? getObjectDimensions(obj) : null;
 
   useFrame(() => {
     if (!groupRef.current) return;
-    if (!obj || !dims) {
+    if (!obj || !fallbackDims) {
       groupRef.current.visible = false;
       return;
     }
@@ -981,35 +848,50 @@ function DimensionRuler({ meshRefs }) {
       return;
     }
     groupRef.current.visible = true;
-    groupRef.current.position.copy(mesh.position);
+    if (obj.type === "imported") {
+      const box = new THREE.Box3().setFromObject(mesh);
+      const center = box.getCenter(new THREE.Vector3());
+      const size = box.getSize(new THREE.Vector3());
+      importedSizeRef.current = {
+        width: size.x,
+        height: size.y,
+        depth: size.z,
+      };
+      groupRef.current.position.copy(center);
+    } else {
+      importedSizeRef.current = null;
+      groupRef.current.position.copy(mesh.position);
+    }
   });
 
-  if (!obj || !dims) return null;
+  if (!obj || !fallbackDims) return null;
 
+  const dims = importedSizeRef.current || fallbackDims;
   const halfW = dims.width / 2;
   const halfH = dims.height / 2;
   const halfD = dims.depth / 2;
   const gap = 4;
+  const baseY = -halfH;
   const fmt = (v) => `${v.toFixed(1)} ${units}`;
 
   return (
     <group ref={groupRef}>
       <DimensionLine
-        start={[-halfW, -halfH - gap, halfD + gap]}
-        end={[halfW, -halfH - gap, halfD + gap]}
+        start={[-halfW, baseY, halfD + gap]}
+        end={[halfW, baseY, halfD + gap]}
         label={fmt(dims.width)}
         color="#ff6b6b"
       />
       <DimensionLine
-        start={[halfW + gap, -halfH, halfD + gap]}
+        start={[halfW + gap, baseY, halfD + gap]}
         end={[halfW + gap, halfH, halfD + gap]}
         label={fmt(dims.height)}
         color="#51cf66"
         offset={[1, 0, 0]}
       />
       <DimensionLine
-        start={[halfW + gap, -halfH - gap, -halfD]}
-        end={[halfW + gap, -halfH - gap, halfD]}
+        start={[halfW + gap, baseY, -halfD]}
+        end={[halfW + gap, baseY, halfD]}
         label={fmt(dims.depth)}
         color="#339af0"
       />
@@ -1193,6 +1075,30 @@ function MeasureTool() {
 // All handle types visible simultaneously: scale squares, rotation arcs, translate arrows
 const AXIS_COLORS = ["#ef4444", "#22c55e", "#3b82f6"];
 const AXIS_LABELS = ["X", "Y", "Z"];
+const HOLE_ROUNDED_EDGE_TYPES = new Set([
+  "sphere",
+  "halfSphere",
+  "cylinder",
+  "halfCylinder",
+  "cone",
+  "torus",
+  "tube",
+  "ellipsoid",
+  "paraboloid",
+  "ring",
+]);
+const HOLE_EDGE_THRESHOLD_BY_TYPE = {
+  torus: 10,
+  tube: 10,
+  ring: 10,
+  cylinder: 20,
+  halfCylinder: 20,
+  cone: 20,
+  sphere: 14,
+  halfSphere: 14,
+  ellipsoid: 2,
+  paraboloid: 14,
+};
 
 const HANDLE_OFFSET = 3;
 
@@ -1380,6 +1286,7 @@ function getScaleHandles(type, geometry, objectDims = null) {
       });
       break;
     case "star":
+    case "starSix":
       handles.push({
         param: "outerRadius",
         dir: [1, 0, 0],
@@ -1399,6 +1306,179 @@ function getScaleHandles(type, geometry, objectDims = null) {
         label: "D",
       });
       break;
+    case "tetrahedron":
+    case "dodecahedron":
+    case "octahedron":
+    case "icosahedron": {
+      const by = -g.radius;
+      handles.push({
+        param: "radius",
+        dir: [1, 0, 0],
+        pos: [g.radius + o, by, 0],
+        label: "R",
+      });
+      handles.push({
+        param: "radius",
+        dir: [-1, 0, 0],
+        pos: [-g.radius - o, by, 0],
+        label: "R",
+      });
+      handles.push({
+        param: "radius",
+        dir: [0, 0, 1],
+        pos: [0, by, g.radius + o],
+        label: "R",
+      });
+      handles.push({
+        param: "radius",
+        dir: [0, 1, 0],
+        pos: [0, g.radius + o, 0],
+        label: "R",
+      });
+      break;
+    }
+    case "ellipsoid": {
+      const by = -g.radiusY;
+      handles.push({
+        param: "radiusX",
+        dir: [1, 0, 0],
+        pos: [g.radiusX + o, by, 0],
+        label: "Rx",
+      });
+      handles.push({
+        param: "radiusX",
+        dir: [-1, 0, 0],
+        pos: [-g.radiusX - o, by, 0],
+        label: "Rx",
+      });
+      handles.push({
+        param: "radiusZ",
+        dir: [0, 0, 1],
+        pos: [0, by, g.radiusZ + o],
+        label: "Rz",
+      });
+      handles.push({
+        param: "radiusZ",
+        dir: [0, 0, -1],
+        pos: [0, by, -g.radiusZ - o],
+        label: "Rz",
+      });
+      handles.push({
+        param: "radiusY",
+        dir: [0, 1, 0],
+        pos: [0, g.radiusY + o, 0],
+        label: "Ry",
+      });
+      break;
+    }
+    case "triangularPrism":
+    case "hexagonalPrism":
+    case "pentagonalPrism": {
+      const by = -g.height / 2;
+      handles.push({
+        param: "radius",
+        dir: [1, 0, 0],
+        pos: [g.radius + o, by, 0],
+        label: "R",
+      });
+      handles.push({
+        param: "radius",
+        dir: [-1, 0, 0],
+        pos: [-g.radius - o, by, 0],
+        label: "R",
+      });
+      handles.push({
+        param: "radius",
+        dir: [0, 0, 1],
+        pos: [0, by, g.radius + o],
+        label: "R",
+      });
+      handles.push({
+        param: "height",
+        dir: [0, 1, 0],
+        pos: [0, g.height / 2 + o, 0],
+        label: "H",
+      });
+      break;
+    }
+    case "pentagonalPyramid":
+    case "squarePyramid": {
+      const by = -g.height / 2;
+      handles.push({
+        param: "radius",
+        dir: [1, 0, 0],
+        pos: [g.radius + o, by, 0],
+        label: "R",
+      });
+      handles.push({
+        param: "radius",
+        dir: [-1, 0, 0],
+        pos: [-g.radius - o, by, 0],
+        label: "R",
+      });
+      handles.push({
+        param: "height",
+        dir: [0, 1, 0],
+        pos: [0, g.height / 2 + o, 0],
+        label: "H",
+      });
+      break;
+    }
+    case "ring": {
+      handles.push({
+        param: "outerRadius",
+        dir: [1, 0, 0],
+        pos: [g.outerRadius + o, -g.height / 2, 0],
+        label: "R",
+      });
+      handles.push({
+        param: "outerRadius",
+        dir: [0, 0, 1],
+        pos: [0, -g.height / 2, g.outerRadius + o],
+        label: "R",
+      });
+      handles.push({
+        param: "innerRadius",
+        dir: [-1, 0, 0],
+        pos: [-g.innerRadius - o, -g.height / 2, 0],
+        label: "Ri",
+      });
+      handles.push({
+        param: "height",
+        dir: [0, 1, 0],
+        pos: [0, g.height / 2 + o, 0],
+        label: "H",
+      });
+      break;
+    }
+    case "paraboloid": {
+      const by = -g.height / 2;
+      handles.push({
+        param: "radius",
+        dir: [1, 0, 0],
+        pos: [g.radius + o, by, 0],
+        label: "R",
+      });
+      handles.push({
+        param: "radius",
+        dir: [-1, 0, 0],
+        pos: [-g.radius - o, by, 0],
+        label: "R",
+      });
+      handles.push({
+        param: "radius",
+        dir: [0, 0, 1],
+        pos: [0, by, g.radius + o],
+        label: "R",
+      });
+      handles.push({
+        param: "height",
+        dir: [0, 1, 0],
+        pos: [0, g.height / 2 + o, 0],
+        label: "H",
+      });
+      break;
+    }
     case "imported": {
       const d = objectDims || { width: 20, height: 20, depth: 20 };
       const by = -d.height / 2;
@@ -1549,12 +1629,22 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
   const mesh = meshRefs.current[selectedId];
   if (!mesh) return null;
 
-  const hw = dims.width / 2;
-  const hh = dims.height / 2;
-  const hd = dims.depth / 2;
-
   const worldPos = new THREE.Vector3();
   mesh.getWorldPosition(worldPos);
+  let hw = dims.width / 2;
+  let hh = dims.height / 2;
+  let hd = dims.depth / 2;
+
+  // Imported/CSG meshes may carry a local pivot offset; anchor handles to
+  // world AABB center/base so base handles don't drift below the visual mesh.
+  if (obj.type === "imported") {
+    const box = new THREE.Box3().setFromObject(mesh);
+    const boxSize = box.getSize(new THREE.Vector3());
+    box.getCenter(worldPos);
+    hw = boxSize.x / 2;
+    hh = boxSize.y / 2;
+    hd = boxSize.z / 2;
+  }
 
   const scaleHandles = getScaleHandles(obj.type, obj.geometry, rawDims);
 
@@ -1601,7 +1691,7 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
     },
     {
       axis: 1,
-      pos: [hw + 3, -hh - 3, 0],
+      pos: [hw + 3, -hh, 0],
       arcRot: [-Math.PI / 2, 0, 0],
       color: "#22c55e",
     },
@@ -1633,19 +1723,35 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
       tube: ["radius", "tube", "radius"],
       heart: ["size", "depth", "size"],
       star: ["outerRadius", "depth", "outerRadius"],
+      starSix: ["outerRadius", "depth", "outerRadius"],
       text: ["size", "height", "size"],
+      tetrahedron: ["radius", "radius", "radius"],
+      dodecahedron: ["radius", "radius", "radius"],
+      octahedron: ["radius", "radius", "radius"],
+      icosahedron: ["radius", "radius", "radius"],
+      ellipsoid: ["radiusX", "radiusY", "radiusZ"],
+      triangularPrism: ["radius", "height", "radius"],
+      hexagonalPrism: ["radius", "height", "radius"],
+      pentagonalPrism: ["radius", "height", "radius"],
+      pentagonalPyramid: ["radius", "height", "radius"],
+      squarePyramid: ["radius", "height", "radius"],
+      ring: ["outerRadius", "height", "outerRadius"],
+      paraboloid: ["radius", "height", "radius"],
     };
     const axisLinkedMap = {
       cylinder: ["radiusTop", null, "radiusTop"],
     };
 
     const paramAxes = axisParamMap[targetObj.type];
-    if (!paramAxes) return { param: handle.param, linkedParam: handle.linkedParam };
+    if (!paramAxes)
+      return { param: handle.param, linkedParam: handle.linkedParam };
 
     const q = new THREE.Quaternion();
     targetMesh.getWorldQuaternion(q);
     const invQ = q.clone().invert();
-    const localDir = new THREE.Vector3(...handle.dir).applyQuaternion(invQ).normalize();
+    const localDir = new THREE.Vector3(...handle.dir)
+      .applyQuaternion(invQ)
+      .normalize();
     const ax = Math.abs(localDir.x);
     const ay = Math.abs(localDir.y);
     const az = Math.abs(localDir.z);
@@ -1654,7 +1760,8 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
     return {
       param: paramAxes[axis] || handle.param,
       linkedParam:
-        (axisLinkedMap[targetObj.type] && axisLinkedMap[targetObj.type][axis]) ||
+        (axisLinkedMap[targetObj.type] &&
+          axisLinkedMap[targetObj.type][axis]) ||
         handle.linkedParam,
     };
   };
@@ -1792,13 +1899,18 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
           : handle.scaleAxis === 2
             ? rawDims.depth
             : undefined;
-    drag.current = { type: "scale", handle, dirW, param, linkedParam, baseSize };
+    drag.current = {
+      type: "scale",
+      handle,
+      dirW,
+      param,
+      linkedParam,
+      baseSize,
+    };
     startPt.copy(e.point);
     startObjScale.current = [...obj.scale];
     startValue.current = param ? obj.geometry[param] : 0;
-    startLinkedValue.current = linkedParam
-      ? obj.geometry[linkedParam]
-      : 0;
+    startLinkedValue.current = linkedParam ? obj.geometry[linkedParam] : 0;
   };
 
   const onTranslateDown = (e, arrow) => {
@@ -1869,35 +1981,44 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
           {/* Scale/Translate handles - world or local based on workplane mode */}
           <group quaternion={workplaneMode ? mesh.quaternion : identityQuat}>
             {scaleHandles.map((h, i) => {
-            const [dx, dy, dz] = h.dir;
-            let rotation;
-            if (dy > 0) {
-              rotation = [0, 0, 0];
-            } else if (dy < 0) {
-              rotation = [Math.PI, 0, 0];
-            } else if (dx > 0) {
-              rotation = [-Math.PI / 2, 0, -Math.PI / 2];
-            } else if (dx < 0) {
-              rotation = [-Math.PI / 2, 0, Math.PI / 2];
-            } else if (dz > 0) {
-              rotation = [-Math.PI / 2, 0, Math.PI];
-            } else {
-              rotation = [-Math.PI / 2, 0, 0];
-            }
-            return (
-              <group key={`sc${i}`} position={h.pos} rotation={rotation}>
-                <mesh
-                  onPointerDown={(e) => onScaleDown(e, h)}
-                  renderOrder={999}
-                  geometry={scaleTriGeo}
-                >
-                  <meshBasicMaterial color="#1a1a2e" depthTest={false} />
-                </mesh>
-                <lineSegments renderOrder={1000} geometry={scaleTriEdges}>
-                  <lineBasicMaterial color="white" depthTest={false} />
-                </lineSegments>
-              </group>
-            );
+              const [dx, dy, dz] = h.dir;
+              let rotation;
+              if (dy > 0) {
+                rotation = [0, 0, 0];
+              } else if (dy < 0) {
+                rotation = [Math.PI, 0, 0];
+              } else if (dx > 0) {
+                rotation = [-Math.PI / 2, 0, -Math.PI / 2];
+              } else if (dx < 0) {
+                rotation = [-Math.PI / 2, 0, Math.PI / 2];
+              } else if (dz > 0) {
+                rotation = [-Math.PI / 2, 0, Math.PI];
+              } else {
+                rotation = [-Math.PI / 2, 0, 0];
+              }
+              return (
+                <group key={`sc${i}`} position={h.pos} rotation={rotation}>
+                  <mesh
+                    onPointerDown={(e) => onScaleDown(e, h)}
+                    renderOrder={999}
+                    geometry={scaleTriGeo}
+                    userData={{ isTransformHandle: true }}
+                  >
+                    <meshBasicMaterial
+                      color="#1a1a2e"
+                      depthTest={false}
+                      depthWrite={false}
+                    />
+                  </mesh>
+                  <lineSegments renderOrder={1000} geometry={scaleTriEdges}>
+                    <lineBasicMaterial
+                      color="white"
+                      depthTest={false}
+                      depthWrite={false}
+                    />
+                  </lineSegments>
+                </group>
+              );
             })}
 
             {/* Translate arrows - small cones outside each face */}
@@ -1908,11 +2029,13 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
                 rotation={a.rot}
                 onPointerDown={(e) => onTranslateDown(e, a)}
                 renderOrder={999}
+                userData={{ isTransformHandle: true }}
               >
                 <coneGeometry args={[1.2, 3, 6]} />
                 <meshBasicMaterial
                   color={a.color}
                   depthTest={false}
+                  depthWrite={false}
                   transparent
                   opacity={0.65}
                 />
@@ -1940,6 +2063,7 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
                       transparent
                       opacity={0.25}
                       depthTest={false}
+                      depthWrite={false}
                       side={THREE.DoubleSide}
                     />
                   </mesh>
@@ -1953,12 +2077,14 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
                   }}
                   onPointerDown={(e) => onRotateDown(e, arc)}
                   renderOrder={999}
+                  userData={{ isTransformHandle: true }}
                 >
                   <meshBasicMaterial
                     color={arc.color}
                     transparent
                     opacity={0.65}
                     depthTest={false}
+                    depthWrite={false}
                     side={THREE.DoubleSide}
                   />
                 </mesh>
@@ -1987,8 +2113,14 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
   );
 }
 
-function GroupObjectHandles({ meshRefs, selectedIds, orbitRef, setTransforming }) {
+function GroupObjectHandles({
+  meshRefs,
+  selectedIds,
+  orbitRef,
+  setTransforming,
+}) {
   const updateObjectSilent = useDesignStore((s) => s.updateObjectSilent);
+  const batchUpdateObjects = useDesignStore((s) => s.batchUpdateObjects);
   const snapIncrement = useDesignStore((s) => s.snapIncrement);
   const objects = useDesignStore((s) => s.objects);
   const { camera, gl } = useThree();
@@ -2098,17 +2230,19 @@ function GroupObjectHandles({ meshRefs, selectedIds, orbitRef, setTransforming }
         const d = hitPoint.clone().sub(startPt).dot(drag.current.dirW);
         const si = useDesignStore.getState().snapIncrement;
         const snapped = si ? Math.round(d / si) * si : d;
+        const updates = {};
         drag.current.ids.forEach((id) => {
           const s = drag.current.start[id];
           if (!s) return;
-          updateObjectSilent(id, {
+          updates[id] = {
             position: [
               s.position[0] + drag.current.dirW.x * snapped,
               s.position[1] + drag.current.dirW.y * snapped,
               s.position[2] + drag.current.dirW.z * snapped,
             ],
-          });
+          };
         });
+        batchUpdateObjects(updates);
       }
       return;
     }
@@ -2120,6 +2254,7 @@ function GroupObjectHandles({ meshRefs, selectedIds, orbitRef, setTransforming }
         if (domEvent.shiftKey) factor = Math.round(factor * 10) / 10;
         const axis = drag.current.axis;
         const c = drag.current.center;
+        const updates = {};
         drag.current.ids.forEach((id) => {
           const s = drag.current.start[id];
           if (!s) return;
@@ -2127,8 +2262,9 @@ function GroupObjectHandles({ meshRefs, selectedIds, orbitRef, setTransforming }
           pos[axis] = c[axis] + (s.position[axis] - c[axis]) * factor;
           const scale = [...s.scale];
           scale[axis] = s.scale[axis] * factor;
-          updateObjectSilent(id, { position: pos, scale });
+          updates[id] = { position: pos, scale };
         });
+        batchUpdateObjects(updates);
       }
       return;
     }
@@ -2136,7 +2272,10 @@ function GroupObjectHandles({ meshRefs, selectedIds, orbitRef, setTransforming }
     if (drag.current.type === "rotate") {
       const mx = domEvent.clientX - rect.left;
       const my = domEvent.clientY - rect.top;
-      const cur = Math.atan2(my - drag.current.screenCy, mx - drag.current.screenCx);
+      const cur = Math.atan2(
+        my - drag.current.screenCy,
+        mx - drag.current.screenCx,
+      );
       let step = cur - prevAngleRef.current;
       while (step > Math.PI) step -= 2 * Math.PI;
       while (step < -Math.PI) step += 2 * Math.PI;
@@ -2148,19 +2287,27 @@ function GroupObjectHandles({ meshRefs, selectedIds, orbitRef, setTransforming }
         const snap = THREE.MathUtils.degToRad(15);
         total = Math.round(total / snap) * snap;
       }
-      const deltaQ = new THREE.Quaternion().setFromAxisAngle(drag.current.worldAxis, total);
+      const deltaQ = new THREE.Quaternion().setFromAxisAngle(
+        drag.current.worldAxis,
+        total,
+      );
       const c = new THREE.Vector3(...drag.current.center);
+      const updates = {};
       drag.current.ids.forEach((id) => {
         const s = drag.current.start[id];
         if (!s) return;
-        const p = new THREE.Vector3(...s.position).sub(c).applyQuaternion(deltaQ).add(c);
+        const p = new THREE.Vector3(...s.position)
+          .sub(c)
+          .applyQuaternion(deltaQ)
+          .add(c);
         const qStart = new THREE.Quaternion().setFromEuler(
           new THREE.Euler(s.rotation[0], s.rotation[1], s.rotation[2], "XYZ"),
         );
         const qNew = deltaQ.clone().multiply(qStart);
         const e = new THREE.Euler().setFromQuaternion(qNew, "XYZ");
-        updateObjectSilent(id, { position: [p.x, p.y, p.z], rotation: [e.x, e.y, e.z] });
+        updates[id] = { position: [p.x, p.y, p.z], rotation: [e.x, e.y, e.z] };
       });
+      batchUpdateObjects(updates);
       setAngleInfo({
         axis: drag.current.axis,
         deg: Math.round(THREE.MathUtils.radToDeg(total)),
@@ -2211,13 +2358,22 @@ function GroupObjectHandles({ meshRefs, selectedIds, orbitRef, setTransforming }
     setTransforming(true);
     const dirW = new THREE.Vector3(...dir).normalize();
     makeDragPlane(dirW, e.point);
-    drag.current = { type: "translate", ids: [...selectedIds], start: captureStart(), dirW };
+    drag.current = {
+      type: "translate",
+      ids: [...selectedIds],
+      start: captureStart(),
+      dirW,
+    };
     startPt.copy(e.point);
   };
 
   const onScaleDown = (e, axis) => {
     beginDrag(e);
-    const dirMap = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)];
+    const dirMap = [
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(0, 1, 0),
+      new THREE.Vector3(0, 0, 1),
+    ];
     const dirW = dirMap[axis].clone();
     makeDragPlane(dirW, e.point);
     drag.current = {
@@ -2245,7 +2401,10 @@ function GroupObjectHandles({ meshRefs, selectedIds, orbitRef, setTransforming }
     const cx = ((projected.x + 1) / 2) * rect.width;
     const cy = ((1 - projected.y) / 2) * rect.height;
     const ne = e.nativeEvent || e;
-    prevAngleRef.current = Math.atan2(ne.clientY - rect.top - cy, ne.clientX - rect.left - cx);
+    prevAngleRef.current = Math.atan2(
+      ne.clientY - rect.top - cy,
+      ne.clientX - rect.left - cx,
+    );
     accumDelta.current = 0;
     const camDir = new THREE.Vector3();
     camera.getWorldDirection(camDir);
@@ -2267,24 +2426,74 @@ function GroupObjectHandles({ meshRefs, selectedIds, orbitRef, setTransforming }
   const rotating = hoveredArc !== null && drag.current?.type === "rotate";
 
   const translateArrows = [
-    { dir: [1, 0, 0], pos: [hw + 10, 0, 0], rot: [0, 0, -Math.PI / 2], color: "#ef4444" },
-    { dir: [-1, 0, 0], pos: [-hw - 10, 0, 0], rot: [0, 0, Math.PI / 2], color: "#ef4444" },
+    {
+      dir: [1, 0, 0],
+      pos: [hw + 10, 0, 0],
+      rot: [0, 0, -Math.PI / 2],
+      color: "#ef4444",
+    },
+    {
+      dir: [-1, 0, 0],
+      pos: [-hw - 10, 0, 0],
+      rot: [0, 0, Math.PI / 2],
+      color: "#ef4444",
+    },
     { dir: [0, 1, 0], pos: [0, hh + 10, 0], rot: [0, 0, 0], color: "#22c55e" },
-    { dir: [0, 0, 1], pos: [0, 0, hd + 10], rot: [Math.PI / 2, 0, 0], color: "#3b82f6" },
-    { dir: [0, 0, -1], pos: [0, 0, -hd - 10], rot: [-Math.PI / 2, 0, 0], color: "#3b82f6" },
+    {
+      dir: [0, 0, 1],
+      pos: [0, 0, hd + 10],
+      rot: [Math.PI / 2, 0, 0],
+      color: "#3b82f6",
+    },
+    {
+      dir: [0, 0, -1],
+      pos: [0, 0, -hd - 10],
+      rot: [-Math.PI / 2, 0, 0],
+      color: "#3b82f6",
+    },
   ];
   const scaleHandles = [
     // X/Z handles sit on the base ring of the combined selection (y = -hh)
-    { axis: 0, pos: [hw + 5, -hh, 0], rot: [-Math.PI / 2, 0, -Math.PI / 2], color: "#ef4444" },
-    { axis: 0, pos: [-hw - 5, -hh, 0], rot: [-Math.PI / 2, 0, Math.PI / 2], color: "#ef4444" },
-    { axis: 2, pos: [0, -hh, hd + 5], rot: [Math.PI / 2, 0, 0], color: "#3b82f6" },
-    { axis: 2, pos: [0, -hh, -hd - 5], rot: [-Math.PI / 2, 0, 0], color: "#3b82f6" },
+    {
+      axis: 0,
+      pos: [hw + 5, -hh, 0],
+      rot: [-Math.PI / 2, 0, -Math.PI / 2],
+      color: "#ef4444",
+    },
+    {
+      axis: 0,
+      pos: [-hw - 5, -hh, 0],
+      rot: [-Math.PI / 2, 0, Math.PI / 2],
+      color: "#ef4444",
+    },
+    {
+      axis: 2,
+      pos: [0, -hh, hd + 5],
+      rot: [Math.PI / 2, 0, 0],
+      color: "#3b82f6",
+    },
+    {
+      axis: 2,
+      pos: [0, -hh, -hd - 5],
+      rot: [-Math.PI / 2, 0, 0],
+      color: "#3b82f6",
+    },
     // Y handle remains at top
     { axis: 1, pos: [0, hh + 5, 0], rot: [0, 0, 0], color: "#22c55e" },
   ];
   const rotationArcs = [
-    { axis: 0, pos: [-hw - 3, hh / 2, hd + 3], arcRot: [0, Math.PI / 2, 0], color: "#ef4444" },
-    { axis: 1, pos: [hw + 3, -hh - 3, 0], arcRot: [-Math.PI / 2, 0, 0], color: "#22c55e" },
+    {
+      axis: 0,
+      pos: [-hw - 3, hh / 2, hd + 3],
+      arcRot: [0, Math.PI / 2, 0],
+      color: "#ef4444",
+    },
+    {
+      axis: 1,
+      pos: [hw + 3, -hh, 0],
+      arcRot: [-Math.PI / 2, 0, 0],
+      color: "#22c55e",
+    },
     { axis: 2, pos: [hw + 3, 0, hd + 3], arcRot: [0, 0, 0], color: "#3b82f6" },
   ];
 
@@ -2298,11 +2507,20 @@ function GroupObjectHandles({ meshRefs, selectedIds, orbitRef, setTransforming }
                 onPointerDown={(e) => onScaleDown(e, h.axis)}
                 renderOrder={999}
                 geometry={scaleTriGeo}
+                userData={{ isTransformHandle: true }}
               >
-                <meshBasicMaterial color="#1a1a2e" depthTest={false} />
+                <meshBasicMaterial
+                  color="#1a1a2e"
+                  depthTest={false}
+                  depthWrite={false}
+                />
               </mesh>
               <lineSegments renderOrder={1000} geometry={scaleTriEdges}>
-                <lineBasicMaterial color="white" depthTest={false} />
+                <lineBasicMaterial
+                  color="white"
+                  depthTest={false}
+                  depthWrite={false}
+                />
               </lineSegments>
             </group>
           ))}
@@ -2313,9 +2531,16 @@ function GroupObjectHandles({ meshRefs, selectedIds, orbitRef, setTransforming }
               rotation={a.rot}
               onPointerDown={(e) => onTranslateDown(e, a.dir)}
               renderOrder={999}
+              userData={{ isTransformHandle: true }}
             >
               <coneGeometry args={[1.2, 3, 6]} />
-              <meshBasicMaterial color={a.color} depthTest={false} transparent opacity={0.65} />
+              <meshBasicMaterial
+                color={a.color}
+                depthTest={false}
+                depthWrite={false}
+                transparent
+                opacity={0.65}
+              />
             </mesh>
           ))}
         </group>
@@ -2324,7 +2549,11 @@ function GroupObjectHandles({ meshRefs, selectedIds, orbitRef, setTransforming }
         {rotationArcs.map((arc) => {
           if (rotating && hoveredArc !== arc.axis) return null;
           return (
-            <group key={`grot${arc.axis}`} position={arc.pos} rotation={arc.arcRot}>
+            <group
+              key={`grot${arc.axis}`}
+              position={arc.pos}
+              rotation={arc.arcRot}
+            >
               {hoveredArc === arc.axis && (
                 <mesh geometry={hoverRingGeo} renderOrder={998}>
                   <meshBasicMaterial
@@ -2332,6 +2561,7 @@ function GroupObjectHandles({ meshRefs, selectedIds, orbitRef, setTransforming }
                     transparent
                     opacity={0.25}
                     depthTest={false}
+                    depthWrite={false}
                     side={THREE.DoubleSide}
                   />
                 </mesh>
@@ -2340,16 +2570,19 @@ function GroupObjectHandles({ meshRefs, selectedIds, orbitRef, setTransforming }
                 geometry={arcGeo}
                 onPointerEnter={() => setHoveredArc(arc.axis)}
                 onPointerLeave={() => {
-                  if (!drag.current || drag.current.type !== "rotate") setHoveredArc(null);
+                  if (!drag.current || drag.current.type !== "rotate")
+                    setHoveredArc(null);
                 }}
                 onPointerDown={(e) => onRotateDown(e, arc.axis)}
                 renderOrder={999}
+                userData={{ isTransformHandle: true }}
               >
                 <meshBasicMaterial
                   color={arc.color}
                   transparent
                   opacity={0.65}
                   depthTest={false}
+                  depthWrite={false}
                   side={THREE.DoubleSide}
                 />
               </mesh>
@@ -2357,8 +2590,15 @@ function GroupObjectHandles({ meshRefs, selectedIds, orbitRef, setTransforming }
           );
         })}
         {angleInfo && (
-          <Html center style={{ pointerEvents: "none" }} position={[0, hh + arcR + 4, 0]}>
-            <div className="dml-rotation-label" style={{ color: AXIS_COLORS[angleInfo.axis] }}>
+          <Html
+            center
+            style={{ pointerEvents: "none" }}
+            position={[0, hh + arcR + 4, 0]}
+          >
+            <div
+              className="dml-rotation-label"
+              style={{ color: AXIS_COLORS[angleInfo.axis] }}
+            >
               {AXIS_LABELS[angleInfo.axis]}: {angleInfo.deg}°
             </div>
           </Html>
@@ -2366,6 +2606,40 @@ function GroupObjectHandles({ meshRefs, selectedIds, orbitRef, setTransforming }
       </group>
     </>
   );
+}
+
+const HANDLES_LAYER = 31;
+
+function HandlesOverlay({ children }) {
+  const groupRef = useRef();
+  const { gl, scene, camera, raycaster } = useThree();
+
+  useEffect(() => {
+    raycaster.layers.enable(HANDLES_LAYER);
+    return () => raycaster.layers.disable(HANDLES_LAYER);
+  }, [raycaster]);
+
+  useFrame(() => {
+    if (!groupRef.current) return;
+    groupRef.current.traverse((child) => {
+      if (child.layers.isEnabled(0)) {
+        child.layers.disable(0);
+        child.layers.enable(HANDLES_LAYER);
+      }
+    });
+  }, -1);
+
+  useFrame(() => {
+    if (!groupRef.current || groupRef.current.children.length === 0) return;
+    gl.autoClear = false;
+    gl.setRenderTarget(null);
+    gl.clearDepth();
+    camera.layers.set(HANDLES_LAYER);
+    gl.render(scene, camera);
+    camera.layers.set(0);
+  }, 2);
+
+  return <group ref={groupRef}>{children}</group>;
 }
 
 const SNAP_THRESHOLD = 3;
@@ -2498,7 +2772,11 @@ function MirrorHintOverlay() {
   if (!show) return null;
 
   const label =
-    show.axis === "x" ? "Mirror X \u2194" : show.axis === "y" ? "Mirror Y \u2195" : "Mirror Z \u2194";
+    show.axis === "x"
+      ? "Mirror X \u2194"
+      : show.axis === "y"
+        ? "Mirror Y \u2195"
+        : "Mirror Z \u2194";
 
   return (
     <Html fullscreen style={{ pointerEvents: "none" }}>
@@ -2511,7 +2789,11 @@ function MirrorPreviewObject({ obj, axis, centerAxis }) {
   const previewType = obj.type === "text" ? "box" : obj.type;
   const previewParams =
     obj.type === "text"
-      ? { width: 20, height: obj.geometry.size || 10, depth: obj.geometry.height || 5 }
+      ? {
+          width: 20,
+          height: obj.geometry.size || 10,
+          depth: obj.geometry.height || 5,
+        }
       : obj.geometry;
   const geometry = useObjectGeometry(previewType, previewParams);
   const edges = useMemo(() => new THREE.EdgesGeometry(geometry), [geometry]);
@@ -2650,7 +2932,12 @@ function MirrorAxisGizmo({ meshRefs, selectedIds }) {
               renderOrder={1000}
             >
               <coneGeometry args={[1.4, 3.2, 8]} />
-              <meshBasicMaterial color={a.color} depthTest={false} transparent opacity={0.95} />
+              <meshBasicMaterial
+                color={a.color}
+                depthTest={false}
+                transparent
+                opacity={0.95}
+              />
             </mesh>
             <mesh
               position={a.coneNeg}
@@ -2665,10 +2952,21 @@ function MirrorAxisGizmo({ meshRefs, selectedIds }) {
               renderOrder={1000}
             >
               <coneGeometry args={[1.4, 3.2, 8]} />
-              <meshBasicMaterial color={a.color} depthTest={false} transparent opacity={0.95} />
+              <meshBasicMaterial
+                color={a.color}
+                depthTest={false}
+                transparent
+                opacity={0.95}
+              />
             </mesh>
-            <Html position={a.labelPos} center style={{ pointerEvents: "none" }}>
-              <div className="dml-mirror-axis-label">{a.axis.toUpperCase()}</div>
+            <Html
+              position={a.labelPos}
+              center
+              style={{ pointerEvents: "none" }}
+            >
+              <div className="dml-mirror-axis-label">
+                {a.axis.toUpperCase()}
+              </div>
             </Html>
           </group>
         ))}
@@ -2739,7 +3037,12 @@ function SceneContent() {
         const cur = state.objects.find((o) => o.id === d.anchorId);
         if (!cur) return;
 
-        const draggedHalfH = getFloorY(cur.type, cur.geometry, cur.rotation, cur.scale);
+        const draggedHalfH = getFloorY(
+          cur.type,
+          cur.geometry,
+          cur.rotation,
+          cur.scale,
+        );
         let ny = cur.position[1];
 
         if (state.faceSnap) {
@@ -2756,7 +3059,10 @@ function SceneContent() {
               new THREE.Vector3(nx, 500, nz),
               new THREE.Vector3(0, -1, 0),
             );
-            const surfaceHits = surfaceRaycaster.intersectObjects(otherMeshes, false);
+            const surfaceHits = surfaceRaycaster.intersectObjects(
+              otherMeshes,
+              false,
+            );
             const topHit = surfaceHits.find((h) => {
               let p = h.object;
               while (p) {
@@ -2781,13 +3087,15 @@ function SceneContent() {
         const dx = nx - anchorStart[0];
         const dy = ny - anchorStart[1];
         const dz = nz - anchorStart[2];
+        const dragUpdates = {};
         d.ids.forEach((id) => {
           const start = d.startPositions[id];
           if (!start) return;
-          updateObjectSilent(id, {
+          dragUpdates[id] = {
             position: [start[0] + dx, start[1] + dy, start[2] + dz],
-          });
+          };
         });
+        useDesignStore.getState().batchUpdateObjects(dragUpdates);
       }
     },
     [
@@ -2815,6 +3123,15 @@ function SceneContent() {
 
   const handleObjDragStart = useCallback(
     (e, id) => {
+      const handleHit = (e.intersections || []).some((hit) => {
+        let node = hit.object;
+        while (node) {
+          if (node.userData?.isTransformHandle) return true;
+          node = node.parent;
+        }
+        return false;
+      });
+      if (handleHit) return;
       e.stopPropagation();
       const state = useDesignStore.getState();
       const obj = state.objects.find((o) => o.id === id);
@@ -2958,22 +3275,24 @@ function SceneContent() {
         />
       ))}
 
-      {!mirrorMode &&
-        (selectedIds.length > 1 ? (
-          <GroupObjectHandles
-            meshRefs={meshRefs}
-            selectedIds={selectedIds}
-            orbitRef={orbitRef}
-            setTransforming={setTransforming}
-          />
-        ) : (
-          <ObjectHandles
-            meshRefs={meshRefs}
-            selectedId={selectedId}
-            orbitRef={orbitRef}
-            setTransforming={setTransforming}
-          />
-        ))}
+      <HandlesOverlay>
+        {!mirrorMode &&
+          (selectedIds.length > 1 ? (
+            <GroupObjectHandles
+              meshRefs={meshRefs}
+              selectedIds={selectedIds}
+              orbitRef={orbitRef}
+              setTransforming={setTransforming}
+            />
+          ) : (
+            <ObjectHandles
+              meshRefs={meshRefs}
+              selectedId={selectedId}
+              orbitRef={orbitRef}
+              setTransforming={setTransforming}
+            />
+          ))}
+      </HandlesOverlay>
 
       <MirrorAxisGizmo meshRefs={meshRefs} selectedIds={selectedIds} />
 
@@ -3006,13 +3325,13 @@ function SceneContent() {
       <EffectComposer autoClear={false}>
         <Outline
           selection={selectedOutlineMeshes}
-          edgeStrength={15}
+          edgeStrength={30}
           pulseSpeed={0.5}
           visibleEdgeColor={0x00d4ff}
-          hiddenEdgeColor={0x00aadd}
-          blur
+          hiddenEdgeColor={0x00d4ff}
           kernelSize={KernelSize.MEDIUM}
           xRay={true}
+          blendFunction={BlendFunction.ADD}
         />
       </EffectComposer>
 
