@@ -42,7 +42,7 @@ import {
   sceneInteracting,
 } from "./store";
 import { createGeometry } from "./geometryFactory";
-import { getObjectDimensions, getFloorY } from "./dimensions";
+import { getObjectDimensions, getFloorY, getWorldBounds } from "./dimensions";
 
 const toonGradientMap = (() => {
   const colors = new Uint8Array([60, 100, 160, 220, 255]);
@@ -992,14 +992,13 @@ function DragPreview() {
     ? "#ff4444"
     : defaults?.color || "#6366f1";
 
-  const previewType = draggingShape
-    ? draggingShape.type === "text"
-      ? "box"
-      : draggingShape.type
-    : "box";
+  const previewType = draggingShape ? draggingShape.type : "box";
   const previewParams = draggingShape
     ? draggingShape.type === "text"
-      ? { width: 20, height: 10, depth: 5 }
+      ? {
+          ...(defaults?.geometry || {}),
+          text: draggingShape.text || defaults?.geometry?.text || "Text",
+        }
       : defaults?.geometry || SHAPE_DEFAULTS.box.geometry
     : SHAPE_DEFAULTS.box.geometry;
   const previewGeo = useObjectGeometry(previewType, previewParams);
@@ -1049,15 +1048,8 @@ function DragPreview() {
 }
 
 function ArrayPreviewGhost({ obj, position }) {
-  const previewType = obj.type === "text" ? "box" : obj.type;
-  const previewParams =
-    obj.type === "text"
-      ? {
-          width: 20,
-          height: obj.geometry.size || 10,
-          depth: obj.geometry.height || 5,
-        }
-      : obj.geometry;
+  const previewType = obj.type;
+  const previewParams = obj.geometry;
   const previewGeo = useObjectGeometry(previewType, previewParams);
 
   return (
@@ -1720,20 +1712,49 @@ function getScaleHandles(type, geometry, objectDims = null) {
       break;
     }
     case "torus":
-    case "tube":
+    case "tube": {
+      const outerX = (objectDims?.width ?? (g.radius + g.tube) * 2) / 2;
+      const outerY = (objectDims?.height ?? (g.radius + g.tube) * 2) / 2;
+      const outerZ = (objectDims?.depth ?? g.tube * 2) / 2;
+      const by = -outerY;
       handles.push({
         param: "radius",
         dir: [1, 0, 0],
-        pos: [g.radius + g.tube + o, 0, 0],
+        pos: [outerX + o, by, 0],
+        label: "R",
+      });
+      handles.push({
+        param: "radius",
+        dir: [-1, 0, 0],
+        pos: [-outerX - o, by, 0],
+        label: "R",
+      });
+      handles.push({
+        param: "radius",
+        dir: [0, 1, 0],
+        pos: [0, outerY + o, 0],
+        label: "R",
+      });
+      handles.push({
+        param: "radius",
+        dir: [0, -1, 0],
+        pos: [0, -outerY - o, 0],
         label: "R",
       });
       handles.push({
         param: "tube",
         dir: [0, 0, 1],
-        pos: [g.radius, 0, g.tube + o],
+        pos: [0, by, outerZ + o],
+        label: "T",
+      });
+      handles.push({
+        param: "tube",
+        dir: [0, 0, -1],
+        pos: [0, by, -outerZ - o],
         label: "T",
       });
       break;
+    }
     case "heart":
       handles.push({
         param: "size",
@@ -1769,6 +1790,46 @@ function getScaleHandles(type, geometry, objectDims = null) {
         label: "D",
       });
       break;
+    case "text": {
+      const text = g.text || "Text";
+      const size = g.size || 10;
+      const width = objectDims?.width ?? Math.max(size * 2, text.length * size * 0.6);
+      const height = objectDims?.height ?? size;
+      const depth = objectDims?.depth ?? ((g.height || 5) + 0.6);
+      const by = -height / 2;
+      const zHandleDist = Math.max(depth / 2 + o, 6);
+      handles.push({
+        scaleAxis: 0,
+        dir: [1, 0, 0],
+        pos: [width / 2 + o, by, 0],
+        label: "W",
+      });
+      handles.push({
+        scaleAxis: 0,
+        dir: [-1, 0, 0],
+        pos: [-width / 2 - o, by, 0],
+        label: "W",
+      });
+      handles.push({
+        scaleAxis: 2,
+        dir: [0, 0, 1],
+        pos: [0, 0, zHandleDist],
+        label: "D",
+      });
+      handles.push({
+        scaleAxis: 2,
+        dir: [0, 0, -1],
+        pos: [0, 0, -zHandleDist],
+        label: "D",
+      });
+      handles.push({
+        scaleAxis: 1,
+        dir: [0, 1, 0],
+        pos: [0, height / 2 + o, 0],
+        label: "H",
+      });
+      break;
+    }
     case "tetrahedron":
     case "dodecahedron":
     case "octahedron":
@@ -1983,7 +2044,13 @@ function getScaleHandles(type, geometry, objectDims = null) {
   return handles;
 }
 
-function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
+function ObjectHandles({
+  meshRefs,
+  selectedId,
+  orbitRef,
+  setTransforming,
+  transforming = false,
+}) {
   const updateObjectSilent = useDesignStore((s) => s.updateObjectSilent);
   const workplaneMode = useDesignStore((s) => s.workplaneMode);
   const obj = useDesignStore((s) => {
@@ -2015,6 +2082,20 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
   const caster = useMemo(() => new THREE.Raycaster(), []);
   const centerPt = useMemo(() => new THREE.Vector3(), []);
   const identityQuat = useMemo(() => new THREE.Quaternion(), []);
+  const objectQuat = useMemo(() => {
+    const q = new THREE.Quaternion();
+    if (obj?.rotation) {
+      q.setFromEuler(
+        new THREE.Euler(
+          obj.rotation[0] || 0,
+          obj.rotation[1] || 0,
+          obj.rotation[2] || 0,
+          "XYZ",
+        ),
+      );
+    }
+    return q;
+  }, [obj?.rotation?.[0], obj?.rotation?.[1], obj?.rotation?.[2]]);
 
   const active = !!obj;
   const dims = active
@@ -2092,24 +2173,58 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
   const mesh = meshRefs.current[selectedId];
   if (!mesh) return null;
 
-  const worldPos = new THREE.Vector3();
-  mesh.getWorldPosition(worldPos);
+  const useStateDrivenHandles = !transforming && !drag.current;
+  const worldPos = useStateDrivenHandles
+    ? new THREE.Vector3(
+        obj.position?.[0] || 0,
+        obj.position?.[1] || 0,
+        obj.position?.[2] || 0,
+      )
+    : new THREE.Vector3();
+  if (!useStateDrivenHandles) {
+    mesh.getWorldPosition(worldPos);
+  }
+  const meshQuat = new THREE.Quaternion();
+  mesh.getWorldQuaternion(meshQuat);
+  const handleQuat = useStateDrivenHandles ? objectQuat : meshQuat;
   let hw = dims.width / 2;
   let hh = dims.height / 2;
   let hd = dims.depth / 2;
 
-  // Imported/CSG meshes may carry a local pivot offset; anchor handles to
-  // world AABB center/base so base handles don't drift below the visual mesh.
-  if (obj.type === "imported") {
-    const box = new THREE.Box3().setFromObject(mesh);
-    const boxSize = box.getSize(new THREE.Vector3());
-    box.getCenter(worldPos);
-    hw = boxSize.x / 2;
-    hh = boxSize.y / 2;
-    hd = boxSize.z / 2;
+  // Imported/CSG meshes may carry a local pivot offset; torus/tube need AABB
+  // extents for stable handle placement.
+  if (obj.type === "imported" || obj.type === "torus" || obj.type === "tube") {
+    if (useStateDrivenHandles) {
+      const wb = getWorldBounds(
+        obj.type,
+        obj.geometry,
+        obj.rotation,
+        obj.scale,
+        obj.position,
+      );
+      worldPos.set(
+        (wb.min[0] + wb.max[0]) / 2,
+        (wb.min[1] + wb.max[1]) / 2,
+        (wb.min[2] + wb.max[2]) / 2,
+      );
+      hw = (wb.max[0] - wb.min[0]) / 2;
+      hh = (wb.max[1] - wb.min[1]) / 2;
+      hd = (wb.max[2] - wb.min[2]) / 2;
+    } else {
+      const box = new THREE.Box3().setFromObject(mesh);
+      const boxSize = box.getSize(new THREE.Vector3());
+      box.getCenter(worldPos);
+      hw = boxSize.x / 2;
+      hh = boxSize.y / 2;
+      hd = boxSize.z / 2;
+    }
   }
 
-  const scaleHandles = getScaleHandles(obj.type, obj.geometry, rawDims);
+  const scaleHandles = getScaleHandles(obj.type, obj.geometry, {
+    width: hw * 2,
+    height: hh * 2,
+    depth: hd * 2,
+  });
 
   const arrowGap = 10;
   const translateArrows = [
@@ -2172,7 +2287,7 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
     interactionPlane.setFromNormalAndCoplanarPoint(pn, point);
   };
 
-  const resolveScaleParams = (targetObj, handle, targetMesh) => {
+  const resolveScaleParams = (targetObj, handle) => {
     const axisParamMap = {
       box: ["width", "height", "depth"],
       wall: ["width", "height", "depth"],
@@ -2182,12 +2297,12 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
       cylinder: ["radiusBottom", "height", "radiusBottom"],
       cone: ["radius", "height", "radius"],
       pyramid: ["radius", "height", "radius"],
-      torus: ["radius", "tube", "radius"],
-      tube: ["radius", "tube", "radius"],
+      torus: ["radius", "radius", "tube"],
+      tube: ["radius", "radius", "tube"],
       heart: ["size", "depth", "size"],
       star: ["outerRadius", "depth", "outerRadius"],
       starSix: ["outerRadius", "depth", "outerRadius"],
-      text: ["size", "height", "size"],
+      text: ["size", "size", "height"],
       tetrahedron: ["radius", "radius", "radius"],
       dodecahedron: ["radius", "radius", "radius"],
       octahedron: ["radius", "radius", "radius"],
@@ -2209,9 +2324,15 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
     if (!paramAxes)
       return { param: handle.param, linkedParam: handle.linkedParam };
 
-    const q = new THREE.Quaternion();
-    targetMesh.getWorldQuaternion(q);
-    const invQ = q.clone().invert();
+    const q = new THREE.Quaternion().setFromEuler(
+      new THREE.Euler(
+        targetObj.rotation?.[0] || 0,
+        targetObj.rotation?.[1] || 0,
+        targetObj.rotation?.[2] || 0,
+        "XYZ",
+      ),
+    );
+    const invQ = q.invert();
     const localDir = new THREE.Vector3(...handle.dir)
       .applyQuaternion(invQ)
       .normalize();
@@ -2345,15 +2466,13 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
     beginDrag(e);
     const dirW = new THREE.Vector3(...handle.dir).normalize();
     if (workplaneMode) {
-      const q = new THREE.Quaternion();
-      mesh.getWorldQuaternion(q);
-      dirW.applyQuaternion(q).normalize();
+      dirW.applyQuaternion(handleQuat).normalize();
     }
     makeDragPlane(dirW, e.point);
     const { param, linkedParam } =
       workplaneMode || handle.scaleAxis !== undefined
         ? { param: handle.param, linkedParam: handle.linkedParam }
-        : resolveScaleParams(obj, handle, mesh);
+        : resolveScaleParams(obj, handle);
     const baseSize =
       handle.scaleAxis === 0
         ? rawDims.width
@@ -2381,9 +2500,7 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
     setTransforming(true);
     const dirW = new THREE.Vector3(...arrow.dir).normalize();
     if (workplaneMode) {
-      const q = new THREE.Quaternion();
-      mesh.getWorldQuaternion(q);
-      dirW.applyQuaternion(q).normalize();
+      dirW.applyQuaternion(handleQuat).normalize();
     }
     makeDragPlane(dirW, e.point);
     drag.current = { type: "translate", dirW };
@@ -2402,7 +2519,7 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
     centerPt.copy(worldPos);
     const worldAxis = localAxes[arc.axis].clone();
     if (workplaneMode) {
-      worldAxis.applyQuaternion(mesh.quaternion).normalize();
+      worldAxis.applyQuaternion(handleQuat).normalize();
     }
 
     const projected = centerPt.clone().project(camera);
@@ -2418,7 +2535,7 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
     prevAngleRef.current = initAngle;
     accumDelta.current = 0;
     startRotation.current = [...obj.rotation];
-    startQuat.current.copy(mesh.quaternion);
+    startQuat.current.copy(handleQuat);
 
     const camDir = new THREE.Vector3();
     camera.getWorldDirection(camDir);
@@ -2442,7 +2559,7 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
       {!rotating && (
         <group position={worldPos}>
           {/* Scale/Translate handles - world or local based on workplane mode */}
-          <group quaternion={workplaneMode ? mesh.quaternion : identityQuat}>
+          <group quaternion={workplaneMode ? handleQuat : identityQuat}>
             {scaleHandles.map((h, i) => {
               const [dx, dy, dz] = h.dir;
               let rotation;
@@ -2510,7 +2627,7 @@ function ObjectHandles({ meshRefs, selectedId, orbitRef, setTransforming }) {
 
       {/* Rotation arcs - world-space, don't rotate with the object */}
       <group position={worldPos}>
-        <group quaternion={workplaneMode ? mesh.quaternion : identityQuat}>
+        <group quaternion={workplaneMode ? handleQuat : identityQuat}>
           {rotationArcs.map((arc) => {
             if (rotating && hoveredArc !== arc.axis) return null;
             return (
@@ -3750,6 +3867,7 @@ function SceneContent() {
               selectedId={selectedId}
               orbitRef={orbitRef}
               setTransforming={setTransforming}
+        transforming={transforming}
             />
           ))}
       </HandlesOverlay>

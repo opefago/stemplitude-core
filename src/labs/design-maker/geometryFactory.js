@@ -1,5 +1,8 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { TextGeometry } from "three/examples/jsm/geometries/TextGeometry.js";
+import { FontLoader } from "three/examples/jsm/loaders/FontLoader.js";
+import helvetikerRegular from "three/examples/fonts/helvetiker_regular.typeface.json";
 
 // ---------------------------------------------------------------------------
 // Shape helpers (exported for anyone who needs the raw 2D profile)
@@ -150,6 +153,7 @@ export function createChamferCylinderGeometry(
 // ---------------------------------------------------------------------------
 
 const creators = new Map();
+const parsedHelvetiker = new FontLoader().parse(helvetikerRegular);
 
 /**
  * Register a geometry creator for a shape type.
@@ -437,6 +441,29 @@ const starExtrudeCreator = (p) => {
 };
 
 registerShape("starSix", starExtrudeCreator);
+
+registerShape("text", (p) => {
+  const geo = new TextGeometry(p.text || "Text", {
+    font: parsedHelvetiker,
+    size: p.size || 10,
+    depth: p.height || 5,
+    curveSegments: 10,
+    bevelEnabled: true,
+    bevelThickness: 0.3,
+    bevelSize: 0.2,
+    bevelSegments: 3,
+  });
+  geo.computeBoundingBox();
+  const bb = geo.boundingBox;
+  if (bb) {
+    geo.translate(
+      -(bb.min.x + bb.max.x) / 2,
+      -(bb.min.y + bb.max.y) / 2,
+      -(bb.min.z + bb.max.z) / 2,
+    );
+  }
+  return geo;
+});
 
 registerShape(
   "imported",

@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { createGeometry } from "./geometryFactory";
 
 /**
  * Shared dimension / bounding-box helpers.
@@ -120,6 +121,47 @@ function getLocalBounds(type, geometry) {
       min: [bb.min.x, bb.min.y, bb.min.z],
       max: [bb.max.x, bb.max.y, bb.max.z],
     };
+  }
+
+  if (type === "text") {
+    const text = geometry?.text || "Text";
+    const size = geometry?.size || 10;
+    const height = geometry?.height || 5;
+    const font = geometry?.font || "helvetiker";
+    const cacheKey = `${text}|${size}|${height}|${font}`;
+
+    if (!getLocalBounds._textCache) getLocalBounds._textCache = new Map();
+    const cached = getLocalBounds._textCache.get(cacheKey);
+    if (cached) return cached;
+
+    try {
+      const textGeo = createGeometry("text", geometry || {});
+      if (!textGeo.boundingBox) textGeo.computeBoundingBox();
+      const bb = textGeo.boundingBox;
+      const bounds = bb
+        ? {
+            min: [bb.min.x, bb.min.y, bb.min.z],
+            max: [bb.max.x, bb.max.y, bb.max.z],
+          }
+        : { min: [-10, -5, -2.5], max: [10, 5, 2.5] };
+      textGeo.dispose();
+      getLocalBounds._textCache.set(cacheKey, bounds);
+      return bounds;
+    } catch {
+      // Fallback to heuristic bounds if text geometry creation fails.
+      return {
+        min: [
+          -Math.max(size / 2, text.length * size * 0.3),
+          -size / 2,
+          -(height + 0.6) / 2,
+        ],
+        max: [
+          Math.max(size / 2, text.length * size * 0.3),
+          size / 2,
+          (height + 0.6) / 2,
+        ],
+      };
+    }
   }
 
   const [hx, hy, hz] = getRawExtents(type, geometry);
@@ -359,9 +401,12 @@ export function getObjectDimensions(obj) {
       d = g.depth;
       break;
     case "text":
-      w = 20;
+      w = Math.max(
+        g.size || 10,
+        (g.text || "Text").length * (g.size || 10) * 0.6,
+      );
       h = g.size || 10;
-      d = g.height || 5;
+      d = (g.height || 5) + 0.6;
       break;
     case "tetrahedron":
     case "dodecahedron":
