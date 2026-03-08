@@ -62,6 +62,13 @@ function renderIcon(renderer, scene, camera, gradientMap, type, geometry, color)
     edgeLines.rotation.x = -Math.PI / 2;
   }
 
+  if (type === 'wall') {
+    const sideAngle = 0.65;
+    mesh.rotation.y = sideAngle;
+    outlineMesh.rotation.y = sideAngle;
+    edgeLines.rotation.y = sideAngle;
+  }
+
   const box = new THREE.Box3().setFromObject(mesh);
   const center = box.getCenter(new THREE.Vector3());
   const size = box.getSize(new THREE.Vector3());
@@ -75,7 +82,7 @@ function renderIcon(renderer, scene, camera, gradientMap, type, geometry, color)
   if (type === 'text') {
     camera.position.set(dist * 0.4, dist * 0.5, dist * 0.6);
   } else if (type === 'wall') {
-    camera.position.set(dist * 0.3, dist * 0.5, dist);
+    camera.position.set(dist * 0.12, dist * 0.5, dist);
   } else {
     camera.position.set(dist * 0.7, dist * 0.5, dist);
   }
@@ -122,14 +129,35 @@ async function generateIcons() {
   gradientMap.needsUpdate = true;
 
   const results = {};
+  const typesToRender = new Set(ICON_TYPES);
+  typesToRender.add('capsule');
 
-  for (const type of ICON_TYPES) {
-    const defaults = SHAPE_DEFAULTS[type] || SHAPE_DEFAULTS.box;
-    let geoParams = type === 'wall'
-      ? { ...defaults.geometry, depth: 6 }
-      : defaults.geometry;
-    const geometry = createGeometry(type, geoParams);
-    results[type] = renderIcon(renderer, scene, camera, gradientMap, type, geometry, defaults.color);
+  for (const type of typesToRender) {
+    try {
+      const defaults = SHAPE_DEFAULTS[type] || SHAPE_DEFAULTS.box;
+      let geoParams = type === 'wall'
+        ? { ...defaults.geometry, depth: 6 }
+        : defaults.geometry;
+      const geometry = createGeometry(type, geoParams);
+      results[type] = renderIcon(renderer, scene, camera, gradientMap, type, geometry, defaults.color);
+    } catch (err) {
+      const fallbackDefaults = SHAPE_DEFAULTS[type] || SHAPE_DEFAULTS.box;
+      const fallbackGeo = type === 'capsule'
+        ? createGeometry('cylinder', { radiusTop: 10, radiusBottom: 10, height: 36, radialSegments: 32 })
+        : new THREE.BoxGeometry(20, 20, 20);
+      results[type] = renderIcon(renderer, scene, camera, gradientMap, type, fallbackGeo, fallbackDefaults.color);
+    }
+  }
+
+  if (!results.capsule) {
+    try {
+      const def = SHAPE_DEFAULTS.capsule || SHAPE_DEFAULTS.cylinder;
+      const geo = createGeometry('capsule', def?.geometry || { radius: 10, height: 36 });
+      results.capsule = renderIcon(renderer, scene, camera, gradientMap, 'capsule', geo, (def && def.color) || '#0d9488');
+    } catch {
+      const cylGeo = createGeometry('cylinder', { radiusTop: 10, radiusBottom: 10, height: 36, radialSegments: 32 });
+      results.capsule = renderIcon(renderer, scene, camera, gradientMap, 'capsule', cylGeo, '#0d9488');
+    }
   }
 
   try {

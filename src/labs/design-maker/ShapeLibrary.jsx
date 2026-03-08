@@ -22,6 +22,7 @@ const CATEGORIES = [
       { type: 'box', name: 'Box' },
       { type: 'sphere', name: 'Sphere' },
       { type: 'cylinder', name: 'Cylinder' },
+      { type: 'capsule', name: 'Capsule' },
       { type: 'cone', name: 'Cone' },
       { type: 'torus', name: 'Torus' },
       { type: 'ellipsoid', name: 'Ellipsoid' },
@@ -235,7 +236,11 @@ export default function ShapeLibrary() {
                         onDragEnd={handleDragEnd}
                       >
                         <div className="dml-shapes-item-icon">
-                          <img src={icons[shape.type]} alt={shape.name} draggable={false} />
+                          {icons[shape.type] ? (
+                            <img src={icons[shape.type]} alt={shape.name} draggable={false} />
+                          ) : (
+                            <span className="dml-shapes-item-icon-placeholder" aria-hidden>{shape.name.charAt(0)}</span>
+                          )}
                         </div>
                         <span>{shape.name}</span>
                         <GripVertical size={10} className="dml-drag-grip" />

@@ -80,6 +80,11 @@ const DEFAULT_SHAPE_TYPES = {
     getRawExtents: radialHeightExtents,
     handleFamily: "radialHeight",
   },
+  capsule: {
+    axisParams: ["radius", "height", "radius"],
+    getRawExtents: radialHeightExtents,
+    handleFamily: "radialHeight",
+  },
   pyramid: {
     axisParams: ["radius", "height", "radius"],
     getRawExtents: radialHeightExtents,

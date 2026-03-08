@@ -243,6 +243,19 @@ registerShape(
   ["tube"],
 );
 
+registerShape("capsule", (p) => {
+  const radius = p.radius ?? 10;
+  const totalHeight = p.height ?? 36;
+  const cylinderLength = Math.max(0, totalHeight - 2 * radius);
+  return new THREE.CapsuleGeometry(
+    radius,
+    cylinderLength,
+    p.capSegments ?? 4,
+    p.radialSegments ?? 32,
+    p.heightSegments ?? 4,
+  );
+});
+
 registerShape("hemisphere", (p) => {
   const dome = new THREE.SphereGeometry(
     p.radius,
@@ -415,11 +428,14 @@ registerShape("ring", (p) => {
 registerShape("paraboloid", (p) => {
   const pts = [];
   const steps = p.profileSteps || 32;
-  pts.push(new THREE.Vector2(0, -p.height / 2));
-  for (let i = 0; i <= steps; i++) {
+  const halfH = p.height / 2;
+  const radius = p.radius;
+  pts.push(new THREE.Vector2(0, -halfH));
+  pts.push(new THREE.Vector2(radius, -halfH));
+  for (let i = 1; i <= steps; i++) {
     const t = i / steps;
-    const y = t * p.height - p.height / 2;
-    const r = p.radius * Math.sqrt(t);
+    const y = t * p.height - halfH;
+    const r = radius * Math.sqrt(t);
     pts.push(new THREE.Vector2(r, y));
   }
   return new THREE.LatheGeometry(pts, p.radialSegments || 32);

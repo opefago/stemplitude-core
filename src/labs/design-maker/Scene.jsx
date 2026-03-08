@@ -42,7 +42,12 @@ import {
   sceneInteracting,
 } from "./store";
 import { createGeometry } from "./geometryFactory";
-import { getObjectDimensions, getFloorY, getWorldBounds } from "./dimensions";
+import {
+  getObjectDimensions,
+  getFloorY,
+  getWorldBounds,
+  getRawExtents,
+} from "./dimensions";
 import { getObjectBehavior } from "./behaviors/ObjectBehaviorFactory";
 
 const toonGradientMap = (() => {
@@ -957,9 +962,9 @@ function CameraControls({ orbitRef }) {
       makeDefault
       enableDamping
       dampingFactor={0.1}
-      zoomSpeed={zoomSpeed}
+      zoomSpeed={-zoomSpeed}
       minDistance={1}
-      maxDistance={2000}
+      maxDistance={10000}
     />
   );
 }
@@ -1531,10 +1536,15 @@ function MeasureTool() {
 // All handle types visible simultaneously: scale squares, rotation arcs, translate arrows
 const AXIS_COLORS = ["#ef4444", "#22c55e", "#3b82f6"];
 const AXIS_LABELS = ["X", "Y", "Z"];
+const ROTATION_ARC_RADIUS = 15;
+const ROTATION_ARC_BAND = 2.0;
+const ROTATION_ARC_INNER = ROTATION_ARC_RADIUS - ROTATION_ARC_BAND;
+const ROTATION_ARC_SPACING = 4;
 const HOLE_ROUNDED_EDGE_TYPES = new Set([
   "sphere",
   "halfSphere",
   "cylinder",
+  "capsule",
   "halfCylinder",
   "cone",
   "torus",
@@ -1548,6 +1558,7 @@ const HOLE_EDGE_THRESHOLD_BY_TYPE = {
   tube: 10,
   ring: 10,
   cylinder: 20,
+  capsule: 20,
   halfCylinder: 20,
   cone: 20,
   sphere: 14,
@@ -1572,7 +1583,7 @@ function ObjectHandles({
     return o;
   });
   const snapIncrement = useDesignStore((s) => s.snapIncrement);
-  const { camera, gl } = useThree();
+  const { camera, gl, scene } = useThree();
 
   const drag = useRef(null);
   const startPt = useMemo(() => new THREE.Vector3(), []);
@@ -1585,9 +1596,18 @@ function ObjectHandles({
   const startRotation = useRef([0, 0, 0]);
   const startQuat = useRef(new THREE.Quaternion());
   const objIdRef = useRef(null);
+  const handleContainerRef = useRef(null);
+  const composePosRef = useRef(new THREE.Vector3());
+  const composeQuatRef = useRef(new THREE.Quaternion());
+  const composeScaleRef = useRef(new THREE.Vector3());
+  const composeEulerRef = useRef(new THREE.Euler(0, 0, 0, "XYZ"));
+  const composeMatrixRef = useRef(new THREE.Matrix4());
+  const parentInvRef = useRef(new THREE.Matrix4());
 
   const [hoveredArc, setHoveredArc] = useState(null);
   const [angleInfo, setAngleInfo] = useState(null);
+  const [liveScale, setLiveScale] = useState(null);
+  const [meshBounds, setMeshBounds] = useState(null);
 
   const interactionPlane = useMemo(() => new THREE.Plane(), []);
   const hitPoint = useMemo(() => new THREE.Vector3(), []);
@@ -1611,43 +1631,42 @@ function ObjectHandles({
 
   const active = !!obj;
   const behavior = active ? getObjectBehavior(obj.type) : null;
+  const effectiveObj = active && liveScale ? { ...obj, scale: liveScale } : obj;
   const dims = active
-    ? getObjectDimensions(obj)
+    ? getObjectDimensions(effectiveObj)
     : { width: 20, height: 20, depth: 20 };
   const rawDims = active
     ? {
-        width: dims.width / Math.abs(obj.scale[0]),
-        height: dims.height / Math.abs(obj.scale[1]),
-        depth: dims.depth / Math.abs(obj.scale[2]),
+        width: dims.width / Math.abs(effectiveObj.scale[0]),
+        height: dims.height / Math.abs(effectiveObj.scale[1]),
+        depth: dims.depth / Math.abs(effectiveObj.scale[2]),
       }
     : dims;
-  const maxDim = Math.max(rawDims.width, rawDims.height, rawDims.depth);
-  const arcR = maxDim * 0.45 + 3;
-
-  const arcBand = 2.0;
+  const arcR = ROTATION_ARC_RADIUS;
+  const arcBand = ROTATION_ARC_BAND;
   const arcGeo = useMemo(
     () =>
       new THREE.RingGeometry(
-        arcR - arcBand,
-        arcR + arcBand,
+        ROTATION_ARC_INNER,
+        ROTATION_ARC_RADIUS + ROTATION_ARC_BAND,
         48,
         1,
         0,
         Math.PI / 2,
       ),
-    [arcR],
+    [],
   );
   const hoverRingGeo = useMemo(
     () =>
       new THREE.RingGeometry(
-        arcR - arcBand,
-        arcR + arcBand,
+        ROTATION_ARC_INNER,
+        ROTATION_ARC_RADIUS + ROTATION_ARC_BAND,
         64,
         1,
         0,
         Math.PI * 2,
       ),
-    [arcR],
+    [],
   );
   const scaleTriGeo = useMemo(() => {
     const s = new THREE.Shape();
@@ -1689,59 +1708,111 @@ function ObjectHandles({
     };
   }, [orbitRef]);
 
+  const scaleBoxRef = useRef(new THREE.Box3());
+  const scaleSizeRef = useRef(new THREE.Vector3());
+  const scaleCenterRef = useRef(new THREE.Vector3());
+
+  useFrame(
+    () => {
+      if (!active) {
+        if (meshBounds) setMeshBounds(null);
+        return;
+      }
+      const id = objIdRef.current;
+      if (!id) return;
+      const mesh = meshRefs.current[id];
+      if (!mesh) return;
+      const o = useDesignStore
+        .getState()
+        .objects.find((ob) => ob.id === id);
+
+      // Sync handle container to object (store) so handles follow scale/position/rotation.
+      // Derive bounds from store when we have the object so container and bounds never desync
+      // (e.g. after proportional then non-proportional scale).
+      if (o) {
+        const d = getObjectDimensions(o);
+        const px = o.position[0] ?? 0;
+        const py = o.position[1] ?? 0;
+        const pz = o.position[2] ?? 0;
+        setMeshBounds({
+          hw: d.width / 2,
+          hh: d.height / 2,
+          hd: d.depth / 2,
+          cx: px,
+          cy: py,
+          cz: pz,
+        });
+      } else {
+        mesh.updateMatrixWorld(true);
+        scaleBoxRef.current.setFromObject(mesh);
+        scaleBoxRef.current.getSize(scaleSizeRef.current);
+        scaleBoxRef.current.getCenter(scaleCenterRef.current);
+        setMeshBounds({
+          hw: scaleSizeRef.current.x / 2,
+          hh: scaleSizeRef.current.y / 2,
+          hd: scaleSizeRef.current.z / 2,
+          cx: scaleCenterRef.current.x,
+          cy: scaleCenterRef.current.y,
+          cz: scaleCenterRef.current.z,
+        });
+      }
+
+      if (handleContainerRef.current) {
+        handleContainerRef.current.matrixAutoUpdate = false;
+        let targetWorld = composeMatrixRef.current;
+        if (o) {
+          composePosRef.current.set(
+            o.position[0] ?? 0,
+            o.position[1] ?? 0,
+            o.position[2] ?? 0,
+          );
+          composeEulerRef.current.set(
+            o.rotation?.[0] ?? 0,
+            o.rotation?.[1] ?? 0,
+            o.rotation?.[2] ?? 0,
+          );
+          composeQuatRef.current.setFromEuler(composeEulerRef.current);
+          composeScaleRef.current.set(1, 1, 1);
+          targetWorld.compose(
+            composePosRef.current,
+            composeQuatRef.current,
+            composeScaleRef.current,
+          );
+        } else {
+          targetWorld.copy(mesh.matrixWorld);
+        }
+        const parent = handleContainerRef.current.parent;
+        if (!parent) {
+          handleContainerRef.current.matrix.copy(targetWorld);
+        } else {
+          parentInvRef.current.copy(parent.matrixWorld).invert();
+          handleContainerRef.current.matrix
+            .copy(targetWorld)
+            .premultiply(parentInvRef.current);
+        }
+        scene.updateMatrixWorld(true);
+      }
+    },
+    1,
+  );
+
   if (!active) return null;
 
   const mesh = meshRefs.current[selectedId];
   if (!mesh) return null;
 
   const useStateDrivenHandles = !transforming && !drag.current;
-  const worldPos = useStateDrivenHandles
-    ? new THREE.Vector3(
-        obj.position?.[0] || 0,
-        obj.position?.[1] || 0,
-        obj.position?.[2] || 0,
-      )
-    : new THREE.Vector3();
-  if (!useStateDrivenHandles) {
-    mesh.getWorldPosition(worldPos);
-  }
   const meshQuat = new THREE.Quaternion();
   mesh.getWorldQuaternion(meshQuat);
   const handleQuat = useStateDrivenHandles ? objectQuat : meshQuat;
-  let hw = dims.width / 2;
-  let hh = dims.height / 2;
-  let hd = dims.depth / 2;
 
-  // Imported/CSG meshes may carry a local pivot offset; torus/tube need AABB
-  // extents for stable handle placement.
-  if (obj.type === "imported" || obj.type === "torus" || obj.type === "tube") {
-    if (useStateDrivenHandles) {
-      const wb = getWorldBounds(
-        obj.type,
-        obj.geometry,
-        obj.rotation,
-        obj.scale,
-        obj.position,
-      );
-      worldPos.set(
-        (wb.min[0] + wb.max[0]) / 2,
-        (wb.min[1] + wb.max[1]) / 2,
-        (wb.min[2] + wb.max[2]) / 2,
-      );
-      hw = (wb.max[0] - wb.min[0]) / 2;
-      hh = (wb.max[1] - wb.min[1]) / 2;
-      hd = (wb.max[2] - wb.min[2]) / 2;
-    } else {
-      const box = new THREE.Box3().setFromObject(mesh);
-      const boxSize = box.getSize(new THREE.Vector3());
-      box.getCenter(worldPos);
-      hw = boxSize.x / 2;
-      hh = boxSize.y / 2;
-      hd = boxSize.z / 2;
-    }
-  }
+  // Use store-driven dimensions (dims / effectiveObj) so handle layout updates immediately
+  // on proportional or axis scale, including during drag (liveScale).
+  const hw = dims.width / 2;
+  const hh = dims.height / 2;
+  const hd = dims.depth / 2;
 
-  const objectDims = { width: hw * 2, height: hh * 2, depth: hd * 2 };
+  const objectDims = { width: dims.width, height: dims.height, depth: dims.depth };
   const scaleHandlesFromBehavior = behavior.getScaleHandles(obj, objectDims);
   const uniformScaleHandle = {
     uniformScale: true,
@@ -1749,11 +1820,71 @@ function ObjectHandles({
     pos: [0, hh + 15, 0],
     label: "U",
   };
-  const scaleHandles = [...scaleHandlesFromBehavior, uniformScaleHandle];
 
-  const translateArrows = behavior.getTranslateArrows({ hw, hh, hd });
+  const rawExtents = getRawExtents(obj.type, obj.geometry);
+  const rawHx = rawExtents[0];
+  const rawHy = rawExtents[1];
+  const rawHz = rawExtents[2];
+  // Container has no scale; all handle positions in dimension space (hw, hh, hd).
+  const toDimension = (pos) => [
+    (pos[0] * hw) / (rawHx || 1e-6),
+    (pos[1] * hh) / (rawHy || 1e-6),
+    (pos[2] * hd) / (rawHz || 1e-6),
+  ];
 
-  const rotationArcs = behavior.getRotationArcs({ hw, hh, hd });
+  // Scale handles: avoid overshoot by putting the face in dimension space then adding a
+  // fixed offset in world units (behavior offset is in geometry space and was being scaled).
+  const scaleHandleOffset = behavior.handleOffset ?? 3;
+  const scaleHandleFixedGap = 2;
+  const scaleHandlesFromBehaviorInDim = scaleHandlesFromBehavior.map((h) => {
+    if (obj.type === "imported") {
+      return { ...h, pos: [...h.pos] };
+    }
+    const [dx, dy, dz] = h.dir;
+    const faceRaw = [
+      h.pos[0] - dx * scaleHandleOffset,
+      h.pos[1] - dy * scaleHandleOffset,
+      h.pos[2] - dz * scaleHandleOffset,
+    ];
+    const faceDim = toDimension(faceRaw);
+    const pos = [
+      faceDim[0] + dx * scaleHandleFixedGap,
+      faceDim[1] + dy * scaleHandleFixedGap,
+      faceDim[2] + dz * scaleHandleFixedGap,
+    ];
+    return { ...h, pos };
+  });
+  const scaleHandles = [
+    ...scaleHandlesFromBehaviorInDim,
+    { ...uniformScaleHandle, pos: [0, hh + 15, 0] },
+  ];
+
+  const translateArrowsRaw = behavior.getTranslateArrows({ hw, hh, hd });
+  const arrowGap = behavior.translateArrowGap ?? 10;
+  const translateArrows = translateArrowsRaw.map((a) => {
+    const [dx, dy, dz] = a.dir;
+    const pos =
+      dx !== 0
+        ? [dx > 0 ? hw + arrowGap : -hw - arrowGap, 0, 0]
+        : dy !== 0
+          ? [0, dy > 0 ? hh + arrowGap : -hh - arrowGap, 0]
+          : [0, 0, dz > 0 ? hd + arrowGap : -hd - arrowGap];
+    return { ...a, pos };
+  });
+
+  const rotationArcsRaw = behavior.getRotationArcs({ hw, hh, hd });
+  // Position each arc so the entire quarter-circle sits outside the box (not just the inner vertex).
+  // Axis 0 (YZ plane): center left-and-front of corner so arc doesn't cross faces.
+  // Axis 1 & 2 (XZ/XY): center on the face + SPACING so arc min-x is hw+SPACING and arc stays right of box.
+  const rotationArcs = rotationArcsRaw.map((arc) => {
+    const pos =
+      arc.axis === 0
+        ? [-hw - ROTATION_ARC_INNER - ROTATION_ARC_SPACING, hh / 2, hd + ROTATION_ARC_INNER + ROTATION_ARC_SPACING]
+        : arc.axis === 1
+          ? [hw + ROTATION_ARC_SPACING, -hh, 0]
+          : [hw + ROTATION_ARC_SPACING, 0, hd];
+    return { ...arc, pos };
+  });
 
   const makeDragPlane = (axisDir, point) => {
     const camDir = new THREE.Vector3();
@@ -1814,7 +1945,13 @@ function ObjectHandles({
           const axis = drag.current.handle.scaleAxis;
           const scale = [...startObjScale.current];
           scale[axis] = Math.max(0.01, startObjScale.current[axis] * factor);
-          updateObjectSilent(id, { scale });
+          const pos = [...startPosition.current];
+          const dir = drag.current.handleDir;
+          const raw = drag.current.rawExtents;
+          pos[axis] =
+            startPosition.current[axis] +
+            (dir[axis] || 0) * (scale[axis] - startObjScale.current[axis]) * (raw[axis] ?? 10);
+          updateObjectSilent(id, { scale, position: pos });
           return;
         }
         const val = Math.max(
@@ -1835,7 +1972,20 @@ function ObjectHandles({
               Math.round((linkedStart + delta) * 10) / 10,
             );
           }
-          updateObjectSilent(id, { geometry: geoUpdate });
+          const paramToAxis = { width: 0, height: 1, depth: 2 };
+          const axis = paramToAxis[drag.current.param];
+          const pos = axis !== undefined ? [...cur.position] : cur.position;
+          if (axis !== undefined && drag.current.handleDir) {
+            const dir = drag.current.handleDir;
+            const scaleA = cur.scale?.[axis] ?? 1;
+            pos[axis] =
+              startPosition.current[axis] +
+              (dir[axis] || 0) * ((val - startValue.current) / 2) * scaleA;
+          }
+          updateObjectSilent(id, {
+            geometry: geoUpdate,
+            ...(axis !== undefined && drag.current.handleDir ? { position: pos } : {}),
+          });
         }
       }
     } else if (drag.current.type === "translate") {
@@ -1890,11 +2040,14 @@ function ObjectHandles({
       setHoveredArc(null);
       setAngleInfo(null);
     }
+    if (drag.current.type === "scale") {
+      setLiveScale(null);
+    }
     drag.current = null;
     sceneInteracting.active = false;
     if (orbitRef.current) orbitRef.current.enabled = true;
-    window.removeEventListener("pointermove", handleDomMove);
-    window.removeEventListener("pointerup", handleDomUp);
+    document.removeEventListener("pointermove", handleDomMove);
+    document.removeEventListener("pointerup", handleDomUp);
   };
 
   const beginDrag = (e) => {
@@ -1902,8 +2055,8 @@ function ObjectHandles({
     sceneInteracting.active = true;
     if (orbitRef.current) orbitRef.current.enabled = false;
     useDesignStore.getState()._saveSnapshot();
-    window.addEventListener("pointermove", handleDomMove);
-    window.addEventListener("pointerup", handleDomUp);
+    document.addEventListener("pointermove", handleDomMove);
+    document.addEventListener("pointerup", handleDomUp);
   };
 
   const onScaleDown = (e, handle) => {
@@ -1941,9 +2094,12 @@ function ObjectHandles({
       param,
       linkedParam,
       baseSize,
+      handleDir: [...handle.dir],
+      rawExtents: getRawExtents(obj.type, obj.geometry),
     };
     startPt.copy(e.point);
     startObjScale.current = [...obj.scale];
+    startPosition.current = [...obj.position];
     startValue.current = param ? obj.geometry[param] : 0;
     startLinkedValue.current = linkedParam ? obj.geometry[linkedParam] : 0;
   };
@@ -1969,7 +2125,7 @@ function ObjectHandles({
 
   const onRotateDown = (e, arc) => {
     beginDrag(e);
-    centerPt.copy(worldPos);
+    mesh.getWorldPosition(centerPt);
     const worldAxis = localAxes[arc.axis].clone();
     if (workplaneMode) {
       worldAxis.applyQuaternion(handleQuat).normalize();
@@ -2008,12 +2164,11 @@ function ObjectHandles({
   const rotating = hoveredArc !== null && drag.current?.type === "rotate";
 
   return (
-    <>
+    <group ref={handleContainerRef}>
       {!rotating && (
-        <group position={worldPos}>
-          {/* Scale/Translate handles - world or local based on workplane mode */}
-          <group quaternion={workplaneMode ? handleQuat : identityQuat}>
-            {scaleHandles.map((h, i) => {
+        <group quaternion={workplaneMode ? handleQuat : identityQuat}>
+          {/* Scale/Translate in mesh local space so they follow scale */}
+          {scaleHandles.map((h, i) => {
               const [dx, dy, dz] = h.dir;
               let rotation;
               if (dy > 0) {
@@ -2077,14 +2232,12 @@ function ObjectHandles({
                 />
               </mesh>
             ))}
-          </group>
         </group>
       )}
 
-      {/* Rotation arcs - world-space, don't rotate with the object */}
-      <group position={worldPos}>
-        <group quaternion={workplaneMode ? handleQuat : identityQuat}>
-          {rotationArcs.map((arc) => {
+      {/* Rotation arcs - same local space as scale/translate */}
+      <group quaternion={workplaneMode ? handleQuat : identityQuat}>
+        {rotationArcs.map((arc) => {
             if (rotating && hoveredArc !== arc.axis) return null;
             return (
               <group
@@ -2097,7 +2250,7 @@ function ObjectHandles({
                     <meshBasicMaterial
                       color={arc.color}
                       transparent
-                      opacity={0.25}
+                      opacity={0.2}
                       depthTest={false}
                       depthWrite={false}
                       side={THREE.DoubleSide}
@@ -2112,13 +2265,13 @@ function ObjectHandles({
                       setHoveredArc(null);
                   }}
                   onPointerDown={(e) => onRotateDown(e, arc)}
-                  renderOrder={999}
+                  renderOrder={1000}
                   userData={{ isTransformHandle: true }}
                 >
                   <meshBasicMaterial
                     color={arc.color}
                     transparent
-                    opacity={0.65}
+                    opacity={0.4}
                     depthTest={false}
                     depthWrite={false}
                     side={THREE.DoubleSide}
@@ -2129,12 +2282,12 @@ function ObjectHandles({
           })}
         </group>
 
-        {/* Rotation angle indicator */}
+        {/* Rotation angle indicator - position in dimension space */}
         {angleInfo && (
           <Html
             center
             style={{ pointerEvents: "none" }}
-            position={[0, hh + arcR + 4, 0]}
+            position={[0, hh + 10, 0]}
           >
             <div
               className="dml-rotation-label"
@@ -2144,8 +2297,7 @@ function ObjectHandles({
             </div>
           </Html>
         )}
-      </group>
-    </>
+    </group>
   );
 }
 
@@ -2185,8 +2337,7 @@ function GroupObjectHandles({
   const hw = size.x / 2;
   const hh = size.y / 2;
   const hd = size.z / 2;
-  const maxDim = Math.max(size.x, size.y, size.z);
-  const arcR = maxDim * 0.55 + 5;
+  const arcR = ROTATION_ARC_RADIUS;
 
   const drag = useRef(null);
   const startPt = useMemo(() => new THREE.Vector3(), []);
@@ -2198,30 +2349,29 @@ function GroupObjectHandles({
   const [hoveredArc, setHoveredArc] = useState(null);
   const [angleInfo, setAngleInfo] = useState(null);
 
-  const arcBand = 2.0;
   const arcGeo = useMemo(
     () =>
       new THREE.RingGeometry(
-        arcR - arcBand,
-        arcR + arcBand,
+        ROTATION_ARC_INNER,
+        ROTATION_ARC_RADIUS + ROTATION_ARC_BAND,
         48,
         1,
         0,
         Math.PI / 2,
       ),
-    [arcR],
+    [],
   );
   const hoverRingGeo = useMemo(
     () =>
       new THREE.RingGeometry(
-        arcR - arcBand,
-        arcR + arcBand,
+        ROTATION_ARC_INNER,
+        ROTATION_ARC_RADIUS + ROTATION_ARC_BAND,
         64,
         1,
         0,
         Math.PI * 2,
       ),
-    [arcR],
+    [],
   );
   const scaleTriGeo = useMemo(() => {
     const s = new THREE.Shape();
@@ -2520,17 +2670,17 @@ function GroupObjectHandles({
   const rotationArcs = [
     {
       axis: 0,
-      pos: [-hw - 3, hh / 2, hd + 3],
+      pos: [-hw - ROTATION_ARC_INNER - ROTATION_ARC_SPACING, hh / 2, hd + ROTATION_ARC_INNER + ROTATION_ARC_SPACING],
       arcRot: [0, Math.PI / 2, 0],
       color: "#ef4444",
     },
     {
       axis: 1,
-      pos: [hw + 3, -hh, 0],
+      pos: [hw + ROTATION_ARC_SPACING, -hh, 0],
       arcRot: [-Math.PI / 2, 0, 0],
       color: "#22c55e",
     },
-    { axis: 2, pos: [hw + 3, 0, hd + 3], arcRot: [0, 0, 0], color: "#3b82f6" },
+    { axis: 2, pos: [hw + ROTATION_ARC_SPACING, 0, hd], arcRot: [0, 0, 0], color: "#3b82f6" },
   ];
 
   return (
@@ -2595,7 +2745,7 @@ function GroupObjectHandles({
                   <meshBasicMaterial
                     color={arc.color}
                     transparent
-                    opacity={0.25}
+                    opacity={0.2}
                     depthTest={false}
                     depthWrite={false}
                     side={THREE.DoubleSide}
@@ -2610,13 +2760,13 @@ function GroupObjectHandles({
                     setHoveredArc(null);
                 }}
                 onPointerDown={(e) => onRotateDown(e, arc.axis)}
-                renderOrder={999}
+                renderOrder={1000}
                 userData={{ isTransformHandle: true }}
               >
                 <meshBasicMaterial
                   color={arc.color}
                   transparent
-                  opacity={0.65}
+                  opacity={0.4}
                   depthTest={false}
                   depthWrite={false}
                   side={THREE.DoubleSide}

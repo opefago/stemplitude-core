@@ -43,6 +43,17 @@ export const SHAPE_DEFAULTS = {
     color: "#14b8a6",
     icon: "M3 4.5c0-1.1 2.2-2 5-2s5 .9 5 2v7c0 1.1-2.2 2-5 2s-5-.9-5-2z M3 4.5c0 1.1 2.2 2 5 2s5-.9 5-2",
   },
+  capsule: {
+    geometry: {
+      radius: 10,
+      height: 36,
+      capSegments: 4,
+      radialSegments: 32,
+      heightSegments: 4,
+    },
+    color: "#0d9488",
+    icon: "M3 3.5c0-.8 2.2-1.5 5-1.5s5 .7 5 1.5v9c0 .8-2.2 1.5-5 1.5s-5-.7-5-1.5z M8 3v1 M8 12.5v1",
+  },
   cone: {
     geometry: { radius: 10, height: 20, radialSegments: 32 },
     color: "#f97316",

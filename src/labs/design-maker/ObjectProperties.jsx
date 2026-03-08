@@ -129,6 +129,7 @@ function GeometryProps({ obj, updateGeometry }) {
         </>
       );
     case "cone":
+    case "capsule":
     case "pyramid":
     case "pentagonalPyramid":
     case "squarePyramid":
