@@ -2159,19 +2159,30 @@
   box-shadow: 0 1px 4px rgba(0,0,0,0.3);
 }
 
-/* --- Rotation Angle Label --- */
+/* --- Rotation Angle Label (visual indication while rotating) --- */
 .dml-rotation-label {
-  background: rgba(20, 20, 30, 0.88);
-  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(20, 20, 30, 0.92);
+  font-size: 14px;
   font-weight: 700;
-  padding: 3px 8px;
-  border-radius: 6px;
+  padding: 6px 10px;
+  border-radius: 8px;
   white-space: nowrap;
   pointer-events: none;
   user-select: none;
   font-family: 'JetBrains Mono', 'SF Mono', monospace;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-  border: 1px solid rgba(255,255,255,0.15);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.5);
+  border: 2px solid;
+  /* borderColor set inline from axis color */
+}
+.dml-rotation-label-axis {
+  opacity: 0.9;
+}
+.dml-rotation-label-angle {
+  font-variant-numeric: tabular-nums;
+  min-width: 3ch;
 }
 
 @media (max-width: 700px) {

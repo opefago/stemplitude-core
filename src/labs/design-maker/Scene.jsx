@@ -1595,6 +1595,7 @@ function ObjectHandles({
   const accumDelta = useRef(0);
   const startRotation = useRef([0, 0, 0]);
   const startQuat = useRef(new THREE.Quaternion());
+  const inverseQuatRef = useRef(new THREE.Quaternion());
   const objIdRef = useRef(null);
   const handleContainerRef = useRef(null);
   const composePosRef = useRef(new THREE.Vector3());
@@ -1668,6 +1669,21 @@ function ObjectHandles({
       ),
     [],
   );
+  const rotationProgressArcGeo = useMemo(() => {
+    if (!angleInfo) return null;
+    const rad = (angleInfo.deg * Math.PI) / 180;
+    const start = rad >= 0 ? 0 : rad;
+    const len = rad >= 0 ? rad : -rad;
+    if (Math.abs(len) < 0.001) return null;
+    return new THREE.RingGeometry(
+      0,
+      ROTATION_ARC_RADIUS + ROTATION_ARC_BAND,
+      24,
+      1,
+      start,
+      len,
+    );
+  }, [angleInfo?.axis, angleInfo?.deg]);
   const scaleTriGeo = useMemo(() => {
     const s = new THREE.Shape();
     s.moveTo(0, 1.5);
@@ -1766,12 +1782,8 @@ function ObjectHandles({
             o.position[1] ?? 0,
             o.position[2] ?? 0,
           );
-          composeEulerRef.current.set(
-            o.rotation?.[0] ?? 0,
-            o.rotation?.[1] ?? 0,
-            o.rotation?.[2] ?? 0,
-          );
-          composeQuatRef.current.setFromEuler(composeEulerRef.current);
+          composeEulerRef.current.set(0, 0, 0);
+          composeQuatRef.current.identity();
           composeScaleRef.current.set(1, 1, 1);
           targetWorld.compose(
             composePosRef.current,
@@ -1805,6 +1817,7 @@ function ObjectHandles({
   const meshQuat = new THREE.Quaternion();
   mesh.getWorldQuaternion(meshQuat);
   const handleQuat = useStateDrivenHandles ? objectQuat : meshQuat;
+  if (angleInfo) inverseQuatRef.current.copy(handleQuat).invert();
 
   // Use store-driven dimensions (dims / effectiveObj) so handle layout updates immediately
   // on proportional or axis scale, including during drag (liveScale).
@@ -2013,6 +2026,8 @@ function ObjectHandles({
       step *= drag.current.sign;
 
       accumDelta.current += step;
+      while (accumDelta.current > Math.PI) accumDelta.current -= 2 * Math.PI;
+      while (accumDelta.current < -Math.PI) accumDelta.current += 2 * Math.PI;
       prevAngleRef.current = cur;
       let total = accumDelta.current;
       if (domEvent.shiftKey) {
@@ -2257,6 +2272,18 @@ function ObjectHandles({
                     />
                   </mesh>
                 )}
+                {angleInfo?.axis === arc.axis && rotationProgressArcGeo && (
+                  <mesh geometry={rotationProgressArcGeo} renderOrder={997}>
+                    <meshBasicMaterial
+                      color={arc.color}
+                      transparent
+                      opacity={0.7}
+                      depthTest={false}
+                      depthWrite={false}
+                      side={THREE.DoubleSide}
+                    />
+                  </mesh>
+                )}
                 <mesh
                   geometry={arcGeo}
                   onPointerEnter={() => setHoveredArc(arc.axis)}
@@ -2282,20 +2309,28 @@ function ObjectHandles({
           })}
         </group>
 
-        {/* Rotation angle indicator - position in dimension space */}
+        {/* Rotation: visual arc (sweep) + label in counter-rotated group so label stays upright */}
         {angleInfo && (
-          <Html
-            center
-            style={{ pointerEvents: "none" }}
-            position={[0, hh + 10, 0]}
-          >
-            <div
-              className="dml-rotation-label"
-              style={{ color: AXIS_COLORS[angleInfo.axis] }}
+          <group quaternion={inverseQuatRef.current}>
+            <Html
+              center
+              style={{ pointerEvents: "none" }}
+              position={[0, hh + 10, 0]}
             >
-              {AXIS_LABELS[angleInfo.axis]}: {angleInfo.deg}°
-            </div>
-          </Html>
+              <div
+                className="dml-rotation-label"
+                style={{
+                  color: AXIS_COLORS[angleInfo.axis],
+                  borderColor: AXIS_COLORS[angleInfo.axis],
+                }}
+              >
+                <span className="dml-rotation-label-axis">{AXIS_LABELS[angleInfo.axis]}</span>
+                <span className="dml-rotation-label-angle">
+                  {angleInfo.deg >= 0 ? "+" : ""}{angleInfo.deg}°
+                </span>
+              </div>
+            </Html>
+          </group>
         )}
     </group>
   );
@@ -2373,6 +2408,21 @@ function GroupObjectHandles({
       ),
     [],
   );
+  const rotationProgressArcGeo = useMemo(() => {
+    if (!angleInfo) return null;
+    const rad = (angleInfo.deg * Math.PI) / 180;
+    const start = rad >= 0 ? 0 : rad;
+    const len = rad >= 0 ? rad : -rad;
+    if (Math.abs(len) < 0.001) return null;
+    return new THREE.RingGeometry(
+      0,
+      ROTATION_ARC_RADIUS + ROTATION_ARC_BAND,
+      24,
+      1,
+      start,
+      len,
+    );
+  }, [angleInfo?.axis, angleInfo?.deg]);
   const scaleTriGeo = useMemo(() => {
     const s = new THREE.Shape();
     s.moveTo(0, 1.5);
@@ -2467,6 +2517,8 @@ function GroupObjectHandles({
       while (step < -Math.PI) step += 2 * Math.PI;
       step *= drag.current.sign;
       accumDelta.current += step;
+      while (accumDelta.current > Math.PI) accumDelta.current -= 2 * Math.PI;
+      while (accumDelta.current < -Math.PI) accumDelta.current += 2 * Math.PI;
       prevAngleRef.current = cur;
       let total = accumDelta.current;
       if (domEvent.shiftKey) {
@@ -2752,6 +2804,18 @@ function GroupObjectHandles({
                   />
                 </mesh>
               )}
+              {angleInfo?.axis === arc.axis && rotationProgressArcGeo && (
+                <mesh geometry={rotationProgressArcGeo} renderOrder={997}>
+                  <meshBasicMaterial
+                    color={arc.color}
+                    transparent
+                    opacity={0.7}
+                    depthTest={false}
+                    depthWrite={false}
+                    side={THREE.DoubleSide}
+                  />
+                </mesh>
+              )}
               <mesh
                 geometry={arcGeo}
                 onPointerEnter={() => setHoveredArc(arc.axis)}
@@ -2783,9 +2847,15 @@ function GroupObjectHandles({
           >
             <div
               className="dml-rotation-label"
-              style={{ color: AXIS_COLORS[angleInfo.axis] }}
+              style={{
+                color: AXIS_COLORS[angleInfo.axis],
+                borderColor: AXIS_COLORS[angleInfo.axis],
+              }}
             >
-              {AXIS_LABELS[angleInfo.axis]}: {angleInfo.deg}°
+              <span className="dml-rotation-label-axis">{AXIS_LABELS[angleInfo.axis]}</span>
+              <span className="dml-rotation-label-angle">
+                {angleInfo.deg >= 0 ? "+" : ""}{angleInfo.deg}°
+              </span>
             </div>
           </Html>
         )}

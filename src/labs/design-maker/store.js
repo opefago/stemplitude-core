@@ -3,6 +3,17 @@ import { v4 as uuidv4 } from "uuid";
 import { BufferGeometryLoader } from "three";
 import { getFloorY, getWorldBounds, overlapsXZ } from "./dimensions";
 
+/** Wrap each rotation component (radians) to [-π, π] so UI and drag stay in ±180°. */
+function normalizeRotationToPlusMinusPi(rotation) {
+  if (!Array.isArray(rotation) || rotation.length < 3) return rotation;
+  return rotation.map((r) => {
+    let x = Number(r);
+    while (x > Math.PI) x -= 2 * Math.PI;
+    while (x < -Math.PI) x += 2 * Math.PI;
+    return x;
+  });
+}
+
 /**
  * Central shape registry. Add new shapes here — every derived list
  * (FLAT_TYPES, ICON_TYPES, TYPE_ICONS, etc.) updates automatically.
@@ -445,27 +456,42 @@ export const useDesignStore = create((set, get) => ({
 
   updateObject: (id, updates) => {
     get()._saveSnapshot();
+    const normalized =
+      updates.rotation != null
+        ? { ...updates, rotation: normalizeRotationToPlusMinusPi(updates.rotation) }
+        : updates;
     set((state) => ({
       objects: state.objects.map((o) =>
-        o.id === id ? { ...o, ...updates } : o,
+        o.id === id ? { ...o, ...normalized } : o,
       ),
       isDirty: true,
     }));
   },
 
   updateObjectSilent: (id, updates) =>
-    set((state) => ({
-      objects: state.objects.map((o) =>
-        o.id === id ? { ...o, ...updates } : o,
-      ),
-      isDirty: true,
-    })),
+    set((state) => {
+      const normalized =
+        updates.rotation != null
+          ? { ...updates, rotation: normalizeRotationToPlusMinusPi(updates.rotation) }
+          : updates;
+      return {
+        objects: state.objects.map((o) =>
+          o.id === id ? { ...o, ...normalized } : o,
+        ),
+        isDirty: true,
+      };
+    }),
 
   batchUpdateObjects: (updates) =>
     set((state) => ({
       objects: state.objects.map((o) => {
         const u = updates[o.id];
-        return u ? { ...o, ...u } : o;
+        if (!u) return o;
+        const normalized =
+          u.rotation != null
+            ? { ...u, rotation: normalizeRotationToPlusMinusPi(u.rotation) }
+            : u;
+        return { ...o, ...normalized };
       }),
       isDirty: true,
     })),
