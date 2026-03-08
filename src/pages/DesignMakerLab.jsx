@@ -373,6 +373,60 @@ export default function DesignMakerLab() {
     return !!o?.groupId;
   });
 
+  const getCSGTransform = useCallback((result, fallback) => {
+    if (result?.position && result?.quaternion && result?.scale) {
+      const euler = new THREE.Euler().setFromQuaternion(result.quaternion, 'XYZ');
+      return {
+        position: [result.position.x, result.position.y, result.position.z],
+        rotation: [euler.x, euler.y, euler.z],
+        scale: [result.scale.x, result.scale.y, result.scale.z],
+      };
+    }
+    return {
+      position: [...(fallback?.position || [0, 0, 0])],
+      rotation: [...(fallback?.rotation || [0, 0, 0])],
+      scale: [...(fallback?.scale || [1, 1, 1])],
+    };
+  }, []);
+
+  const normalizeImportedPivot = useCallback((bufferGeometry, tx) => {
+    if (!bufferGeometry) return { geometry: bufferGeometry, tx };
+    const geometry = bufferGeometry.clone();
+    // 1) Bake CSG transform into geometry so object transform can be canonical.
+    const q = new THREE.Quaternion().setFromEuler(
+      new THREE.Euler(tx.rotation[0], tx.rotation[1], tx.rotation[2], 'XYZ'),
+    );
+    const m = new THREE.Matrix4().compose(
+      new THREE.Vector3(tx.position[0], tx.position[1], tx.position[2]),
+      q,
+      new THREE.Vector3(tx.scale[0], tx.scale[1], tx.scale[2]),
+    );
+    geometry.applyMatrix4(m);
+
+    // 2) Recenter geometry around local origin (true midpoint pivot).
+    geometry.computeBoundingBox();
+    const bb = geometry.boundingBox;
+    if (!bb) {
+      geometry.computeBoundingSphere();
+      return { geometry, tx };
+    }
+    const center = new THREE.Vector3();
+    bb.getCenter(center);
+    geometry.translate(-center.x, -center.y, -center.z);
+    geometry.computeBoundingBox();
+    geometry.computeBoundingSphere();
+
+    // 3) Canonical transform: centered pivot with no residual rotation/scale.
+    return {
+      geometry,
+      tx: {
+        position: [center.x, center.y, center.z],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+      },
+    };
+  }, []);
+
   const handleMerge = useCallback(() => {
     if (selectedIds.length < 2) return;
     const selected = objects.filter(o => selectedIds.includes(o.id));
@@ -380,23 +434,26 @@ export default function DesignMakerLab() {
     try {
       const result = mergeCSG(selected);
       if (result) {
+        const anchor = solids[0] || selected[0];
+        const tx = getCSGTransform(result, anchor);
+        const normalized = normalizeImportedPivot(result.geometry, tx);
         replaceObjects(selectedIds, {
           id: uuidv4(),
           name: 'Merge',
           type: 'imported',
-          position: [0, 0, 0],
-          rotation: [0, 0, 0],
-          scale: [1, 1, 1],
+          position: normalized.tx.position,
+          rotation: normalized.tx.rotation,
+          scale: normalized.tx.scale,
           color: (solids[0] || selected[0]).color,
           isHole: false,
           visible: true,
-          geometry: { bufferGeometry: result.geometry },
+          geometry: { bufferGeometry: normalized.geometry },
         });
       }
     } catch (err) {
       console.error('Merge failed:', err);
     }
-  }, [selectedIds, objects, replaceObjects]);
+  }, [selectedIds, objects, replaceObjects, getCSGTransform, normalizeImportedPivot]);
 
   const handleSubtract = useCallback(() => {
     if (selectedIds.length < 2) return;
@@ -406,23 +463,25 @@ export default function DesignMakerLab() {
     try {
       const result = subtractCSG(target, tools);
       if (result) {
+        const tx = getCSGTransform(result, target);
+        const normalized = normalizeImportedPivot(result.geometry, tx);
         replaceObjects(selectedIds, {
           id: uuidv4(),
           name: 'Subtraction',
           type: 'imported',
-          position: [0, 0, 0],
-          rotation: [0, 0, 0],
-          scale: [1, 1, 1],
+          position: normalized.tx.position,
+          rotation: normalized.tx.rotation,
+          scale: normalized.tx.scale,
           color: target.color,
           isHole: false,
           visible: true,
-          geometry: { bufferGeometry: result.geometry },
+          geometry: { bufferGeometry: normalized.geometry },
         });
       }
     } catch (err) {
       console.error('Subtract failed:', err);
     }
-  }, [selectedIds, objects, replaceObjects]);
+  }, [selectedIds, objects, replaceObjects, getCSGTransform, normalizeImportedPivot]);
 
   const handleIntersect = useCallback(() => {
     if (selectedIds.length < 2) return;
@@ -430,23 +489,25 @@ export default function DesignMakerLab() {
     try {
       const result = intersectCSG(selected);
       if (result) {
+        const tx = getCSGTransform(result, selected[0]);
+        const normalized = normalizeImportedPivot(result.geometry, tx);
         replaceObjects(selectedIds, {
           id: uuidv4(),
           name: 'Intersection',
           type: 'imported',
-          position: [0, 0, 0],
-          rotation: [0, 0, 0],
-          scale: [1, 1, 1],
+          position: normalized.tx.position,
+          rotation: normalized.tx.rotation,
+          scale: normalized.tx.scale,
           color: selected[0].color,
           isHole: false,
           visible: true,
-          geometry: { bufferGeometry: result.geometry },
+          geometry: { bufferGeometry: normalized.geometry },
         });
       }
     } catch (err) {
       console.error('Intersect failed:', err);
     }
-  }, [selectedIds, objects, replaceObjects]);
+  }, [selectedIds, objects, replaceObjects, getCSGTransform, normalizeImportedPivot]);
 
   return (
     <div className="dml-container">

@@ -13,6 +13,9 @@ import {
 import { createGeometry } from "./geometryFactory";
 
 const evaluator = new Evaluator();
+// Keep evaluator attributes aligned with prepareBrushGeometry().
+// We rebuild normals after CSG anyway, and UVs are not needed for these solids.
+evaluator.attributes = ["position"];
 const CURVED_CSG_TYPES = new Set([
   "sphere",
   "cylinder",
@@ -70,8 +73,25 @@ function prepareBrushGeometry(obj) {
     obj.type,
     upgradeCSGParams(obj.type, obj.geometry),
   );
-  const geometry = base.clone();
-  geometry.deleteAttribute("normal");
+  let geometry = base.clone();
+  if (!geometry.attributes?.position) {
+    throw new Error(`CSG source geometry for "${obj.type}" has no position attribute.`);
+  }
+
+  // Keep CSG input attributes consistent across all brushes.
+  // This avoids evaluator crashes when one geometry has extra attrs
+  // (e.g. surfaceId from outline experiments) and another doesn't.
+  Object.keys(geometry.attributes).forEach((key) => {
+    if (key !== "position") geometry.deleteAttribute(key);
+  });
+
+  // three-bvh-csg expects indexed geometry in several code paths.
+  if (!geometry.index) {
+    const indexed = mergeVertices(geometry, 1e-6);
+    geometry.dispose();
+    geometry = indexed;
+  }
+
   geometry.computeBoundingBox();
   geometry.computeBoundingSphere();
   return geometry;
