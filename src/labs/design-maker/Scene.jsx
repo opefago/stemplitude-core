@@ -43,6 +43,7 @@ import {
 } from "./store";
 import { createGeometry } from "./geometryFactory";
 import { getObjectDimensions, getFloorY, getWorldBounds } from "./dimensions";
+import { getObjectBehavior } from "./behaviors/ObjectBehaviorFactory";
 
 const toonGradientMap = (() => {
   const colors = new Uint8Array([60, 100, 160, 220, 255]);
@@ -1555,495 +1556,6 @@ const HOLE_EDGE_THRESHOLD_BY_TYPE = {
   paraboloid: 14,
 };
 
-const HANDLE_OFFSET = 3;
-
-function getScaleHandles(type, geometry, objectDims = null) {
-  const handles = [];
-  const g = geometry;
-  const o = HANDLE_OFFSET;
-  switch (type) {
-    case "box":
-    case "wall":
-    case "wedge": {
-      const by = -g.height / 2;
-      handles.push({
-        param: "width",
-        dir: [1, 0, 0],
-        pos: [g.width / 2 + o, by, 0],
-        label: "W",
-      });
-      handles.push({
-        param: "width",
-        dir: [-1, 0, 0],
-        pos: [-g.width / 2 - o, by, 0],
-        label: "W",
-      });
-      handles.push({
-        param: "depth",
-        dir: [0, 0, 1],
-        pos: [0, by, g.depth / 2 + o],
-        label: "D",
-      });
-      handles.push({
-        param: "depth",
-        dir: [0, 0, -1],
-        pos: [0, by, -g.depth / 2 - o],
-        label: "D",
-      });
-      handles.push({
-        param: "height",
-        dir: [0, 1, 0],
-        pos: [0, g.height / 2 + o, 0],
-        label: "H",
-      });
-      break;
-    }
-    case "sphere": {
-      const by = -g.radius;
-      handles.push({
-        param: "radius",
-        dir: [1, 0, 0],
-        pos: [g.radius + o, by, 0],
-        label: "R",
-      });
-      handles.push({
-        param: "radius",
-        dir: [-1, 0, 0],
-        pos: [-g.radius - o, by, 0],
-        label: "R",
-      });
-      handles.push({
-        param: "radius",
-        dir: [0, 0, 1],
-        pos: [0, by, g.radius + o],
-        label: "R",
-      });
-      handles.push({
-        param: "radius",
-        dir: [0, 1, 0],
-        pos: [0, g.radius + o, 0],
-        label: "R",
-      });
-      break;
-    }
-    case "hemisphere": {
-      // Hemisphere geometry is centered around Y after construction:
-      // base at -r/2 and top at +r/2.
-      const by = -g.radius / 2;
-      handles.push({
-        param: "radius",
-        dir: [1, 0, 0],
-        pos: [g.radius + o, by, 0],
-        label: "R",
-      });
-      handles.push({
-        param: "radius",
-        dir: [-1, 0, 0],
-        pos: [-g.radius - o, by, 0],
-        label: "R",
-      });
-      handles.push({
-        param: "radius",
-        dir: [0, 0, 1],
-        pos: [0, by, g.radius + o],
-        label: "R",
-      });
-      handles.push({
-        param: "radius",
-        dir: [0, 1, 0],
-        pos: [0, g.radius / 2 + o, 0],
-        label: "R",
-      });
-      break;
-    }
-    case "cylinder": {
-      const by = -g.height / 2;
-      handles.push({
-        param: "radiusBottom",
-        linkedParam: "radiusTop",
-        dir: [1, 0, 0],
-        pos: [g.radiusBottom + o, by, 0],
-        label: "R",
-      });
-      handles.push({
-        param: "radiusBottom",
-        linkedParam: "radiusTop",
-        dir: [-1, 0, 0],
-        pos: [-g.radiusBottom - o, by, 0],
-        label: "R",
-      });
-      if (Math.abs((g.radiusTop ?? 0) - (g.radiusBottom ?? 0)) > 0.001) {
-        handles.push({
-          param: "radiusTop",
-          dir: [1, 0, 0],
-          pos: [g.radiusTop + o, g.height / 2, 0],
-          label: "Rt",
-        });
-      }
-      handles.push({
-        param: "height",
-        dir: [0, 1, 0],
-        pos: [0, g.height / 2 + o, 0],
-        label: "H",
-      });
-      break;
-    }
-    case "cone":
-    case "pyramid": {
-      const by = -g.height / 2;
-      handles.push({
-        param: "radius",
-        dir: [1, 0, 0],
-        pos: [g.radius + o, by, 0],
-        label: "R",
-      });
-      handles.push({
-        param: "radius",
-        dir: [-1, 0, 0],
-        pos: [-g.radius - o, by, 0],
-        label: "R",
-      });
-      handles.push({
-        param: "height",
-        dir: [0, 1, 0],
-        pos: [0, g.height / 2 + o, 0],
-        label: "H",
-      });
-      break;
-    }
-    case "torus":
-    case "tube": {
-      const outerX = (objectDims?.width ?? (g.radius + g.tube) * 2) / 2;
-      const outerY = (objectDims?.height ?? (g.radius + g.tube) * 2) / 2;
-      const outerZ = (objectDims?.depth ?? g.tube * 2) / 2;
-      const by = -outerY;
-      handles.push({
-        param: "radius",
-        dir: [1, 0, 0],
-        pos: [outerX + o, by, 0],
-        label: "R",
-      });
-      handles.push({
-        param: "radius",
-        dir: [-1, 0, 0],
-        pos: [-outerX - o, by, 0],
-        label: "R",
-      });
-      handles.push({
-        param: "radius",
-        dir: [0, 1, 0],
-        pos: [0, outerY + o, 0],
-        label: "R",
-      });
-      handles.push({
-        param: "radius",
-        dir: [0, -1, 0],
-        pos: [0, -outerY - o, 0],
-        label: "R",
-      });
-      handles.push({
-        param: "tube",
-        dir: [0, 0, 1],
-        pos: [0, by, outerZ + o],
-        label: "T",
-      });
-      handles.push({
-        param: "tube",
-        dir: [0, 0, -1],
-        pos: [0, by, -outerZ - o],
-        label: "T",
-      });
-      break;
-    }
-    case "heart":
-      handles.push({
-        param: "size",
-        dir: [1, 0, 0],
-        pos: [g.size + o, -g.depth / 2, 0],
-        label: "S",
-      });
-      handles.push({
-        param: "depth",
-        dir: [0, 1, 0],
-        pos: [0, g.depth / 2 + o, 0],
-        label: "D",
-      });
-      break;
-    case "star":
-    case "starSix":
-      handles.push({
-        param: "outerRadius",
-        dir: [1, 0, 0],
-        pos: [g.outerRadius + o, -g.depth / 2, 0],
-        label: "R",
-      });
-      handles.push({
-        param: "outerRadius",
-        dir: [0, 0, 1],
-        pos: [0, -g.depth / 2, g.outerRadius + o],
-        label: "R",
-      });
-      handles.push({
-        param: "depth",
-        dir: [0, 1, 0],
-        pos: [0, g.depth / 2 + o, 0],
-        label: "D",
-      });
-      break;
-    case "text": {
-      const text = g.text || "Text";
-      const size = g.size || 10;
-      const width = objectDims?.width ?? Math.max(size * 2, text.length * size * 0.6);
-      const height = objectDims?.height ?? size;
-      const depth = objectDims?.depth ?? ((g.height || 5) + 0.6);
-      const by = -height / 2;
-      const zHandleDist = Math.max(depth / 2 + o, 6);
-      handles.push({
-        scaleAxis: 0,
-        dir: [1, 0, 0],
-        pos: [width / 2 + o, by, 0],
-        label: "W",
-      });
-      handles.push({
-        scaleAxis: 0,
-        dir: [-1, 0, 0],
-        pos: [-width / 2 - o, by, 0],
-        label: "W",
-      });
-      handles.push({
-        scaleAxis: 2,
-        dir: [0, 0, 1],
-        pos: [0, 0, zHandleDist],
-        label: "D",
-      });
-      handles.push({
-        scaleAxis: 2,
-        dir: [0, 0, -1],
-        pos: [0, 0, -zHandleDist],
-        label: "D",
-      });
-      handles.push({
-        scaleAxis: 1,
-        dir: [0, 1, 0],
-        pos: [0, height / 2 + o, 0],
-        label: "H",
-      });
-      break;
-    }
-    case "tetrahedron":
-    case "dodecahedron":
-    case "octahedron":
-    case "icosahedron": {
-      const by = -g.radius;
-      handles.push({
-        param: "radius",
-        dir: [1, 0, 0],
-        pos: [g.radius + o, by, 0],
-        label: "R",
-      });
-      handles.push({
-        param: "radius",
-        dir: [-1, 0, 0],
-        pos: [-g.radius - o, by, 0],
-        label: "R",
-      });
-      handles.push({
-        param: "radius",
-        dir: [0, 0, 1],
-        pos: [0, by, g.radius + o],
-        label: "R",
-      });
-      handles.push({
-        param: "radius",
-        dir: [0, 1, 0],
-        pos: [0, g.radius + o, 0],
-        label: "R",
-      });
-      break;
-    }
-    case "ellipsoid": {
-      const by = -g.radiusY;
-      handles.push({
-        param: "radiusX",
-        dir: [1, 0, 0],
-        pos: [g.radiusX + o, by, 0],
-        label: "Rx",
-      });
-      handles.push({
-        param: "radiusX",
-        dir: [-1, 0, 0],
-        pos: [-g.radiusX - o, by, 0],
-        label: "Rx",
-      });
-      handles.push({
-        param: "radiusZ",
-        dir: [0, 0, 1],
-        pos: [0, by, g.radiusZ + o],
-        label: "Rz",
-      });
-      handles.push({
-        param: "radiusZ",
-        dir: [0, 0, -1],
-        pos: [0, by, -g.radiusZ - o],
-        label: "Rz",
-      });
-      handles.push({
-        param: "radiusY",
-        dir: [0, 1, 0],
-        pos: [0, g.radiusY + o, 0],
-        label: "Ry",
-      });
-      break;
-    }
-    case "triangularPrism":
-    case "hexagonalPrism":
-    case "pentagonalPrism": {
-      const by = -g.height / 2;
-      handles.push({
-        param: "radius",
-        dir: [1, 0, 0],
-        pos: [g.radius + o, by, 0],
-        label: "R",
-      });
-      handles.push({
-        param: "radius",
-        dir: [-1, 0, 0],
-        pos: [-g.radius - o, by, 0],
-        label: "R",
-      });
-      handles.push({
-        param: "radius",
-        dir: [0, 0, 1],
-        pos: [0, by, g.radius + o],
-        label: "R",
-      });
-      handles.push({
-        param: "height",
-        dir: [0, 1, 0],
-        pos: [0, g.height / 2 + o, 0],
-        label: "H",
-      });
-      break;
-    }
-    case "pentagonalPyramid":
-    case "squarePyramid": {
-      const by = -g.height / 2;
-      handles.push({
-        param: "radius",
-        dir: [1, 0, 0],
-        pos: [g.radius + o, by, 0],
-        label: "R",
-      });
-      handles.push({
-        param: "radius",
-        dir: [-1, 0, 0],
-        pos: [-g.radius - o, by, 0],
-        label: "R",
-      });
-      handles.push({
-        param: "height",
-        dir: [0, 1, 0],
-        pos: [0, g.height / 2 + o, 0],
-        label: "H",
-      });
-      break;
-    }
-    case "ring": {
-      handles.push({
-        param: "outerRadius",
-        dir: [1, 0, 0],
-        pos: [g.outerRadius + o, -g.height / 2, 0],
-        label: "R",
-      });
-      handles.push({
-        param: "outerRadius",
-        dir: [0, 0, 1],
-        pos: [0, -g.height / 2, g.outerRadius + o],
-        label: "R",
-      });
-      handles.push({
-        param: "innerRadius",
-        dir: [-1, 0, 0],
-        pos: [-g.innerRadius - o, -g.height / 2, 0],
-        label: "Ri",
-      });
-      handles.push({
-        param: "height",
-        dir: [0, 1, 0],
-        pos: [0, g.height / 2 + o, 0],
-        label: "H",
-      });
-      break;
-    }
-    case "paraboloid": {
-      const by = -g.height / 2;
-      handles.push({
-        param: "radius",
-        dir: [1, 0, 0],
-        pos: [g.radius + o, by, 0],
-        label: "R",
-      });
-      handles.push({
-        param: "radius",
-        dir: [-1, 0, 0],
-        pos: [-g.radius - o, by, 0],
-        label: "R",
-      });
-      handles.push({
-        param: "radius",
-        dir: [0, 0, 1],
-        pos: [0, by, g.radius + o],
-        label: "R",
-      });
-      handles.push({
-        param: "height",
-        dir: [0, 1, 0],
-        pos: [0, g.height / 2 + o, 0],
-        label: "H",
-      });
-      break;
-    }
-    case "imported": {
-      const d = objectDims || { width: 20, height: 20, depth: 20 };
-      const by = -d.height / 2;
-      handles.push({
-        scaleAxis: 0,
-        dir: [1, 0, 0],
-        pos: [d.width / 2 + o, by, 0],
-        label: "W",
-      });
-      handles.push({
-        scaleAxis: 0,
-        dir: [-1, 0, 0],
-        pos: [-d.width / 2 - o, by, 0],
-        label: "W",
-      });
-      handles.push({
-        scaleAxis: 2,
-        dir: [0, 0, 1],
-        pos: [0, by, d.depth / 2 + o],
-        label: "D",
-      });
-      handles.push({
-        scaleAxis: 2,
-        dir: [0, 0, -1],
-        pos: [0, by, -d.depth / 2 - o],
-        label: "D",
-      });
-      handles.push({
-        scaleAxis: 1,
-        dir: [0, 1, 0],
-        pos: [0, d.height / 2 + o, 0],
-        label: "H",
-      });
-      break;
-    }
-    default:
-      break;
-  }
-  return handles;
-}
-
 function ObjectHandles({
   meshRefs,
   selectedId,
@@ -2098,6 +1610,7 @@ function ObjectHandles({
   }, [obj?.rotation?.[0], obj?.rotation?.[1], obj?.rotation?.[2]]);
 
   const active = !!obj;
+  const behavior = active ? getObjectBehavior(obj.type) : null;
   const dims = active
     ? getObjectDimensions(obj)
     : { width: 20, height: 20, depth: 20 };
@@ -2152,6 +1665,14 @@ function ObjectHandles({
   const scaleTriEdges = useMemo(
     () => new THREE.EdgesGeometry(scaleTriGeo),
     [scaleTriGeo],
+  );
+  const scaleCubeGeo = useMemo(
+    () => new THREE.BoxGeometry(1.4, 1.4, 1.4),
+    [],
+  );
+  const scaleCubeEdges = useMemo(
+    () => new THREE.EdgesGeometry(scaleCubeGeo),
+    [scaleCubeGeo],
   );
 
   useEffect(() => {
@@ -2220,61 +1741,19 @@ function ObjectHandles({
     }
   }
 
-  const scaleHandles = getScaleHandles(obj.type, obj.geometry, {
-    width: hw * 2,
-    height: hh * 2,
-    depth: hd * 2,
-  });
+  const objectDims = { width: hw * 2, height: hh * 2, depth: hd * 2 };
+  const scaleHandlesFromBehavior = behavior.getScaleHandles(obj, objectDims);
+  const uniformScaleHandle = {
+    uniformScale: true,
+    dir: [0, 1, 0],
+    pos: [0, hh + 15, 0],
+    label: "U",
+  };
+  const scaleHandles = [...scaleHandlesFromBehavior, uniformScaleHandle];
 
-  const arrowGap = 10;
-  const translateArrows = [
-    {
-      dir: [1, 0, 0],
-      pos: [hw + arrowGap, 0, 0],
-      rot: [0, 0, -Math.PI / 2],
-      color: "#ef4444",
-    },
-    {
-      dir: [-1, 0, 0],
-      pos: [-hw - arrowGap, 0, 0],
-      rot: [0, 0, Math.PI / 2],
-      color: "#ef4444",
-    },
-    {
-      dir: [0, 1, 0],
-      pos: [0, hh + arrowGap, 0],
-      rot: [0, 0, 0],
-      color: "#22c55e",
-    },
-    {
-      dir: [0, 0, 1],
-      pos: [0, 0, hd + arrowGap],
-      rot: [Math.PI / 2, 0, 0],
-      color: "#3b82f6",
-    },
-    {
-      dir: [0, 0, -1],
-      pos: [0, 0, -hd - arrowGap],
-      rot: [-Math.PI / 2, 0, 0],
-      color: "#3b82f6",
-    },
-  ];
+  const translateArrows = behavior.getTranslateArrows({ hw, hh, hd });
 
-  const rotationArcs = [
-    {
-      axis: 0,
-      pos: [-hw - 3, hh / 2, hd + 3],
-      arcRot: [0, Math.PI / 2, 0],
-      color: "#ef4444",
-    },
-    {
-      axis: 1,
-      pos: [hw + 3, -hh, 0],
-      arcRot: [-Math.PI / 2, 0, 0],
-      color: "#22c55e",
-    },
-    { axis: 2, pos: [hw + 3, 0, hd + 3], arcRot: [0, 0, 0], color: "#3b82f6" },
-  ];
+  const rotationArcs = behavior.getRotationArcs({ hw, hh, hd });
 
   const makeDragPlane = (axisDir, point) => {
     const camDir = new THREE.Vector3();
@@ -2288,42 +1767,6 @@ function ObjectHandles({
   };
 
   const resolveScaleParams = (targetObj, handle) => {
-    const axisParamMap = {
-      box: ["width", "height", "depth"],
-      wall: ["width", "height", "depth"],
-      wedge: ["width", "height", "depth"],
-      sphere: ["radius", "radius", "radius"],
-      hemisphere: ["radius", "radius", "radius"],
-      cylinder: ["radiusBottom", "height", "radiusBottom"],
-      cone: ["radius", "height", "radius"],
-      pyramid: ["radius", "height", "radius"],
-      torus: ["radius", "radius", "tube"],
-      tube: ["radius", "radius", "tube"],
-      heart: ["size", "depth", "size"],
-      star: ["outerRadius", "depth", "outerRadius"],
-      starSix: ["outerRadius", "depth", "outerRadius"],
-      text: ["size", "size", "height"],
-      tetrahedron: ["radius", "radius", "radius"],
-      dodecahedron: ["radius", "radius", "radius"],
-      octahedron: ["radius", "radius", "radius"],
-      icosahedron: ["radius", "radius", "radius"],
-      ellipsoid: ["radiusX", "radiusY", "radiusZ"],
-      triangularPrism: ["radius", "height", "radius"],
-      hexagonalPrism: ["radius", "height", "radius"],
-      pentagonalPrism: ["radius", "height", "radius"],
-      pentagonalPyramid: ["radius", "height", "radius"],
-      squarePyramid: ["radius", "height", "radius"],
-      ring: ["outerRadius", "height", "outerRadius"],
-      paraboloid: ["radius", "height", "radius"],
-    };
-    const axisLinkedMap = {
-      cylinder: ["radiusTop", null, "radiusTop"],
-    };
-
-    const paramAxes = axisParamMap[targetObj.type];
-    if (!paramAxes)
-      return { param: handle.param, linkedParam: handle.linkedParam };
-
     const q = new THREE.Quaternion().setFromEuler(
       new THREE.Euler(
         targetObj.rotation?.[0] || 0,
@@ -2340,14 +1783,7 @@ function ObjectHandles({
     const ay = Math.abs(localDir.y);
     const az = Math.abs(localDir.z);
     const axis = ax >= ay && ax >= az ? 0 : ay >= az ? 1 : 2;
-
-    return {
-      param: paramAxes[axis] || handle.param,
-      linkedParam:
-        (axisLinkedMap[targetObj.type] &&
-          axisLinkedMap[targetObj.type][axis]) ||
-        handle.linkedParam,
-    };
+    return behavior.resolveScaleParams(targetObj, handle, axis);
   };
 
   const handleDomMove = (domEvent) => {
@@ -2363,11 +1799,19 @@ function ObjectHandles({
     if (drag.current.type === "scale") {
       if (caster.ray.intersectPlane(interactionPlane, hitPoint)) {
         const d = hitPoint.clone().sub(startPt).dot(drag.current.dirW);
+        const base = Math.max(drag.current.baseSize || 1, 1);
+        let factor = 1 + d / base;
+        if (!Number.isFinite(factor)) factor = 1;
+
+        if (drag.current.handle.uniformScale) {
+          const scale = startObjScale.current.map((s) =>
+            Math.max(0.01, s * factor),
+          );
+          updateObjectSilent(id, { scale });
+          return;
+        }
         if (drag.current.handle.scaleAxis !== undefined) {
           const axis = drag.current.handle.scaleAxis;
-          const base = Math.max(drag.current.baseSize || 1, 1);
-          let factor = 1 + d / base;
-          if (!Number.isFinite(factor)) factor = 1;
           const scale = [...startObjScale.current];
           scale[axis] = Math.max(0.01, startObjScale.current[axis] * factor);
           updateObjectSilent(id, { scale });
@@ -2464,26 +1908,35 @@ function ObjectHandles({
 
   const onScaleDown = (e, handle) => {
     beginDrag(e);
+    const ne = e.nativeEvent || e;
+    const shiftKey = !!(ne && ne.shiftKey);
+    const uniformScale =
+      handle.uniformScale ||
+      (shiftKey && (handle.scaleAxis !== undefined || handle.param != null));
     const dirW = new THREE.Vector3(...handle.dir).normalize();
     if (workplaneMode) {
       dirW.applyQuaternion(handleQuat).normalize();
     }
     makeDragPlane(dirW, e.point);
     const { param, linkedParam } =
-      workplaneMode || handle.scaleAxis !== undefined
+      uniformScale ||
+      workplaneMode ||
+      handle.scaleAxis !== undefined
         ? { param: handle.param, linkedParam: handle.linkedParam }
         : resolveScaleParams(obj, handle);
     const baseSize =
-      handle.scaleAxis === 0
-        ? rawDims.width
-        : handle.scaleAxis === 1
-          ? rawDims.height
-          : handle.scaleAxis === 2
-            ? rawDims.depth
-            : undefined;
+      uniformScale || handle.uniformScale
+        ? (rawDims.width + rawDims.height + rawDims.depth) / 3
+        : handle.scaleAxis === 0
+          ? rawDims.width
+          : handle.scaleAxis === 1
+            ? rawDims.height
+            : handle.scaleAxis === 2
+              ? rawDims.depth
+              : undefined;
     drag.current = {
       type: "scale",
-      handle,
+      handle: { ...handle, uniformScale: uniformScale || handle.uniformScale },
       dirW,
       param,
       linkedParam,
@@ -2576,12 +2029,15 @@ function ObjectHandles({
               } else {
                 rotation = [-Math.PI / 2, 0, 0];
               }
+              const isUniform = h.uniformScale;
+              const geo = isUniform ? scaleCubeGeo : scaleTriGeo;
+              const edges = isUniform ? scaleCubeEdges : scaleTriEdges;
               return (
                 <group key={`sc${i}`} position={h.pos} rotation={rotation}>
                   <mesh
                     onPointerDown={(e) => onScaleDown(e, h)}
                     renderOrder={999}
-                    geometry={scaleTriGeo}
+                    geometry={geo}
                     userData={{ isTransformHandle: true }}
                   >
                     <meshBasicMaterial
@@ -2590,7 +2046,7 @@ function ObjectHandles({
                       depthWrite={false}
                     />
                   </mesh>
-                  <lineSegments renderOrder={1000} geometry={scaleTriEdges}>
+                  <lineSegments renderOrder={1000} geometry={edges}>
                     <lineBasicMaterial
                       color="white"
                       depthTest={false}
@@ -3555,6 +3011,14 @@ function MirrorAxisGizmo({ meshRefs, selectedIds }) {
   );
 }
 
+function RaycasterCameraSync() {
+  const { camera, raycaster } = useThree();
+  useFrame(() => {
+    if (raycaster && camera) raycaster.camera = camera;
+  }, -100);
+  return null;
+}
+
 function SceneContent() {
   const meshRefs = useRef({});
   const orbitRef = useRef();
@@ -3635,6 +3099,7 @@ function SceneContent() {
           }
 
           if (otherMeshes.length > 0) {
+            surfaceRaycaster.camera = camera;
             surfaceRaycaster.set(
               new THREE.Vector3(nx, 500, nz),
               new THREE.Vector3(0, -1, 0),
@@ -3774,6 +3239,7 @@ function SceneContent() {
   return (
     <>
       <CameraSetup />
+      <RaycasterCameraSync />
 
       <ambientLight intensity={0.4} />
       <directionalLight

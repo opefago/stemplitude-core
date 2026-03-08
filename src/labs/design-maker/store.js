@@ -769,7 +769,7 @@ export const useDesignStore = create((set, get) => ({
       id: uuidv4(),
       name: `${name} ${objectCounter}`,
       type: "imported",
-      position: [0, 10, 0],
+      position: [0, 0, 0],
       rotation: [0, 0, 0],
       scale: [1, 1, 1],
       color: "#6366f1",
@@ -778,6 +778,13 @@ export const useDesignStore = create((set, get) => ({
       visible: true,
       geometry: { bufferGeometry },
     };
+    const floorY = getFloorY(
+      "imported",
+      obj.geometry,
+      obj.rotation,
+      obj.scale,
+    );
+    obj.position = [0, floorY, 0];
     set((state) => ({
       objects: [...state.objects, obj],
       groups: reconcileGroups([...state.objects, obj], state.groups),
