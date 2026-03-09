@@ -4,6 +4,7 @@ import RichTip from '../labs/design-maker/RichTip';
 import TC from '../labs/design-maker/tooltipContent';
 import {
   Settings, Upload, Download, Share2, X, Pencil,
+  FolderOpen, ChevronDown, Search,
 } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import * as THREE from 'three';
@@ -115,6 +116,19 @@ export default function DesignMakerLab() {
   const [projectList, setProjectList] = useState([]);
   const projectsRef = useRef(null);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [projectDialogOpen, setProjectDialogOpen] = useState(false);
+  const [dialogSearch, setDialogSearch] = useState('');
+  const [dialogPage, setDialogPage] = useState(0);
+  const [dialogProjects, setDialogProjects] = useState([]);
+  const DIALOG_PAGE_SIZE = 8;
+  const filteredDialogProjects = dialogProjects.filter(p =>
+    p.name.toLowerCase().includes(dialogSearch.toLowerCase())
+  );
+  const totalDialogPages = Math.max(1, Math.ceil(filteredDialogProjects.length / DIALOG_PAGE_SIZE));
+  const paginatedDialogProjects = filteredDialogProjects.slice(
+    dialogPage * DIALOG_PAGE_SIZE,
+    (dialogPage + 1) * DIALOG_PAGE_SIZE
+  );
   const [sidebarTab, setSidebarTab] = useState('properties');
 
   useEffect(() => {
@@ -127,6 +141,22 @@ export default function DesignMakerLab() {
     document.addEventListener('click', handleClick);
     return () => document.removeEventListener('click', handleClick);
   }, [projectsOpen]);
+
+  useEffect(() => {
+    if (projectDialogOpen) {
+      setDialogProjects(getProjectList());
+      setDialogSearch('');
+      setDialogPage(0);
+    }
+  }, [projectDialogOpen, getProjectList]);
+
+  useEffect(() => {
+    if (!projectDialogOpen) return;
+    const handleKey = (e) => { if (e.key === 'Escape') setProjectDialogOpen(false); };
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, [projectDialogOpen]);
+
   const [marquee, setMarquee] = useState(null);
   const marqueeStart = useRef(null);
   const MIN_MARQUEE = 5;
@@ -518,7 +548,68 @@ export default function DesignMakerLab() {
             <span className="dml-logo-text">Design Maker</span>
           </div>
           <div className="dml-divider" />
-          <div className="dml-project-info" ref={projectsRef}>
+          <div className="dml-project-info">
+            {/* Projects trigger — sits LEFT of the name input */}
+            <div className="dml-projects-trigger" ref={projectsRef}>
+              <button
+                className={`dml-projects-btn ${projectsOpen ? 'active' : ''}`}
+                onClick={() => { setProjectList(getProjectList()); setProjectsOpen(!projectsOpen); }}
+              >
+                <FolderOpen size={14} />
+                <span>Projects</span>
+                <ChevronDown size={11} className={`dml-projects-chevron ${projectsOpen ? 'open' : ''}`} />
+              </button>
+
+              {projectsOpen && (
+                <div className="dml-projects-dropdown">
+                  <button
+                    className="dml-projects-new"
+                    onClick={() => { newProject(); setProjectsOpen(false); }}
+                  >
+                    <span className="dml-projects-new-icon">+</span>
+                    New Project
+                  </button>
+
+                  {projectList.length > 0 && (
+                    <div className="dml-projects-section-label">Recent</div>
+                  )}
+
+                  {projectList.length === 0
+                    ? <p className="dml-projects-empty">No saved projects yet</p>
+                    : projectList.slice(0, 5).map(p => (
+                        <div key={p.id} className="dml-projects-item">
+                          <button
+                            className="dml-projects-item-name"
+                            onClick={() => { loadProject(p.id); setProjectsOpen(false); }}
+                          >
+                            <span className="dml-projects-item-title">{p.name}</span>
+                            <span className="dml-projects-item-date">
+                              {new Date(p.updatedAt).toLocaleDateString()}
+                            </span>
+                          </button>
+                          <button
+                            className="dml-projects-item-del"
+                            onClick={(e) => { e.stopPropagation(); setDeleteConfirm(p); }}
+                            title="Delete"
+                          >×</button>
+                        </div>
+                      ))
+                  }
+
+                  {projectList.length > 0 && (
+                    <button
+                      className="dml-projects-browse"
+                      onClick={() => { setProjectDialogOpen(true); setProjectsOpen(false); }}
+                    >
+                      Browse all projects
+                      <ChevronDown size={11} style={{ transform: 'rotate(-90deg)' }} />
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Project name input */}
             <div className="dml-project-name-wrap">
               <input
                 className="dml-project-name"
@@ -528,33 +619,10 @@ export default function DesignMakerLab() {
               />
               <Pencil size={12} className="dml-edit-icon" />
             </div>
-            <div className="dml-save-row">
-              <span className={`dml-save-indicator ${isDirty ? 'unsaved' : 'saved'}`}>
-                {isDirty ? '● Unsaved' : '✓ Saved'}
-              </span>
-              <button className="dml-projects-btn" onClick={() => { setProjectList(getProjectList()); setProjectsOpen(!projectsOpen); }}>
-                My Projects ▾
-              </button>
-            </div>
-            {projectsOpen && (
-              <div className="dml-projects-dropdown">
-                <button className="dml-projects-item dml-projects-new" onClick={() => { newProject(); setProjectsOpen(false); }}>
-                  + New Project
-                </button>
-                {projectList.length === 0 && <p className="dml-projects-empty">No saved projects</p>}
-                {projectList.map(p => (
-                  <div key={p.id} className="dml-projects-item">
-                    <button className="dml-projects-item-name" onClick={() => { loadProject(p.id); setProjectsOpen(false); }}>
-                      {p.name}
-                      <span className="dml-projects-item-date">{new Date(p.updatedAt).toLocaleDateString()}</span>
-                    </button>
-                    <button className="dml-projects-item-del" onClick={(e) => { e.stopPropagation(); setDeleteConfirm(p); }}>
-                      ×
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
+
+            <span className={`dml-save-indicator ${isDirty ? 'unsaved' : 'saved'}`}>
+              {isDirty ? '● Unsaved' : '✓ Saved'}
+            </span>
           </div>
         </div>
 
@@ -748,6 +816,99 @@ export default function DesignMakerLab() {
 
       <SettingsDialog />
 
+      {/* ── Full Project Browser Dialog ── */}
+      {projectDialogOpen && (
+        <div className="dml-pdialog-overlay" onClick={() => setProjectDialogOpen(false)}>
+          <div className="dml-pdialog" onClick={(e) => e.stopPropagation()}>
+            <div className="dml-pdialog-header">
+              <div className="dml-pdialog-title">
+                <FolderOpen size={18} />
+                <h2>My Projects</h2>
+              </div>
+              <button className="dml-pdialog-close" onClick={() => setProjectDialogOpen(false)}>
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="dml-pdialog-search-wrap">
+              <Search size={14} className="dml-pdialog-search-icon" />
+              <input
+                className="dml-pdialog-search"
+                placeholder="Search projects…"
+                value={dialogSearch}
+                onChange={(e) => { setDialogSearch(e.target.value); setDialogPage(0); }}
+                autoFocus
+              />
+              {dialogSearch && (
+                <button className="dml-pdialog-search-clear" onClick={() => setDialogSearch('')}>
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+
+            <div className="dml-pdialog-list">
+              {filteredDialogProjects.length === 0 ? (
+                <p className="dml-pdialog-empty">
+                  {dialogSearch ? `No projects matching "${dialogSearch}"` : 'No saved projects yet'}
+                </p>
+              ) : (
+                paginatedDialogProjects.map(p => (
+                  <div key={p.id} className="dml-pdialog-item">
+                    <div className="dml-pdialog-item-info">
+                      <span className="dml-pdialog-item-name">{p.name}</span>
+                      <span className="dml-pdialog-item-date">
+                        {new Date(p.updatedAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
+                      </span>
+                    </div>
+                    <div className="dml-pdialog-item-actions">
+                      <button
+                        className="dml-pdialog-open"
+                        onClick={() => { loadProject(p.id); setProjectDialogOpen(false); }}
+                      >Open</button>
+                      <button
+                        className="dml-pdialog-del"
+                        onClick={() => setDeleteConfirm(p)}
+                        title="Delete project"
+                      >×</button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {totalDialogPages > 1 && (
+              <div className="dml-pdialog-pagination">
+                <button
+                  className="dml-pdialog-page-btn"
+                  disabled={dialogPage === 0}
+                  onClick={() => setDialogPage(p => p - 1)}
+                >‹</button>
+                <span className="dml-pdialog-page-info">
+                  {dialogPage + 1} / {totalDialogPages}
+                </span>
+                <button
+                  className="dml-pdialog-page-btn"
+                  disabled={dialogPage >= totalDialogPages - 1}
+                  onClick={() => setDialogPage(p => p + 1)}
+                >›</button>
+              </div>
+            )}
+
+            <div className="dml-pdialog-footer">
+              <button
+                className="dml-pdialog-new"
+                onClick={() => { newProject(); setProjectDialogOpen(false); }}
+              >
+                <span>+</span> New Project
+              </button>
+              <span className="dml-pdialog-count">
+                {filteredDialogProjects.length} project{filteredDialogProjects.length !== 1 ? 's' : ''}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {deleteConfirm && (
         <div className="dml-confirm-overlay" onClick={() => setDeleteConfirm(null)}>
           <div className="dml-confirm-dialog" onClick={(e) => e.stopPropagation()}>
@@ -768,7 +929,9 @@ export default function DesignMakerLab() {
               <button className="dml-confirm-cancel" onClick={() => setDeleteConfirm(null)}>Cancel</button>
               <button className="dml-confirm-delete" onClick={() => {
                 deleteProject(deleteConfirm.id);
-                setProjectList(getProjectList());
+                const fresh = getProjectList();
+                setProjectList(fresh);
+                setDialogProjects(fresh);
                 setDeleteConfirm(null);
               }}>Delete</button>
             </div>

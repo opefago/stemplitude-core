@@ -856,11 +856,57 @@ const SceneObject = forwardRef(function SceneObject(
   );
 });
 
-function CameraSetup() {
+function CameraSetup({ orbitRef }) {
   const cameraMode = useDesignStore((s) => s.cameraMode);
+  const perspRef = useRef();
+  const orthoRef = useRef();
+  const prevMode = useRef(cameraMode);
+  const { size } = useThree();
+
+  useEffect(() => {
+    if (prevMode.current === cameraMode) return;
+    const controls = orbitRef?.current;
+    const fromCam = prevMode.current === "perspective" ? perspRef.current : orthoRef.current;
+    const toCam   = cameraMode      === "perspective" ? perspRef.current : orthoRef.current;
+    if (!fromCam || !toCam) { prevMode.current = cameraMode; return; }
+
+    // Preserve position (and therefore viewing direction)
+    toCam.position.copy(fromCam.position);
+
+    if (cameraMode === "orthographic") {
+      // Derive ortho zoom from perspective distance + fov so the scene looks the same size
+      const target = controls ? controls.target : new THREE.Vector3();
+      const distance = fromCam.position.distanceTo(target);
+      const fov = fromCam.fov ?? 50;
+      const viewHeight = 2 * Math.tan((fov * Math.PI) / 360) * distance;
+      toCam.zoom = size.height / viewHeight;
+    } else {
+      // Derive perspective distance from ortho zoom so the scene looks the same size
+      const target = controls ? controls.target : new THREE.Vector3();
+      const viewHeight = size.height / (fromCam.zoom ?? 4);
+      const fov = toCam.fov ?? 50;
+      const distance = viewHeight / (2 * Math.tan((fov * Math.PI) / 360));
+      const dir = new THREE.Vector3()
+        .subVectors(fromCam.position, target)
+        .normalize();
+      toCam.position.copy(target).addScaledVector(dir, distance);
+    }
+
+    toCam.updateProjectionMatrix();
+
+    // Re-point OrbitControls at the new camera so it doesn't jerk
+    if (controls) {
+      controls.object = toCam;
+      controls.update();
+    }
+
+    prevMode.current = cameraMode;
+  }, [cameraMode, orbitRef, size]);
+
   return (
     <>
       <PerspectiveCamera
+        ref={perspRef}
         makeDefault={cameraMode === "perspective"}
         position={[60, 60, 60]}
         fov={50}
@@ -868,6 +914,7 @@ function CameraSetup() {
         far={10000}
       />
       <OrthographicCamera
+        ref={orthoRef}
         makeDefault={cameraMode === "orthographic"}
         position={[60, 60, 60]}
         zoom={4}
@@ -3513,7 +3560,7 @@ function SceneContent() {
 
   return (
     <>
-      <CameraSetup />
+      <CameraSetup orbitRef={orbitRef} />
       <RaycasterCameraSync />
 
       <ambientLight intensity={0.4} />
