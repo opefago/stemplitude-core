@@ -41,32 +41,40 @@ function renderIcon(renderer, scene, camera, gradientMap, type, geometry, color)
   const outlineMesh = new THREE.Mesh(geometry, outlineMat);
   outlineMesh.scale.multiplyScalar(1.1);
 
-  const edges = new THREE.EdgesGeometry(geometry, 18);
-  const lineGeo = new LineSegmentsGeometry();
-  lineGeo.setPositions(edges.attributes.position.array);
+  // Capsule: no edge lines so it stays smooth and white like the reference
+  const edgeAngle = type === 'capsule' ? 90 : (type === 'sphere' ? 8 : 18);
+  const edges = new THREE.EdgesGeometry(geometry, edgeAngle);
+  const hasEdges = edges.attributes.position.count > 0;
+  let lineGeo = null;
+  let lineMat = null;
+  let edgeLines = null;
+  if (hasEdges) {
+    lineGeo = new LineSegmentsGeometry();
+    lineGeo.setPositions(edges.attributes.position.array);
+    const res = SIZE * PIXEL_RATIO;
+    lineMat = new LineMaterial({
+      color: 0x000000,
+      linewidth: 2.5,
+      transparent: true,
+      opacity: 0.85,
+      worldUnits: false,
+      resolution: new THREE.Vector2(res, res),
+    });
+    edgeLines = new LineSegments2(lineGeo, lineMat);
+  }
   edges.dispose();
-  const res = SIZE * PIXEL_RATIO;
-  const lineMat = new LineMaterial({
-    color: 0x000000,
-    linewidth: 2.5,
-    transparent: true,
-    opacity: 0.85,
-    worldUnits: false,
-    resolution: new THREE.Vector2(res, res),
-  });
-  const edgeLines = new LineSegments2(lineGeo, lineMat);
 
   if (FLAT_TYPES.includes(type)) {
     mesh.rotation.x = -Math.PI / 2;
     outlineMesh.rotation.x = -Math.PI / 2;
-    edgeLines.rotation.x = -Math.PI / 2;
+    if (edgeLines) edgeLines.rotation.x = -Math.PI / 2;
   }
 
   if (type === 'wall') {
     const sideAngle = 0.65;
     mesh.rotation.y = sideAngle;
     outlineMesh.rotation.y = sideAngle;
-    edgeLines.rotation.y = sideAngle;
+    if (edgeLines) edgeLines.rotation.y = sideAngle;
   }
 
   const box = new THREE.Box3().setFromObject(mesh);
@@ -76,7 +84,7 @@ function renderIcon(renderer, scene, camera, gradientMap, type, geometry, color)
 
   mesh.position.sub(center);
   outlineMesh.position.copy(mesh.position);
-  edgeLines.position.copy(mesh.position);
+  if (edgeLines) edgeLines.position.copy(mesh.position);
 
   const dist = maxDim / (2 * Math.tan((camera.fov * Math.PI) / 360)) * 1.6;
   if (type === 'text') {
@@ -90,9 +98,9 @@ function renderIcon(renderer, scene, camera, gradientMap, type, geometry, color)
 
   scene.add(outlineMesh);
   scene.add(mesh);
-  scene.add(edgeLines);
+  if (edgeLines) scene.add(edgeLines);
   renderer.render(scene, camera);
-  scene.remove(edgeLines);
+  if (edgeLines) scene.remove(edgeLines);
   scene.remove(mesh);
   scene.remove(outlineMesh);
 
@@ -100,8 +108,8 @@ function renderIcon(renderer, scene, camera, gradientMap, type, geometry, color)
   geometry.dispose();
   material.dispose();
   outlineMat.dispose();
-  lineGeo.dispose();
-  lineMat.dispose();
+  if (lineGeo) lineGeo.dispose();
+  if (lineMat) lineMat.dispose();
   return dataUrl;
 }
 
@@ -129,10 +137,24 @@ async function generateIcons() {
   gradientMap.needsUpdate = true;
 
   const results = {};
+  const capsuleColor = (SHAPE_DEFAULTS.capsule && SHAPE_DEFAULTS.capsule.color) || '#ffffff';
+  try {
+    const capsuleGeo = createGeometry('capsule', (SHAPE_DEFAULTS.capsule && SHAPE_DEFAULTS.capsule.geometry) || { radius: 10, height: 36 });
+    results.capsule = renderIcon(renderer, scene, camera, gradientMap, 'capsule', capsuleGeo, capsuleColor);
+  } catch {
+    try {
+      const cylGeo = createGeometry('cylinder', { radiusTop: 10, radiusBottom: 10, height: 36, radialSegments: 32 });
+      results.capsule = renderIcon(renderer, scene, camera, gradientMap, 'cylinder', cylGeo, capsuleColor);
+    } catch {
+      results.capsule = renderIcon(renderer, scene, camera, gradientMap, 'box', new THREE.BoxGeometry(20, 36, 20), capsuleColor);
+    }
+  }
+
   const typesToRender = new Set(ICON_TYPES);
   typesToRender.add('capsule');
 
   for (const type of typesToRender) {
+    if (type === 'capsule') continue; // already generated above
     try {
       const defaults = SHAPE_DEFAULTS[type] || SHAPE_DEFAULTS.box;
       let geoParams = type === 'wall'
@@ -142,21 +164,27 @@ async function generateIcons() {
       results[type] = renderIcon(renderer, scene, camera, gradientMap, type, geometry, defaults.color);
     } catch (err) {
       const fallbackDefaults = SHAPE_DEFAULTS[type] || SHAPE_DEFAULTS.box;
-      const fallbackGeo = type === 'capsule'
-        ? createGeometry('cylinder', { radiusTop: 10, radiusBottom: 10, height: 36, radialSegments: 32 })
-        : new THREE.BoxGeometry(20, 20, 20);
-      results[type] = renderIcon(renderer, scene, camera, gradientMap, type, fallbackGeo, fallbackDefaults.color);
+      let fallbackGeo;
+      let renderAs = type;
+      if (type === 'capsule') {
+        fallbackGeo = createGeometry('cylinder', { radiusTop: 10, radiusBottom: 10, height: 36, radialSegments: 32 });
+        renderAs = 'cylinder'; // use cylinder pipeline so edges render and icon is never blank
+      } else {
+        fallbackGeo = new THREE.BoxGeometry(20, 20, 20);
+      }
+      results[type] = renderIcon(renderer, scene, camera, gradientMap, renderAs, fallbackGeo, fallbackDefaults.color);
     }
   }
 
+  // Guaranteed capsule icon: use 'cylinder' type so we get the standard edge path (no empty-edges issue)
   if (!results.capsule) {
     try {
       const def = SHAPE_DEFAULTS.capsule || SHAPE_DEFAULTS.cylinder;
-      const geo = createGeometry('capsule', def?.geometry || { radius: 10, height: 36 });
-      results.capsule = renderIcon(renderer, scene, camera, gradientMap, 'capsule', geo, (def && def.color) || '#0d9488');
-    } catch {
       const cylGeo = createGeometry('cylinder', { radiusTop: 10, radiusBottom: 10, height: 36, radialSegments: 32 });
-      results.capsule = renderIcon(renderer, scene, camera, gradientMap, 'capsule', cylGeo, '#0d9488');
+      results.capsule = renderIcon(renderer, scene, camera, gradientMap, 'cylinder', cylGeo, (def && def.color) || '#ffffff');
+    } catch {
+      const boxGeo = new THREE.BoxGeometry(20, 36, 20);
+      results.capsule = renderIcon(renderer, scene, camera, gradientMap, 'box', boxGeo, '#ffffff');
     }
   }
 
@@ -189,6 +217,11 @@ async function generateIcons() {
   gradientMap.dispose();
   renderer.dispose();
 
+  // Ensure capsule slot is never empty (e.g. reuse cylinder icon if capsule generation failed)
+  if (!results.capsule && results.cylinder) {
+    results.capsule = results.cylinder;
+  }
+
   cache = results;
   return results;
 }
@@ -199,4 +232,10 @@ export function getShapeIcons() {
     cachePromise = generateIcons();
   }
   return cachePromise;
+}
+
+/** Call to force icons to regenerate on next getShapeIcons() (e.g. after fixing icon code) */
+export function clearShapeIconCache() {
+  cache = null;
+  cachePromise = null;
 }

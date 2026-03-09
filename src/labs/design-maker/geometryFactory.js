@@ -431,13 +431,14 @@ registerShape("paraboloid", (p) => {
   const halfH = p.height / 2;
   const radius = p.radius;
   pts.push(new THREE.Vector2(0, -halfH));
-  pts.push(new THREE.Vector2(radius, -halfH));
   for (let i = 1; i <= steps; i++) {
     const t = i / steps;
     const y = t * p.height - halfH;
     const r = radius * Math.sqrt(t);
     pts.push(new THREE.Vector2(r, y));
   }
+  // Close the top with a flat cap by bringing the profile back to the center axis.
+  pts.push(new THREE.Vector2(0, halfH));
   return new THREE.LatheGeometry(pts, p.radialSegments || 32);
 });
 

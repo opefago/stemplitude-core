@@ -14,6 +14,18 @@ const transparentImg = (() => {
   return c;
 })();
 
+// Inline capsule (pill) SVG so the capsule slot always shows something even if async icons fail
+const CAPSULE_PLACEHOLDER_SVG = 'data:image/svg+xml,' + encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect x="14" y="6" width="36" height="52" rx="18" ry="18" fill="%23d1d5db" stroke="%236b7280" stroke-width="2"/></svg>'
+);
+
+function getIconSrc(icons, shape) {
+  if (shape.type === 'capsule') {
+    return icons.capsule || icons.cylinder || CAPSULE_PLACEHOLDER_SVG;
+  }
+  return icons[shape.type];
+}
+
 const CATEGORIES = [
   {
     name: 'Primitives',
@@ -157,7 +169,7 @@ export default function ShapeLibrary() {
   useEffect(() => {
     const result = getShapeIcons();
     if (result instanceof Promise) {
-      result.then(setIcons);
+      result.then(setIcons).catch(() => setIcons({}));
     } else {
       setIcons(result);
     }
@@ -235,9 +247,14 @@ export default function ShapeLibrary() {
                         onDragStart={(e) => handleDragStart(e, shape)}
                         onDragEnd={handleDragEnd}
                       >
-                        <div className="dml-shapes-item-icon">
-                          {icons[shape.type] ? (
-                            <img src={icons[shape.type]} alt={shape.name} draggable={false} />
+                        <div className={`dml-shapes-item-icon ${shape.type === 'capsule' ? 'dml-shapes-item-icon-capsule' : ''}`}>
+                          {getIconSrc(icons, shape) ? (
+                            <img
+                              src={getIconSrc(icons, shape)}
+                              alt={shape.name}
+                              draggable={false}
+                              loading="eager"
+                            />
                           ) : (
                             <span className="dml-shapes-item-icon-placeholder" aria-hidden>{shape.name.charAt(0)}</span>
                           )}

@@ -44,6 +44,7 @@ import {
 import { createGeometry } from "./geometryFactory";
 import {
   getObjectDimensions,
+  getObjectWorldDims,
   getFloorY,
   getWorldBounds,
   getRawExtents,
@@ -1295,7 +1296,7 @@ function DimensionRuler({ meshRefs }) {
     if (!s.rulerVisible || s.selectedIds.length !== 1) return null;
     return s.objects.find((o) => o.id === s.selectedIds[0]) || null;
   });
-  const fallbackDims = obj ? getObjectDimensions(obj) : null;
+  const fallbackDims = obj ? getObjectWorldDims(obj) : null;
 
   useFrame(() => {
     if (!groupRef.current) return;
@@ -1634,7 +1635,7 @@ function ObjectHandles({
   const behavior = active ? getObjectBehavior(obj.type) : null;
   const effectiveObj = active && liveScale ? { ...obj, scale: liveScale } : obj;
   const dims = active
-    ? getObjectDimensions(effectiveObj)
+    ? getObjectWorldDims(effectiveObj)
     : { width: 20, height: 20, depth: 20 };
   const rawDims = active
     ? {
@@ -1746,18 +1747,23 @@ function ObjectHandles({
       // Derive bounds from store when we have the object so container and bounds never desync
       // (e.g. after proportional then non-proportional scale).
       if (o) {
-        const d = getObjectDimensions(o);
-        const px = o.position[0] ?? 0;
-        const py = o.position[1] ?? 0;
-        const pz = o.position[2] ?? 0;
-        setMeshBounds({
-          hw: d.width / 2,
-          hh: d.height / 2,
-          hd: d.depth / 2,
-          cx: px,
-          cy: py,
-          cz: pz,
-        });
+        // Freeze bounds while rotating so handles stay fixed at their drag-start positions.
+        // The AABB changes every frame during rotation (non-spherical objects), which would
+        // cause hw/hh/hd to shift and all handles to dance around their pivot point.
+        if (drag.current?.type !== "rotate") {
+          const d = getObjectWorldDims(o);
+          const px = o.position[0] ?? 0;
+          const py = o.position[1] ?? 0;
+          const pz = o.position[2] ?? 0;
+          setMeshBounds({
+            hw: d.width / 2,
+            hh: d.height / 2,
+            hd: d.depth / 2,
+            cx: px,
+            cy: py,
+            cz: pz,
+          });
+        }
       } else {
         mesh.updateMatrixWorld(true);
         scaleBoxRef.current.setFromObject(mesh);
@@ -1826,6 +1832,7 @@ function ObjectHandles({
   const hd = dims.depth / 2;
 
   const objectDims = { width: dims.width, height: dims.height, depth: dims.depth };
+  const isRingOrTorusLike = obj.type === "torus" || obj.type === "tube" || obj.type === "ring";
   const scaleHandlesFromBehavior = behavior.getScaleHandles(obj, objectDims);
   const uniformScaleHandle = {
     uniformScale: true,
@@ -1848,10 +1855,25 @@ function ObjectHandles({
   // Scale handles: avoid overshoot by putting the face in dimension space then adding a
   // fixed offset in world units (behavior offset is in geometry space and was being scaled).
   const scaleHandleOffset = behavior.handleOffset ?? 3;
-  const scaleHandleFixedGap = 2;
+  // For ring/torus/tube the behavior already positions handles at the face + offset;
+  // add a small gap so they sit just outside without overlapping translate arrows.
+  const scaleHandleFixedGap = isRingOrTorusLike ? 0 : 2;
+  // Torus/tube behavior returns scale handle positions in dimension space; add fixed gap in handle direction.
+  // Ring uses default handle family (geometry space) so it goes through toDimension below. Imported: use as-is.
   const scaleHandlesFromBehaviorInDim = scaleHandlesFromBehavior.map((h) => {
     if (obj.type === "imported") {
       return { ...h, pos: [...h.pos] };
+    }
+    if (obj.type === "torus" || obj.type === "tube" || obj.type === "ring") {
+      const [dx, dy, dz] = h.dir;
+      return {
+        ...h,
+        pos: [
+          h.pos[0] + dx * scaleHandleFixedGap,
+          h.pos[1] + dy * scaleHandleFixedGap,
+          h.pos[2] + dz * scaleHandleFixedGap,
+        ],
+      };
     }
     const [dx, dy, dz] = h.dir;
     const faceRaw = [
@@ -1873,7 +1895,9 @@ function ObjectHandles({
   ];
 
   const translateArrowsRaw = behavior.getTranslateArrows({ hw, hh, hd });
-  const arrowGap = behavior.translateArrowGap ?? 10;
+  // Ring/torus/tube: arrows further out than scale handles (which are at face+handleOffset=face+3)
+  // so they don't overlap. handleOffset=3 → scale handle at face+3; arrow at face+8.
+  const arrowGap = isRingOrTorusLike ? 8 : (behavior.translateArrowGap ?? 10);
   const translateArrows = translateArrowsRaw.map((a) => {
     const [dx, dy, dz] = a.dir;
     const pos =
@@ -1886,16 +1910,28 @@ function ObjectHandles({
   });
 
   const rotationArcsRaw = behavior.getRotationArcs({ hw, hh, hd });
-  // Position each arc so the entire quarter-circle sits outside the box (not just the inner vertex).
-  // Axis 0 (YZ plane): center left-and-front of corner so arc doesn't cross faces.
-  // Axis 1 & 2 (XZ/XY): center on the face + SPACING so arc min-x is hw+SPACING and arc stays right of box.
+  // For ring/torus/tube (flat, small height): place arcs just outside the bounding box faces
+  // with a small 2-unit gap. The ROTATION_ARC_INNER formula overshoots for small flat shapes
+  // because ROTATION_ARC_INNER (13) is larger than the object's radius.
+  // For normal shapes: use the existing corner-based formula.
   const rotationArcs = rotationArcsRaw.map((arc) => {
-    const pos =
-      arc.axis === 0
-        ? [-hw - ROTATION_ARC_INNER - ROTATION_ARC_SPACING, hh / 2, hd + ROTATION_ARC_INNER + ROTATION_ARC_SPACING]
-        : arc.axis === 1
-          ? [hw + ROTATION_ARC_SPACING, -hh, 0]
-          : [hw + ROTATION_ARC_SPACING, 0, hd];
+    let pos;
+    if (isRingOrTorusLike) {
+      // Simple face-relative placement: just outside each face by 2 units
+      pos =
+        arc.axis === 0
+          ? [-(hw + 2), 0, 0]       // just outside left face, in YZ plane
+          : arc.axis === 1
+            ? [hw + 2, -hh, hd]     // right-front at base, in XZ plane
+            : [hw + 2, 0, hd];      // right at depth face, in XY plane
+    } else {
+      pos =
+        arc.axis === 0
+          ? [-hw - ROTATION_ARC_INNER - ROTATION_ARC_SPACING, hh / 2, hd + ROTATION_ARC_INNER + ROTATION_ARC_SPACING]
+          : arc.axis === 1
+            ? [hw + ROTATION_ARC_SPACING, -hh, 0]
+            : [hw + ROTATION_ARC_SPACING, 0, hd];
+    }
     return { ...arc, pos };
   });
 
@@ -1985,15 +2021,34 @@ function ObjectHandles({
               Math.round((linkedStart + delta) * 10) / 10,
             );
           }
+          // Box-like params: full dimension → shift center by delta/2
           const paramToAxis = { width: 0, height: 1, depth: 2 };
-          const axis = paramToAxis[drag.current.param];
+          // Radius params: half-dimension → shift center by full delta (no /2)
+          // The axis is inferred from the handle direction since the same param
+          // (e.g. "radius") can be dragged along X or Z.
+          const radiusParams = new Set(["tube", "radius", "outerRadius"]);
+          const inferAxisFromDir = (dir) => {
+            const [dx, dy, dz] = dir.map(Math.abs);
+            return dx >= dy && dx >= dz ? 0 : dy >= dz ? 1 : 2;
+          };
+          let axis = paramToAxis[drag.current.param];
+          let halfFactor = 0.5; // full-dimension params: shift by half
+          if (axis === undefined && drag.current.handleDir && radiusParams.has(drag.current.param)) {
+            axis = inferAxisFromDir(drag.current.handleDir);
+            halfFactor = 1; // radius params: shift by full delta
+          }
+          // ring "height" is a full dimension on Y, same as box height
+          if (axis === undefined && drag.current.param === "height" && drag.current.handleDir) {
+            axis = 1;
+            halfFactor = 0.5;
+          }
           const pos = axis !== undefined ? [...cur.position] : cur.position;
           if (axis !== undefined && drag.current.handleDir) {
             const dir = drag.current.handleDir;
             const scaleA = cur.scale?.[axis] ?? 1;
             pos[axis] =
               startPosition.current[axis] +
-              (dir[axis] || 0) * ((val - startValue.current) / 2) * scaleA;
+              (dir[axis] || 0) * ((val - startValue.current) * halfFactor) * scaleA;
           }
           updateObjectSilent(id, {
             geometry: geoUpdate,

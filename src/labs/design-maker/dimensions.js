@@ -9,6 +9,26 @@ export function getObjectDimensions(obj) {
   return getObjectBehavior(obj.type).getDimensions(obj);
 }
 
+/**
+ * World-space AABB dimensions for handle and ruler layout.
+ * Unlike getObjectDimensions, this accounts for the object's rotation so flat shapes
+ * (torus, tube, ring, star, heart, etc.) return correct world-space extents.
+ */
+export function getObjectWorldDims(obj) {
+  const wb = getObjectBehavior(obj.type).getWorldBounds(
+    obj.type,
+    obj.geometry,
+    obj.rotation || [0, 0, 0],
+    obj.scale || [1, 1, 1],
+    [0, 0, 0],
+  );
+  return {
+    width: wb.max[0] - wb.min[0],
+    height: wb.max[1] - wb.min[1],
+    depth: wb.max[2] - wb.min[2],
+  };
+}
+
 export function getFloorY(type, geometry, rotation, scale) {
   return getObjectBehavior(type).getFloorY(type, geometry, rotation, scale);
 }

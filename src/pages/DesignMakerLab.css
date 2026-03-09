@@ -1565,6 +1565,12 @@
   pointer-events: none;
 }
 
+.dml-shapes-item-icon-capsule {
+  min-width: 42px;
+  min-height: 42px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
 .dml-shapes-item {
   cursor: grab;
   position: relative;

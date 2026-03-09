@@ -58,11 +58,11 @@ export const SHAPE_DEFAULTS = {
     geometry: {
       radius: 10,
       height: 36,
-      capSegments: 4,
-      radialSegments: 32,
-      heightSegments: 4,
+      capSegments: 6,
+      radialSegments: 16,
+      heightSegments: 3,
     },
-    color: "#0d9488",
+    color: "#ffffff",
     icon: "M3 3.5c0-.8 2.2-1.5 5-1.5s5 .7 5 1.5v9c0 .8-2.2 1.5-5 1.5s-5-.7-5-1.5z M8 3v1 M8 12.5v1",
   },
   cone: {
