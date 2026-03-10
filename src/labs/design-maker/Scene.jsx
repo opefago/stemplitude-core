@@ -51,6 +51,194 @@ import {
 } from "./dimensions";
 import { getObjectBehavior } from "./behaviors/ObjectBehaviorFactory";
 
+const DROP_SURFACE_EPSILON = 0.01;
+
+function getDefaultDropRotation(type) {
+  if (FLAT_TYPES.includes(type)) return [...FLAT_ROTATION];
+  if (DEFAULT_SHAPE_ROTATIONS[type]) return [...DEFAULT_SHAPE_ROTATIONS[type]];
+  return [0, 0, 0];
+}
+
+function getLocalSupportNormal(type) {
+  return FLAT_TYPES.includes(type)
+    ? new THREE.Vector3(0, 0, -1)
+    : new THREE.Vector3(0, -1, 0);
+}
+
+function quantizeToAxis(vec) {
+  const ax = Math.abs(vec.x);
+  const ay = Math.abs(vec.y);
+  const az = Math.abs(vec.z);
+  if (ax >= ay && ax >= az) return new THREE.Vector3(Math.sign(vec.x) || 1, 0, 0);
+  if (ay >= az) return new THREE.Vector3(0, Math.sign(vec.y) || 1, 0);
+  return new THREE.Vector3(0, 0, Math.sign(vec.z) || 1);
+}
+
+function clamp(value, min, max) {
+  if (min > max) return (min + max) / 2;
+  return Math.min(max, Math.max(min, value));
+}
+
+function getSupportDistanceFromBounds(bounds, worldNormal) {
+  if (Math.abs(worldNormal.x) > 0.5) {
+    return worldNormal.x > 0 ? -bounds.min[0] : bounds.max[0];
+  }
+  if (Math.abs(worldNormal.y) > 0.5) {
+    return worldNormal.y > 0 ? -bounds.min[1] : bounds.max[1];
+  }
+  return worldNormal.z > 0 ? -bounds.min[2] : bounds.max[2];
+}
+
+function findSceneObjectNode(node) {
+  let cur = node;
+  while (cur) {
+    if (cur.userData?.isSceneObject) return cur;
+    cur = cur.parent;
+  }
+  return null;
+}
+
+function collectSceneMeshes(meshRefs) {
+  const meshes = [];
+  Object.values(meshRefs.current).forEach((group) => {
+    group?.traverse((child) => {
+      if (child.isMesh) meshes.push(child);
+    });
+  });
+  return meshes;
+}
+
+function getDropRotationForNormal(type, worldNormal) {
+  const defaultRotation = getDefaultDropRotation(type);
+  const defaultQuat = new THREE.Quaternion().setFromEuler(
+    new THREE.Euler(...defaultRotation, "XYZ"),
+  );
+  const baseSupportNormal = getLocalSupportNormal(type)
+    .clone()
+    .applyQuaternion(defaultQuat)
+    .normalize();
+  const targetSupportNormal = worldNormal.clone().normalize().multiplyScalar(-1);
+  const alignQuat = new THREE.Quaternion().setFromUnitVectors(
+    baseSupportNormal,
+    targetSupportNormal,
+  );
+  const finalQuat = alignQuat.multiply(defaultQuat);
+  const finalEuler = new THREE.Euler().setFromQuaternion(finalQuat, "XYZ");
+  return [finalEuler.x, finalEuler.y, finalEuler.z];
+}
+
+function clampDropPointToFace(hitPoint, supportBounds, candidateBounds, worldNormal) {
+  const point = hitPoint.clone();
+  if (Math.abs(worldNormal.x) > 0.5) {
+    const halfY = (candidateBounds.max[1] - candidateBounds.min[1]) / 2;
+    const halfZ = (candidateBounds.max[2] - candidateBounds.min[2]) / 2;
+    point.x = worldNormal.x > 0 ? supportBounds.max[0] : supportBounds.min[0];
+    point.y = clamp(point.y, supportBounds.min[1] + halfY, supportBounds.max[1] - halfY);
+    point.z = clamp(point.z, supportBounds.min[2] + halfZ, supportBounds.max[2] - halfZ);
+    return point;
+  }
+  if (Math.abs(worldNormal.y) > 0.5) {
+    const halfX = (candidateBounds.max[0] - candidateBounds.min[0]) / 2;
+    const halfZ = (candidateBounds.max[2] - candidateBounds.min[2]) / 2;
+    point.y = worldNormal.y > 0 ? supportBounds.max[1] : supportBounds.min[1];
+    point.x = clamp(point.x, supportBounds.min[0] + halfX, supportBounds.max[0] - halfX);
+    point.z = clamp(point.z, supportBounds.min[2] + halfZ, supportBounds.max[2] - halfZ);
+    return point;
+  }
+  const halfX = (candidateBounds.max[0] - candidateBounds.min[0]) / 2;
+  const halfY = (candidateBounds.max[1] - candidateBounds.min[1]) / 2;
+  point.z = worldNormal.z > 0 ? supportBounds.max[2] : supportBounds.min[2];
+  point.x = clamp(point.x, supportBounds.min[0] + halfX, supportBounds.max[0] - halfX);
+  point.y = clamp(point.y, supportBounds.min[1] + halfY, supportBounds.max[1] - halfY);
+  return point;
+}
+
+function shouldClampDropToFace(supportObject) {
+  return supportObject?.type === "box";
+}
+
+function resolveDropPlacement({
+  camera,
+  ndc,
+  meshRefs,
+  objects,
+  type,
+  geometry,
+  scale = [1, 1, 1],
+  snapIncrement,
+  raycaster = new THREE.Raycaster(),
+}) {
+  raycaster.setFromCamera(new THREE.Vector2(ndc.x, ndc.y), camera);
+
+  const targetMeshes = collectSceneMeshes(meshRefs);
+  const surfaceHits =
+    targetMeshes.length > 0 ? raycaster.intersectObjects(targetMeshes, false) : [];
+
+  let mode = "floor";
+  let hitPoint = new THREE.Vector3();
+  let worldNormal = new THREE.Vector3(0, 1, 0);
+  let supportObject = null;
+
+  const meshHit = surfaceHits.find((hit) => {
+    const sceneNode = findSceneObjectNode(hit.object);
+    if (!sceneNode || !hit.face) return false;
+    supportObject =
+      objects.find((obj) => obj.id === sceneNode.userData?.objectId) || null;
+    return true;
+  });
+
+  if (meshHit) {
+    mode = "surface";
+    hitPoint.copy(meshHit.point);
+    const normalMatrix = new THREE.Matrix3().getNormalMatrix(meshHit.object.matrixWorld);
+    worldNormal
+      .copy(meshHit.face.normal)
+      .applyMatrix3(normalMatrix)
+      .normalize();
+    worldNormal.copy(quantizeToAxis(worldNormal));
+  } else {
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    if (!raycaster.ray.intersectPlane(plane, hitPoint)) return null;
+  }
+
+  const rotation = getDropRotationForNormal(type, worldNormal);
+  const candidateBounds = getWorldBounds(type, geometry, rotation, scale, [0, 0, 0]);
+
+  if (mode === "floor") {
+    if (snapIncrement) {
+      hitPoint.x = Math.round(hitPoint.x / snapIncrement) * snapIncrement;
+      hitPoint.z = Math.round(hitPoint.z / snapIncrement) * snapIncrement;
+    }
+    hitPoint.y = 0;
+  } else if (supportObject && shouldClampDropToFace(supportObject)) {
+    const supportBounds = getWorldBounds(
+      supportObject.type,
+      supportObject.geometry,
+      supportObject.rotation,
+      supportObject.scale,
+      supportObject.position,
+    );
+    hitPoint = clampDropPointToFace(
+      hitPoint,
+      supportBounds,
+      candidateBounds,
+      worldNormal,
+    );
+  }
+
+  const supportDistance =
+    getSupportDistanceFromBounds(candidateBounds, worldNormal) + DROP_SURFACE_EPSILON;
+  const position = hitPoint.clone().addScaledVector(worldNormal, supportDistance);
+
+  return {
+    mode,
+    position: [position.x, position.y, position.z],
+    rotation,
+    worldNormal: [worldNormal.x, worldNormal.y, worldNormal.z],
+    supportObjectId: supportObject?.id ?? null,
+  };
+}
+
 const toonGradientMap = (() => {
   const colors = new Uint8Array([60, 100, 160, 220, 255]);
   const tex = new THREE.DataTexture(colors, colors.length, 1, THREE.RedFormat);
@@ -698,7 +886,7 @@ const SceneObject = forwardRef(function SceneObject(
         position={obj.position}
         rotation={obj.rotation}
         scale={obj.scale}
-        userData={{ isSceneObject: true }}
+        userData={{ isSceneObject: true, objectId: obj.id }}
         onPointerDown={(e) => {
           sceneInteracting.active = true;
           if (e.button === 0) onDragStart(e, obj.id);
@@ -800,7 +988,7 @@ const SceneObject = forwardRef(function SceneObject(
       position={obj.position}
       rotation={obj.rotation}
       scale={obj.scale}
-      userData={{ isSceneObject: true }}
+      userData={{ isSceneObject: true, objectId: obj.id }}
       onPointerDown={(e) => {
         sceneInteracting.active = true;
         if (e.button === 0) onDragStart(e, obj.id);
@@ -1017,31 +1205,17 @@ function CameraControls({ orbitRef }) {
   );
 }
 
-function DragPreview() {
+function DragPreview({ meshRefs, objects }) {
   const groupRef = useRef();
   const { camera } = useThree();
   const draggingShape = useDesignStore((s) => s.draggingShape);
   const snapIncrement = useDesignStore((s) => s.snapIncrement);
 
   const raycaster = useMemo(() => new THREE.Raycaster(), []);
-  const plane = useMemo(
-    () => new THREE.Plane(new THREE.Vector3(0, 1, 0), 0),
-    [],
-  );
-  const hitPoint = useMemo(() => new THREE.Vector3(), []);
 
   const defaults = draggingShape
     ? SHAPE_DEFAULTS[draggingShape.type] || SHAPE_DEFAULTS.box
     : null;
-  const previewRotation =
-    draggingShape && FLAT_TYPES.includes(draggingShape.type)
-      ? FLAT_ROTATION
-      : draggingShape && DEFAULT_SHAPE_ROTATIONS[draggingShape.type]
-        ? DEFAULT_SHAPE_ROTATIONS[draggingShape.type]
-        : [0, 0, 0];
-  const halfH = defaults
-    ? getFloorY(draggingShape.type, defaults.geometry, previewRotation)
-    : 10;
   const color = draggingShape?.isHole
     ? "#ff4444"
     : defaults?.color || "#6366f1";
@@ -1063,23 +1237,29 @@ function DragPreview() {
       groupRef.current.visible = false;
       return;
     }
-    groupRef.current.visible = true;
-    raycaster.setFromCamera(dragCursor, camera);
-    if (raycaster.ray.intersectPlane(plane, hitPoint)) {
-      const sx = snapIncrement
-        ? Math.round(hitPoint.x / snapIncrement) * snapIncrement
-        : hitPoint.x;
-      const sz = snapIncrement
-        ? Math.round(hitPoint.z / snapIncrement) * snapIncrement
-        : hitPoint.z;
-      groupRef.current.position.set(sx, halfH, sz);
+    const placement = resolveDropPlacement({
+      camera,
+      ndc: dragCursor,
+      meshRefs,
+      objects,
+      type: previewType,
+      geometry: previewParams,
+      snapIncrement,
+      raycaster,
+    });
+    if (!placement) {
+      groupRef.current.visible = false;
+      return;
     }
+    groupRef.current.visible = true;
+    groupRef.current.position.set(...placement.position);
+    groupRef.current.rotation.set(...placement.rotation);
   });
 
   if (!draggingShape || !defaults) return null;
 
   return (
-    <group ref={groupRef} visible={false} rotation={previewRotation}>
+    <group ref={groupRef} visible={false}>
       <mesh renderOrder={998} geometry={previewGeo}>
         <meshStandardMaterial
           color={color}
@@ -1408,7 +1588,7 @@ function DimensionRuler({ meshRefs }) {
   );
 }
 
-function DropHandler() {
+function DropHandler({ meshRefs, objects }) {
   const { camera } = useThree();
   const pendingDrop = useDesignStore((s) => s.pendingDrop);
   const clearPendingDrop = useDesignStore((s) => s.clearPendingDrop);
@@ -1420,30 +1600,33 @@ function DropHandler() {
 
     const { ndc, type, isHole, text } = pendingDrop;
     const raycaster = new THREE.Raycaster();
-    raycaster.setFromCamera(new THREE.Vector2(ndc.x, ndc.y), camera);
+    const baseGeometry =
+      type === "text" && text
+        ? { text, size: 10, height: 5, font: "helvetiker" }
+        : SHAPE_DEFAULTS[type]?.geometry || SHAPE_DEFAULTS.box.geometry;
+    const placement = resolveDropPlacement({
+      camera,
+      ndc,
+      meshRefs,
+      objects,
+      type,
+      geometry: baseGeometry,
+      snapIncrement,
+      raycaster,
+    });
 
-    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-    const hit = new THREE.Vector3();
-    const intersected = raycaster.ray.intersectPlane(plane, hit);
-
-    if (intersected) {
-      const x = snapIncrement
-        ? Math.round(hit.x / snapIncrement) * snapIncrement
-        : hit.x;
-      const z = snapIncrement
-        ? Math.round(hit.z / snapIncrement) * snapIncrement
-        : hit.z;
-
-      const overrides = { position: [x, 0, z] };
+    if (placement) {
+      const overrides = {
+        position: placement.position,
+        rotation: placement.rotation,
+      };
       if (isHole) overrides.isHole = true;
-      if (type === "text" && text) {
-        overrides.geometry = { text, size: 10, height: 5, font: "helvetiker" };
-      }
+      if (type === "text" && text) overrides.geometry = baseGeometry;
       addObject(type, overrides);
     }
 
     clearPendingDrop();
-  }, [pendingDrop, camera, addObject, clearPendingDrop, snapIncrement]);
+  }, [pendingDrop, camera, addObject, clearPendingDrop, snapIncrement, meshRefs, objects]);
 
   return null;
 }
@@ -3669,10 +3852,10 @@ function SceneContent() {
       />
       <DimensionRuler meshRefs={meshRefs} />
       <MeasureTool />
-      <DragPreview />
+      <DragPreview meshRefs={meshRefs} objects={objects} />
       <ArrayPreview />
       <WorkplaneOverlay meshRefs={meshRefs} selectedId={selectedId} />
-      <DropHandler />
+      <DropHandler meshRefs={meshRefs} objects={objects} />
       <MirrorHintOverlay />
 
       <CameraControls orbitRef={orbitRef} />

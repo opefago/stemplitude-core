@@ -276,6 +276,21 @@ registerShape("hemisphere", (p) => {
   return geo;
 });
 
+registerShape("halfCylinder", (p) => {
+  const shape = new THREE.Shape();
+  shape.absarc(0, 0, 1, 0, Math.PI, false);
+  shape.lineTo(1, 0);
+  const geo = new THREE.ExtrudeGeometry(shape, {
+    depth: 1,
+    bevelEnabled: false,
+    curveSegments: p.curveSegments || p.radialSegments || 32,
+  });
+  geo.scale((p.width || 20) / 2, p.height || 10, p.depth || 20);
+  geo.translate(0, -(p.height || 10) / 2, -((p.depth || 20) / 2));
+  geo.computeVertexNormals();
+  return geo;
+});
+
 registerShape("heart", (p) => {
   const shape = createHeartShape(p.size);
   const geo = new THREE.ExtrudeGeometry(shape, {
@@ -338,6 +353,22 @@ registerShape("wedge", (p) => {
   g.setIndex(indices);
   g.computeVertexNormals();
   return g;
+});
+
+registerShape("roof", (p) => {
+  const shape = new THREE.Shape();
+  shape.moveTo(-0.5, 0);
+  shape.lineTo(0.5, 0);
+  shape.lineTo(0, 1);
+  shape.lineTo(-0.5, 0);
+  const geo = new THREE.ExtrudeGeometry(shape, {
+    depth: 1,
+    bevelEnabled: false,
+  });
+  geo.scale(p.width || 20, p.height || 16, p.depth || 20);
+  geo.translate(0, -((p.height || 16) / 2), -((p.depth || 20) / 2));
+  geo.computeVertexNormals();
+  return geo;
 });
 
 // ---------------------------------------------------------------------------

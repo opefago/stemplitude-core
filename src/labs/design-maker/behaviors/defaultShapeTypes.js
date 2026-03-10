@@ -50,6 +50,11 @@ const DEFAULT_SHAPE_TYPES = {
     getRawExtents: boxLikeExtents,
     handleFamily: "boxLike",
   },
+  roof: {
+    axisParams: ["width", "height", "depth"],
+    getRawExtents: boxLikeExtents,
+    handleFamily: "boxLike",
+  },
   sphere: {
     axisParams: ["radius", "radius", "radius"],
     getRawExtents: sphereLikeExtents,
@@ -64,6 +69,11 @@ const DEFAULT_SHAPE_TYPES = {
       baseY: (g) => -g.radius / 2,
       topY: (g, o) => g.radius / 2 + o,
     },
+  },
+  halfCylinder: {
+    axisParams: ["width", "height", "depth"],
+    getRawExtents: boxLikeExtents,
+    handleFamily: "boxLike",
   },
   cylinder: {
     axisParams: ["radiusBottom", "height", "radiusBottom"],

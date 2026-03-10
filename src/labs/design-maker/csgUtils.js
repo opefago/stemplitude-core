@@ -19,6 +19,7 @@ evaluator.attributes = ["position"];
 const CURVED_CSG_TYPES = new Set([
   "sphere",
   "cylinder",
+  "halfCylinder",
   "capsule",
   "cone",
   "torus",
@@ -37,7 +38,9 @@ function upgradeCSGParams(type, geometry = {}) {
       params.heightSegments = Math.max(params.heightSegments || 0, 32);
       break;
     case "cylinder":
+    case "halfCylinder":
       params.radialSegments = Math.max(params.radialSegments || 0, 64);
+      params.curveSegments = Math.max(params.curveSegments || 0, 48);
       break;
     case "capsule":
       params.radialSegments = Math.max(params.radialSegments || 0, 64);

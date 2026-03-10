@@ -157,6 +157,22 @@ export default function DesignMakerLab() {
     return () => document.removeEventListener('keydown', handleKey);
   }, [projectDialogOpen]);
 
+  const saveBeforeProjectSwitch = useCallback(async () => {
+    if (useDesignStore.getState().isDirty) {
+      await saveProject();
+    }
+  }, [saveProject]);
+
+  const handleOpenProject = useCallback(async (id) => {
+    await saveBeforeProjectSwitch();
+    await loadProject(id);
+  }, [saveBeforeProjectSwitch, loadProject]);
+
+  const handleNewProject = useCallback(async () => {
+    await saveBeforeProjectSwitch();
+    newProject();
+  }, [saveBeforeProjectSwitch, newProject]);
+
   const [marquee, setMarquee] = useState(null);
   const marqueeStart = useRef(null);
   const MIN_MARQUEE = 5;
@@ -564,7 +580,7 @@ export default function DesignMakerLab() {
                 <div className="dml-projects-dropdown">
                   <button
                     className="dml-projects-new"
-                    onClick={() => { newProject(); setProjectsOpen(false); }}
+                    onClick={() => { handleNewProject(); setProjectsOpen(false); }}
                   >
                     <span className="dml-projects-new-icon">+</span>
                     New Project
@@ -580,7 +596,7 @@ export default function DesignMakerLab() {
                         <div key={p.id} className="dml-projects-item">
                           <button
                             className="dml-projects-item-name"
-                            onClick={() => { loadProject(p.id); setProjectsOpen(false); }}
+                            onClick={() => { handleOpenProject(p.id); setProjectsOpen(false); }}
                           >
                             <span className="dml-projects-item-title">{p.name}</span>
                             <span className="dml-projects-item-date">
@@ -863,7 +879,7 @@ export default function DesignMakerLab() {
                     <div className="dml-pdialog-item-actions">
                       <button
                         className="dml-pdialog-open"
-                        onClick={() => { loadProject(p.id); setProjectDialogOpen(false); }}
+                        onClick={() => { handleOpenProject(p.id); setProjectDialogOpen(false); }}
                       >Open</button>
                       <button
                         className="dml-pdialog-del"
@@ -897,7 +913,7 @@ export default function DesignMakerLab() {
             <div className="dml-pdialog-footer">
               <button
                 className="dml-pdialog-new"
-                onClick={() => { newProject(); setProjectDialogOpen(false); }}
+                onClick={() => { handleNewProject(); setProjectDialogOpen(false); }}
               >
                 <span>+</span> New Project
               </button>

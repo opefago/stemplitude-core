@@ -116,6 +116,11 @@ export const SHAPE_DEFAULTS = {
     color: "#06b6d4",
     icon: "M2 10a6 6 0 0 1 12 0z M2 10h12",
   },
+  halfCylinder: {
+    geometry: { width: 20, height: 10, depth: 20, curveSegments: 32 },
+    color: "#67e8f9",
+    icon: "M3 12V8a5 5 0 0 1 10 0v4z M3 12h10",
+  },
   tube: {
     geometry: { radius: 10, tube: 2, radialSegments: 8, tubularSegments: 48 },
     color: "#a855f7",
@@ -126,6 +131,11 @@ export const SHAPE_DEFAULTS = {
     geometry: { width: 20, height: 20, depth: 20 },
     color: "#84cc16",
     icon: "M3 12L3 4 13 12z M3 4l5-1.5L13 12 M8 2.5L3 4",
+  },
+  roof: {
+    geometry: { width: 20, height: 16, depth: 20 },
+    color: "#4ade80",
+    icon: "M3 12l5-8 5 8z M3 12h10",
   },
   tetrahedron: {
     geometry: { radius: 10 },
@@ -295,18 +305,117 @@ export function getEffectiveSelectionIdsFromState(state) {
 
 let objectCounter = 0;
 
-const STORAGE_KEY = "dml-projects";
+const LEGACY_STORAGE_KEY = "dml-projects";
+const PROJECT_META_KEY = "dml-projects-meta";
+const PROJECT_DB_NAME = "dml-projects-db";
+const PROJECT_STORE_NAME = "projects";
+let projectDbPromise = null;
+let migrationPromise = null;
 
-function loadProjectList() {
+function openProjectDb() {
+  if (projectDbPromise) return projectDbPromise;
+  projectDbPromise = new Promise((resolve, reject) => {
+    if (typeof indexedDB === "undefined") {
+      reject(new Error("IndexedDB unavailable"));
+      return;
+    }
+    const request = indexedDB.open(PROJECT_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(PROJECT_STORE_NAME)) {
+        db.createObjectStore(PROJECT_STORE_NAME, { keyPath: "id" });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("Failed to open project DB"));
+  });
+  return projectDbPromise;
+}
+
+async function putProjectRecord(project) {
+  const db = await openProjectDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(PROJECT_STORE_NAME, "readwrite");
+    const store = tx.objectStore(PROJECT_STORE_NAME);
+    const request = store.put(project);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error || new Error("Failed to save project"));
+  });
+}
+
+async function getProjectRecord(id) {
+  const db = await openProjectDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(PROJECT_STORE_NAME, "readonly");
+    const store = tx.objectStore(PROJECT_STORE_NAME);
+    const request = store.get(id);
+    request.onsuccess = () => resolve(request.result || null);
+    request.onerror = () => reject(request.error || new Error("Failed to load project"));
+  });
+}
+
+async function deleteProjectRecord(id) {
+  const db = await openProjectDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(PROJECT_STORE_NAME, "readwrite");
+    const store = tx.objectStore(PROJECT_STORE_NAME);
+    const request = store.delete(id);
+    request.onsuccess = () => resolve();
+    request.onerror = () =>
+      reject(request.error || new Error("Failed to delete project"));
+  });
+}
+
+function toProjectMeta(project) {
+  return {
+    id: project.id,
+    name: project.name,
+    updatedAt: project.updatedAt,
+    backgroundColor: project.backgroundColor,
+    objectCounter: project.objectCounter,
+  };
+}
+
+function loadLegacyProjectList() {
   try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+    return JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEY)) || [];
   } catch {
     return [];
   }
 }
 
+function loadProjectList() {
+  try {
+    const meta = JSON.parse(localStorage.getItem(PROJECT_META_KEY));
+    if (Array.isArray(meta)) return meta;
+  } catch {
+    // fall through to legacy projects
+  }
+  return loadLegacyProjectList().map(toProjectMeta);
+}
+
 function saveProjectList(list) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+  localStorage.setItem(PROJECT_META_KEY, JSON.stringify(list));
+}
+
+async function migrateLegacyProjectsIfNeeded() {
+  if (localStorage.getItem(PROJECT_META_KEY)) return;
+  const legacyProjects = loadLegacyProjectList();
+  if (legacyProjects.length === 0) return;
+  if (migrationPromise) return migrationPromise;
+  migrationPromise = (async () => {
+    for (const project of legacyProjects) {
+      await putProjectRecord(project);
+    }
+    // Free the large legacy blob before writing the compact metadata list.
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
+    saveProjectList(legacyProjects.map(toProjectMeta));
+  })();
+  try {
+    await migrationPromise;
+  } finally {
+    migrationPromise = null;
+  }
 }
 
 export const useDesignStore = create((set, get) => ({
@@ -414,7 +523,9 @@ export const useDesignStore = create((set, get) => ({
       obj.rotation = [...DEFAULT_SHAPE_ROTATIONS[type]];
     }
     const floorY = getFloorY(type, obj.geometry, obj.rotation, obj.scale);
-    obj.position = [obj.position[0], floorY, obj.position[2]];
+    if (!overrides.position || overrides.position[1] == null) {
+      obj.position = [obj.position[0], floorY, obj.position[2]];
+    }
     set((state) => ({
       objects: [...state.objects, obj],
       groups: reconcileGroups([...state.objects, obj], state.groups),
@@ -830,9 +941,9 @@ export const useDesignStore = create((set, get) => ({
     }));
   },
 
-  saveProject: () => {
+  saveProject: async () => {
     const state = get();
-    let id = state.projectId || uuidv4();
+    const id = state.projectId || uuidv4();
     const saveable = state.objects.map((o) => {
       const { geometry, ...rest } = o;
       if (o.type === "imported") {
@@ -861,19 +972,34 @@ export const useDesignStore = create((set, get) => ({
       objectCounter,
       updatedAt: Date.now(),
     };
-    const list = loadProjectList().filter((p) => p.id !== id);
-    list.unshift(project);
     try {
+      await migrateLegacyProjectsIfNeeded();
+      await putProjectRecord(project);
+      const list = loadProjectList().filter((p) => p.id !== id);
+      list.unshift(toProjectMeta(project));
       saveProjectList(list);
+      localStorage.removeItem(LEGACY_STORAGE_KEY);
+      set({ projectId: id, isDirty: false });
+      return true;
     } catch (e) {
       console.warn("Project save failed (storage full?):", e);
+      set({ projectId: id, isDirty: true });
+      return false;
     }
-    set({ projectId: id, isDirty: false });
   },
 
-  loadProject: (id) => {
-    const list = loadProjectList();
-    const project = list.find((p) => p.id === id);
+  loadProject: async (id) => {
+    await migrateLegacyProjectsIfNeeded();
+    let project = null;
+    try {
+      project = await getProjectRecord(id);
+    } catch (e) {
+      console.warn("Project load failed from IndexedDB, falling back:", e);
+    }
+    if (!project) {
+      const legacyList = loadLegacyProjectList();
+      project = legacyList.find((p) => p.id === id) || null;
+    }
     if (!project) return;
     objectCounter = project.objectCounter || project.objects.length;
     const restoredObjects = project.objects.map((o) => {
@@ -920,9 +1046,14 @@ export const useDesignStore = create((set, get) => ({
     });
   },
 
-  deleteProject: (id) => {
+  deleteProject: async (id) => {
     const list = loadProjectList().filter((p) => p.id !== id);
     saveProjectList(list);
+    try {
+      await deleteProjectRecord(id);
+    } catch (e) {
+      console.warn("Project delete failed from IndexedDB:", e);
+    }
   },
 
   getProjectList: () => loadProjectList(),

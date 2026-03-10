@@ -242,6 +242,8 @@ function GeometryProps({ obj, updateGeometry }) {
         </>
       );
     case "wedge":
+    case "roof":
+    case "halfCylinder":
       return (
         <>
           <NumberInput
