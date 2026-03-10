@@ -60,6 +60,10 @@ function getDefaultDropRotation(type) {
 }
 
 function getLocalSupportNormal(type) {
+  if (type === "tetrahedron") {
+    // Support on a full triangular face instead of treating the tetrahedron like a box.
+    return new THREE.Vector3(1, -1, 1).normalize();
+  }
   return FLAT_TYPES.includes(type)
     ? new THREE.Vector3(0, 0, -1)
     : new THREE.Vector3(0, -1, 0);

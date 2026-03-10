@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Zap, Cpu, Play, Lock, ArrowRight, Code, Wrench, Gamepad2, Puzzle, Cuboid } from 'lucide-react';
+import { Zap, Cpu, Play, Lock, ArrowRight, Wrench, Gamepad2, Puzzle, Cuboid } from 'lucide-react';
 import './Playground.css';
 
 const Playground = () => {
@@ -80,21 +80,6 @@ const Playground = () => {
       status: 'available',
       path: '/playground/design-maker'
     },
-    {
-      id: 'gamedev-lab',
-      title: 'Game Development',
-      icon: <Code size={48} />,
-      description: 'Create your own games with Microsoft MakeCode Arcade. Build, test, and share!',
-      features: [
-        'Drag-and-drop coding',
-        'Retro game creation',
-        'Save & load projects',
-        'Play on device'
-      ],
-      color: '#667eea',
-      status: 'available',
-      path: '/playground/gamedev'
-    }
   ];
 
   return (

@@ -225,7 +225,7 @@ export const ICON_TYPES = Object.entries(SHAPE_DEFAULTS)
 
 export const FLAT_ROTATION = [-Math.PI / 2, 0, 0];
 export const DEFAULT_SHAPE_ROTATIONS = {
-  tetrahedron: [1.219916915922639, 0.9086510911493443, 1.219916915922639],
+  tetrahedron: [0.6319143123750713, -0.21293023928625662, -0.6319143123750713],
 };
 
 // Mutable cursor state for high-frequency drag position updates (not in Zustand for perf)

@@ -5,7 +5,7 @@ import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import { createGeometry } from './geometryFactory';
-import { SHAPE_DEFAULTS, FLAT_TYPES, ICON_TYPES } from './store';
+import { SHAPE_DEFAULTS, FLAT_TYPES, ICON_TYPES, DEFAULT_SHAPE_ROTATIONS } from './store';
 
 const FONT_URL = 'https://cdn.jsdelivr.net/npm/three@0.169.0/examples/fonts/helvetiker_regular.typeface.json';
 
@@ -68,6 +68,27 @@ function renderIcon(renderer, scene, camera, gradientMap, type, geometry, color)
     mesh.rotation.x = -Math.PI / 2;
     outlineMesh.rotation.x = -Math.PI / 2;
     if (edgeLines) edgeLines.rotation.x = -Math.PI / 2;
+  }
+
+  const defaultRotation = DEFAULT_SHAPE_ROTATIONS[type];
+  if (defaultRotation) {
+    mesh.rotation.set(
+      mesh.rotation.x + defaultRotation[0],
+      mesh.rotation.y + defaultRotation[1],
+      mesh.rotation.z + defaultRotation[2],
+    );
+    outlineMesh.rotation.set(
+      outlineMesh.rotation.x + defaultRotation[0],
+      outlineMesh.rotation.y + defaultRotation[1],
+      outlineMesh.rotation.z + defaultRotation[2],
+    );
+    if (edgeLines) {
+      edgeLines.rotation.set(
+        edgeLines.rotation.x + defaultRotation[0],
+        edgeLines.rotation.y + defaultRotation[1],
+        edgeLines.rotation.z + defaultRotation[2],
+      );
+    }
   }
 
   if (type === 'wall') {
