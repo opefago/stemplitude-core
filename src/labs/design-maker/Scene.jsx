@@ -1564,7 +1564,18 @@ function DimensionRuler({ meshRefs }) {
   const halfH = dims.height / 2;
   const halfD = dims.depth / 2;
   const gap = 4;
-  const baseY = -halfH;
+  const localBounds =
+    obj.type !== "imported"
+      ? getWorldBounds(
+          obj.type,
+          obj.geometry,
+          obj.rotation || [0, 0, 0],
+          obj.scale || [1, 1, 1],
+          [0, 0, 0],
+        )
+      : null;
+  const baseY = localBounds ? localBounds.min[1] : -halfH;
+  const topY = localBounds ? localBounds.max[1] : halfH;
   const fmt = (v) => `${v.toFixed(1)} ${units}`;
 
   return (
@@ -1577,7 +1588,7 @@ function DimensionRuler({ meshRefs }) {
       />
       <DimensionLine
         start={[halfW + gap, baseY, halfD + gap]}
-        end={[halfW + gap, halfH, halfD + gap]}
+        end={[halfW + gap, topY, halfD + gap]}
         label={fmt(dims.height)}
         color="#51cf66"
         offset={[1, 0, 0]}
@@ -1771,6 +1782,12 @@ function MeasureTool() {
 // All handle types visible simultaneously: scale squares, rotation arcs, translate arrows
 const AXIS_COLORS = ["#ef4444", "#22c55e", "#3b82f6"];
 const AXIS_LABELS = ["X", "Y", "Z"];
+const POLYHEDRON_TYPES = new Set([
+  "tetrahedron",
+  "octahedron",
+  "dodecahedron",
+  "icosahedron",
+]);
 const ROTATION_ARC_RADIUS = 15;
 const ROTATION_ARC_BAND = 2.0;
 const ROTATION_ARC_INNER = ROTATION_ARC_RADIUS - ROTATION_ARC_BAND;
@@ -1871,6 +1888,20 @@ function ObjectHandles({
   const dims = active
     ? getObjectWorldDims(effectiveObj)
     : { width: 20, height: 20, depth: 20 };
+  const localBounds = active
+    ? getWorldBounds(
+        effectiveObj.type,
+        effectiveObj.geometry,
+        effectiveObj.rotation || [0, 0, 0],
+        effectiveObj.scale || [1, 1, 1],
+        [0, 0, 0],
+      )
+    : null;
+  const baseYLocal = localBounds ? localBounds.min[1] : -dims.height / 2;
+  const topYLocal = localBounds ? localBounds.max[1] : dims.height / 2;
+  const centerYLocal = localBounds
+    ? (localBounds.min[1] + localBounds.max[1]) / 2
+    : 0;
   const rawDims = active
     ? {
         width: dims.width / Math.abs(effectiveObj.scale[0]),
@@ -1976,7 +2007,6 @@ function ObjectHandles({
       const o = useDesignStore
         .getState()
         .objects.find((ob) => ob.id === id);
-
       // Sync handle container to object (store) so handles follow scale/position/rotation.
       // Derive bounds from store when we have the object so container and bounds never desync
       // (e.g. after proportional then non-proportional scale).
@@ -2068,10 +2098,16 @@ function ObjectHandles({
   const objectDims = { width: dims.width, height: dims.height, depth: dims.depth };
   const isRingOrTorusLike = obj.type === "torus" || obj.type === "tube" || obj.type === "ring";
   const scaleHandlesFromBehavior = behavior.getScaleHandles(obj, objectDims);
+  const uniformScaleYOffset =
+    obj.type === "tetrahedron"
+      ? 16
+      : POLYHEDRON_TYPES.has(obj.type)
+        ? 20
+        : 15;
   const uniformScaleHandle = {
     uniformScale: true,
     dir: [0, 1, 0],
-    pos: [0, hh + 15, 0],
+    pos: [0, hh + uniformScaleYOffset, 0],
     label: "U",
   };
 
@@ -2091,14 +2127,20 @@ function ObjectHandles({
   const scaleHandleOffset = behavior.handleOffset ?? 3;
   // For ring/torus/tube the behavior already positions handles at the face + offset;
   // add a small gap so they sit just outside without overlapping translate arrows.
-  const scaleHandleFixedGap = isRingOrTorusLike ? 0 : 2;
+  const scaleHandleFixedGap =
+    isRingOrTorusLike || obj.type === "tetrahedron" ? 0 : 2;
   // Torus/tube behavior returns scale handle positions in dimension space; add fixed gap in handle direction.
   // Ring uses default handle family (geometry space) so it goes through toDimension below. Imported: use as-is.
   const scaleHandlesFromBehaviorInDim = scaleHandlesFromBehavior.map((h) => {
     if (obj.type === "imported") {
       return { ...h, pos: [...h.pos] };
     }
-    if (obj.type === "torus" || obj.type === "tube" || obj.type === "ring") {
+    if (
+      obj.type === "torus" ||
+      obj.type === "tube" ||
+      obj.type === "ring" ||
+      obj.type === "tetrahedron"
+    ) {
       const [dx, dy, dz] = h.dir;
       return {
         ...h,
@@ -2125,7 +2167,7 @@ function ObjectHandles({
   });
   const scaleHandles = [
     ...scaleHandlesFromBehaviorInDim,
-    { ...uniformScaleHandle, pos: [0, hh + 15, 0] },
+    { ...uniformScaleHandle, pos: [0, topYLocal + uniformScaleYOffset, 0] },
   ];
 
   const translateArrowsRaw = behavior.getTranslateArrows({ hw, hh, hd });
@@ -2161,9 +2203,13 @@ function ObjectHandles({
     } else {
       pos =
         arc.axis === 0
-          ? [-hw - ROTATION_ARC_INNER - ROTATION_ARC_SPACING, hh / 2, hd + ROTATION_ARC_INNER + ROTATION_ARC_SPACING]
+          ? [
+              -hw - ROTATION_ARC_INNER - ROTATION_ARC_SPACING,
+              centerYLocal,
+              hd + ROTATION_ARC_INNER + ROTATION_ARC_SPACING,
+            ]
           : arc.axis === 1
-            ? [hw + ROTATION_ARC_SPACING, -hh, 0]
+            ? [hw + ROTATION_ARC_SPACING, baseYLocal, 0]
             : [hw + ROTATION_ARC_SPACING, 0, hd];
     }
     return { ...arc, pos };

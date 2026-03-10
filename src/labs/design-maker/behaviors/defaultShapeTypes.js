@@ -129,21 +129,41 @@ const DEFAULT_SHAPE_TYPES = {
     axisParams: ["radius", "radius", "radius"],
     getRawExtents: (g) => [g.radius * 0.57735, g.radius * 0.57735, g.radius * 0.57735],
     handleFamily: "sphereLike",
+    handleOptions: {
+      param: "radius",
+      baseY: (g) => -(g.radius * 0.57735),
+      topY: (g, o) => g.radius * 0.57735 + o,
+    },
   },
   dodecahedron: {
     axisParams: ["radius", "radius", "radius"],
     getRawExtents: (g) => [g.radius * 0.93417, g.radius * 0.93417, g.radius * 0.93417],
     handleFamily: "sphereLike",
+    handleOptions: {
+      param: "radius",
+      baseY: (g) => -(g.radius * 0.93417),
+      topY: (g, o) => g.radius * 0.93417 + o,
+    },
   },
   octahedron: {
     axisParams: ["radius", "radius", "radius"],
     getRawExtents: sphereLikeExtents,
     handleFamily: "sphereLike",
+    handleOptions: {
+      param: "radius",
+      baseY: (g) => -g.radius,
+      topY: (g, o) => g.radius + o,
+    },
   },
   icosahedron: {
     axisParams: ["radius", "radius", "radius"],
     getRawExtents: (g) => [g.radius * 0.85065, g.radius * 0.85065, g.radius * 0.85065],
     handleFamily: "sphereLike",
+    handleOptions: {
+      param: "radius",
+      baseY: (g) => -(g.radius * 0.85065),
+      topY: (g, o) => g.radius * 0.85065 + o,
+    },
   },
   ellipsoid: {
     axisParams: ["radiusX", "radiusY", "radiusZ"],
