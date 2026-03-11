@@ -2213,9 +2213,9 @@ function ObjectHandles({
       pos =
         arc.axis === 0
           ? [
-              -hw - ROTATION_ARC_INNER - ROTATION_ARC_SPACING,
+              -hw - ROTATION_ARC_SPACING,
               centerYLocal,
-              hd + ROTATION_ARC_INNER + ROTATION_ARC_SPACING,
+              hd + ROTATION_ARC_SPACING,
             ]
           : arc.axis === 1
             ? [hw + ROTATION_ARC_SPACING, baseYLocal, 0]
