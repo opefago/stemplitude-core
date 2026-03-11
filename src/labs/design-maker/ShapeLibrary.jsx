@@ -18,16 +18,16 @@ const transparentImg = (() => {
   return c;
 })();
 
-// Inline capsule (pill) SVG so the capsule slot always shows something even if async icons fail
-const CAPSULE_PLACEHOLDER_SVG =
+// Deterministic capsule icon so it always renders as a capsule.
+const CAPSULE_ICON_SVG =
   "data:image/svg+xml," +
   encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect x="14" y="6" width="36" height="52" rx="18" ry="18" fill="%23d1d5db" stroke="%236b7280" stroke-width="2"/></svg>',
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="capFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#ffffff"/><stop offset="100%" stop-color="#e7ebf1"/></linearGradient><linearGradient id="capGloss" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#ffffff" stop-opacity="0.65"/><stop offset="100%" stop-color="#ffffff" stop-opacity="0"/></linearGradient></defs><rect x="22" y="4" width="20" height="56" rx="10" ry="10" fill="url(#capFill)"/><rect x="25" y="8" width="7" height="48" rx="3.5" ry="3.5" fill="url(#capGloss)"/></svg>',
   );
 
 function getIconSrc(icons, shape) {
   if (shape.type === "capsule") {
-    return icons.capsule || icons.cylinder || CAPSULE_PLACEHOLDER_SVG;
+    return CAPSULE_ICON_SVG;
   }
   return icons[shape.type];
 }

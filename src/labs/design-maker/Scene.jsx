@@ -2174,13 +2174,22 @@ function ObjectHandles({
   // Ring/torus/tube: arrows further out than scale handles (which are at face+handleOffset=face+3)
   // so they don't overlap. handleOffset=3 → scale handle at face+3; arrow at face+8.
   const arrowGap = isRingOrTorusLike ? 8 : (behavior.translateArrowGap ?? 10);
+  const maxUpScaleY = scaleHandlesFromBehaviorInDim.reduce((acc, h) => {
+    if ((h.dir?.[1] ?? 0) > 0) return Math.max(acc, h.pos?.[1] ?? -Infinity);
+    return acc;
+  }, -Infinity);
   const translateArrows = translateArrowsRaw.map((a) => {
     const [dx, dy, dz] = a.dir;
+    const upArrowBaseY = hh + arrowGap;
+    // Keep the +Y translate cone just above upward scale handles without floating too high.
+    const upArrowY = Number.isFinite(maxUpScaleY)
+      ? Math.max(upArrowBaseY, maxUpScaleY + 6)
+      : upArrowBaseY;
     const pos =
       dx !== 0
         ? [dx > 0 ? hw + arrowGap : -hw - arrowGap, 0, 0]
         : dy !== 0
-          ? [0, dy > 0 ? hh + arrowGap : -hh - arrowGap, 0]
+          ? [0, dy > 0 ? upArrowY : -hh - arrowGap, 0]
           : [0, 0, dz > 0 ? hd + arrowGap : -hd - arrowGap];
     return { ...a, pos };
   });
@@ -3233,7 +3242,7 @@ function HandlesOverlay({ children }) {
   return <group ref={groupRef}>{children}</group>;
 }
 
-const SNAP_THRESHOLD = 3;
+const SNAP_THRESHOLD = 1.5;
 const AXES = ["x", "y", "z"];
 const SNAP_COLORS = ["#ef4444", "#22c55e", "#3b82f6"];
 const SNAP_DIRS = [
@@ -3283,11 +3292,6 @@ function FaceSnapper({ meshRefs, selectedId, active }) {
         for (const { sf, tf } of pairs) {
           const dist = Math.abs(sf - tf);
           if (dist < SNAP_THRESHOLD) {
-            const delta = tf - sf;
-            selMesh.position[a] += delta;
-            selBox.min[a] += delta;
-            selBox.max[a] += delta;
-
             midVec.x =
               (selBox.min.x + selBox.max.x + tgtBox.min.x + tgtBox.max.x) / 4;
             midVec.y =

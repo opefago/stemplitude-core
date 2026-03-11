@@ -59,6 +59,11 @@ const DEFAULT_SHAPE_TYPES = {
     axisParams: ["radius", "radius", "radius"],
     getRawExtents: sphereLikeExtents,
     handleFamily: "sphereLike",
+    handleOptions: {
+      param: "radius",
+      baseY: (g) => -g.radius,
+      topY: (g, o) => g.radius + o,
+    },
   },
   hemisphere: {
     axisParams: ["radius", "radius", "radius"],
