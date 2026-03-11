@@ -1856,6 +1856,7 @@ function ObjectHandles({
   const composeEulerRef = useRef(new THREE.Euler(0, 0, 0, "XYZ"));
   const composeMatrixRef = useRef(new THREE.Matrix4());
   const parentInvRef = useRef(new THREE.Matrix4());
+  const frozenLocalBoundsRef = useRef(null);
 
   const [hoveredArc, setHoveredArc] = useState(null);
   const [angleInfo, setAngleInfo] = useState(null);
@@ -1885,10 +1886,10 @@ function ObjectHandles({
   const active = !!obj;
   const behavior = active ? getObjectBehavior(obj.type) : null;
   const effectiveObj = active && liveScale ? { ...obj, scale: liveScale } : obj;
-  const dims = active
+  const currentDims = active
     ? getObjectWorldDims(effectiveObj)
     : { width: 20, height: 20, depth: 20 };
-  const localBounds = active
+  const currentLocalBounds = active
     ? getWorldBounds(
         effectiveObj.type,
         effectiveObj.geometry,
@@ -1897,6 +1898,19 @@ function ObjectHandles({
         [0, 0, 0],
       )
     : null;
+  const rotatingNow = drag.current?.type === "rotate";
+  const dims =
+    rotatingNow && meshBounds
+      ? {
+          width: meshBounds.hw * 2,
+          height: meshBounds.hh * 2,
+          depth: meshBounds.hd * 2,
+        }
+      : currentDims;
+  const localBounds =
+    rotatingNow && frozenLocalBoundsRef.current
+      ? frozenLocalBoundsRef.current
+      : currentLocalBounds;
   const baseYLocal = localBounds ? localBounds.min[1] : -dims.height / 2;
   const topYLocal = localBounds ? localBounds.max[1] : dims.height / 2;
   const centerYLocal = localBounds
@@ -2016,6 +2030,13 @@ function ObjectHandles({
         // cause hw/hh/hd to shift and all handles to dance around their pivot point.
         if (drag.current?.type !== "rotate") {
           const d = getObjectWorldDims(o);
+          const lb = getWorldBounds(
+            o.type,
+            o.geometry,
+            o.rotation || [0, 0, 0],
+            o.scale || [1, 1, 1],
+            [0, 0, 0],
+          );
           const px = o.position[0] ?? 0;
           const py = o.position[1] ?? 0;
           const pz = o.position[2] ?? 0;
@@ -2027,6 +2048,7 @@ function ObjectHandles({
             cy: py,
             cz: pz,
           });
+          frozenLocalBoundsRef.current = lb;
         }
       } else {
         mesh.updateMatrixWorld(true);
