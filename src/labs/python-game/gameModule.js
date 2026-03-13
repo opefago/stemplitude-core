@@ -121,6 +121,12 @@ export function getGameModuleSource() {
   function eid(obj) {
     return (obj && obj._eid !== undefined) ? obj._eid : jsv(obj);
   }
+  function wrapLike(obj, id) {
+    var cls = obj.ob$type;
+    var inst = new cls();
+    inst._eid = id;
+    return inst;
+  }
 
   // ========== Shared class infrastructure ==========
   function addMethods($loc) {
@@ -194,10 +200,7 @@ export function getGameModuleSource() {
     $loc.clone = new Sk.builtin.func(function(self) {
       var newId = engine.cloneObject(self._eid);
       if (newId === null) return NONE;
-      var cls = self.ob$type;
-      var inst = new cls();
-      inst._eid = newId;
-      return inst;
+      return wrapLike(self, newId);
     });
     $loc.say = new Sk.builtin.func(function(self, text, duration, scroll_speed) {
       engine.showBubble(self._eid, jsv(text), {
@@ -385,6 +388,21 @@ export function getGameModuleSource() {
     padding:       function(o, v) { o.padding = v; }
   });
   mod.Text = TextClass;
+
+  // ========== Point (invisible marker) ==========
+  var PointClass = Sk.misceval.buildClass(mod, function($gbl, $loc) {
+    $loc.__init__ = new Sk.builtin.func(function(self, x, y) {
+      self._eid = engine.createObject('point', {
+        x: jsv(x), y: jsv(y), width: 0, height: 0, visible: false
+      });
+    });
+    addMethods($loc);
+  }, 'Point', []);
+  setupProps(PointClass, {
+    width:  function() { return pyFloat(0); },
+    height: function() { return pyFloat(0); }
+  }, {});
+  mod.Point = PointClass;
 
   // ========== Line ==========
   var LineClass = Sk.misceval.buildClass(mod, function($gbl, $loc) {
@@ -1457,6 +1475,13 @@ export function getGameModuleSource() {
   mod.on_overlap = new Sk.builtin.func(function(objA, objB, callback) {
     engine.onOverlap(eid(objA), eid(objB), function(aId, bId) {
       try { Sk.misceval.callsimArray(callback, [objA, objB]); }
+      catch(e) { engine.onError(e.toString()); }
+    });
+    return NONE;
+  });
+  mod.on_clone = new Sk.builtin.func(function(obj, callback) {
+    engine.onClone(eid(obj), function(sourceId, cloneId) {
+      try { Sk.misceval.callsimArray(callback, [obj, wrapLike(obj, cloneId)]); }
       catch(e) { engine.onError(e.toString()); }
     });
     return NONE;

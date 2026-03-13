@@ -39,12 +39,68 @@ const PROP_OPTIONS = [
 ];
 
 const NEW_VAR_ID = '__new_variable__';
+const OBJECT_REFERENCE_FIELD_NAMES = new Set(['OBJ', 'TARGET', 'A', 'B']);
+const OBJECT_VALUE_BLOCK_TYPES = new Set([
+  'game_create_point',
+  'game_create_rect',
+  'game_create_circle',
+  'game_create_text',
+  'game_create_sprite',
+  'game_create_line',
+  'game_create_button',
+  'game_clone',
+]);
+
+function makeSafeIdentifier(value, fallback = 'block') {
+  const safe = String(value || '')
+    .replace(/[^A-Za-z0-9_]/g, '_')
+    .replace(/^(\d)/, '_$1');
+  return safe || fallback;
+}
+
+function indentCode(code, levels, indent) {
+  if (!code) return '';
+  const lines = code.split('\n');
+  const hasTrailingNewline = lines[lines.length - 1] === '';
+  const contentLines = hasTrailingNewline ? lines.slice(0, -1) : lines;
+  const prefix = indent.repeat(levels);
+  const indented = contentLines.map((line) => prefix + line).join('\n');
+  return hasTrailingNewline ? indented + '\n' : indented;
+}
+
+function getWorkspacesForField(workspace) {
+  return [...new Set([workspace, workspace?.targetWorkspace].filter(Boolean))];
+}
+
+function getAssignedObjectVariablesForWorkspace(workspace) {
+  const variablesById = new Map();
+
+  for (const ws of getWorkspacesForField(workspace)) {
+    for (const block of ws.getAllBlocks(false)) {
+      if (block.type !== 'variables_set') continue;
+      const valueBlock = block.getInputTargetBlock('VALUE');
+      if (!valueBlock || !OBJECT_VALUE_BLOCK_TYPES.has(valueBlock.type)) continue;
+
+      const variable = block.getField('VAR')?.getVariable?.();
+      if (variable?.getId?.()) {
+        variablesById.set(variable.getId(), variable);
+      }
+    }
+  }
+
+  return [...variablesById.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
 
 class FieldVariableCreator extends Blockly.FieldVariable {
   constructor(varName, validator, variableTypes, defaultType, config) {
     super(varName, validator, variableTypes, defaultType, config);
     const originalGenerator = this.menuGenerator_;
     this.menuGenerator_ = function () {
+      if (this.shouldRestrictToObjectInstances_()) {
+        const objectOptions = this.getObjectInstanceOptions_();
+        if (objectOptions.length > 0) return objectOptions;
+      }
+
       const options = originalGenerator.call(this);
       const insertIdx = Math.max(0, options.length - 2);
       options.splice(insertIdx, 0, [
@@ -53,6 +109,42 @@ class FieldVariableCreator extends Blockly.FieldVariable {
       ]);
       return options;
     };
+  }
+
+  shouldRestrictToObjectInstances_() {
+    return OBJECT_REFERENCE_FIELD_NAMES.has(this.name);
+  }
+
+  getObjectInstanceOptions_() {
+    const workspace = this.getSourceBlock()?.workspace || this.sourceBlock_?.workspace;
+    return getAssignedObjectVariablesForWorkspace(workspace).map((variable) => [
+      variable.name,
+      variable.getId(),
+    ]);
+  }
+
+  getObjectInstanceFallback_() {
+    return this.getObjectInstanceOptions_()[0]?.[1] || null;
+  }
+
+  doClassValidation_(newValue) {
+    if (this.shouldRestrictToObjectInstances_()) {
+      const allowed = new Set(this.getObjectInstanceOptions_().map(([, id]) => id));
+      if (allowed.size > 0 && !allowed.has(newValue)) {
+        return super.doClassValidation_(this.getObjectInstanceFallback_());
+      }
+    }
+    return super.doClassValidation_(newValue);
+  }
+
+  loadState(state) {
+    if (this.shouldRestrictToObjectInstances_()) {
+      const allowed = new Set(this.getObjectInstanceOptions_().map(([, id]) => id));
+      if (allowed.size > 0 && !allowed.has(state)) {
+        return super.loadState(this.getObjectInstanceFallback_());
+      }
+    }
+    return super.loadState(state);
   }
 
   onItemSelected_(menu, menuItem) {
@@ -84,6 +176,15 @@ class FieldVariableCreator extends Blockly.FieldVariable {
 Blockly.fieldRegistry.register('field_variable_creator', FieldVariableCreator);
 
 export function registerBlocks() {
+  if (
+    Blockly.Blocks['game_on_start'] &&
+    Blockly.Blocks['game_clone_do'] &&
+    Blockly.Blocks['game_on_clone'] &&
+    Blockly.Blocks['mp_array_for_each'] &&
+    Blockly.Blocks['game_on_array_item_where'] &&
+    Blockly.Blocks['game_create_point']
+  ) return;
+
   registerMathBlocks();
   registerStringsBlocks();
   registerArraysBlocks();
@@ -168,6 +269,27 @@ export function registerBlocks() {
     return [v + '.pop(int(' + idx + '))', Order.FUNCTION_CALL];
   };
 
+  Blockly.Blocks['mp_array_for_each'] = {
+    init() {
+      this.appendDummyInput()
+        .appendField('for each')
+        .appendField(new FieldVariableCreator('item'), 'ITEM')
+        .appendField('in')
+        .appendField(new Blockly.FieldVariable('list'), 'VAR');
+      this.appendStatementInput('DO').setCheck(null);
+      this.setPreviousStatement(true, null);
+      this.setNextStatement(true, null);
+      this.setColour(120);
+      this.setTooltip('Run the blocks once for each item in a list');
+    },
+  };
+  pythonGenerator.forBlock['mp_array_for_each'] = function(block, gen) {
+    const item = gen.getVariableName(block.getFieldValue('ITEM'));
+    const listVar = getArrayVarName(block, gen);
+    const body = gen.statementToCode(block, 'DO') || gen.INDENT + 'pass\n';
+    return 'for ' + item + ' in ' + listVar + ':\n' + body;
+  };
+
   Blockly.defineBlocksWithJsonArray([
     // ════════ Events ════════
     {
@@ -217,6 +339,16 @@ export function registerBlocks() {
     },
 
     // ════════ Objects ════════
+    {
+      type: 'game_create_point',
+      message0: 'Point x: %1 y: %2',
+      args0: [
+        { type: 'input_value', name: 'X', check: 'Number' },
+        { type: 'input_value', name: 'Y', check: 'Number' },
+      ],
+      output: null, colour: OBJECTS_HUE, inputsInline: true,
+      tooltip: 'Create an invisible point object for spawn points and markers',
+    },
     {
       type: 'game_create_rect',
       message0: 'Rectangle x: %1 y: %2 width: %3 height: %4 color: %5',
@@ -348,6 +480,16 @@ export function registerBlocks() {
       ],
       output: null, colour: OBJECTS_HUE,
       tooltip: 'Create a copy of an object',
+    },
+    {
+      type: 'game_clone_do',
+      message0: 'clone %1',
+      args0: [
+        { type: 'field_variable_creator', name: 'OBJ', variable: 'player', variableTypes: [''] },
+      ],
+      previousStatement: null, nextStatement: null,
+      colour: OBJECTS_HUE,
+      tooltip: 'Create a copy of an object without storing it',
     },
     {
       type: 'game_hide',
@@ -521,6 +663,20 @@ export function registerBlocks() {
     },
     { type: 'game_width', message0: 'screen width', output: 'Number', colour: STAGE_HUE, tooltip: 'Canvas width (600)' },
     { type: 'game_height', message0: 'screen height', output: 'Number', colour: STAGE_HUE, tooltip: 'Canvas height (600)' },
+    {
+      type: 'game_show_grid',
+      message0: 'show grid',
+      previousStatement: null, nextStatement: null,
+      colour: STAGE_HUE,
+      tooltip: 'Show a placement grid on the game area',
+    },
+    {
+      type: 'game_hide_grid',
+      message0: 'hide grid',
+      previousStatement: null, nextStatement: null,
+      colour: STAGE_HUE,
+      tooltip: 'Hide the placement grid on the game area',
+    },
 
     // ════════ Mobile / Tilt ════════
     {
@@ -1182,6 +1338,31 @@ export function registerBlocks() {
       tooltip: 'Run code when the mouse hovers over an object (event)',
     },
     {
+      type: 'game_on_clone',
+      message0: 'when %1 cloned as %2 %3 %4',
+      args0: [
+        { type: 'field_variable_creator', name: 'OBJ', variable: 'player', variableTypes: [''] },
+        { type: 'field_variable_creator', name: 'CLONE', variable: 'clone', variableTypes: [''] },
+        { type: 'input_dummy' },
+        { type: 'input_statement', name: 'DO' },
+      ],
+      colour: EVENTS_HUE,
+      tooltip: 'Run code when an object is cloned (event)',
+    },
+    {
+      type: 'game_on_array_item_where',
+      message0: 'when any %1 in %2 where %3 %4 %5',
+      args0: [
+        { type: 'field_variable_creator', name: 'ITEM', variable: 'item', variableTypes: [''] },
+        { type: 'field_variable', name: 'VAR', variable: 'list' },
+        { type: 'input_value', name: 'COND', check: 'Boolean' },
+        { type: 'input_dummy' },
+        { type: 'input_statement', name: 'DO' },
+      ],
+      colour: EVENTS_HUE,
+      tooltip: 'Run code once when an item in a list starts matching a condition',
+    },
+    {
       type: 'game_after',
       message0: 'after %1 ms as %2 %3 %4',
       args0: [
@@ -1646,18 +1827,38 @@ export function registerBlocks() {
 
   const ADD_SPRITE_ID = '__add_sprite__';
 
+  function getSpriteNamesForWorkspace(workspace, fallbackName = 'player') {
+    const names = workspace?._getSpriteNames?.() || [];
+    const targetNames = workspace?.targetWorkspace?._getSpriteNames?.() || [];
+    const merged = [...new Set([...names, ...targetNames])];
+    return merged.length > 0 ? merged : [fallbackName];
+  }
+
   class FieldSpritePicker extends Blockly.FieldDropdown {
     constructor(defaultVal) {
       super(function () {
         const ws = this.getSourceBlock()?.workspace;
-        const names = ws?._getSpriteNames?.() || [];
-        const opts = names.length > 0
-          ? names.map(n => [n, n])
-          : [['(no sprites)', '__none__']];
+        const names = getSpriteNamesForWorkspace(ws, this.defaultVal_ || 'player');
+        const opts = names.map(n => [n, n]);
         opts.push(['\u2795 Add sprite\u2026', ADD_SPRITE_ID]);
         return opts;
       });
       this.defaultVal_ = defaultVal || 'player';
+    }
+
+    getFallbackValue_() {
+      const ws = this.getSourceBlock()?.workspace || this.sourceBlock_?.workspace;
+      return getSpriteNamesForWorkspace(ws, this.defaultVal_)[0] || this.defaultVal_;
+    }
+
+    doClassValidation_(newValue) {
+      const normalized = newValue === '__none__' ? this.getFallbackValue_() : newValue;
+      return super.doClassValidation_(normalized);
+    }
+
+    loadState(state) {
+      const normalized = !state || state === '__none__' ? this.getFallbackValue_() : state;
+      return super.loadState(normalized);
     }
 
     onItemSelected_(menu, menuItem) {
@@ -1678,6 +1879,17 @@ export function registerBlocks() {
   }
 
   Blockly.fieldRegistry.register('field_sprite_picker', FieldSpritePicker);
+
+  function resolveSpriteName(block, fieldName) {
+    const names = getSpriteNamesForWorkspace(block.workspace);
+    const current = block.getFieldValue(fieldName);
+    if (current && current !== '__none__' && names.includes(current)) return current;
+    const fallback = names[0] || null;
+    if (fallback) {
+      block.getField(fieldName)?.setValue(fallback);
+    }
+    return fallback;
+  }
 
   const ADD_BG_ID = '__add_bg__';
 
@@ -2100,13 +2312,20 @@ export function registerBlocks() {
 
   pythonGenerator.forBlock['game_on_start'] = function(block, gen) {
     const code = gen.statementToCode(block, 'DO');
-    return code || '';
+    if (!code) return '';
+    const indent = gen.INDENT;
+    return code.replace(new RegExp('^' + indent, 'gm'), '');
   };
 
   pythonGenerator.forBlock['game_every_frame'] = function(block, gen) {
     const code = gen.statementToCode(block, 'DO');
-    const vars = block.workspace.getAllVariables().map(v => gen.getVariableName(v.name));
-    const globalLine = vars.length > 0 ? gen.INDENT + 'global ' + vars.join(', ') + '\n' : '';
+    const vars = (Blockly.Variables.allUsedVarModels(block.workspace) || [])
+      .map((v) => v?.getName?.() || v?.name || '')
+      .filter((name) => typeof name === 'string' && name.trim())
+      .map((name) => gen.getVariableName(name))
+      .filter(Boolean);
+    const uniqueVars = [...new Set(vars)];
+    const globalLine = uniqueVars.length > 0 ? gen.INDENT + 'global ' + uniqueVars.join(', ') + '\n' : '';
     return '\ndef update():\n' + globalLine + (code || gen.INDENT + 'pass\n') + '\ngame.on_update(update)\n';
   };
 
@@ -2125,6 +2344,11 @@ export function registerBlocks() {
     return 'game.clear_background_image()\n';
   };
 
+  pythonGenerator.forBlock['game_create_point'] = function(block, gen) {
+    const x = gen.valueToCode(block, 'X', Order.NONE) || '0';
+    const y = gen.valueToCode(block, 'Y', Order.NONE) || '0';
+    return ['game.Point(' + x + ', ' + y + ')', Order.FUNCTION_CALL];
+  };
   pythonGenerator.forBlock['game_create_rect'] = function(block, gen) {
     const x = gen.valueToCode(block, 'X', Order.NONE) || '0';
     const y = gen.valueToCode(block, 'Y', Order.NONE) || '0';
@@ -2149,7 +2373,8 @@ export function registerBlocks() {
     return ['game.Text("' + t + '", ' + x + ', ' + y + ', "' + c + '", ' + s + ')', Order.FUNCTION_CALL];
   };
   pythonGenerator.forBlock['game_create_sprite'] = function(block, gen) {
-    const n = block.getFieldValue('NAME');
+    const n = resolveSpriteName(block, 'NAME');
+    if (!n) return ['None', Order.NONE];
     const x = gen.valueToCode(block, 'X', Order.NONE) || '0';
     const y = gen.valueToCode(block, 'Y', Order.NONE) || '0';
     const s = gen.valueToCode(block, 'SCALE', Order.NONE) || '4';
@@ -2158,12 +2383,14 @@ export function registerBlocks() {
 
   pythonGenerator.forBlock['game_move'] = function(block, gen) {
     const obj = gen.valueToCode(block, 'OBJ', Order.NONE) || 'None';
+    if (obj === 'None') return '';
     const dx = gen.valueToCode(block, 'DX', Order.NONE) || '0';
     const dy = gen.valueToCode(block, 'DY', Order.NONE) || '0';
-    return obj + '.move(' + dx + ', ' + dy + ')\n';
+    return obj + '.move(' + dx + ', -(' + dy + '))\n';
   };
   pythonGenerator.forBlock['game_move_to'] = function(block, gen) {
     const obj = gen.valueToCode(block, 'OBJ', Order.NONE) || 'None';
+    if (obj === 'None') return '';
     const x = gen.valueToCode(block, 'X', Order.NONE) || '0';
     const y = gen.valueToCode(block, 'Y', Order.NONE) || '0';
     return obj + '.move_to(' + x + ', ' + y + ')\n';
@@ -2196,13 +2423,13 @@ export function registerBlocks() {
     const obj = gen.getVariableName(block.getFieldValue('OBJ'));
     const vx = gen.valueToCode(block, 'VX', Order.NONE) || '0';
     const vy = gen.valueToCode(block, 'VY', Order.NONE) || '0';
-    return obj + '.vx = ' + vx + '\n' + obj + '.vy = ' + vy + '\n';
+    return obj + '.vx = ' + vx + '\n' + obj + '.vy = -(' + vy + ')\n';
   };
   pythonGenerator.forBlock['game_set_acceleration'] = function(block, gen) {
     const obj = gen.getVariableName(block.getFieldValue('OBJ'));
     const ax = gen.valueToCode(block, 'AX', Order.NONE) || '0';
     const ay = gen.valueToCode(block, 'AY', Order.NONE) || '0';
-    return obj + '.ax = ' + ax + '\n' + obj + '.ay = ' + ay + '\n';
+    return obj + '.ax = ' + ax + '\n' + obj + '.ay = -(' + ay + ')\n';
   };
   pythonGenerator.forBlock['game_set_bounce'] = function(block, gen) {
     const obj = gen.getVariableName(block.getFieldValue('OBJ'));
@@ -2232,7 +2459,11 @@ export function registerBlocks() {
   };
   pythonGenerator.forBlock['game_clone'] = function(block, gen) {
     const obj = gen.getVariableName(block.getFieldValue('OBJ'));
-    return [obj + '.clone()', Order.FUNCTION_CALL];
+    return ['(' + obj + '.clone() if ' + obj + ' is not None else None)', Order.NONE];
+  };
+  pythonGenerator.forBlock['game_clone_do'] = function(block, gen) {
+    const obj = gen.getVariableName(block.getFieldValue('OBJ'));
+    return 'if ' + obj + ' is not None:\n' + gen.INDENT + obj + '.clone()\n';
   };
   pythonGenerator.forBlock['game_hide'] = function(block, gen) {
     return gen.getVariableName(block.getFieldValue('OBJ')) + '.hide()\n';
@@ -2296,6 +2527,12 @@ export function registerBlocks() {
   };
   pythonGenerator.forBlock['game_width'] = () => ['game.WIDTH', Order.MEMBER];
   pythonGenerator.forBlock['game_height'] = () => ['game.HEIGHT', Order.MEMBER];
+  pythonGenerator.forBlock['game_show_grid'] = function() {
+    return 'game.show_grid(True)\n';
+  };
+  pythonGenerator.forBlock['game_hide_grid'] = function() {
+    return 'game.show_grid(False)\n';
+  };
 
   pythonGenerator.forBlock['game_show_controls'] = function(block) {
     return 'game.show_controls("' + block.getFieldValue('LAYOUT') + '")\n';
@@ -2633,6 +2870,36 @@ export function registerBlocks() {
     const body = gen.statementToCode(block, 'DO') || gen.INDENT + 'pass\n';
     return 'def _on_hover_' + obj + '(' + obj + ', _x, _y):\n' + body +
            obj + '.on_hover(_on_hover_' + obj + ')\n';
+  };
+  pythonGenerator.forBlock['game_on_clone'] = function(block, gen) {
+    const obj = gen.getVariableName(block.getFieldValue('OBJ'));
+    const clone = gen.getVariableName(block.getFieldValue('CLONE'));
+    const body = gen.statementToCode(block, 'DO') || gen.INDENT + 'pass\n';
+    return 'def _on_clone_' + obj + '(' + obj + ', ' + clone + '):\n' + body +
+           'if ' + obj + ' is not None:\n' + gen.INDENT + 'game.on_clone(' + obj + ', _on_clone_' + obj + ')\n';
+  };
+  pythonGenerator.forBlock['game_on_array_item_where'] = function(block, gen) {
+    const listVar = getArrayVarName(block, gen);
+    const item = gen.getVariableName(block.getFieldValue('ITEM'));
+    const cond = gen.valueToCode(block, 'COND', Order.NONE) || 'False';
+    const safeId = makeSafeIdentifier(block.id, 'array_where');
+    const fn = '_on_array_where_' + safeId;
+    const activeVar = '_array_where_active_' + safeId;
+    const nextVar = '_array_where_next_' + safeId;
+    const indexVar = '_array_where_idx_' + safeId;
+    const body = gen.statementToCode(block, 'DO') || gen.INDENT + 'pass\n';
+    const indentedBody = indentCode(body, 3, gen.INDENT);
+    return activeVar + ' = []\n' +
+      'def ' + fn + '():\n' +
+      gen.INDENT + 'global ' + activeVar + '\n' +
+      gen.INDENT + nextVar + ' = []\n' +
+      gen.INDENT + 'for ' + indexVar + ', ' + item + ' in enumerate(' + listVar + '):\n' +
+      gen.INDENT.repeat(2) + 'if ' + cond + ':\n' +
+      gen.INDENT.repeat(3) + nextVar + '.append(' + indexVar + ')\n' +
+      gen.INDENT.repeat(3) + 'if ' + indexVar + ' not in ' + activeVar + ':\n' +
+      indentedBody +
+      gen.INDENT + activeVar + ' = ' + nextVar + '\n' +
+      'game.on_update(' + fn + ')\n';
   };
   pythonGenerator.forBlock['game_after'] = function(block, gen) {
     const timer = gen.getVariableName(block.getFieldValue('TIMER'));
@@ -3107,7 +3374,7 @@ export function registerBlocks() {
 export function generateCode(workspace) {
   pythonGenerator.init(workspace);
 
-  const EVENT_TYPES = ['game_on_overlap', 'game_on_click_obj', 'game_on_hover_obj', 'game_after', 'game_every', 'hud_on_score_reach', 'hud_on_zero', 'hud_on_timer_done', 'hud_on_value_change'];
+  const EVENT_TYPES = ['game_on_overlap', 'game_on_click_obj', 'game_on_hover_obj', 'game_on_clone', 'game_on_array_item_where', 'game_after', 'game_every', 'hud_on_score_reach', 'hud_on_zero', 'hud_on_timer_done', 'hud_on_value_change'];
   const topBlocks = workspace.getTopBlocks(true);
   const startBlocks = [];
   const procBlocks = [];
@@ -3120,9 +3387,16 @@ export function generateCode(workspace) {
     else otherBlocks.push(b);
   }
 
+  const normalizeTopLevelCode = (blockCode) => {
+    if (!blockCode) return '';
+    const codeText = Array.isArray(blockCode) ? blockCode[0] : blockCode;
+    if (!codeText) return '';
+    return codeText.endsWith('\n') ? codeText : codeText + '\n';
+  };
+
   let code = '';
   for (const b of [...startBlocks, ...procBlocks, ...otherBlocks, ...eventBlocks]) {
-    code += pythonGenerator.blockToCode(b);
+    code += normalizeTopLevelCode(pythonGenerator.blockToCode(b));
   }
 
   code = pythonGenerator.finish(code);

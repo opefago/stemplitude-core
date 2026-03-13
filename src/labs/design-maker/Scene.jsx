@@ -1471,7 +1471,15 @@ function WorkplaneOverlay({ meshRefs, selectedId }) {
 function DimensionLine({
   start,
   end,
-  label,
+  value,
+  units,
+  axisKey,
+  editingAxis,
+  editValue,
+  onStartEdit,
+  onEditChange,
+  onCommitEdit,
+  onCancelEdit,
   color = "#ff9f43",
   offset = [0, 0, 0],
 }) {
@@ -1483,6 +1491,8 @@ function DimensionLine({
     ],
     [start, end, offset],
   );
+  const isEditing = editingAxis === axisKey;
+  const label = `${value.toFixed(1)} ${units}`;
 
   return (
     <group>
@@ -1510,8 +1520,48 @@ function DimensionLine({
         color={color}
         lineWidth={1.5}
       />
-      <Html position={mid} center style={{ pointerEvents: "none" }}>
-        <div className="dml-ruler-label">{label}</div>
+      <Html position={mid} center style={{ pointerEvents: "auto" }}>
+        {isEditing ? (
+          <input
+            className="dml-ruler-label"
+            value={editValue}
+            autoFocus
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => onEditChange(e.target.value)}
+            onBlur={() => onCommitEdit(axisKey)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                onCommitEdit(axisKey);
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                onCancelEdit();
+              }
+            }}
+            style={{
+              width: "84px",
+              textAlign: "center",
+              border: "1px solid #6b7280",
+              outline: "none",
+              background: "rgba(17, 24, 39, 0.95)",
+              color: "#ffffff",
+            }}
+          />
+        ) : (
+          <div
+            className="dml-ruler-label"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              onStartEdit(axisKey, value);
+            }}
+            style={{ pointerEvents: "auto", cursor: "text" }}
+            title="Click to edit dimension"
+          >
+            {label}
+          </div>
+        )}
       </Html>
     </group>
   );
@@ -1522,7 +1572,10 @@ function DimensionRuler({ meshRefs }) {
   const groupRef = useRef();
   const rulerVisible = useDesignStore((s) => s.rulerVisible);
   const units = useDesignStore((s) => s.units);
+  const updateObject = useDesignStore((s) => s.updateObject);
   const importedSizeRef = useRef(null);
+  const [editingAxis, setEditingAxis] = useState(null);
+  const [editValue, setEditValue] = useState("");
   const obj = useDesignStore((s) => {
     if (!s.rulerVisible || s.selectedIds.length !== 1) return null;
     return s.objects.find((o) => o.id === s.selectedIds[0]) || null;
@@ -1560,6 +1613,34 @@ function DimensionRuler({ meshRefs }) {
   if (!obj || !fallbackDims) return null;
 
   const dims = importedSizeRef.current || fallbackDims;
+  const startEdit = (axisKey, value) => {
+    setEditingAxis(axisKey);
+    setEditValue(String(Number(value.toFixed(1))));
+  };
+  const cancelEdit = () => {
+    setEditingAxis(null);
+    setEditValue("");
+  };
+  const commitEdit = (axisKey) => {
+    if (!obj) return cancelEdit();
+    const nextValue = Number.parseFloat(editValue);
+    if (!Number.isFinite(nextValue) || nextValue <= 0) return cancelEdit();
+    const dimByAxis = {
+      width: dims.width,
+      height: dims.height,
+      depth: dims.depth,
+    };
+    const curValue = dimByAxis[axisKey];
+    if (!Number.isFinite(curValue) || curValue <= 1e-6) return cancelEdit();
+    const axisIndex = axisKey === "width" ? 0 : axisKey === "height" ? 1 : 2;
+    const curScale = [...(obj.scale || [1, 1, 1])];
+    curScale[axisIndex] = Math.max(
+      0.01,
+      curScale[axisIndex] * (nextValue / curValue),
+    );
+    updateObject(obj.id, { scale: curScale });
+    cancelEdit();
+  };
   const halfW = dims.width / 2;
   const halfH = dims.height / 2;
   const halfD = dims.depth / 2;
@@ -1583,20 +1664,44 @@ function DimensionRuler({ meshRefs }) {
       <DimensionLine
         start={[-halfW, baseY, halfD + gap]}
         end={[halfW, baseY, halfD + gap]}
-        label={fmt(dims.width)}
+        value={dims.width}
+        units={units}
+        axisKey="width"
+        editingAxis={editingAxis}
+        editValue={editValue}
+        onStartEdit={startEdit}
+        onEditChange={setEditValue}
+        onCommitEdit={commitEdit}
+        onCancelEdit={cancelEdit}
         color="#ff6b6b"
       />
       <DimensionLine
         start={[halfW + gap, baseY, halfD + gap]}
         end={[halfW + gap, topY, halfD + gap]}
-        label={fmt(dims.height)}
+        value={dims.height}
+        units={units}
+        axisKey="height"
+        editingAxis={editingAxis}
+        editValue={editValue}
+        onStartEdit={startEdit}
+        onEditChange={setEditValue}
+        onCommitEdit={commitEdit}
+        onCancelEdit={cancelEdit}
         color="#51cf66"
         offset={[1, 0, 0]}
       />
       <DimensionLine
         start={[halfW + gap, baseY, -halfD]}
         end={[halfW + gap, baseY, halfD]}
-        label={fmt(dims.depth)}
+        value={dims.depth}
+        units={units}
+        axisKey="depth"
+        editingAxis={editingAxis}
+        editValue={editValue}
+        onStartEdit={startEdit}
+        onEditChange={setEditValue}
+        onCommitEdit={commitEdit}
+        onCancelEdit={cancelEdit}
         color="#339af0"
       />
     </group>

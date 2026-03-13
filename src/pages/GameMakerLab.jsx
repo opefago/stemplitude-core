@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { Play, Square, RotateCcw, X, Puzzle, Code, Fullscreen, Shrink, HelpCircle, Save, FolderOpen, Trash2, ArrowLeft, Plus, Upload, Mic, AudioLines } from 'lucide-react';
+import { Play, Square, RotateCcw, X, Puzzle, Code, Fullscreen, Shrink, HelpCircle, Save, FolderOpen, Trash2, ArrowLeft, Plus, Upload, Mic, AudioLines, Grid3x3 } from 'lucide-react';
 import * as Blockly from 'blockly';
 import { pythonGenerator } from 'blockly/python';
 import { registerBlocks, generateCode } from '../labs/game-maker/blocks';
@@ -10,7 +10,7 @@ import { AssetManager } from '../labs/python-game/AssetManager';
 import { loadSkulpt, runPythonCode } from '../labs/python-game/skulptRunner';
 import SpritePanel from '../labs/python-game/SpritePanel';
 import SoundMixer from '../labs/python-game/SoundMixer';
-import { getSpriteNames } from '../labs/python-game/sprites';
+import { getSpriteNames, getSpriteInfo, renderPixelArt } from '../labs/python-game/sprites';
 import './GameMakerLab.css';
 
 const darkTheme = Blockly.Theme.defineTheme('gameMakerDark', {
@@ -42,6 +42,135 @@ const loadProjectsFromStorage = () => {
 
 let blocksRegistered = false;
 
+function createBuiltInSpriteEntry(name) {
+  const info = getSpriteInfo(name);
+  if (!info) return null;
+
+  const firstFrame = info.frames[0];
+  const image = renderPixelArt(firstFrame, 1);
+  const thumbnail = renderPixelArt(firstFrame, 3).toDataURL();
+  const entry = {
+    id: `builtin_sprite_${name}`,
+    name,
+    source: 'gallery',
+    image,
+    thumbnail,
+    width: image.width,
+    height: image.height,
+  };
+
+  if (info.frameCount > 1) {
+    entry.frames = info.frames.map(frame => renderPixelArt(frame, 1));
+    entry.fps = info.fps || 4;
+  }
+
+  return entry;
+}
+
+function createSeededAssetManager() {
+  const assetManager = new AssetManager();
+  const playerSprite = createBuiltInSpriteEntry('player');
+  if (playerSprite) {
+    assetManager.register(playerSprite.name, 'sprite', playerSprite.source, playerSprite);
+  }
+  return assetManager;
+}
+
+function resetAssetManager(assetManager) {
+  assetManager.clear();
+  const playerSprite = createBuiltInSpriteEntry('player');
+  if (playerSprite) {
+    assetManager.register(playerSprite.name, 'sprite', playerSprite.source, playerSprite);
+  }
+}
+
+function imageToDataUrl(image) {
+  if (!image) return null;
+  if (typeof image.toDataURL === 'function') return image.toDataURL();
+
+  const canvas = document.createElement('canvas');
+  canvas.width = image.naturalWidth || image.width || 0;
+  canvas.height = image.naturalHeight || image.height || 0;
+  if (!canvas.width || !canvas.height) return null;
+
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  ctx.drawImage(image, 0, 0);
+  return canvas.toDataURL();
+}
+
+function serializeAssets(assetManager) {
+  return assetManager.list().map((asset) => ({
+    id: asset.id,
+    name: asset.name,
+    type: asset.type,
+    source: asset.source,
+    thumbnail: asset.thumbnail || null,
+    width: asset.width ?? null,
+    height: asset.height ?? null,
+    fps: asset.fps ?? null,
+    audioUrl: asset.audioUrl || null,
+    imageDataUrl: imageToDataUrl(asset.image),
+    frameDataUrls: Array.isArray(asset.frames) ? asset.frames.map(imageToDataUrl).filter(Boolean) : [],
+  }));
+}
+
+function loadImageFromDataUrl(dataUrl) {
+  return new Promise((resolve, reject) => {
+    if (!dataUrl) {
+      resolve(null);
+      return;
+    }
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = dataUrl;
+  });
+}
+
+async function restoreAssets(assetManager, assets) {
+  resetAssetManager(assetManager);
+  if (!Array.isArray(assets)) return;
+
+  for (const asset of assets) {
+    if (!asset?.name || !asset?.type) continue;
+    if (asset.name === 'player' && assetManager.has('player')) continue;
+
+    const entry = {
+      id: asset.id,
+      thumbnail: asset.thumbnail || null,
+      width: asset.width ?? undefined,
+      height: asset.height ?? undefined,
+      fps: asset.fps ?? undefined,
+      audioUrl: asset.audioUrl || undefined,
+    };
+
+    if (asset.type === 'sprite' || asset.type === 'background') {
+      entry.image = await loadImageFromDataUrl(asset.imageDataUrl);
+    }
+    if (asset.type === 'sprite' && Array.isArray(asset.frameDataUrls) && asset.frameDataUrls.length > 0) {
+      entry.frames = (await Promise.all(asset.frameDataUrls.map(loadImageFromDataUrl))).filter(Boolean);
+    }
+
+    assetManager.register(asset.name, asset.type, asset.source || 'created', entry);
+  }
+}
+
+function loadStarterBlocks(workspace) {
+  if (!workspace) return;
+
+  const makeBlock = (type, x, y) => {
+    const block = workspace.newBlock(type);
+    block.initSvg?.();
+    block.render?.();
+    block.moveBy(x, y);
+    return block;
+  };
+
+  makeBlock('game_on_start', 40, 40);
+  makeBlock('game_every_frame', 40, 220);
+}
+
 const GameMakerLab = () => {
   const blocklyDiv = useRef(null);
   const workspaceRef = useRef(null);
@@ -56,6 +185,7 @@ const GameMakerLab = () => {
   const [viewMode, setViewMode] = useState('blocks');
   const [generatedCode, setGeneratedCode] = useState('');
   const [isCanvasFullscreen, setIsCanvasFullscreen] = useState(false);
+  const [isGridVisible, setIsGridVisible] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [consoleLogs, setConsoleLogs] = useState([]);
   const consoleLogsRef = useRef([]);
@@ -80,7 +210,10 @@ const GameMakerLab = () => {
   const [isRecording, setIsRecording] = useState(false);
   const [showMixerOverlay, setShowMixerOverlay] = useState(false);
 
-  const assetManagerRef = useRef(new AssetManager());
+  const assetManagerRef = useRef(null);
+  if (!assetManagerRef.current) {
+    assetManagerRef.current = createSeededAssetManager();
+  }
   const [assetVersion, setAssetVersion] = useState(0);
 
   useEffect(() => {
@@ -106,6 +239,12 @@ const GameMakerLab = () => {
     engineRef.current.onTitleChange = (title) => setGameTitle(title);
     return () => { engineRef.current?.destroy(); engineRef.current = null; };
   }, []);
+
+  useEffect(() => {
+    if (!engineRef.current) return;
+    engineRef.current.gridVisible = isGridVisible;
+    engineRef.current._render();
+  }, [isGridVisible]);
 
   useEffect(() => {
     Blockly.dialog.setPrompt((message, defaultValue, callback) => {
@@ -205,6 +344,7 @@ const GameMakerLab = () => {
     });
 
     workspace.getVariableMap().createVariable('player');
+    loadStarterBlocks(workspace);
 
     workspace._getSoundNames = () =>
       assetManagerRef.current.list('sound').map(s => s.name);
@@ -346,7 +486,7 @@ const GameMakerLab = () => {
     const now = new Date().toISOString();
     const projects = loadProjectsFromStorage();
     const idx = projects.findIndex(p => p.id === projectId);
-    const project = { id: projectId, name: projectName, workspace: state, updatedAt: now,
+    const project = { id: projectId, name: projectName, workspace: state, assets: serializeAssets(assetManagerRef.current), updatedAt: now,
       createdAt: idx >= 0 ? projects[idx].createdAt : now };
     if (idx >= 0) projects[idx] = project; else projects.unshift(project);
     localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
@@ -355,8 +495,10 @@ const GameMakerLab = () => {
     setTimeout(() => setSaveStatus(null), 1500);
   }, [projectId, projectName]);
 
-  const handleLoadProject = useCallback((project) => {
+  const handleLoadProject = useCallback(async (project) => {
     handleReset();
+    await restoreAssets(assetManagerRef.current, project.assets);
+    if (engineRef.current) engineRef.current.clearBackgroundImage();
     if (workspaceRef.current && project.workspace) {
       workspaceRef.current.clear();
       Blockly.serialization.workspaces.load(project.workspace, workspaceRef.current);
@@ -373,6 +515,26 @@ const GameMakerLab = () => {
   }, []);
 
   const am = assetManagerRef.current;
+
+  const ensureSpriteAsset = useCallback((name) => {
+    if (!name) return null;
+    if (am.has(name)) return name;
+
+    const sprite = createBuiltInSpriteEntry(name);
+    if (!sprite) return null;
+
+    am.register(sprite.name, 'sprite', sprite.source, sprite);
+    return sprite.name;
+  }, [am]);
+
+  const loadDefaultWorkspace = useCallback((workspace) => {
+    if (!workspace) return;
+    resetAssetManager(am);
+    if (engineRef.current) engineRef.current.clearBackgroundImage();
+    workspace.clear();
+    workspace.getVariableMap().createVariable('player');
+    loadStarterBlocks(workspace);
+  }, [am]);
 
   const handleAddSprite = useCallback((sprite) => {
     am.register(sprite.name, 'sprite', sprite.source || 'created', {
@@ -543,9 +705,9 @@ const GameMakerLab = () => {
 
   const handleGalleryPick = useCallback((name) => {
     setSpriteAddDialog(null);
-    spriteAddCallbackRef.current?.(name);
+    spriteAddCallbackRef.current?.(ensureSpriteAsset(name));
     spriteAddCallbackRef.current = null;
-  }, []);
+  }, [ensureSpriteAsset]);
 
   useEffect(() => {
     const handler = (e) => {
@@ -659,6 +821,14 @@ const GameMakerLab = () => {
               <button onClick={handleReset} className="gml-btn">
                 <RotateCcw size={16} /> Reset
               </button>
+              <button
+                onClick={() => setIsGridVisible((visible) => !visible)}
+                className={`gml-btn ${isGridVisible ? 'gml-btn-active' : ''}`}
+                title={isGridVisible ? 'Hide placement grid' : 'Show placement grid'}
+                aria-pressed={isGridVisible}
+              >
+                <Grid3x3 size={16} /> Grid
+              </button>
             </div>
             <span className="gml-game-title">{gameTitle}</span>
           </div>
@@ -709,7 +879,7 @@ const GameMakerLab = () => {
               onClick={() => {
                 setProjectId(crypto.randomUUID());
                 setProjectName('Untitled Project');
-                if (workspaceRef.current) workspaceRef.current.clear();
+                if (workspaceRef.current) loadDefaultWorkspace(workspaceRef.current);
                 setShowProjects(false);
               }}
             >

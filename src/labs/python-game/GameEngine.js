@@ -21,6 +21,7 @@ export class GameEngine {
     this._justReleased = new Set();
     this.mouseX = 0;
     this.mouseY = 0;
+    this.mouseInside = false;
     this.mouseDown = false;
     this._mouseJustClicked = false;
     this._mouseJustReleased = false;
@@ -86,14 +87,17 @@ export class GameEngine {
     // Tilemaps
     this._tilemaps = [];
 
-    // Collision event handlers
+    // Collision / object lifecycle event handlers
     this._overlapHandlers = [];
+    this._cloneHandlers = [];
 
     this._boundKeyDown = this._onKeyDown.bind(this);
     this._boundKeyUp = this._onKeyUp.bind(this);
     this._boundMouseMove = this._onMouseMove.bind(this);
     this._boundMouseDown = this._onMouseDown.bind(this);
     this._boundMouseUp = this._onMouseUp.bind(this);
+    this._boundMouseEnter = this._onMouseEnter.bind(this);
+    this._boundMouseLeave = this._onMouseLeave.bind(this);
     this._boundTouchStart = this._onTouchStart.bind(this);
     this._boundTouchMove = this._onTouchMove.bind(this);
     this._boundTouchEnd = this._onTouchEnd.bind(this);
@@ -130,6 +134,13 @@ export class GameEngine {
     const scaleY = this.height / rect.height;
     this.mouseX = Math.round((e.clientX - rect.left) * scaleX);
     this.mouseY = Math.round((e.clientY - rect.top) * scaleY);
+    this.mouseInside = true;
+    if (!this.running) this._render();
+  }
+
+  _onMouseEnter() {
+    this.mouseInside = true;
+    if (!this.running) this._render();
   }
 
   _onMouseDown(e) {
@@ -151,6 +162,12 @@ export class GameEngine {
     this._mouseJustReleased = true;
   }
 
+  _onMouseLeave() {
+    this.mouseInside = false;
+    this.mouseDown = false;
+    if (!this.running) this._render();
+  }
+
   _getTouchPos(touch) {
     const rect = this.canvas.getBoundingClientRect();
     const scaleX = this.width / rect.width;
@@ -168,8 +185,10 @@ export class GameEngine {
     const pos = this._getTouchPos(t);
     this.mouseX = pos.x;
     this.mouseY = pos.y;
+    this.mouseInside = true;
     this.mouseDown = true;
     this._mouseJustClicked = true;
+    if (!this.running) this._render();
     if (this._onClickCallback) {
       try { this._onClickCallback(pos.x, pos.y); } catch (_) {}
     }
@@ -183,12 +202,16 @@ export class GameEngine {
     const pos = this._getTouchPos(t);
     this.mouseX = pos.x;
     this.mouseY = pos.y;
+    this.mouseInside = true;
+    if (!this.running) this._render();
   }
 
   _onTouchEnd(e) {
     e.preventDefault();
+    this.mouseInside = false;
     this.mouseDown = false;
     this._mouseJustReleased = true;
+    if (!this.running) this._render();
   }
 
   _onDeviceMotion(e) {
@@ -704,6 +727,8 @@ export class GameEngine {
     this.canvas.addEventListener('mousemove', this._boundMouseMove);
     this.canvas.addEventListener('mousedown', this._boundMouseDown);
     this.canvas.addEventListener('mouseup', this._boundMouseUp);
+    this.canvas.addEventListener('mouseenter', this._boundMouseEnter);
+    this.canvas.addEventListener('mouseleave', this._boundMouseLeave);
     this.canvas.addEventListener('touchstart', this._boundTouchStart, { passive: false });
     this.canvas.addEventListener('touchmove', this._boundTouchMove, { passive: false });
     this.canvas.addEventListener('touchend', this._boundTouchEnd, { passive: false });
@@ -721,6 +746,8 @@ export class GameEngine {
     this.canvas.removeEventListener('mousemove', this._boundMouseMove);
     this.canvas.removeEventListener('mousedown', this._boundMouseDown);
     this.canvas.removeEventListener('mouseup', this._boundMouseUp);
+    this.canvas.removeEventListener('mouseenter', this._boundMouseEnter);
+    this.canvas.removeEventListener('mouseleave', this._boundMouseLeave);
     this.canvas.removeEventListener('touchstart', this._boundTouchStart);
     this.canvas.removeEventListener('touchmove', this._boundTouchMove);
     this.canvas.removeEventListener('touchend', this._boundTouchEnd);
@@ -759,7 +786,7 @@ export class GameEngine {
       letterSpacing: props.letterSpacing || 0,
       background: props.background || '',
       padding: props.padding || 0,
-      visible: true,
+      visible: props.visible !== undefined ? !!props.visible : true,
       rotation: 0,
       opacity: 1,
       layer: props.layer || 0,
@@ -833,13 +860,22 @@ export class GameEngine {
     if (!src) return null;
     const newId = this._nextId++;
     const clone = { ...src, id: newId };
+    clone.visible = src.type === 'point' ? false : true;
     if (clone._frames) clone._frames = [...clone._frames];
     clone._onClick = null;
     clone._onHoverEnter = null;
     clone._onHoverExit = null;
     clone._hovered = false;
     this.objects.set(newId, clone);
+    for (const h of this._cloneHandlers) {
+      if (h.source !== id) continue;
+      try { h.fn(id, newId); } catch (e) { this.onError(e.toString()); }
+    }
     return newId;
+  }
+
+  onClone(sourceId, callback) {
+    this._cloneHandlers.push({ source: sourceId, fn: callback });
   }
 
   follow(followerId, targetId, speed) {
@@ -1006,6 +1042,7 @@ export class GameEngine {
     this._bubbles = new Map();
     this._tilemaps = [];
     this._overlapHandlers = [];
+    this._cloneHandlers = [];
     this.backgroundColor = '#1a1a2e';
     this.gameTitle = 'My Game';
     this.gridVisible = false;
@@ -1223,6 +1260,35 @@ export class GameEngine {
       for (let y = 0; y <= h; y += 50) {
         ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
       }
+
+      ctx.save();
+      ctx.fillStyle = 'rgba(255,255,255,0.75)';
+      ctx.font = '10px monospace';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+
+      for (let x = 50; x <= w; x += 50) {
+        ctx.fillText(String(x), Math.min(x + 2, w - 24), 2);
+      }
+
+      for (let y = 50; y <= h; y += 50) {
+        ctx.fillText(String(y), 2, Math.min(y + 2, h - 12));
+      }
+
+      if (this.mouseInside) {
+        const label = `x:${this.mouseX} y:${this.mouseY}`;
+        ctx.font = '12px monospace';
+        const textWidth = ctx.measureText(label).width;
+        const boxX = Math.max(6, Math.min(this.mouseX + 12, w - textWidth - 14));
+        const boxY = Math.max(6, Math.min(this.mouseY + 12, h - 24));
+
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.fillRect(boxX - 4, boxY - 3, textWidth + 8, 18);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(label, boxX, boxY);
+      }
+
+      ctx.restore();
     }
 
     // Camera + shake offset
@@ -1432,6 +1498,8 @@ export class GameEngine {
 
   _renderObject(ctx, obj) {
     switch (obj.type) {
+        case 'point':
+          break;
         case 'rect':
           if (obj.outline) {
             ctx.strokeStyle = obj.color;
@@ -1749,6 +1817,7 @@ export class GameEngine {
       this._emitters = [];
       this._nextEmitterId = 1;
       this._overlapHandlers = [];
+      this._cloneHandlers = [];
       this._tilemaps = [];
       this.updateCallback = null;
       this._onKeyCallback = null;
