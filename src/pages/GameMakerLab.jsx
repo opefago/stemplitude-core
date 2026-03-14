@@ -159,6 +159,12 @@ async function restoreAssets(assetManager, assets) {
 function loadStarterBlocks(workspace) {
   if (!workspace) return;
 
+  const getOrCreateVariable = (name) => {
+    const variableMap = workspace.getVariableMap();
+    const existing = variableMap.getAllVariables().find((variable) => variable.name === name);
+    return existing || variableMap.createVariable(name);
+  };
+
   const makeBlock = (type, x, y) => {
     const block = workspace.newBlock(type);
     block.initSvg?.();
@@ -167,6 +173,7 @@ function loadStarterBlocks(workspace) {
     return block;
   };
 
+  getOrCreateVariable('Player');
   makeBlock('game_on_start', 40, 40);
   makeBlock('game_every_frame', 40, 220);
 }
@@ -343,7 +350,6 @@ const GameMakerLab = () => {
       return xmlList;
     });
 
-    workspace.getVariableMap().createVariable('player');
     loadStarterBlocks(workspace);
 
     workspace._getSoundNames = () =>
@@ -532,7 +538,6 @@ const GameMakerLab = () => {
     resetAssetManager(am);
     if (engineRef.current) engineRef.current.clearBackgroundImage();
     workspace.clear();
-    workspace.getVariableMap().createVariable('player');
     loadStarterBlocks(workspace);
   }, [am]);
 

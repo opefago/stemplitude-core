@@ -922,13 +922,16 @@ export class GameEngine {
   createSprite(name, x, y, scale = 4) {
     const custom = this._resolveCustomSprite(name);
     if (custom) {
-      const w = (custom.width || custom.image?.width || 16) * scale;
-      const h = (custom.height || custom.image?.height || 16) * scale;
+      const baseW = custom.width || custom.image?.width || 16;
+      const baseH = custom.height || custom.image?.height || 16;
+      const w = baseW * scale;
+      const h = baseH * scale;
       const id = this._nextId++;
       const hasFrames = custom.frames && custom.frames.length > 1;
       this.objects.set(id, {
         id, type: 'sprite', x, y,
         width: w, height: h,
+        _baseW: baseW, _baseH: baseH, _scale: scale,
         _canvas: custom.image,
         _drawW: w, _drawH: h,
         _frames: hasFrames ? custom.frames : null,
@@ -956,7 +959,9 @@ export class GameEngine {
     this.objects.set(id, {
       id, type: 'sprite', x, y,
       width: first.width, height: first.height,
+      _baseW: first.width / (scale || 1), _baseH: first.height / (scale || 1), _scale: scale,
       _canvas: first,
+      _drawW: first.width, _drawH: first.height,
       _frames: frames.length > 1 ? frames : null,
       _fps: info.fps || 4,
       _animate: frames.length > 1,
@@ -978,7 +983,12 @@ export class GameEngine {
       x, y,
       width: spriteCanvas.width,
       height: spriteCanvas.height,
+      _baseW: spriteCanvas.width / (scale || 1),
+      _baseH: spriteCanvas.height / (scale || 1),
+      _scale: scale,
       _canvas: spriteCanvas,
+      _drawW: spriteCanvas.width,
+      _drawH: spriteCanvas.height,
       _cacheKey: null,
       flipX: false,
       flipY: false,
@@ -989,6 +999,19 @@ export class GameEngine {
     };
     this.objects.set(id, obj);
     return id;
+  }
+
+  resizeSprite(id, scale) {
+    const obj = this.objects.get(id);
+    if (!obj || obj.type !== 'sprite') return;
+    const safeScale = Math.max(0.1, Number(scale) || 1);
+    const baseW = obj._baseW || obj.width || 0;
+    const baseH = obj._baseH || obj.height || 0;
+    obj._scale = safeScale;
+    obj.width = baseW * safeScale;
+    obj.height = baseH * safeScale;
+    obj._drawW = obj.width;
+    obj._drawH = obj.height;
   }
 
   getSpriteNames() {

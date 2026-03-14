@@ -16,6 +16,19 @@ const SENSING_HUE = 195;
 const SOUND_HUE = 310;
 const HUD_HUE = 20;
 
+const TURN_RIGHT_SVG = 'data:image/svg+xml;utf8,' + encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18">' +
+    '<path d="M9 3a6 6 0 1 1-4.64 9.8" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round"/>' +
+    '<path d="M7.4 1.8 10.8 2.6 8.9 5.5" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>' +
+  '</svg>'
+);
+const TURN_LEFT_SVG = 'data:image/svg+xml;utf8,' + encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18">' +
+    '<path d="M9 3a6 6 0 1 0 4.64 9.8" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round"/>' +
+    '<path d="M10.6 1.8 7.2 2.6 9.1 5.5" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>' +
+  '</svg>'
+);
+
 const KEY_OPTIONS = [
   ['right arrow', 'right'], ['left arrow', 'left'],
   ['up arrow', 'up'], ['down arrow', 'down'],
@@ -50,6 +63,19 @@ const OBJECT_VALUE_BLOCK_TYPES = new Set([
   'game_create_button',
   'game_clone',
 ]);
+
+function normalizeDefaultVariableName(varName) {
+  return varName === 'player' ? 'Player' : varName;
+}
+
+function getVariableByIdFromWorkspaces(workspace, variableId) {
+  if (!variableId) return null;
+  for (const ws of getWorkspacesForField(workspace)) {
+    const variable = ws?.getVariableById?.(variableId);
+    if (variable) return variable;
+  }
+  return null;
+}
 
 function makeSafeIdentifier(value, fallback = 'block') {
   const safe = String(value || '')
@@ -93,12 +119,15 @@ function getAssignedObjectVariablesForWorkspace(workspace) {
 
 class FieldVariableCreator extends Blockly.FieldVariable {
   constructor(varName, validator, variableTypes, defaultType, config) {
-    super(varName, validator, variableTypes, defaultType, config);
+    super(normalizeDefaultVariableName(varName), validator, variableTypes, defaultType, config);
     const originalGenerator = this.menuGenerator_;
     this.menuGenerator_ = function () {
       if (this.shouldRestrictToObjectInstances_()) {
         const objectOptions = this.getObjectInstanceOptions_();
-        if (objectOptions.length > 0) return objectOptions;
+        return [
+          ...objectOptions,
+          [Blockly.Msg['NEW_VARIABLE'] || 'New variable...', NEW_VAR_ID],
+        ];
       }
 
       const options = originalGenerator.call(this);
@@ -117,7 +146,14 @@ class FieldVariableCreator extends Blockly.FieldVariable {
 
   getObjectInstanceOptions_() {
     const workspace = this.getSourceBlock()?.workspace || this.sourceBlock_?.workspace;
-    return getAssignedObjectVariablesForWorkspace(workspace).map((variable) => [
+    const assigned = getAssignedObjectVariablesForWorkspace(workspace);
+    const currentVariable = getVariableByIdFromWorkspaces(workspace, this.getValue());
+    const variables = [...assigned];
+    if (currentVariable && !variables.some((variable) => variable.getId() === currentVariable.getId())) {
+      variables.push(currentVariable);
+    }
+
+    return variables.map((variable) => [
       variable.name,
       variable.getId(),
     ]);
@@ -130,6 +166,9 @@ class FieldVariableCreator extends Blockly.FieldVariable {
   doClassValidation_(newValue) {
     if (this.shouldRestrictToObjectInstances_()) {
       const allowed = new Set(this.getObjectInstanceOptions_().map(([, id]) => id));
+      if (newValue && getVariableByIdFromWorkspaces(this.getSourceBlock()?.workspace || this.sourceBlock_?.workspace, newValue)) {
+        allowed.add(newValue);
+      }
       if (allowed.size > 0 && !allowed.has(newValue)) {
         return super.doClassValidation_(this.getObjectInstanceFallback_());
       }
@@ -140,6 +179,9 @@ class FieldVariableCreator extends Blockly.FieldVariable {
   loadState(state) {
     if (this.shouldRestrictToObjectInstances_()) {
       const allowed = new Set(this.getObjectInstanceOptions_().map(([, id]) => id));
+      if (state && getVariableByIdFromWorkspaces(this.getSourceBlock()?.workspace || this.sourceBlock_?.workspace, state)) {
+        allowed.add(state);
+      }
       if (allowed.size > 0 && !allowed.has(state)) {
         return super.loadState(this.getObjectInstanceFallback_());
       }
@@ -164,7 +206,7 @@ class FieldVariableCreator extends Blockly.FieldVariable {
       options.variable,
     );
     return new FieldVariableCreator(
-      varName,
+      normalizeDefaultVariableName(varName),
       undefined,
       options.variableTypes,
       options.defaultType,
@@ -182,7 +224,14 @@ export function registerBlocks() {
     Blockly.Blocks['game_on_clone'] &&
     Blockly.Blocks['mp_array_for_each'] &&
     Blockly.Blocks['game_on_array_item_where'] &&
-    Blockly.Blocks['game_create_point']
+    Blockly.Blocks['game_create_point'] &&
+    Blockly.Blocks['game_wait'] &&
+    Blockly.Blocks['game_resize_sprite'] &&
+    Blockly.Blocks['game_turn_right'] &&
+    Blockly.Blocks['game_turn_left'] &&
+    Blockly.Blocks['game_x_position'] &&
+    Blockly.Blocks['game_y_position'] &&
+    Blockly.Blocks['game_rotation_of']
   ) return;
 
   registerMathBlocks();
@@ -332,7 +381,7 @@ export function registerBlocks() {
     },
     {
       type: 'game_clear_bg_image',
-      message0: 'clear background image',
+      message0: 'clear backdrop',
       previousStatement: null, nextStatement: null,
       colour: STAGE_HUE,
       tooltip: 'Remove the background image',
@@ -513,7 +562,7 @@ export function registerBlocks() {
       type: 'game_move',
       message0: 'move %1 by x: %2 y: %3',
       args0: [
-        { type: 'input_value', name: 'OBJ' },
+        { type: 'field_variable_creator', name: 'OBJ', variable: 'player', variableTypes: [''] },
         { type: 'input_value', name: 'DX', check: 'Number' },
         { type: 'input_value', name: 'DY', check: 'Number' },
       ],
@@ -525,7 +574,7 @@ export function registerBlocks() {
       type: 'game_move_to',
       message0: 'move %1 to x: %2 y: %3',
       args0: [
-        { type: 'input_value', name: 'OBJ' },
+        { type: 'field_variable_creator', name: 'OBJ', variable: 'player', variableTypes: [''] },
         { type: 'input_value', name: 'X', check: 'Number' },
         { type: 'input_value', name: 'Y', check: 'Number' },
       ],
@@ -536,10 +585,61 @@ export function registerBlocks() {
     {
       type: 'game_keep_inside',
       message0: 'keep %1 inside screen',
-      args0: [{ type: 'input_value', name: 'OBJ' }],
+      args0: [{ type: 'field_variable_creator', name: 'OBJ', variable: 'player', variableTypes: [''] }],
       previousStatement: null, nextStatement: null,
       colour: MOTION_HUE, inputsInline: true,
       tooltip: 'Keep an object inside the game canvas',
+    },
+    {
+      type: 'game_turn_right',
+      message0: 'turn %1 %2 %3 degrees',
+      args0: [
+        { type: 'field_variable_creator', name: 'OBJ', variable: 'player', variableTypes: [''] },
+        { type: 'field_image', src: TURN_RIGHT_SVG, width: 18, height: 18, alt: 'clockwise' },
+        { type: 'input_value', name: 'DEG', check: 'Number' },
+      ],
+      previousStatement: null, nextStatement: null,
+      colour: MOTION_HUE, inputsInline: true,
+      tooltip: 'Rotate an object clockwise by some degrees',
+    },
+    {
+      type: 'game_turn_left',
+      message0: 'turn %1 %2 %3 degrees',
+      args0: [
+        { type: 'field_variable_creator', name: 'OBJ', variable: 'player', variableTypes: [''] },
+        { type: 'field_image', src: TURN_LEFT_SVG, width: 18, height: 18, alt: 'counterclockwise' },
+        { type: 'input_value', name: 'DEG', check: 'Number' },
+      ],
+      previousStatement: null, nextStatement: null,
+      colour: MOTION_HUE, inputsInline: true,
+      tooltip: 'Rotate an object counterclockwise by some degrees',
+    },
+    {
+      type: 'game_x_position',
+      message0: 'x position of %1',
+      args0: [
+        { type: 'field_variable_creator', name: 'OBJ', variable: 'player', variableTypes: [''] },
+      ],
+      output: 'Number', colour: MOTION_HUE, inputsInline: true,
+      tooltip: 'Get the x position of an object',
+    },
+    {
+      type: 'game_y_position',
+      message0: 'y position of %1',
+      args0: [
+        { type: 'field_variable_creator', name: 'OBJ', variable: 'player', variableTypes: [''] },
+      ],
+      output: 'Number', colour: MOTION_HUE, inputsInline: true,
+      tooltip: 'Get the y position of an object',
+    },
+    {
+      type: 'game_rotation_of',
+      message0: 'rotation of %1',
+      args0: [
+        { type: 'field_variable_creator', name: 'OBJ', variable: 'player', variableTypes: [''] },
+      ],
+      output: 'Number', colour: MOTION_HUE, inputsInline: true,
+      tooltip: 'Get the rotation of an object in degrees',
     },
 
     // ════════ Looks / Properties ════════
@@ -1178,14 +1278,25 @@ export function registerBlocks() {
     },
     {
       type: 'game_anim_set_frame',
-      message0: 'set frame of %1 to %2',
+      message0: 'switch costume of %1 to %2',
       args0: [
         { type: 'field_variable_creator', name: 'OBJ', variable: 'player', variableTypes: [''] },
         { type: 'input_value', name: 'FRAME', check: 'Number' },
       ],
       previousStatement: null, nextStatement: null,
       colour: 45, inputsInline: true,
-      tooltip: 'Jump to a specific animation frame (0-based)',
+      tooltip: 'Switch a sprite to a specific costume/frame (0-based)',
+    },
+    {
+      type: 'game_resize_sprite',
+      message0: 'resize %1 to %2 x',
+      args0: [
+        { type: 'field_variable_creator', name: 'OBJ', variable: 'player', variableTypes: [''] },
+        { type: 'input_value', name: 'SCALE', check: 'Number' },
+      ],
+      previousStatement: null, nextStatement: null,
+      colour: LOOKS_HUE, inputsInline: true,
+      tooltip: 'Resize a sprite. 1 is original size.',
     },
     {
       type: 'game_anim_frame',
@@ -1361,6 +1472,16 @@ export function registerBlocks() {
       ],
       colour: EVENTS_HUE,
       tooltip: 'Run code once when an item in a list starts matching a condition',
+    },
+    {
+      type: 'game_wait',
+      message0: 'wait %1 ms',
+      args0: [
+        { type: 'input_value', name: 'MS', check: 'Number' },
+      ],
+      previousStatement: null, nextStatement: null,
+      colour: EVENTS_HUE, inputsInline: true,
+      tooltip: 'Pause the current script for some milliseconds',
     },
     {
       type: 'game_after',
@@ -2246,12 +2367,12 @@ export function registerBlocks() {
   Blockly.Blocks['game_set_bg_image'] = {
     init() {
       this.appendDummyInput()
-        .appendField('set background image')
+        .appendField('change backdrop to')
         .appendField(new FieldBackgroundPicker(), 'IMAGE');
       this.setPreviousStatement(true);
       this.setNextStatement(true);
       this.setColour(STAGE_HUE);
-      this.setTooltip('Set a background image from the sprite panel');
+      this.setTooltip('Change the backdrop image from the sprite panel');
     },
   };
 
@@ -2343,6 +2464,11 @@ export function registerBlocks() {
   pythonGenerator.forBlock['game_clear_bg_image'] = function() {
     return 'game.clear_background_image()\n';
   };
+  pythonGenerator.forBlock['game_resize_sprite'] = function(block, gen) {
+    const obj = gen.getVariableName(block.getFieldValue('OBJ'));
+    const scale = gen.valueToCode(block, 'SCALE', Order.NONE) || '1';
+    return 'if ' + obj + ' is not None:\n' + gen.INDENT + 'game.resize_sprite(' + obj + ', ' + scale + ')\n';
+  };
 
   pythonGenerator.forBlock['game_create_point'] = function(block, gen) {
     const x = gen.valueToCode(block, 'X', Order.NONE) || '0';
@@ -2382,21 +2508,42 @@ export function registerBlocks() {
   };
 
   pythonGenerator.forBlock['game_move'] = function(block, gen) {
-    const obj = gen.valueToCode(block, 'OBJ', Order.NONE) || 'None';
-    if (obj === 'None') return '';
+    const obj = gen.getVariableName(block.getFieldValue('OBJ'));
     const dx = gen.valueToCode(block, 'DX', Order.NONE) || '0';
     const dy = gen.valueToCode(block, 'DY', Order.NONE) || '0';
-    return obj + '.move(' + dx + ', -(' + dy + '))\n';
+    return 'if ' + obj + ' is not None:\n' + gen.INDENT + obj + '.move(' + dx + ', -(' + dy + '))\n';
   };
   pythonGenerator.forBlock['game_move_to'] = function(block, gen) {
-    const obj = gen.valueToCode(block, 'OBJ', Order.NONE) || 'None';
-    if (obj === 'None') return '';
+    const obj = gen.getVariableName(block.getFieldValue('OBJ'));
     const x = gen.valueToCode(block, 'X', Order.NONE) || '0';
     const y = gen.valueToCode(block, 'Y', Order.NONE) || '0';
-    return obj + '.move_to(' + x + ', ' + y + ')\n';
+    return 'if ' + obj + ' is not None:\n' + gen.INDENT + obj + '.move_to(' + x + ', ' + y + ')\n';
   };
   pythonGenerator.forBlock['game_keep_inside'] = function(block, gen) {
-    return (gen.valueToCode(block, 'OBJ', Order.NONE) || 'None') + '.keep_inside()\n';
+    const obj = gen.getVariableName(block.getFieldValue('OBJ'));
+    return 'if ' + obj + ' is not None:\n' + gen.INDENT + obj + '.keep_inside()\n';
+  };
+  pythonGenerator.forBlock['game_turn_right'] = function(block, gen) {
+    const obj = gen.getVariableName(block.getFieldValue('OBJ'));
+    const deg = gen.valueToCode(block, 'DEG', Order.NONE) || '15';
+    return 'if ' + obj + ' is not None:\n' + gen.INDENT + obj + '.rotation += ' + deg + '\n';
+  };
+  pythonGenerator.forBlock['game_turn_left'] = function(block, gen) {
+    const obj = gen.getVariableName(block.getFieldValue('OBJ'));
+    const deg = gen.valueToCode(block, 'DEG', Order.NONE) || '15';
+    return 'if ' + obj + ' is not None:\n' + gen.INDENT + obj + '.rotation -= ' + deg + '\n';
+  };
+  pythonGenerator.forBlock['game_x_position'] = function(block, gen) {
+    const obj = gen.getVariableName(block.getFieldValue('OBJ'));
+    return ['(' + obj + '.x if ' + obj + ' is not None else 0)', Order.MEMBER];
+  };
+  pythonGenerator.forBlock['game_y_position'] = function(block, gen) {
+    const obj = gen.getVariableName(block.getFieldValue('OBJ'));
+    return ['(' + obj + '.y if ' + obj + ' is not None else 0)', Order.MEMBER];
+  };
+  pythonGenerator.forBlock['game_rotation_of'] = function(block, gen) {
+    const obj = gen.getVariableName(block.getFieldValue('OBJ'));
+    return ['(' + obj + '.rotation if ' + obj + ' is not None else 0)', Order.MEMBER];
   };
 
   pythonGenerator.forBlock['game_set_prop'] = function(block, gen) {
@@ -2908,6 +3055,10 @@ export function registerBlocks() {
     const fn = '_after_' + timer;
     return 'def ' + fn + '():\n' + body + timer + ' = game.after(' + ms + ', ' + fn + ')\n';
   };
+  pythonGenerator.forBlock['game_wait'] = function(block, gen) {
+    const ms = gen.valueToCode(block, 'MS', Order.NONE) || '1000';
+    return 'game.wait(' + ms + ')\n';
+  };
   pythonGenerator.forBlock['game_every'] = function(block, gen) {
     const timer = gen.getVariableName(block.getFieldValue('TIMER'));
     const ms = gen.valueToCode(block, 'MS', Order.NONE) || '1000';
@@ -3401,7 +3552,12 @@ export function generateCode(workspace) {
 
   code = pythonGenerator.finish(code);
 
-  code = 'import game\n' + code;
+  const playerVariable = workspace.getVariableMap?.()?.getAllVariables?.().find((variable) => variable?.name === 'Player');
+  const playerBootstrap = playerVariable
+    ? pythonGenerator.getVariableName(playerVariable.getId()) + ' = game.Sprite("player", 100, 100, 5)\n'
+    : '';
+
+  code = 'import game\n' + playerBootstrap + code;
   if (!code.includes('game.start()')) {
     code += '\ngame.start()\n';
   }

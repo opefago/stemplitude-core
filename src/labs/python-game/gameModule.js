@@ -127,6 +127,33 @@ export function getGameModuleSource() {
     inst._eid = id;
     return inst;
   }
+  function reportCallbackError(err, stopGame) {
+    engine.onError(err && err.toString ? err.toString() : String(err));
+    if (stopGame) engine.stop();
+  }
+  function runPythonCallback(callback, getArgs, options) {
+    options = options || {};
+    var active = false;
+    return function() {
+      if (!callback || callback === NONE) return;
+      if (active && options.allowReentry !== true) return;
+      var args = typeof getArgs === 'function' ? getArgs.apply(null, arguments) : (getArgs || []);
+      active = true;
+      try {
+        Sk.misceval.asyncToPromise(function() {
+          return Sk.misceval.callsimArray(callback, args);
+        }).then(function() {
+          active = false;
+        }, function(err) {
+          active = false;
+          reportCallbackError(err, options.stopGameOnError);
+        });
+      } catch (err) {
+        active = false;
+        reportCallbackError(err, options.stopGameOnError);
+      }
+    };
+  }
 
   // ========== Shared class infrastructure ==========
   function addMethods($loc) {
@@ -172,10 +199,9 @@ export function getGameModuleSource() {
     $loc.on_click = new Sk.builtin.func(function(self, callback) {
       var o = engine.getObject(self._eid);
       if (o) {
-        o._onClick = function(_id, mx, my) {
-          try { Sk.misceval.callsimArray(callback, [self, pyInt(mx), pyInt(my)]); }
-          catch(e) { engine.onError(e.toString()); }
-        };
+        o._onClick = runPythonCallback(callback, function(_id, mx, my) {
+          return [self, pyInt(mx), pyInt(my)];
+        });
       }
       return NONE;
     });
@@ -183,16 +209,14 @@ export function getGameModuleSource() {
       var o = engine.getObject(self._eid);
       if (o) {
         if (enterCb && enterCb !== Sk.builtin.none.none$) {
-          o._onHoverEnter = function(_id, mx, my) {
-            try { Sk.misceval.callsimArray(enterCb, [self, pyInt(mx), pyInt(my)]); }
-            catch(e) { engine.onError(e.toString()); }
-          };
+          o._onHoverEnter = runPythonCallback(enterCb, function(_id, mx, my) {
+            return [self, pyInt(mx), pyInt(my)];
+          });
         }
         if (exitCb && exitCb !== Sk.builtin.none.none$) {
-          o._onHoverExit = function(_id) {
-            try { Sk.misceval.callsimArray(exitCb, [self]); }
-            catch(e) { engine.onError(e.toString()); }
-          };
+          o._onHoverExit = runPythonCallback(exitCb, function() {
+            return [self];
+          });
         }
       }
       return NONE;
@@ -594,21 +618,21 @@ export function getGameModuleSource() {
   mod.mouse_clicked = new Sk.builtin.func(function() { return pyBool(engine.isMouseClicked()); });
   mod.mouse_released = new Sk.builtin.func(function() { return pyBool(engine.isMouseReleased()); });
   mod.on_key = new Sk.builtin.func(function(callback) {
-    engine._onKeyCallback = function(key) {
-      try { Sk.misceval.callsimArray(callback, [pyStr(key)]); } catch(e) { engine.onError(e.toString()); }
-    };
+    engine._onKeyCallback = runPythonCallback(callback, function(key) {
+      return [pyStr(key)];
+    });
     return NONE;
   });
   mod.on_key_up = new Sk.builtin.func(function(callback) {
-    engine._onKeyUpCallback = function(key) {
-      try { Sk.misceval.callsimArray(callback, [pyStr(key)]); } catch(e) { engine.onError(e.toString()); }
-    };
+    engine._onKeyUpCallback = runPythonCallback(callback, function(key) {
+      return [pyStr(key)];
+    });
     return NONE;
   });
   mod.on_click = new Sk.builtin.func(function(callback) {
-    engine._onClickCallback = function(x, y) {
-      try { Sk.misceval.callsimArray(callback, [pyInt(x), pyInt(y)]); } catch(e) { engine.onError(e.toString()); }
-    };
+    engine._onClickCallback = runPythonCallback(callback, function(x, y) {
+      return [pyInt(x), pyInt(y)];
+    });
     return NONE;
   });
 
@@ -644,6 +668,10 @@ export function getGameModuleSource() {
   });
   mod.clear_background_image = new Sk.builtin.func(function() {
     engine.clearBackgroundImage();
+    return NONE;
+  });
+  mod.resize_sprite = new Sk.builtin.func(function(obj, scale) {
+    engine.resizeSprite(eid(obj), jsv(scale));
     return NONE;
   });
 
@@ -689,13 +717,14 @@ export function getGameModuleSource() {
   });
   mod.after = new Sk.builtin.func(function(ms, callback) {
     var id = engine.addTimer(jsv(ms), function() {
-      try { Sk.misceval.callsimArray(callback, []); } catch(e) { engine.onError(e.toString()); }
+      runPythonCallback(callback, [])();
     }, false);
     return pyInt(id);
   });
   mod.every = new Sk.builtin.func(function(ms, callback) {
+    var wrapped = runPythonCallback(callback, []);
     var id = engine.addTimer(jsv(ms), function() {
-      try { Sk.misceval.callsimArray(callback, []); } catch(e) { engine.onError(e.toString()); }
+      wrapped();
     }, true);
     return pyInt(id);
   });
@@ -731,9 +760,8 @@ export function getGameModuleSource() {
 
   // ========== Tweening ==========
   mod.tween = new Sk.builtin.func(function(obj, prop, target, duration, easing, callback) {
-    var id = engine.addTween(eid(obj), jsv(prop), jsv(target), jsv(duration), optJs(easing, 'linear'), callback ? function() {
-      try { Sk.misceval.callsimArray(callback, []); } catch(e) { engine.onError(e.toString()); }
-    } : null);
+    var onDone = callback ? runPythonCallback(callback, []) : null;
+    var id = engine.addTween(eid(obj), jsv(prop), jsv(target), jsv(duration), optJs(easing, 'linear'), onDone);
     return pyInt(id);
   });
   mod.cancel_tween = new Sk.builtin.func(function(tweenId) {
@@ -835,8 +863,8 @@ export function getGameModuleSource() {
   mod.transition = new Sk.builtin.func(function(type, duration, color, onMid, onDone) {
     engine.startTransition(
       optJs(type, 'fade'), optJs(duration, 500), optJs(color, 'black'),
-      onMid ? function() { try { Sk.misceval.callsimArray(onMid, []); } catch(e) { engine.onError(e.toString()); } } : null,
-      onDone ? function() { try { Sk.misceval.callsimArray(onDone, []); } catch(e) { engine.onError(e.toString()); } } : null
+      onMid ? runPythonCallback(onMid, []) : null,
+      onDone ? runPythonCallback(onDone, []) : null
     );
     return NONE;
   });
@@ -891,10 +919,7 @@ export function getGameModuleSource() {
     return NONE;
   });
   mod.on_scene = new Sk.builtin.func(function(name, callback) {
-    engine.registerScene(gn(name), function() {
-      try { Sk.misceval.callsimArray(callback, []); }
-      catch(e) { engine.onError(e.toString()); }
-    });
+    engine.registerScene(gn(name), runPythonCallback(callback, []));
     return NONE;
   });
   mod.get_scene = new Sk.builtin.func(function() {
@@ -948,7 +973,7 @@ export function getGameModuleSource() {
     $loc.for_each = new Sk.builtin.func(function(self, fn) {
       for (var i = 0; i < self._items.length; i++) {
         var o = engine.getObject(eid(self._items[i]));
-        if (o) Sk.misceval.callsimArray(fn, [self._items[i]]);
+        if (o) runPythonCallback(fn, [self._items[i]])();
       }
       return NONE;
     });
@@ -1473,17 +1498,15 @@ export function getGameModuleSource() {
 
   // ========== Collision Events ==========
   mod.on_overlap = new Sk.builtin.func(function(objA, objB, callback) {
-    engine.onOverlap(eid(objA), eid(objB), function(aId, bId) {
-      try { Sk.misceval.callsimArray(callback, [objA, objB]); }
-      catch(e) { engine.onError(e.toString()); }
-    });
+    engine.onOverlap(eid(objA), eid(objB), runPythonCallback(callback, function() {
+      return [objA, objB];
+    }));
     return NONE;
   });
   mod.on_clone = new Sk.builtin.func(function(obj, callback) {
-    engine.onClone(eid(obj), function(sourceId, cloneId) {
-      try { Sk.misceval.callsimArray(callback, [obj, wrapLike(obj, cloneId)]); }
-      catch(e) { engine.onError(e.toString()); }
-    });
+    engine.onClone(eid(obj), runPythonCallback(callback, function(sourceId, cloneId) {
+      return [obj, wrapLike(obj, cloneId)];
+    }));
     return NONE;
   });
 
@@ -1517,10 +1540,7 @@ export function getGameModuleSource() {
 
   // ========== Game loop ==========
   mod.on_update = new Sk.builtin.func(function(callback) {
-    engine.updateCallback = function() {
-      try { Sk.misceval.callsimArray(callback, []); }
-      catch(e) { engine.onError(e.toString()); engine.stop(); }
-    };
+    engine.updateCallback = runPythonCallback(callback, [], { stopGameOnError: true });
     return NONE;
   });
   mod.start = new Sk.builtin.func(function() { engine.start(); return NONE; });
