@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
+import Tippy from '@tippyjs/react';
 import { Play, Square, RotateCcw, X, Puzzle, Code, Fullscreen, Shrink, HelpCircle, Save, FolderOpen, Trash2, ArrowLeft, Plus, Upload, Mic, AudioLines, Grid3x3 } from 'lucide-react';
 import * as Blockly from 'blockly';
 import { pythonGenerator } from 'blockly/python';
@@ -11,6 +12,7 @@ import { loadSkulpt, runPythonCode } from '../labs/python-game/skulptRunner';
 import SpritePanel from '../labs/python-game/SpritePanel';
 import SoundMixer from '../labs/python-game/SoundMixer';
 import { getSpriteNames, getSpriteInfo, renderPixelArt } from '../labs/python-game/sprites';
+import 'tippy.js/animations/shift-away.css';
 import './GameMakerLab.css';
 
 const darkTheme = Blockly.Theme.defineTheme('gameMakerDark', {
@@ -33,6 +35,14 @@ const darkTheme = Blockly.Theme.defineTheme('gameMakerDark', {
     size: 12,
   },
 });
+
+const tipProps = {
+  theme: 'gml-dark',
+  animation: 'shift-away',
+  arrow: true,
+  delay: [400, 0],
+  duration: [200, 150],
+};
 
 const PROJECTS_KEY = 'stemplitude_gamemaker_projects';
 const loadProjectsFromStorage = () => {
@@ -742,32 +752,40 @@ const GameMakerLab = () => {
           </div>
 
           <div className="gml-view-toggle">
-            <button
-              className={`gml-toggle-btn ${viewMode === 'blocks' ? 'active' : ''}`}
-              onClick={() => setViewMode('blocks')}
-            >
-              <Puzzle size={14} /> Blocks
-            </button>
-            <button
-              className={`gml-toggle-btn ${viewMode === 'code' ? 'active' : ''}`}
-              onClick={() => setViewMode('code')}
-            >
-              <Code size={14} /> Code
-            </button>
+            <Tippy content="Block editor" {...tipProps}>
+              <button
+                className={`gml-toggle-btn ${viewMode === 'blocks' ? 'active' : ''}`}
+                onClick={() => setViewMode('blocks')}
+              >
+                <Puzzle size={14} /> Blocks
+              </button>
+            </Tippy>
+            <Tippy content="Generated Python code" {...tipProps}>
+              <button
+                className={`gml-toggle-btn ${viewMode === 'code' ? 'active' : ''}`}
+                onClick={() => setViewMode('code')}
+              >
+                <Code size={14} /> Code
+              </button>
+            </Tippy>
           </div>
 
           <div className="gml-separator" />
 
-          <button className="gml-btn" onClick={() => setShowHelp(!showHelp)} title="Help">
-            <HelpCircle size={16} /> Help
-          </button>
+          <Tippy content="Help" {...tipProps}>
+            <button className="gml-btn" onClick={() => setShowHelp(!showHelp)}>
+              <HelpCircle size={16} /> Help
+            </button>
+          </Tippy>
         </div>
 
         <div className="gml-controls-right">
           {skulptLoading && <span className="gml-loading">Loading Python...</span>}
-          <Link to="/playground" className="gml-exit-btn">
-            <X size={18} /> Exit
-          </Link>
+          <Tippy content="Return to Playground" {...tipProps}>
+            <Link to="/playground" className="gml-exit-btn">
+              <X size={18} /> Exit
+            </Link>
+          </Tippy>
         </div>
       </div>
 
@@ -778,26 +796,30 @@ const GameMakerLab = () => {
           <div className="gml-panel-header">
             <span>{viewMode === 'blocks' ? 'Blocks' : 'Generated Python'}</span>
             <div className="gml-panel-header-actions">
-              <input
-                className="gml-project-name"
-                value={projectName}
-                onChange={(e) => setProjectName(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
-                spellCheck={false}
-                maxLength={40}
-                title="Click to rename project"
-              />
-              <button className="gml-btn gml-btn-icon" onClick={handleSaveProject} title="Save project (Ctrl+S)">
-                <Save size={14} />
-              </button>
+              <Tippy content="Click to rename project" {...tipProps}>
+                <input
+                  className="gml-project-name"
+                  value={projectName}
+                  onChange={(e) => setProjectName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
+                  spellCheck={false}
+                  maxLength={40}
+                />
+              </Tippy>
+              <Tippy content="Save project (Ctrl+S)" {...tipProps}>
+                <button className="gml-btn gml-btn-icon" onClick={handleSaveProject}>
+                  <Save size={14} />
+                </button>
+              </Tippy>
               {saveStatus && <span className="gml-save-status">Saved!</span>}
-              <button
-                className="gml-btn gml-btn-icon"
-                onClick={() => { setSavedProjects(loadProjectsFromStorage()); setShowProjects(true); }}
-                title="My Projects"
-              >
-                <FolderOpen size={14} />
-              </button>
+              <Tippy content="My Projects" {...tipProps}>
+                <button
+                  className="gml-btn gml-btn-icon"
+                  onClick={() => { setSavedProjects(loadProjectsFromStorage()); setShowProjects(true); }}
+                >
+                  <FolderOpen size={14} />
+                </button>
+              </Tippy>
             </div>
           </div>
 
@@ -817,23 +839,30 @@ const GameMakerLab = () => {
         <div className="gml-game-panel">
           <div className="gml-game-header">
             <div className="gml-game-controls">
-              <button onClick={handleRun} className="gml-btn gml-btn-run" disabled={!skulptReady || isRunning}>
-                <Play size={16} /> Run
-              </button>
-              <button onClick={handleStop} className="gml-btn gml-btn-stop" disabled={!isRunning}>
-                <Square size={16} /> Stop
-              </button>
-              <button onClick={handleReset} className="gml-btn">
-                <RotateCcw size={16} /> Reset
-              </button>
-              <button
-                onClick={() => setIsGridVisible((visible) => !visible)}
-                className={`gml-btn ${isGridVisible ? 'gml-btn-active' : ''}`}
-                title={isGridVisible ? 'Hide placement grid' : 'Show placement grid'}
-                aria-pressed={isGridVisible}
-              >
-                <Grid3x3 size={16} /> Grid
-              </button>
+              <Tippy content="Run the game" {...tipProps}>
+                <button onClick={handleRun} className="gml-btn gml-btn-run" disabled={!skulptReady || isRunning}>
+                  <Play size={16} /> Run
+                </button>
+              </Tippy>
+              <Tippy content="Stop the game" {...tipProps}>
+                <button onClick={handleStop} className="gml-btn gml-btn-stop" disabled={!isRunning}>
+                  <Square size={16} /> Stop
+                </button>
+              </Tippy>
+              <Tippy content="Reset and restart" {...tipProps}>
+                <button onClick={handleReset} className="gml-btn">
+                  <RotateCcw size={16} /> Reset
+                </button>
+              </Tippy>
+              <Tippy content={isGridVisible ? 'Hide placement grid' : 'Show placement grid'} {...tipProps}>
+                <button
+                  onClick={() => setIsGridVisible((visible) => !visible)}
+                  className={`gml-btn ${isGridVisible ? 'gml-btn-active' : ''}`}
+                  aria-pressed={isGridVisible}
+                >
+                  <Grid3x3 size={16} /> Grid
+                </button>
+              </Tippy>
             </div>
             <span className="gml-game-title">{gameTitle}</span>
           </div>
@@ -842,13 +871,14 @@ const GameMakerLab = () => {
             ref={gameWrapperRef}
           >
             <canvas ref={canvasRef} className="gml-canvas" />
-            <button
-              className="gml-fullscreen-btn"
-              onClick={toggleCanvasFullscreen}
-              title={isCanvasFullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen'}
-            >
-              {isCanvasFullscreen ? <Shrink size={18} /> : <Fullscreen size={18} />}
-            </button>
+            <Tippy content={isCanvasFullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen'} {...tipProps}>
+              <button
+                className="gml-fullscreen-btn"
+                onClick={toggleCanvasFullscreen}
+              >
+                {isCanvasFullscreen ? <Shrink size={18} /> : <Fullscreen size={18} />}
+              </button>
+            </Tippy>
           </div>
 
           <SpritePanel
@@ -909,9 +939,11 @@ const GameMakerLab = () => {
                   </div>
                   <div className="gml-project-actions">
                     <button className="gml-btn gml-btn-open" onClick={() => handleLoadProject(p)}>Open</button>
-                    <button className="gml-project-delete" onClick={() => handleDeleteProject(p.id)} title="Delete project">
-                      <Trash2 size={15} />
-                    </button>
+                    <Tippy content="Delete project" {...tipProps}>
+                      <button className="gml-project-delete" onClick={() => handleDeleteProject(p.id)}>
+                        <Trash2 size={15} />
+                      </button>
+                    </Tippy>
                   </div>
                 </div>
               ))
@@ -1097,14 +1129,14 @@ const GameMakerLab = () => {
             </div>
             <div className="gml-gallery-grid">
               {getSpriteNames().map(name => (
-                <button
-                  key={name}
-                  className="gml-gallery-item"
-                  onClick={() => handleGalleryPick(name)}
-                  title={name}
-                >
-                  <span className="gml-gallery-name">{name}</span>
-                </button>
+                <Tippy key={name} content={name} {...tipProps}>
+                  <button
+                    className="gml-gallery-item"
+                    onClick={() => handleGalleryPick(name)}
+                  >
+                    <span className="gml-gallery-name">{name}</span>
+                  </button>
+                </Tippy>
               ))}
             </div>
           </div>

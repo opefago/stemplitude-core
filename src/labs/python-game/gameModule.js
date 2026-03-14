@@ -35,6 +35,7 @@
  *     game.cancel_timer(id)
  *     game.random_int(min,max)
  *     game.distance(a,b)          game.frame_count()
+ *     game.time_since_start()
  *     game.sound(freq,dur,type)   game.sprite_names()
  *     game.tone(freq,dur,vol,type) game.note(name,dur,vol,type)
  *     game.play_sound(name,vol)   game.sound_names()
@@ -655,6 +656,7 @@ export function getGameModuleSource() {
     return pyFloat(Math.sqrt(dx * dx + dy * dy));
   });
   mod.frame_count = new Sk.builtin.func(function() { return pyInt(engine.frameCount); });
+  mod.time_since_start = new Sk.builtin.func(function() { return pyFloat(engine.elapsedMs / 1000); });
   mod.sprite_names = new Sk.builtin.func(function() {
     var ns = engine.getSpriteNames(), out = [];
     for (var i = 0; i < ns.length; i++) out.push(pyStr(ns[i]));

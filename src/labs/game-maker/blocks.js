@@ -226,6 +226,7 @@ export function registerBlocks() {
     Blockly.Blocks['game_on_array_item_where'] &&
     Blockly.Blocks['game_create_point'] &&
     Blockly.Blocks['game_wait'] &&
+    Blockly.Blocks['game_time_since_start'] &&
     Blockly.Blocks['game_resize_sprite'] &&
     Blockly.Blocks['game_turn_right'] &&
     Blockly.Blocks['game_turn_left'] &&
@@ -1910,6 +1911,12 @@ export function registerBlocks() {
       output: 'Number', colour: SENSING_HUE,
       tooltip: 'Number of frames since the game started',
     },
+    {
+      type: 'game_time_since_start',
+      message0: 'time since start',
+      output: 'Number', colour: SENSING_HUE,
+      tooltip: 'Seconds since the game started',
+    },
   ]);
 
   const ADD_SOUND_ID = '__add_sound__';
@@ -3248,6 +3255,9 @@ export function registerBlocks() {
   };
   pythonGenerator.forBlock['game_frame_count'] = function() {
     return ['game.frame_count()', Order.FUNCTION_CALL];
+  };
+  pythonGenerator.forBlock['game_time_since_start'] = function() {
+    return ['game.time_since_start()', Order.FUNCTION_CALL];
   };
 
   // ────── Math helpers generators ──────

@@ -1,3 +1,30 @@
+/* --- Tippy tooltips (Game Maker dark theme) --- */
+.tippy-box[data-theme~="gml-dark"] {
+  background: #21262d !important;
+  border: 1px solid #30363d !important;
+  border-radius: 8px !important;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4) !important;
+}
+.tippy-box[data-theme~="gml-dark"] .tippy-content {
+  padding: 6px 10px !important;
+}
+.tippy-box[data-theme~="gml-dark"] .tippy-arrow {
+  color: #21262d !important;
+}
+
+/* --- Blockly block tooltips (dark theme) --- */
+.blocklyTooltipDiv {
+  background: #21262d !important;
+  color: #e6edf3 !important;
+  border: 1px solid #30363d !important;
+  border-radius: 8px !important;
+  padding: 6px 10px !important;
+  font-size: 12px !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4) !important;
+  max-width: 300px !important;
+}
+
 .game-maker-lab {
   position: fixed;
   top: 0;

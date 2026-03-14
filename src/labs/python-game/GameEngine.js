@@ -33,6 +33,7 @@ export class GameEngine {
     this.updateCallback = null;
     this.gameTitle = 'My Game';
     this.frameCount = 0;
+    this.elapsedMs = 0;
     this._nextId = 1;
     this.onLog = onLog || (() => {});
     this.onError = onError || console.error;
@@ -1040,6 +1041,7 @@ export class GameEngine {
     this._spriteCache.clear();
     this.updateCallback = null;
     this.frameCount = 0;
+    this.elapsedMs = 0;
     this.keys.clear();
     this._justPressed.clear();
     this._justReleased.clear();
@@ -1075,6 +1077,7 @@ export class GameEngine {
   _gameLoop() {
     if (!this.running) return;
 
+    const dt = 1000 / 60;
     this._updateTimers();
     this._updatePhysics();
     this._updateTweens();
@@ -1094,6 +1097,7 @@ export class GameEngine {
 
     this._render();
     this._clearFrameInput();
+    this.elapsedMs += dt;
     this.frameCount++;
     this.animationId = requestAnimationFrame(() => this._gameLoop());
   }
