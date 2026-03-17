@@ -1,0 +1,98 @@
+/* Student Dashboard – Bento overrides + gamification */
+
+.student-dashboard__header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--spacing-md, 16px);
+  margin-bottom: var(--spacing-md, 16px);
+}
+
+.student-dashboard__header-stats {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md, 16px);
+}
+
+.student-dashboard__level {
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--color-text-secondary, #64748b);
+}
+
+.student-dashboard__xp-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.student-dashboard__xp-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-text-secondary, #64748b);
+}
+
+.student-dashboard__sparkle {
+  color: #ffc800;
+  animation: student-dashboard__pulse 2s ease-in-out infinite;
+}
+
+@keyframes student-dashboard__pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.7; transform: scale(1.05); }
+}
+
+.student-dashboard__lab-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.student-dashboard__lab-chip {
+  padding: 6px 12px;
+  background: color-mix(in srgb, #1cb0f6 12%, transparent);
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #1cb0f6;
+  text-decoration: none;
+  border: 2px solid color-mix(in srgb, #1cb0f6 30%, transparent);
+  transition: all 0.15s ease;
+}
+
+.student-dashboard__lab-chip:hover {
+  background: color-mix(in srgb, #1cb0f6 20%, transparent);
+  transform: translateY(-1px);
+}
+
+/* Kids mode – more playful */
+[data-ui-mode="kids"] .student-dashboard .dashboard-bento__greeting {
+  font-size: 1.75rem;
+}
+
+[data-ui-mode="kids"] .student-dashboard .dashboard-bento__card:hover {
+  transform: translateY(-3px) scale(1.01);
+}
+
+[data-ui-mode="kids"] .student-dashboard .dashboard-bento__badge {
+  width: 52px;
+  height: 52px;
+}
+
+/* Explorer mode */
+[data-ui-mode="explorer"] .student-dashboard .dashboard-bento__xp-fill {
+  background: linear-gradient(90deg, #6c5ce7, #a29bfe);
+}
+
+/* Pro mode – slightly more compact */
+[data-ui-mode="pro"] .student-dashboard .dashboard-bento__greeting {
+  font-size: 1.25rem;
+}
+
+[data-ui-mode="pro"] .student-dashboard .dashboard-bento__badge {
+  width: 38px;
+  height: 38px;
+}

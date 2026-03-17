@@ -1,0 +1,156 @@
+/* Parent Dashboard – Bento overrides */
+
+.parent-dashboard__header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--spacing-md, 16px);
+}
+
+.parent-dashboard__tenant {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary, #64748b);
+  font-weight: 600;
+}
+
+.parent-dashboard__child-switcher {
+  display: flex;
+  gap: var(--spacing-sm, 8px);
+}
+
+.parent-dashboard__child-tab {
+  padding: 10px 1.25rem;
+  border-radius: 999px;
+  border: 2px solid var(--color-border, #e5e5e5);
+  background: var(--color-surface, #ffffff);
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--color-text-secondary, #777);
+  cursor: pointer;
+  box-shadow: 0 3px 0 var(--color-border, #e5e5e5);
+  transition: all var(--transition-fast, 120ms ease);
+}
+
+.parent-dashboard__child-tab:hover {
+  border-color: #ff9600;
+  color: #ff9600;
+}
+
+.parent-dashboard__child-tab--active {
+  background: #ff9600;
+  border-color: #e08600;
+  color: white;
+  box-shadow: 0 3px 0 #e08600;
+}
+
+.parent-dashboard__panel {
+  margin-top: var(--spacing-md, 16px);
+}
+
+.parent-dashboard__progress-main {
+  margin: var(--spacing-md, 16px) 0;
+}
+
+.parent-dashboard__progress-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-md, 16px);
+  margin-top: auto;
+}
+
+.parent-dashboard__stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text-secondary, #64748b);
+}
+
+.parent-dashboard__session-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm, 8px);
+  padding: 8px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border, #e8e8e8) 50%, transparent);
+}
+
+.parent-dashboard__session-row:last-child {
+  border-bottom: none;
+}
+
+.parent-dashboard__session-text {
+  flex: 1;
+  font-size: 0.875rem;
+  color: var(--color-text, #1e293b);
+}
+
+.parent-dashboard__session-cancel {
+  padding: 6px 10px;
+  border: 2px solid var(--color-border, #e5e5e5);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-secondary, #777);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all var(--transition-fast, 120ms ease);
+}
+
+.parent-dashboard__session-cancel:hover {
+  border-color: var(--color-error, #ff4b4b);
+  color: var(--color-error, #ff4b4b);
+}
+
+.parent-dashboard__messages-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm, 10px);
+  flex: 1;
+  min-height: 0;
+}
+
+.parent-dashboard__message-preview {
+  padding: 10px 12px;
+  background: color-mix(in srgb, #1cb0f6 6%, transparent);
+  border-radius: 12px;
+}
+
+.parent-dashboard__message-preview--unread {
+  border-left: 3px solid #1cb0f6;
+}
+
+.parent-dashboard__message-from {
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: var(--color-text, #1e293b);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.parent-dashboard__message-unread {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #1cb0f6;
+  flex-shrink: 0;
+}
+
+.parent-dashboard__message-text {
+  margin: 8px 0 0;
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary, #64748b);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.parent-dashboard__achievement-badge {
+  font-size: 1.25rem;
+}

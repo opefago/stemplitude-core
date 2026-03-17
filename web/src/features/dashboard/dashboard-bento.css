@@ -1,0 +1,242 @@
+/* ==============================================
+   Dashboard Bento – STEMplitude LMS
+   Rounded cards with playful dropshadows (LMSHome style)
+   ============================================== */
+
+.dashboard-bento {
+  --bento-radius: 20px;
+  --bento-radius-lg: 24px;
+  --bento-shadow: 0 3px 0 var(--color-border, #e8e8e8);
+  --bento-shadow-hover: 0 4px 0 var(--color-border, #e8e8e8);
+  --bento-accent-green: #58cc02;
+  --bento-accent-blue: #1cb0f6;
+  --bento-accent-orange: #ff9600;
+  --bento-accent-purple: #ce82ff;
+  --bento-accent-red: #ff4b4b;
+  --bento-accent-yellow: #ffc800;
+
+  padding: var(--spacing-lg, 24px);
+  max-width: 1200px;
+  margin: 0 auto;
+  font-family: "Nunito", "DIN Round Pro", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.dashboard-bento__header {
+  margin-bottom: var(--spacing-xl, 32px);
+}
+
+.dashboard-bento__greeting {
+  margin: 0 0 var(--spacing-xs, 4px);
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: var(--color-text, #3c3c3c);
+}
+
+.dashboard-bento__subtitle {
+  margin: 0;
+  font-size: 0.9375rem;
+  color: var(--color-text-secondary, #64748b);
+}
+
+/* ── Bento Grid ── */
+.dashboard-bento__grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--spacing-md, 16px);
+  grid-auto-rows: minmax(140px, auto);
+}
+
+@media (max-width: 1024px) {
+  .dashboard-bento__grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 600px) {
+  .dashboard-bento__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Card span modifiers */
+.dashboard-bento__card--span-2 {
+  grid-column: span 2;
+}
+
+.dashboard-bento__card--row-2 {
+  grid-row: span 2;
+}
+
+@media (max-width: 1024px) {
+  .dashboard-bento__card--span-2 {
+    grid-column: span 1;
+  }
+  .dashboard-bento__card--row-2 {
+    grid-row: span 1;
+  }
+}
+
+/* ── Bento Card (playful dropshadow style) ── */
+.dashboard-bento__card {
+  background: var(--color-surface, #fff);
+  border-radius: var(--bento-radius-lg);
+  border: 2px solid var(--color-border, #e8e8e8);
+  box-shadow: var(--bento-shadow);
+  padding: var(--spacing-lg, 20px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm, 10px);
+  transition:
+    transform 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.dashboard-bento__card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--bento-shadow-hover);
+}
+
+.dashboard-bento__card-link {
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.dashboard-bento__card-link:hover {
+  border-color: var(--color-primary, var(--bento-accent-blue));
+}
+
+/* Card accent variants */
+.dashboard-bento__card--green:hover { border-color: var(--bento-accent-green); }
+.dashboard-bento__card--blue:hover { border-color: var(--bento-accent-blue); }
+.dashboard-bento__card--orange:hover { border-color: var(--bento-accent-orange); }
+.dashboard-bento__card--purple:hover { border-color: var(--bento-accent-purple); }
+.dashboard-bento__card--red:hover { border-color: var(--bento-accent-red); }
+
+.dashboard-bento__card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.dashboard-bento__card-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.dashboard-bento__card-title {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 700;
+  color: var(--color-text, #1e293b);
+}
+
+.dashboard-bento__card-desc {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--color-text-secondary, #64748b);
+  line-height: 1.4;
+}
+
+.dashboard-bento__card-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: auto;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--color-primary, var(--bento-accent-blue));
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+.dashboard-bento__card-action:hover {
+  color: var(--bento-accent-blue);
+}
+
+/* Activity list inside cards */
+.dashboard-bento__activity-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1;
+  min-height: 0;
+}
+
+.dashboard-bento__activity-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border, #e8e8e8) 50%, transparent);
+  font-size: 0.8125rem;
+}
+
+.dashboard-bento__activity-item:last-child {
+  border-bottom: none;
+}
+
+.dashboard-bento__activity-text {
+  color: var(--color-text, #1e293b);
+}
+
+.dashboard-bento__activity-time {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary, #64748b);
+  flex-shrink: 0;
+}
+
+/* ── Gamification elements ── */
+.dashboard-bento__xp-bar {
+  height: 10px;
+  background: var(--color-border, #e8e8e8);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.dashboard-bento__xp-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.4s ease;
+  background: linear-gradient(90deg, var(--bento-accent-yellow), var(--bento-accent-orange));
+}
+
+.dashboard-bento__streak {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: color-mix(in srgb, var(--bento-accent-orange) 15%, transparent);
+  border-radius: 999px;
+  font-weight: 700;
+  color: var(--bento-accent-orange);
+}
+
+.dashboard-bento__badges {
+  display: flex;
+  gap: var(--spacing-sm, 10px);
+  flex-wrap: wrap;
+}
+
+.dashboard-bento__badge {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--bento-accent-blue), var(--bento-accent-purple));
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 0 color-mix(in srgb, var(--bento-accent-blue) 60%, black);
+  transition: transform 0.15s ease;
+}
+
+.dashboard-bento__badge:hover {
+  transform: scale(1.1);
+}

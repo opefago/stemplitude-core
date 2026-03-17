@@ -1,0 +1,131 @@
+/* Admin Dashboard – Bento overrides */
+
+.admin-dashboard__header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--spacing-md, 16px);
+}
+
+.admin-dashboard__header-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 20px;
+  background: var(--color-primary, #58cc02);
+  color: white;
+  border-radius: 12px;
+  text-decoration: none;
+  font-size: 0.875rem;
+  font-weight: 700;
+  border: 2px solid var(--color-primary-dark, #46a302);
+  box-shadow: 0 3px 0 var(--color-primary-dark, #46a302);
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+
+.admin-dashboard__header-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 0 var(--color-primary-dark, #46a302);
+}
+
+.admin-dashboard__stat-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: var(--spacing-sm, 10px);
+}
+
+.admin-dashboard__stat-value {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: var(--color-text, #1e293b);
+}
+
+.admin-dashboard__stat-label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-text-secondary, #64748b);
+}
+
+.admin-dashboard__trend {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #10b981;
+  margin-bottom: var(--spacing-sm, 10px);
+}
+
+.admin-dashboard__class-list {
+  margin-top: var(--spacing-md, 16px);
+}
+
+.admin-dashboard__class-item {
+  padding: 10px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border, #e8e8e8) 50%, transparent);
+}
+
+.admin-dashboard__class-item:last-child {
+  border-bottom: none;
+}
+
+.admin-dashboard__class-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.admin-dashboard__class-name {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--color-text, #1e293b);
+}
+
+.admin-dashboard__class-meta {
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary, #64748b);
+}
+
+.admin-dashboard__activity-header {
+  flex-wrap: wrap;
+}
+
+.admin-dashboard__activity-header .dashboard-bento__card-action {
+  margin-top: 4px;
+}
+
+.admin-dashboard__announcements {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md, 16px);
+  flex: 1;
+  min-height: 0;
+}
+
+.admin-dashboard__announcement {
+  padding: 12px;
+  background: color-mix(in srgb, #ff4b4b 6%, transparent);
+  border-radius: 12px;
+}
+
+.admin-dashboard__announcement-date {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-secondary, #64748b);
+}
+
+.admin-dashboard__announcement-title {
+  margin: 4px 0 6px;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--color-text, #1e293b);
+}
+
+.admin-dashboard__announcement-preview {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary, #64748b);
+  line-height: 1.4;
+}
