@@ -218,6 +218,7 @@ export function ClassroomLiveSession() {
   const suppressVideoBroadcastRef = useRef(false);
   const suppressScrollBroadcastRef = useRef(false);
   const sessionEndedRedirectedRef = useRef(false);
+  const navigatingToLabRef = useRef(false);
   const [nowMs, setNowMs] = useState(Date.now());
   const [realtimeConnected, setRealtimeConnected] = useState(false);
   const [showConfettiSplash, setShowConfettiSplash] = useState(false);
@@ -994,7 +995,12 @@ export function ClassroomLiveSession() {
 
     return () => {
       cancelled = true;
-      client.send("presence.leave");
+      if (navigatingToLabRef.current) {
+        client.send("presence.in_lab");
+        navigatingToLabRef.current = false;
+      } else {
+        client.send("presence.leave");
+      }
       client.disconnect();
       if (realtimeRef.current === client) {
         realtimeRef.current = null;
@@ -1206,6 +1212,7 @@ export function ClassroomLiveSession() {
       navigate("/app/labs");
       return;
     }
+    navigatingToLabRef.current = true;
     navigate(
       buildLabLaunchPath(lab, {
         classroomId: id,

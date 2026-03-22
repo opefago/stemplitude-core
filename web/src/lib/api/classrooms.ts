@@ -337,7 +337,7 @@ export async function heartbeatClassroomSession(
 export async function heartbeatMySession(
   classroomId: string,
   sessionId: string,
-  status: "active" | "left" = "active",
+  status: "active" | "left" | "in_lab" = "active",
 ): Promise<SessionPresenceSummary> {
   return apiFetch<SessionPresenceSummary>(
     `/students/me/classrooms/${classroomId}/sessions/${sessionId}/presence`,

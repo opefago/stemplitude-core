@@ -360,6 +360,7 @@ class ClassroomRepository:
                 row.first_seen_at = seen_at
             row.last_seen_at = seen_at
             row.left_at = None
+            row.in_lab = False
             return row
 
         row = ClassroomSessionPresence(
@@ -370,9 +371,25 @@ class ClassroomRepository:
             actor_type=actor_type,
             first_seen_at=seen_at,
             last_seen_at=seen_at,
+            in_lab=False,
         )
         self.session.add(row)
         return row
+
+    async def mark_presence_in_lab(
+        self,
+        *,
+        session_id: UUID,
+        actor_id: UUID,
+        actor_type: str,
+        seen_at: datetime,
+    ) -> None:
+        """Mark the actor as having transitioned to the lab (still a participant)."""
+        row = await self.get_presence_row(session_id, actor_id, actor_type)
+        if row:
+            row.last_seen_at = seen_at
+            row.in_lab = True
+            row.left_at = None
 
     async def mark_presence_left(
         self,
@@ -387,6 +404,18 @@ class ClassroomRepository:
         if row:
             row.last_seen_at = left_at
             row.left_at = left_at
+            row.in_lab = False
+
+    async def get_presence_in_lab(
+        self,
+        *,
+        session_id: UUID,
+        actor_id: UUID,
+        actor_type: str,
+    ) -> bool:
+        """Return True if the actor is currently flagged as in-lab."""
+        row = await self.get_presence_row(session_id, actor_id, actor_type)
+        return bool(row and row.in_lab)
 
     async def get_session_presence_summary(
         self,

@@ -1,9 +1,9 @@
 import { CircuitLabContainer } from '../labs/mcu/components/CircuitLabContainer.tsx';
-import { useLabExit } from '../features/labs/useLabExit';
+import { useLabSession } from '../features/labs/useLabSession';
 import './Labs.css';
 
 const ElectronicsLab = () => {
-  const { exitLab, fallbackExitPath } = useLabExit();
+  const { exitLab, fallbackExitPath } = useLabSession();
 
   return (
     <div className="lab-page electronics-lab-fullscreen">

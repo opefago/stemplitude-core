@@ -110,6 +110,7 @@ class ClassroomSessionPresence(Base):
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )
     left_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    in_lab: Mapped[bool] = mapped_column(default=False, nullable=False, server_default="false")
 
 
 class ClassroomSessionEvent(Base):

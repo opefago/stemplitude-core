@@ -1073,10 +1073,10 @@ class ClassroomService:
             session_id=session_id,
             tenant_id=tenant_id,
         )
-        if data.status not in {"active", "left"}:
+        if data.status not in {"active", "left", "in_lab"}:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Presence status must be 'active' or 'left'",
+                detail="Presence status must be 'active', 'left', or 'in_lab'",
             )
         now = datetime.now(timezone.utc)
         await self._auto_complete_if_idle(session_obj=session_obj, now=now)
@@ -1094,6 +1094,13 @@ class ClassroomService:
                 actor_id=identity.id,
                 actor_type=actor_type,
                 left_at=now,
+            )
+        elif data.status == "in_lab":
+            await self.repo.mark_presence_in_lab(
+                session_id=session_obj.id,
+                actor_id=identity.id,
+                actor_type=actor_type,
+                seen_at=now,
             )
         else:
             await self.repo.upsert_presence(

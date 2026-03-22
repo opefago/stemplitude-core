@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Play, Square, RotateCcw, ChevronDown, X, PanelLeftClose, PanelLeftOpen, Fullscreen, Shrink, Maximize2, Minimize2, HelpCircle, Save, Share2, FolderOpen, Trash2, Check, ArrowLeft, Plus } from 'lucide-react';
-import { useLabExit } from '../features/labs/useLabExit';
+import { useLabSession } from '../features/labs/useLabSession';
 import { EditorView, basicSetup } from 'codemirror';
 import { EditorState } from '@codemirror/state';
 import { python, pythonLanguage } from '@codemirror/lang-python';
@@ -21,7 +21,7 @@ const loadProjectsFromStorage = () => {
 };
 
 const PythonGameLab = () => {
-  const { exitLab } = useLabExit();
+  const { exitLab } = useLabSession();
   const canvasRef = useRef(null);
   const editorContainerRef = useRef(null);
   const editorViewRef = useRef(null);

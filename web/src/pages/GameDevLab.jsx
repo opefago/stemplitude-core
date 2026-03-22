@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import { X, Save, FolderOpen, Download, Plus } from 'lucide-react';
-import { useLabExit } from '../features/labs/useLabExit';
+import { useLabSession } from '../features/labs/useLabSession';
 import './Labs.css';
 
 const MAKECODE_URL = 'https://arcade.makecode.com';
 
 const GameDevLab = () => {
-  const { exitLab } = useLabExit();
+  const { exitLab } = useLabSession();
   const iframeRef = useRef(null);
   const [projectName, setProjectName] = useState('My Game');
   const [isSaving, setIsSaving] = useState(false);

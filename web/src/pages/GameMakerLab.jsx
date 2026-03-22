@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import Tippy from '@tippyjs/react';
 import { Play, Square, RotateCcw, X, Puzzle, Code, Fullscreen, Shrink, HelpCircle, Save, FolderOpen, Trash2, ArrowLeft, Plus, Upload, Mic, AudioLines, Grid3x3 } from 'lucide-react';
-import { useLabExit } from '../features/labs/useLabExit';
+import { useLabSession } from '../features/labs/useLabSession';
 import * as Blockly from 'blockly';
 import { pythonGenerator } from 'blockly/python';
 import { registerBlocks, generateCode } from '../labs/game-maker/blocks';
@@ -189,7 +189,7 @@ function loadStarterBlocks(workspace) {
 }
 
 const GameMakerLab = () => {
-  const { exitLab } = useLabExit();
+  const { exitLab } = useLabSession();
   const blocklyDiv = useRef(null);
   const workspaceRef = useRef(null);
   const canvasRef = useRef(null);

@@ -1,9 +1,9 @@
 import { Esp32BlocklyEditor } from '../labs/mcu/components/blockly/Esp32BlocklyEditor.tsx';
-import { useLabExit } from '../features/labs/useLabExit';
+import { useLabSession } from '../features/labs/useLabSession';
 import './Labs.css';
 
 const MCULab = () => {
-  const { exitLab, fallbackExitPath } = useLabExit();
+  const { exitLab, fallbackExitPath } = useLabSession();
 
   return (
     <div className="lab-page mcu-lab-fullscreen">

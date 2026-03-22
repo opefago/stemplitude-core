@@ -12,6 +12,7 @@ from uuid import UUID
 
 from fastapi import WebSocket, status
 
+from app.classrooms.repository import ClassroomRepository
 from app.classrooms.schemas import (
     SessionActivityCreateRequest,
     SessionChatCreateRequest,
@@ -144,6 +145,7 @@ class ClassroomRealtimeCommandRouter:
 
     def _register_defaults(self) -> None:
         self._handlers["presence.leave"] = self._handle_presence_leave
+        self._handlers["presence.in_lab"] = self._handle_presence_in_lab
         self._handlers["chat.send"] = self._handle_chat_send
         self._handlers["recognition.award"] = self._handle_recognition_award
         self._handlers["lab.select"] = self._handle_lab_select
@@ -179,6 +181,24 @@ class ClassroomRealtimeCommandRouter:
             tenant_id=context.tenant_id,
             identity=identity,
             data=SessionPresenceHeartbeatRequest(status="left"),
+        )
+        return CommandDispatchResult(envelope=None, emit_presence=True)
+
+    async def _handle_presence_in_lab(
+        self,
+        service: ClassroomService,
+        _: dict,
+        identity: CurrentIdentity,
+        __: str | None,
+        context: RealtimeConnectionContext,
+    ) -> CommandDispatchResult:
+        """Mark actor as transitioning to a lab — remains a session participant."""
+        await service.heartbeat_session_presence(
+            classroom_id=context.classroom_id,
+            session_id=context.session_id,
+            tenant_id=context.tenant_id,
+            identity=identity,
+            data=SessionPresenceHeartbeatRequest(status="in_lab"),
         )
         return CommandDispatchResult(envelope=None, emit_presence=True)
 
@@ -449,15 +469,23 @@ async def classroom_session_ws_handler(
         )
 
     async def handle_disconnect() -> None:
+        actor_type = ClassroomService._presence_actor_type(identity)
         async with async_session_factory() as db:
-            service = ClassroomService(db)
-            await service.heartbeat_session_presence(
-                classroom_id=classroom_id,
+            repo = ClassroomRepository(db)
+            in_lab = await repo.get_presence_in_lab(
                 session_id=session_id,
-                tenant_id=tenant_id,
-                identity=identity,
-                data=SessionPresenceHeartbeatRequest(status="left"),
+                actor_id=identity.id,
+                actor_type=actor_type,
             )
+            if not in_lab:
+                service = ClassroomService(db)
+                await service.heartbeat_session_presence(
+                    classroom_id=classroom_id,
+                    session_id=session_id,
+                    tenant_id=tenant_id,
+                    identity=identity,
+                    data=SessionPresenceHeartbeatRequest(status="left"),
+                )
             await db.commit()
         await emit_presence_update()
 

@@ -1,6 +1,6 @@
 import React, { useEffect, useCallback, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useLabExit } from '../features/labs/useLabExit';
+import { useLabSession } from '../features/labs/useLabSession';
 import RichTip from '../labs/design-maker/RichTip';
 import TC from '../labs/design-maker/tooltipContent';
 import {
@@ -79,7 +79,7 @@ function buildExportScene(objects) {
 
 export default function DesignMakerLab() {
   const navigate = useNavigate();
-  const { exitLab } = useLabExit();
+  const { exitLab } = useLabSession();
   const fileInputRef = useRef(null);
   const [exportOpen, setExportOpen] = React.useState(false);
   const [dragOver, setDragOver] = React.useState(false);
