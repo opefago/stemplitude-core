@@ -1,0 +1,81 @@
+/* Bottom navigation - kids mode only */
+/* Visible only when data-ui-mode="kids" */
+
+.bottom-nav {
+  --bottom-nav-height: 72px;
+  --bottom-nav-bg: var(--color-surface, #ffffff);
+  --bottom-nav-border: var(--color-border, #e2e8f0);
+  --bottom-nav-accent: var(--color-primary, #0066ff);
+  --bottom-nav-text: var(--color-text-secondary, #64748b);
+  --bottom-nav-text-active: var(--color-primary, #0066ff);
+  --bottom-nav-icon-size: 32px;
+
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: var(--bottom-nav-height);
+  background: var(--bottom-nav-bg);
+  border-top: 1px solid var(--bottom-nav-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  padding: 0 var(--spacing-md, 16px);
+  padding-bottom: env(safe-area-inset-bottom, 0);
+  z-index: 100;
+  border-radius: var(--radius-lg, 16px) var(--radius-lg, 16px) 0 0;
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.06);
+}
+
+.bottom-nav__link {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: var(--spacing-sm, 8px) var(--spacing-md, 16px);
+  color: var(--bottom-nav-text);
+  text-decoration: none;
+  border-radius: var(--radius-md, 8px);
+  transition: color 0.2s ease;
+  min-width: 64px;
+  position: relative;
+}
+
+.bottom-nav__link:hover {
+  color: var(--bottom-nav-text-active);
+}
+
+.bottom-nav__link.active {
+  color: var(--bottom-nav-text-active);
+}
+
+.bottom-nav__icon-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--bottom-nav-icon-size);
+  height: var(--bottom-nav-icon-size);
+  position: relative;
+}
+
+.bottom-nav__icon {
+  width: var(--bottom-nav-icon-size);
+  height: var(--bottom-nav-icon-size);
+  color: inherit;
+}
+
+.bottom-nav__label {
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+/* Hide bottom nav when not in kids mode */
+:root:not([data-ui-mode="kids"]) .bottom-nav,
+[data-ui-mode="explorer"] .bottom-nav,
+[data-ui-mode="pro"] .bottom-nav,
+[data-ui-mode="parent"] .bottom-nav,
+[data-ui-mode="instructor"] .bottom-nav,
+[data-ui-mode="admin"] .bottom-nav {
+  display: none;
+}

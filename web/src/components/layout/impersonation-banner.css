@@ -1,0 +1,77 @@
+.imp-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 9999;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: #1e293b;
+  color: #f8fafc;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  font-family: inherit;
+}
+
+.imp-banner__content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.imp-banner__text strong {
+  color: #fbbf24;
+}
+
+.imp-banner__slug {
+  opacity: 0.6;
+  margin-left: 4px;
+  font-weight: 400;
+}
+
+.imp-banner__end {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #f8fafc;
+  font-size: 0.75rem;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.imp-banner__end:hover {
+  background: rgba(239, 68, 68, 0.3);
+  border-color: rgba(239, 68, 68, 0.5);
+}
+
+/* Push everything down when banner is visible */
+.app-shell:has(.imp-banner) .sidebar {
+  top: 36px;
+  height: calc(100vh - 36px);
+}
+
+.app-shell:has(.imp-banner) .dash-header {
+  top: 36px;
+}
+
+.app-shell:has(.imp-banner) {
+  padding-top: 36px;
+}
+
+/* Platform shell support */
+.platform-shell:has(.imp-banner) .dash-header {
+  top: 36px;
+}
+
+.platform-shell:has(.imp-banner) {
+  padding-top: 36px;
+}

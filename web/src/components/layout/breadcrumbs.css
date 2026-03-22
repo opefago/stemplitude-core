@@ -1,0 +1,49 @@
+/* Breadcrumbs - hidden in kids mode */
+
+.breadcrumbs {
+  margin-bottom: var(--spacing-md, 16px);
+}
+
+.breadcrumbs__list {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--spacing-xs, 4px);
+  list-style: none;
+  font-size: 0.875rem;
+  color: var(--color-text-secondary, #64748b);
+}
+
+.breadcrumbs__item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs, 4px);
+}
+
+.breadcrumbs__link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs, 4px);
+  color: var(--color-text-secondary, #64748b);
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+.breadcrumbs__link:hover {
+  color: var(--color-primary, #0066ff);
+}
+
+.breadcrumbs__separator {
+  color: var(--color-border, #e2e8f0);
+  user-select: none;
+}
+
+.breadcrumbs__current {
+  color: var(--color-text, #1e293b);
+  font-weight: 500;
+}
+
+/* Hide breadcrumbs in kids mode */
+[data-ui-mode="kids"] .breadcrumbs {
+  display: none;
+}

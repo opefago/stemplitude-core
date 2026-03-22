@@ -1,0 +1,146 @@
+{
+  "_description": "Central plan registry. Defines subscription plans, their features, and limits. Consumed by seed_plans and seed_all at startup.",
+  "plans": [
+    {
+      "name": "Free (Parent)",
+      "slug": "free-parent",
+      "type": "parent",
+      "price_monthly": 0,
+      "price_yearly": 0,
+      "trial_days": 0,
+      "features": [
+        { "feature_key": "students_feature", "enabled": true },
+        { "feature_key": "classrooms", "enabled": false },
+        { "feature_key": "robotics_lab", "enabled": true },
+        { "feature_key": "game_maker", "enabled": true },
+        { "feature_key": "3d_designer", "enabled": false },
+        { "feature_key": "ai_lab", "enabled": false },
+        { "feature_key": "electronics_lab", "enabled": true },
+        { "feature_key": "python_lab", "enabled": true },
+        { "feature_key": "projects", "enabled": true }
+      ],
+      "limits": [
+        { "limit_key": "max_students", "limit_value": 1 },
+        { "limit_key": "max_projects", "limit_value": 10 }
+      ]
+    },
+    {
+      "name": "Homeschool",
+      "slug": "homeschool",
+      "type": "parent",
+      "price_monthly": 14.99,
+      "price_yearly": 149.99,
+      "trial_days": 14,
+      "features": [
+        { "feature_key": "students_feature", "enabled": true },
+        { "feature_key": "classrooms", "enabled": false },
+        { "feature_key": "robotics_lab", "enabled": true },
+        { "feature_key": "game_maker", "enabled": true },
+        { "feature_key": "3d_designer", "enabled": true },
+        { "feature_key": "ai_lab", "enabled": true },
+        { "feature_key": "electronics_lab", "enabled": true },
+        { "feature_key": "python_lab", "enabled": true },
+        { "feature_key": "projects", "enabled": true },
+        { "feature_key": "parent_reports", "enabled": true }
+      ],
+      "limits": [
+        { "limit_key": "max_students", "limit_value": 5 },
+        { "limit_key": "max_projects", "limit_value": 100 },
+        { "limit_key": "storage_mb", "limit_value": 1000 }
+      ]
+    },
+    {
+      "name": "Starter (Center)",
+      "slug": "starter-center",
+      "type": "center",
+      "price_monthly": 49.99,
+      "price_yearly": 499.99,
+      "trial_days": 14,
+      "features": [
+        { "feature_key": "students_feature", "enabled": true },
+        { "feature_key": "classrooms", "enabled": true },
+        { "feature_key": "robotics_lab", "enabled": true },
+        { "feature_key": "game_maker", "enabled": true },
+        { "feature_key": "3d_designer", "enabled": false },
+        { "feature_key": "ai_lab", "enabled": false },
+        { "feature_key": "electronics_lab", "enabled": true },
+        { "feature_key": "python_lab", "enabled": true },
+        { "feature_key": "projects", "enabled": true },
+        { "feature_key": "create_student", "enabled": true },
+        { "feature_key": "create_classroom", "enabled": true }
+      ],
+      "limits": [
+        { "limit_key": "max_students", "limit_value": 5 },
+        { "limit_key": "max_classrooms", "limit_value": 3 },
+        { "limit_key": "max_instructors", "limit_value": 2 },
+        { "limit_key": "max_projects", "limit_value": 200 },
+        { "limit_key": "storage_mb", "limit_value": 5000 }
+      ]
+    },
+    {
+      "name": "Pro (Center)",
+      "slug": "pro-center",
+      "type": "center",
+      "price_monthly": 149.99,
+      "price_yearly": 1499.99,
+      "trial_days": 14,
+      "features": [
+        { "feature_key": "students_feature", "enabled": true },
+        { "feature_key": "classrooms", "enabled": true },
+        { "feature_key": "robotics_lab", "enabled": true },
+        { "feature_key": "game_maker", "enabled": true },
+        { "feature_key": "3d_designer", "enabled": true },
+        { "feature_key": "ai_lab", "enabled": true },
+        { "feature_key": "electronics_lab", "enabled": true },
+        { "feature_key": "python_lab", "enabled": true },
+        { "feature_key": "projects", "enabled": true },
+        { "feature_key": "create_student", "enabled": true },
+        { "feature_key": "create_classroom", "enabled": true },
+        { "feature_key": "advanced_analytics", "enabled": true },
+        { "feature_key": "custom_branding", "enabled": true },
+        { "feature_key": "api_access", "enabled": true }
+      ],
+      "limits": [
+        { "limit_key": "max_students", "limit_value": 50 },
+        { "limit_key": "max_classrooms", "limit_value": 20 },
+        { "limit_key": "max_instructors", "limit_value": 10 },
+        { "limit_key": "max_projects", "limit_value": 2000 },
+        { "limit_key": "storage_mb", "limit_value": 20000 }
+      ]
+    },
+    {
+      "name": "Enterprise",
+      "slug": "enterprise",
+      "type": "center",
+      "price_monthly": null,
+      "price_yearly": null,
+      "trial_days": 30,
+      "features": [
+        { "feature_key": "students_feature", "enabled": true },
+        { "feature_key": "classrooms", "enabled": true },
+        { "feature_key": "robotics_lab", "enabled": true },
+        { "feature_key": "game_maker", "enabled": true },
+        { "feature_key": "3d_designer", "enabled": true },
+        { "feature_key": "ai_lab", "enabled": true },
+        { "feature_key": "electronics_lab", "enabled": true },
+        { "feature_key": "python_lab", "enabled": true },
+        { "feature_key": "projects", "enabled": true },
+        { "feature_key": "create_student", "enabled": true },
+        { "feature_key": "create_classroom", "enabled": true },
+        { "feature_key": "advanced_analytics", "enabled": true },
+        { "feature_key": "custom_branding", "enabled": true },
+        { "feature_key": "api_access", "enabled": true },
+        { "feature_key": "sso", "enabled": true },
+        { "feature_key": "dedicated_support", "enabled": true },
+        { "feature_key": "custom_integrations", "enabled": true }
+      ],
+      "limits": [
+        { "limit_key": "max_students", "limit_value": 9999 },
+        { "limit_key": "max_classrooms", "limit_value": 9999 },
+        { "limit_key": "max_instructors", "limit_value": 9999 },
+        { "limit_key": "max_projects", "limit_value": 99999 },
+        { "limit_key": "storage_mb", "limit_value": 100000 }
+      ]
+    }
+  ]
+}

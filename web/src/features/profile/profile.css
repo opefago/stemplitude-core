@@ -1,0 +1,457 @@
+/* Profile page - ClassDojo-inspired flat design */
+
+.profile-page {
+  padding: var(--spacing-lg);
+  max-width: 920px;
+  margin: 0 auto;
+  background: var(--color-bg);
+}
+
+.profile-page__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-lg);
+  margin-bottom: var(--spacing-xl);
+  padding-bottom: var(--spacing-lg);
+  border-bottom: 2px solid color-mix(in srgb, var(--color-border) 82%, white);
+}
+
+.profile-page__avatar {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.75rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.profile-page__header-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.profile-page__name {
+  margin: 0 0 var(--spacing-xs);
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.profile-page__email {
+  margin: 0 0 var(--spacing-sm);
+  font-size: 0.9375rem;
+  color: var(--color-text-secondary);
+}
+
+.profile-page__role-badge {
+  display: inline-block;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-radius: var(--radius-md);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  background: var(--color-primary);
+  color: white;
+}
+
+.profile-page__edit-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: 10px 16px;
+  border: 2px solid color-mix(in srgb, var(--color-border) 75%, var(--color-primary) 25%);
+  border-radius: 14px;
+  font-size: 0.875rem;
+  font-weight: 800;
+  color: var(--color-text);
+  background: var(--color-surface);
+  cursor: pointer;
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--color-border) 86%, white);
+  transition: background var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.profile-page__edit-btn:hover {
+  background: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface));
+  transform: translateY(-1px);
+  box-shadow: 0 4px 0 color-mix(in srgb, var(--color-border) 82%, white);
+}
+
+.profile-page__edit-btn--active {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.profile-page__sections {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+}
+
+.profile-page__card {
+  background: var(--color-surface);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-lg, 16px);
+  padding: var(--spacing-lg);
+  box-shadow: var(--shadow-card-playful);
+}
+
+.profile-page__card-title {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin: 0 0 var(--spacing-md);
+  font-size: 1.0625rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.profile-page__card-title--danger {
+  color: var(--color-error);
+}
+
+.profile-page__card--danger {
+  border-color: rgba(239, 68, 68, 0.3);
+  background: rgba(239, 68, 68, 0.04);
+}
+
+.profile-page__fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.profile-page__field {
+  display: flex;
+  flex-direction: column;
+}
+
+.profile-page__field--half {
+  flex: 1;
+}
+
+.profile-page__field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--spacing-md);
+}
+
+.profile-page__field label {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  margin-bottom: var(--spacing-xs);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.profile-page__field input,
+.profile-page__field select,
+.profile-page__field textarea {
+  padding: 12px 14px;
+  border: 2px solid color-mix(in srgb, var(--color-border) 75%, var(--color-secondary) 25%);
+  border-radius: 12px;
+  font-size: 0.9375rem;
+  color: var(--color-text);
+  background: var(--color-surface);
+  font-family: inherit;
+}
+
+.profile-page__field input:focus,
+.profile-page__field select:focus,
+.profile-page__field textarea:focus {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.profile-page__field input:disabled,
+.profile-page__field textarea:disabled {
+  background: var(--color-bg);
+  color: var(--color-text-secondary);
+  cursor: not-allowed;
+}
+
+.profile-page__field textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+.profile-page__hint {
+  margin: var(--spacing-xs) 0 0;
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+}
+
+.profile-page__toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-sm) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.profile-page__toggle-row:last-of-type {
+  border-bottom: none;
+}
+
+.profile-page__toggle-label {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  font-size: 0.875rem;
+  color: var(--color-text);
+}
+
+.profile-page__toggle {
+  width: 44px;
+  height: 24px;
+  border-radius: 12px;
+  background: var(--color-border);
+  border: none;
+  cursor: pointer;
+  padding: 2px;
+  transition: background var(--transition-fast);
+}
+
+.profile-page__toggle:hover {
+  background: var(--color-text-secondary);
+}
+
+.profile-page__toggle--on {
+  background: var(--color-primary);
+}
+
+.profile-page__toggle-thumb {
+  display: block;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: white;
+  transition: transform var(--transition-fast);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.profile-page__toggle--on .profile-page__toggle-thumb {
+  transform: translateX(20px);
+}
+
+.profile-page__scheme-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+}
+
+.profile-page__scheme-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 2px solid color-mix(in srgb, var(--color-border) 75%, var(--color-secondary) 25%);
+  border-radius: 12px;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--color-text);
+  background: var(--color-surface);
+  cursor: pointer;
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--color-border) 86%, white);
+  transition: border-color var(--transition-fast), background var(--transition-fast), transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.profile-page__scheme-btn:hover {
+  border-color: var(--color-primary);
+  background: var(--color-bg);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 0 color-mix(in srgb, var(--color-border) 82%, white);
+}
+
+.profile-page__scheme-btn--active {
+  border-color: var(--color-primary);
+  background: rgba(0, 102, 255, 0.08);
+  color: var(--color-primary);
+}
+
+.profile-page__connected-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+}
+
+.profile-page__badge {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-md);
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.profile-page__badge--google {
+  background: #f1f3f4;
+  color: #5f6368;
+  border: 1px solid #dadce0;
+}
+
+.profile-page__badge--microsoft {
+  background: #f3f3f3;
+  color: #5e5e5e;
+  border: 1px solid #d2d2d2;
+}
+
+.profile-page__danger-text {
+  margin: 0 0 var(--spacing-md);
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+}
+
+.profile-page__delete-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 2px solid var(--color-error);
+  border-radius: 12px;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--color-error);
+  background: transparent;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.profile-page__delete-btn:not(:disabled) {
+  cursor: pointer;
+  opacity: 1;
+}
+
+.profile-page__delete-btn:not(:disabled):hover {
+  background: rgba(239, 68, 68, 0.1);
+}
+
+@media (max-width: 768px) {
+  .profile-page {
+    padding: var(--spacing-md);
+  }
+
+  .profile-page__header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .profile-page__field-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Gamification showcase (profile) ───────────────────────────────────────── */
+
+.profile-page__card--gamification {
+  background: color-mix(in srgb, var(--color-xp, #ffc800) 5%, var(--color-surface));
+  border-color: color-mix(in srgb, var(--color-xp, #ffc800) 35%, var(--color-border));
+}
+
+.profile-gamification__level-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+  flex-wrap: wrap;
+}
+
+.profile-gamification__level-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  background: color-mix(in srgb, var(--color-xp, #ffc800) 18%, white);
+  border: 2px solid var(--color-xp, #ffc800);
+  border-radius: var(--radius-xl);
+  padding: 6px var(--spacing-md);
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--color-xp, #ffc800) 50%, #b8860b);
+  flex-shrink: 0;
+}
+
+.profile-gamification__level-num {
+  font-size: 1.25rem;
+  font-weight: 900;
+  color: #b8860b;
+}
+
+.profile-gamification__level-name {
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: #7c5a00;
+}
+
+.profile-gamification__xp-wrap {
+  flex: 1;
+  min-width: 160px;
+}
+
+.profile-gamification__stats {
+  display: flex;
+  gap: var(--spacing-lg);
+  margin-bottom: var(--spacing-md);
+  flex-wrap: wrap;
+}
+
+.profile-gamification__stat {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px var(--spacing-md);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.profile-gamification__stat-value {
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--color-text);
+}
+
+.profile-gamification__stat-label {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+}
+
+.profile-gamification__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-sm);
+}
+
+.profile-gamification__badge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: var(--spacing-sm) 10px;
+  background: color-mix(in srgb, var(--badge-color, var(--color-primary)) 10%, white);
+  border: 2px solid color-mix(in srgb, var(--badge-color, var(--color-primary)) 35%, var(--color-border));
+  border-radius: var(--radius-md);
+  cursor: default;
+  transition: transform var(--transition-bounce);
+}
+
+.profile-gamification__badge:hover {
+  transform: translateY(-2px) scale(1.05);
+}
+
+.profile-gamification__badge-emoji {
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.profile-gamification__badge-name {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  color: var(--color-text);
+  text-align: center;
+  max-width: 70px;
+}

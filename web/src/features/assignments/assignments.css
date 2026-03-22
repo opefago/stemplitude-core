@@ -1,0 +1,225 @@
+.student-assignments {
+  padding: var(--spacing-lg);
+  max-width: 980px;
+  margin: 0 auto;
+}
+
+.student-assignments__header h1 {
+  margin: 0;
+}
+
+.student-assignments__header p {
+  margin-top: 0.4rem;
+  color: var(--color-text-secondary);
+}
+
+.student-assignments__list {
+  list-style: none;
+  margin: 1rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.85rem;
+}
+
+.student-assignments__item {
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background: var(--color-surface);
+  padding: 0.95rem 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.student-assignments__item h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.student-assignments__item p {
+  margin: 0.25rem 0 0;
+}
+
+.student-assignments__meta {
+  color: var(--color-text-secondary);
+  font-size: 0.9rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.student-assignments__open {
+  white-space: nowrap;
+  text-decoration: none;
+  color: var(--color-primary);
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.student-assignments__error {
+  color: var(--color-danger, #b91c1c);
+}
+
+.student-assignments__empty {
+  color: var(--color-text-secondary);
+}
+
+/* ── Redesigned assignment list ─────────────────────────────────────────── */
+
+.sa-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-text, #1e293b);
+  margin: 0 0 10px;
+}
+
+.sa-due-soon {
+  margin-bottom: 28px;
+  padding: 16px;
+  border-radius: 12px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+}
+
+.sa-filter-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.sa-filter-btn {
+  padding: 5px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border, #e2e8f0);
+  background: var(--color-surface, #fff);
+  color: var(--color-text-muted, #64748b);
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.sa-filter-btn--active {
+  background: var(--color-primary, #0066ff);
+  border-color: var(--color-primary, #0066ff);
+  color: #fff;
+  font-weight: 600;
+}
+
+.sa-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sa-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--color-border, #e2e8f0);
+  border-radius: 12px;
+  background: var(--color-surface, #fff);
+  transition: background 0.15s;
+}
+
+.sa-item--urgent {
+  border-color: #fbbf24;
+}
+
+.sa-item-icon {
+  flex-shrink: 0;
+}
+
+.sa-icon--done {
+  color: #16a34a;
+}
+
+.sa-icon--pending {
+  color: var(--color-text-muted, #94a3b8);
+}
+
+.sa-item-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sa-item-title {
+  font-weight: 600;
+  font-size: 0.9375rem;
+  color: var(--color-text, #1e293b);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sa-item-meta {
+  font-size: 0.8125rem;
+  color: var(--color-text-muted, #64748b);
+}
+
+.sa-item-instructions {
+  font-size: 0.8125rem;
+  color: var(--color-text, #475569);
+  margin-top: 4px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.sa-badge {
+  flex-shrink: 0;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.775rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.sa-badge--submitted {
+  background: #dcfce7;
+  color: #16a34a;
+}
+
+.sa-badge--draft {
+  background: #fef9c3;
+  color: #92400e;
+}
+
+.sa-badge--pending {
+  background: var(--color-surface-muted, #f1f5f9);
+  color: var(--color-text-muted, #64748b);
+}
+
+.sa-open-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--color-primary, #0066ff);
+  background: transparent;
+  color: var(--color-primary, #0066ff);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+  white-space: nowrap;
+}
+
+.sa-open-btn:hover {
+  background: var(--color-primary-light, #dbeafe);
+}

@@ -1,0 +1,136 @@
+.accept-invite__card {
+  max-width: 520px;
+}
+
+/* Org header */
+.accept-invite__org {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md, 16px);
+  background: var(--color-bg, #f8fafc);
+  border: 2px solid var(--color-border, #e2e8f0);
+  border-radius: var(--radius-md, 12px);
+  padding: var(--spacing-md, 16px);
+  margin-bottom: var(--spacing-lg, 24px);
+}
+
+.accept-invite__org-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: var(--radius-md, 12px);
+  background: var(--color-primary, #059669);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.accept-invite__org-label {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-secondary, #64748b);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.accept-invite__org-name {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: var(--color-text, #1e293b);
+}
+
+/* Meta rows */
+.accept-invite__meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs, 6px);
+  margin-bottom: var(--spacing-lg, 24px);
+}
+
+.accept-invite__meta-row {
+  font-size: 0.9375rem;
+  color: var(--color-text-secondary, #64748b);
+}
+
+.accept-invite__meta-row strong {
+  color: var(--color-text, #1e293b);
+  font-weight: 600;
+}
+
+/* Status icons */
+.accept-invite__status-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto var(--spacing-md, 16px);
+}
+
+.accept-invite__status-icon--success {
+  background: #dcfce7;
+  color: #16a34a;
+}
+
+.accept-invite__status-icon--error {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+/* Tabs */
+.accept-invite__tabs {
+  display: flex;
+  border-bottom: 2px solid var(--color-border, #e2e8f0);
+  margin-bottom: var(--spacing-lg, 24px);
+}
+
+.accept-invite__tab {
+  flex: 1;
+  padding: var(--spacing-sm, 10px) var(--spacing-md, 16px);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--color-text-secondary, #64748b);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.accept-invite__tab:hover {
+  color: var(--color-text, #1e293b);
+}
+
+.accept-invite__tab--active {
+  color: var(--color-primary, #059669);
+  border-bottom-color: var(--color-primary, #059669);
+}
+
+/* Name row for registration */
+.accept-invite__name-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--spacing-sm, 12px);
+}
+
+/* Error */
+.accept-invite__error {
+  font-size: 0.875rem;
+  color: var(--color-error, #ef4444);
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: var(--radius-sm, 8px);
+  padding: var(--spacing-sm, 10px) var(--spacing-md, 16px);
+  margin-bottom: var(--spacing-md, 16px);
+}
+
+/* CTA button */
+.accept-invite__cta {
+  width: 100%;
+  margin-top: var(--spacing-sm, 8px);
+}

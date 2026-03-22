@@ -59,6 +59,7 @@ import {
 type Props = {
   title?: string;
   exitPath?: string;
+  onExit?: () => void;
 };
 
 // Board configuration map for dynamic GPIO options
@@ -758,6 +759,7 @@ function cleanupPythonCode(code: string): string {
 export const Esp32BlocklyEditor: React.FC<Props> = ({
   title = "Micro Maker",
   exitPath,
+  onExit,
 }) => {
   const divRef = useRef<HTMLDivElement | null>(null);
   const workspaceRef = useRef<Blockly.WorkspaceSvg | null>(null);
@@ -2035,10 +2037,20 @@ export const Esp32BlocklyEditor: React.FC<Props> = ({
               </option>
             ))}
           </select>
-          {exitPath && (
-            <a href={exitPath} style={{ ...headerBtnStyle, background: "rgba(180,80,40,0.12)", borderColor: "#d4a574" }}>
+          {(onExit || exitPath) && (
+            <button
+              type="button"
+              onClick={() => {
+                if (onExit) {
+                  onExit();
+                  return;
+                }
+                if (exitPath) window.location.assign(exitPath);
+              }}
+              style={{ ...headerBtnStyle, background: "rgba(180,80,40,0.12)", borderColor: "#d4a574" }}
+            >
               <X size={14} /> Exit
-            </a>
+            </button>
           )}
         </div>
       </div>

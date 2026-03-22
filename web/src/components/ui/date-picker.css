@@ -1,0 +1,209 @@
+/* ── Wrapper ──────────────────────────────────────────────────────────────── */
+
+.dp-wrap {
+  position: relative;
+  display: inline-block;
+  width: 100%;
+}
+
+/* ── Trigger button ─────────────────────────────────────────────────────────── */
+
+.dp-trigger {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  min-height: 44px;
+  border: 2px solid color-mix(in srgb, var(--color-border, #e5e5e5) 75%, var(--color-secondary, #1cb0f6) 25%);
+  border-radius: 14px;
+  background: var(--color-surface, #fff);
+  color: var(--color-text, #3c3c3c);
+  font-size: 0.9375rem;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--color-border, #e5e5e5) 88%, white);
+  transition: border-color var(--transition-fast, 120ms ease);
+}
+
+.dp-trigger:hover:not(:disabled) {
+  border-color: var(--color-primary, #58cc02);
+}
+
+.dp-trigger--open {
+  border-color: var(--color-primary, #58cc02);
+}
+
+.dp-trigger:focus-visible {
+  outline: 2px solid var(--color-primary, #58cc02);
+  outline-offset: 2px;
+}
+
+.dp-trigger:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.dp-trigger__icon {
+  flex-shrink: 0;
+  color: var(--color-text-secondary, #777);
+}
+
+.dp-trigger__text {
+  flex: 1;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dp-trigger__text--placeholder {
+  color: var(--color-text-secondary, #777);
+  font-weight: 600;
+}
+
+/* ── Clear button ───────────────────────────────────────────────────────────── */
+
+.dp-clear {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid var(--color-border, #e5e5e5);
+  background: var(--color-bg, #f7f7f7);
+  color: var(--color-text-secondary, #777);
+  cursor: pointer;
+  transition: background var(--transition-fast, 120ms ease), color var(--transition-fast, 120ms ease);
+}
+
+.dp-clear:hover {
+  background: var(--color-error, #ff4b4b);
+  color: white;
+  border-color: var(--color-error, #ff4b4b);
+}
+
+.dp-trigger--error {
+  border-color: var(--color-error, #ff4b4b) !important;
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--color-error, #ff4b4b) 30%, transparent) !important;
+}
+
+.dp-error {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-error, #ff4b4b);
+  margin-top: 4px;
+}
+
+/* ── Popover ────────────────────────────────────────────────────────────────── */
+
+.dp-popover {
+  /* position: fixed + coordinates are set via inline style */
+  z-index: 9999;
+  background: var(--color-surface, #fff);
+  border: 2px solid color-mix(in srgb, var(--color-border, #e5e5e5) 72%, var(--color-secondary, #1cb0f6) 28%);
+  border-radius: 18px;
+  padding: 14px;
+  box-shadow:
+    0 6px 0 color-mix(in srgb, var(--color-border, #e5e5e5) 85%, white),
+    0 16px 40px rgba(0, 0, 0, 0.12);
+  min-width: 280px;
+}
+
+/* When opening upward, anchor to bottom instead of top */
+.dp-popover--up {
+  box-shadow:
+    0 -4px 0 color-mix(in srgb, var(--color-border, #e5e5e5) 85%, white),
+    0 -16px 40px rgba(0, 0, 0, 0.12);
+}
+
+/* ── react-day-picker theme overrides ───────────────────────────────────────── */
+
+.dp-popover .rdp-root {
+  --rdp-accent-color: var(--color-primary, #58cc02);
+  --rdp-accent-background-color: color-mix(in srgb, var(--color-primary, #58cc02) 12%, white);
+  --rdp-today-color: var(--color-secondary, #1cb0f6);
+  --rdp-day-height: 36px;
+  --rdp-day-width: 36px;
+  --rdp-day_button-height: 34px;
+  --rdp-day_button-width: 34px;
+  --rdp-day_button-border-radius: 10px;
+  --rdp-selected-border: 2px solid var(--color-primary-dark, #46a302);
+  --rdp-nav_button-height: 2rem;
+  --rdp-nav_button-width: 2rem;
+  --rdp-outside-opacity: 0.4;
+  font-family: var(--font-family, "Nunito", sans-serif);
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--color-text, #3c3c3c);
+}
+
+/* Month caption */
+.dp-popover .rdp-month_caption {
+  padding-bottom: 8px;
+}
+
+.dp-popover .rdp-caption_label {
+  font-size: 0.9375rem;
+  font-weight: 800;
+  color: var(--color-text, #3c3c3c);
+}
+
+/* Weekday headers */
+.dp-popover .rdp-weekday {
+  font-size: 0.6875rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-secondary, #777);
+}
+
+/* Today highlight */
+.dp-popover .rdp-today:not(.rdp-selected) .rdp-day_button {
+  border-color: var(--color-secondary, #1cb0f6);
+  color: var(--color-secondary, #1cb0f6);
+}
+
+/* Selected day */
+.dp-popover .rdp-selected .rdp-day_button {
+  background: var(--color-primary, #58cc02);
+  border-color: var(--color-primary-dark, #46a302);
+  color: #fff;
+  box-shadow: 0 2px 0 var(--color-primary-dark, #46a302);
+}
+
+/* Day hover */
+.dp-popover .rdp-day_button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-primary, #58cc02) 12%, white);
+  border-color: var(--color-primary, #58cc02);
+  color: var(--color-primary-dark, #46a302);
+}
+
+/* Nav prev/next buttons */
+.dp-popover .rdp-nav {
+  gap: 4px;
+}
+
+.dp-popover .rdp-nav button {
+  border: 2px solid var(--color-border, #e5e5e5);
+  border-radius: 10px;
+  background: var(--color-surface, #fff);
+  box-shadow: 0 2px 0 color-mix(in srgb, var(--color-border, #e5e5e5) 88%, white);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-secondary, #777);
+  transition: border-color var(--transition-fast, 120ms ease), background var(--transition-fast, 120ms ease);
+}
+
+.dp-popover .rdp-nav button:hover {
+  border-color: var(--color-primary, #58cc02);
+  background: color-mix(in srgb, var(--color-primary, #58cc02) 8%, white);
+  color: var(--color-primary-dark, #46a302);
+}

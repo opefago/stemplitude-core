@@ -1,0 +1,714 @@
+/* Platform Roles Page - Duolingo-inspired playful design */
+
+.prp-page {
+  padding: 28px 32px;
+  max-width: 1200px;
+  margin: 0 auto;
+  min-height: 100%;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Header                                                                     */
+/* -------------------------------------------------------------------------- */
+
+.prp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.prp-header__left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.prp-header__icon {
+  color: var(--color-primary, #6c5ce7);
+}
+
+.prp-header__title {
+  font-size: 1.5rem;
+  font-weight: 800;
+  margin: 0;
+  color: var(--color-text, #1e293b);
+}
+
+.prp-header__subtitle {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary, #64748b);
+  margin: 2px 0 0;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Section                                                                    */
+/* -------------------------------------------------------------------------- */
+
+.prp-section {
+  margin-bottom: 28px;
+}
+
+.prp-section__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.prp-section__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 1.125rem;
+  font-weight: 800;
+  margin: 0 0 16px;
+  color: var(--color-text, #1e293b);
+}
+
+.prp-section__header .prp-section__title {
+  margin: 0;
+}
+
+.prp-loading {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--color-text-secondary, #64748b);
+  margin: 0;
+}
+
+.prp-error {
+  padding: 24px;
+  background: rgba(239, 68, 68, 0.08);
+  border: 2px solid var(--color-error, #ef4444);
+  border-radius: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.prp-error p {
+  margin: 0;
+  font-weight: 600;
+  color: var(--color-error, #ef4444);
+}
+
+.prp-error--inline {
+  padding: 12px 16px;
+  margin-bottom: 16px;
+}
+
+.prp-add-user-form__error {
+  width: 100%;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-error, #ef4444);
+  margin-bottom: 4px;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Roles grid                                                                 */
+/* -------------------------------------------------------------------------- */
+
+.prp-roles-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.prp-role-card {
+  background: var(--color-surface, #fff);
+  border: 2px solid var(--color-border, #e2e8f0);
+  border-radius: 18px;
+  overflow: hidden;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.prp-role-card:hover {
+  border-color: var(--role-accent);
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--role-accent) 25%, transparent);
+}
+
+.prp-role-card--expanded {
+  border-color: var(--role-accent);
+  box-shadow: 0 4px 0 color-mix(in srgb, var(--role-accent) 30%, transparent);
+}
+
+.prp-role-card__main {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  width: 100%;
+  padding: 18px;
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.prp-role-card__main:hover {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.prp-role-card__icon-wrap {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: color-mix(in srgb, var(--role-accent) 18%, transparent);
+  color: var(--role-accent);
+  box-shadow: 0 2px 0 color-mix(in srgb, var(--role-accent) 40%, transparent);
+}
+
+.prp-role-card__content {
+  flex: 1;
+  min-width: 0;
+}
+
+.prp-role-card__top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
+.prp-role-card__name {
+  font-size: 1rem;
+  font-weight: 800;
+  margin: 0;
+  color: var(--color-text, #1e293b);
+}
+
+.prp-role-card__badge {
+  padding: 2px 8px;
+  border-radius: 8px;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.prp-role-card__badge--full {
+  background: rgba(88, 204, 2, 0.2);
+  color: var(--color-success, #10b981);
+}
+
+.prp-role-card__slug {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--color-surface-hover, #f1f5f9);
+  color: var(--color-text-secondary, #64748b);
+  margin-bottom: 8px;
+  font-family: ui-monospace, monospace;
+}
+
+.prp-role-card__desc {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-text-secondary, #64748b);
+  margin: 0 0 12px;
+  line-height: 1.4;
+}
+
+.prp-role-card__meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--color-text-secondary, #64748b);
+}
+
+.prp-role-card__meta-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.prp-role-card__chevron {
+  flex-shrink: 0;
+  color: var(--color-text-secondary, #64748b);
+  transition: transform 0.2s ease;
+}
+
+.prp-role-card__chevron--up {
+  transform: rotate(180deg);
+}
+
+/* Permissions expanded view */
+.prp-role-card__permissions {
+  padding: 0 18px 18px;
+  border-top: 1px solid var(--color-border, #e2e8f0);
+  margin-top: -8px;
+  padding-top: 16px;
+}
+
+.prp-role-card__perms-title {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  margin: 0 0 12px;
+  color: var(--color-text, #1e293b);
+}
+
+.prp-role-card__perms-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.prp-perm-group {
+  padding: 10px 12px;
+  background: var(--color-surface-hover, #f8fafc);
+  border: 2px solid var(--color-border, #e2e8f0);
+  border-radius: 12px;
+}
+
+.prp-perm-group__resource {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--color-text-secondary, #64748b);
+  margin-bottom: 8px;
+  font-family: ui-monospace, monospace;
+}
+
+.prp-perm-group__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.prp-perm-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 8px;
+}
+
+.prp-perm-item--granted {
+  background: rgba(16, 185, 129, 0.15);
+  color: #059669;
+}
+
+.prp-perm-item--denied {
+  background: rgba(148, 163, 184, 0.2);
+  color: var(--color-text-secondary, #94a3b8);
+}
+
+.prp-perm-icon--check {
+  color: #10b981;
+  flex-shrink: 0;
+}
+
+.prp-perm-icon--x {
+  color: var(--color-text-secondary, #94a3b8);
+  flex-shrink: 0;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Buttons                                                                    */
+/* -------------------------------------------------------------------------- */
+
+.prp-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border: 2px solid transparent;
+  border-radius: 14px;
+  font-family: inherit;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.prp-btn--primary {
+  background: var(--color-primary, #6c5ce7);
+  color: white;
+  border-color: var(--color-primary-dark, #5b4cdb);
+  box-shadow: 0 4px 0 var(--color-primary-dark, #5b4cdb);
+}
+
+.prp-btn--primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 5px 0 var(--color-primary-dark, #5b4cdb);
+}
+
+.prp-btn--primary:active {
+  transform: translateY(2px);
+  box-shadow: 0 2px 0 var(--color-primary-dark, #5b4cdb);
+}
+
+.prp-btn--secondary {
+  background: var(--color-surface, #fff);
+  color: var(--color-text, #1e293b);
+  border-color: var(--color-border, #e2e8f0);
+  box-shadow: 0 2px 0 var(--color-border, #e2e8f0);
+}
+
+.prp-btn--secondary:hover {
+  border-color: var(--color-primary, #6c5ce7);
+  background: rgba(108, 92, 231, 0.06);
+}
+
+.prp-btn--secondary:active {
+  transform: translateY(1px);
+  box-shadow: 0 1px 0 var(--color-border, #e2e8f0);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Add user form                                                              */
+/* -------------------------------------------------------------------------- */
+
+.prp-add-user-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 16px;
+  padding: 20px;
+  margin-bottom: 16px;
+  background: var(--color-surface, #fff);
+  border: 2px solid var(--color-border, #e2e8f0);
+  border-radius: 18px;
+}
+
+.prp-add-user-form__row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.prp-add-user-form__label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--color-text-secondary, #64748b);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.prp-add-user-form__input,
+.prp-add-user-form__select {
+  padding: 10px 14px;
+  border: 2px solid var(--color-border, #e2e8f0);
+  border-radius: 12px;
+  font-family: inherit;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--color-text, #1e293b);
+  background: var(--color-surface, #fff);
+  min-width: 220px;
+  transition: border-color 0.15s ease;
+}
+
+.prp-add-user-form__input:focus,
+.prp-add-user-form__select:focus {
+  outline: none;
+  border-color: var(--color-primary, #6c5ce7);
+}
+
+.prp-add-user-form__input::placeholder {
+  color: var(--color-text-secondary, #94a3b8);
+}
+
+.prp-add-user-form__actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Table                                                                      */
+/* -------------------------------------------------------------------------- */
+
+.prp-table-wrap {
+  overflow-x: auto;
+  background: var(--color-surface, #fff);
+  border: 2px solid var(--color-border, #e2e8f0);
+  border-radius: 18px;
+}
+
+.prp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.prp-table th {
+  text-align: left;
+  padding: 12px 16px;
+  font-weight: 700;
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-secondary, #64748b);
+  background: var(--color-surface-hover, #f8fafc);
+  border-bottom: 2px solid var(--color-border, #e2e8f0);
+}
+
+.prp-table th:first-child {
+  border-radius: 16px 0 0 0;
+}
+
+.prp-table__th-actions {
+  text-align: right;
+}
+
+.prp-table td {
+  padding: 14px 16px;
+  font-weight: 600;
+  color: var(--color-text, #1e293b);
+  border-bottom: 1px solid var(--color-border, #e2e8f0);
+}
+
+.prp-table__tr:last-child td {
+  border-bottom: none;
+}
+
+.prp-table__tr:hover td {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.prp-table__empty {
+  text-align: center !important;
+  font-size: 2rem;
+  font-weight: 800;
+  color: color-mix(in srgb, var(--color-primary, #6c5ce7) 55%, #5846a8);
+  padding: 46px 16px !important;
+  background: color-mix(in srgb, var(--color-secondary, #1cb0f6) 6%, white);
+}
+
+.prp-table__td-actions {
+  text-align: right;
+  white-space: nowrap;
+  position: relative;
+}
+
+.prp-user-cell {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.prp-user-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.875rem;
+  font-weight: 800;
+  background: var(--color-primary, #6c5ce7);
+  color: white;
+  flex-shrink: 0;
+}
+
+.prp-user-name {
+  font-weight: 700;
+  color: var(--color-text, #1e293b);
+}
+
+.prp-user-email {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-text-secondary, #64748b);
+}
+
+.prp-role-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 10px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  background: color-mix(in srgb, var(--badge-color, #6c5ce7) 18%, transparent);
+  color: var(--badge-color, #6c5ce7);
+}
+
+.prp-date-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--color-text-secondary, #64748b);
+}
+
+.prp-assigned-by {
+  font-weight: 600;
+  color: var(--color-text-secondary, #64748b);
+}
+
+.prp-actions-wrap {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.prp-action-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.prp-dropdown-trigger {
+  position: relative;
+}
+
+.prp-dropdown-chevron {
+  transition: transform 0.2s ease;
+}
+
+.prp-dropdown-chevron--up {
+  transform: rotate(180deg);
+}
+
+.prp-action-btn--active {
+  border-color: var(--color-primary, #6c5ce7);
+  color: var(--color-primary, #6c5ce7);
+  background: rgba(108, 92, 231, 0.08);
+}
+
+.prp-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 2px solid var(--color-border, #e2e8f0);
+  border-radius: 10px;
+  font-family: inherit;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  background: var(--color-surface, #fff);
+  color: var(--color-text, #1e293b);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: 0 2px 0 var(--color-border, #e2e8f0);
+}
+
+.prp-action-btn:hover {
+  border-color: var(--color-primary, #6c5ce7);
+  color: var(--color-primary, #6c5ce7);
+  background: rgba(108, 92, 231, 0.06);
+}
+
+.prp-action-btn:active {
+  transform: translateY(1px);
+  box-shadow: 0 1px 0 var(--color-border, #e2e8f0);
+}
+
+.prp-action-btn--danger:hover {
+  border-color: var(--color-error, #ef4444);
+  color: var(--color-error, #ef4444);
+  background: rgba(239, 68, 68, 0.06);
+}
+
+/* Actions dropdown (when changing role) */
+.prp-actions-dropdown {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  margin-top: 6px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 180px;
+  padding: 8px;
+  background: var(--color-surface, #fff);
+  border: 2px solid var(--color-border, #e2e8f0);
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.prp-actions-dropdown__item {
+  padding: 8px 12px;
+  border: none;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  text-align: left;
+  background: transparent;
+  color: var(--color-text, #1e293b);
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.prp-actions-dropdown__item:hover {
+  background: var(--color-surface-hover, #f1f5f9);
+}
+
+.prp-actions-dropdown__cancel {
+  margin-top: 4px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  text-align: left;
+  background: transparent;
+  color: var(--color-text-secondary, #64748b);
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.prp-actions-dropdown__cancel:hover {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--color-error, #ef4444);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Responsive                                                                 */
+/* -------------------------------------------------------------------------- */
+
+@media (max-width: 860px) {
+  .prp-page {
+    padding: 20px 16px;
+  }
+
+  .prp-roles-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .prp-add-user-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .prp-add-user-form__input,
+  .prp-add-user-form__select {
+    min-width: 100%;
+  }
+
+  .prp-table-wrap {
+    font-size: 0.8125rem;
+  }
+
+  .prp-action-buttons {
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 480px) {
+  .prp-user-cell {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

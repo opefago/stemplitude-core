@@ -1,0 +1,193 @@
+{
+  "$schema": "job_registry.schema.json",
+  "_description": "Central job registry. Consumed by Python (Pipeline class), and any non-Python worker that reads from the same Redis broker. Add new job types here.",
+  "jobs": {
+    "thumbnail.generate": {
+      "task_path": "workers.tasks.thumbnail_tasks.generate_thumbnail",
+      "queue": "default",
+      "runtime": "python",
+      "max_retries": 3,
+      "retry_delay_seconds": 30,
+      "dedup_ttl_seconds": 600,
+      "description": "Generate thumbnail for an uploaded asset",
+      "params_schema": {
+        "asset_table": { "type": "string", "required": true, "description": "Table name: 'assets' or 'global_assets'" },
+        "asset_id": { "type": "string", "required": true, "description": "UUID of the asset record" }
+      }
+    },
+    "email.send": {
+      "task_path": "workers.tasks.email_tasks.send_email_task",
+      "queue": "default",
+      "runtime": "python",
+      "max_retries": 3,
+      "retry_delay_seconds": 60,
+      "dedup_ttl_seconds": 60,
+      "description": "Send transactional email",
+      "params_schema": {
+        "recipient": { "type": "string", "required": true, "description": "Recipient email address" },
+        "subject": { "type": "string", "required": true, "description": "Email subject line" },
+        "body": { "type": "string", "required": true, "description": "Plain text body" },
+        "html_body": { "type": "string", "required": false, "description": "Optional HTML body" }
+      }
+    },
+    "notification.create": {
+      "task_path": "workers.tasks.notification_tasks.create_notification_task",
+      "queue": "default",
+      "runtime": "python",
+      "max_retries": 0,
+      "retry_delay_seconds": 0,
+      "dedup_ttl_seconds": 30,
+      "description": "Create an in-app notification",
+      "params_schema": {
+        "user_id": { "type": "string", "required": true, "description": "UUID of the recipient user" },
+        "tenant_id": { "type": "string", "required": false, "description": "UUID of the tenant context" },
+        "notification_type": { "type": "string", "required": true, "description": "Notification category" },
+        "title": { "type": "string", "required": true, "description": "Notification title" },
+        "body": { "type": "string", "required": false, "description": "Notification body text" }
+      }
+    },
+    "notification.create_student": {
+      "task_path": "workers.tasks.notification_tasks.create_student_notification_task",
+      "queue": "default",
+      "runtime": "python",
+      "max_retries": 0,
+      "retry_delay_seconds": 0,
+      "dedup_ttl_seconds": 30,
+      "description": "Create an in-app notification for a student recipient (students.id)",
+      "params_schema": {
+        "student_id": { "type": "string", "required": true, "description": "UUID of the student" },
+        "tenant_id": { "type": "string", "required": true, "description": "UUID of the tenant" },
+        "notification_type": { "type": "string", "required": true, "description": "Notification category" },
+        "title": { "type": "string", "required": true, "description": "Notification title" },
+        "body": { "type": "string", "required": false, "description": "Notification body text" }
+      }
+    },
+    "stripe.webhook": {
+      "task_path": "workers.tasks.subscription_tasks.process_stripe_webhook_task",
+      "queue": "default",
+      "runtime": "python",
+      "max_retries": 0,
+      "retry_delay_seconds": 0,
+      "dedup_ttl_seconds": 60,
+      "description": "Process a Stripe webhook event",
+      "params_schema": {
+        "event_type": { "type": "string", "required": true, "description": "Stripe event type" },
+        "event_data": { "type": "object", "required": true, "description": "Stripe event data payload" }
+      }
+    },
+    "analytics.aggregate_progress": {
+      "task_path": "workers.tasks.analytics_tasks.aggregate_progress_stats",
+      "queue": "default",
+      "runtime": "python",
+      "max_retries": 0,
+      "retry_delay_seconds": 0,
+      "dedup_ttl_seconds": 300,
+      "description": "Aggregate progress stats for a tenant",
+      "params_schema": {
+        "tenant_id": { "type": "string", "required": true, "description": "UUID of the tenant" }
+      }
+    },
+    "analytics.usage_report": {
+      "task_path": "workers.tasks.analytics_tasks.generate_usage_report",
+      "queue": "default",
+      "runtime": "python",
+      "max_retries": 0,
+      "retry_delay_seconds": 0,
+      "dedup_ttl_seconds": 300,
+      "description": "Generate usage report for a tenant",
+      "params_schema": {
+        "tenant_id": { "type": "string", "required": true, "description": "UUID of the tenant" }
+      }
+    },
+    "integration.refresh_oauth": {
+      "task_path": "workers.tasks.integration_tasks.refresh_oauth_tokens_task",
+      "queue": "default",
+      "runtime": "python",
+      "max_retries": 3,
+      "retry_delay_seconds": 120,
+      "dedup_ttl_seconds": 300,
+      "description": "Refresh OAuth tokens for a connection",
+      "params_schema": {
+        "connection_id": { "type": "string", "required": true, "description": "UUID of the OAuth connection" }
+      }
+    },
+    "integration.create_meeting": {
+      "task_path": "workers.tasks.integration_tasks.create_meeting_task",
+      "queue": "default",
+      "runtime": "python",
+      "max_retries": 0,
+      "retry_delay_seconds": 0,
+      "dedup_ttl_seconds": 60,
+      "description": "Create external meeting for a classroom",
+      "params_schema": {
+        "classroom_id": { "type": "string", "required": true, "description": "UUID of the classroom" },
+        "provider": { "type": "string", "required": true, "description": "Meeting provider (e.g. 'zoom', 'google_meet')" }
+      }
+    },
+    "integration.sync_calendar": {
+      "task_path": "workers.tasks.integration_tasks.sync_calendar_task",
+      "queue": "default",
+      "runtime": "python",
+      "max_retries": 0,
+      "retry_delay_seconds": 0,
+      "dedup_ttl_seconds": 60,
+      "description": "Sync classroom schedule to instructor calendar",
+      "params_schema": {
+        "connection_id": { "type": "string", "required": true, "description": "UUID of the OAuth connection" },
+        "classroom_id": { "type": "string", "required": true, "description": "UUID of the classroom" },
+        "action": { "type": "string", "required": false, "description": "Action: 'create', 'update', or 'delete'. Defaults to 'create'." }
+      }
+    },
+
+    "cron.cleanup_expired_tokens": {
+      "task_path": "workers.tasks.cleanup_tasks.cleanup_expired_tokens",
+      "queue": "default",
+      "runtime": "python",
+      "max_retries": 0,
+      "retry_delay_seconds": 0,
+      "dedup_ttl_seconds": 300,
+      "description": "Remove expired refresh tokens from Redis blacklist",
+      "schedule": { "type": "crontab", "hour": "3", "minute": "0" }
+    },
+    "cron.cleanup_expired_support_grants": {
+      "task_path": "workers.tasks.cleanup_tasks.cleanup_expired_support_grants",
+      "queue": "default",
+      "runtime": "python",
+      "max_retries": 0,
+      "retry_delay_seconds": 0,
+      "dedup_ttl_seconds": 300,
+      "description": "Mark expired support access grants as expired",
+      "schedule": { "type": "crontab", "minute": "*/30" }
+    },
+    "cron.cleanup_orphan_blobs": {
+      "task_path": "workers.tasks.cleanup_tasks.cleanup_orphan_blobs",
+      "queue": "default",
+      "runtime": "python",
+      "max_retries": 0,
+      "retry_delay_seconds": 0,
+      "dedup_ttl_seconds": 300,
+      "description": "Remove orphaned files from S3 that have no database reference",
+      "schedule": { "type": "crontab", "hour": "4", "minute": "0", "day_of_week": "sunday" }
+    },
+    "cron.cleanup_audit_events": {
+      "task_path": "workers.tasks.cleanup_tasks.cleanup_audit_events",
+      "queue": "default",
+      "runtime": "python",
+      "max_retries": 0,
+      "retry_delay_seconds": 0,
+      "dedup_ttl_seconds": 300,
+      "description": "Delete audit events older than the configured retention period",
+      "schedule": { "type": "crontab", "hour": "2", "minute": "30", "day_of_week": "sunday" }
+    },
+    "cron.cleanup_notifications": {
+      "task_path": "workers.tasks.cleanup_tasks.cleanup_notifications",
+      "queue": "default",
+      "runtime": "python",
+      "max_retries": 0,
+      "retry_delay_seconds": 0,
+      "dedup_ttl_seconds": 300,
+      "description": "Delete in-app notifications past retention days and trim per-recipient overflow",
+      "schedule": { "type": "crontab", "hour": "3", "minute": "15" }
+    }
+  }
+}

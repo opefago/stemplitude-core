@@ -1,0 +1,49 @@
+/* ── DateTimePicker ──────────────────────────────────────────────────────────── */
+
+.dtp-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.dtp-label {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--color-text-secondary, #777);
+  letter-spacing: 0.02em;
+}
+
+.dtp-fields {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.dtp-field {
+  flex: 1;
+  min-width: 140px;
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+/* Hide the icon — DatePicker and TimePicker already have built-in icons */
+.dtp-field__icon {
+  display: none;
+}
+
+.dtp-sep {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--color-text-secondary, #777);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.dtp-error {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-error, #ff4b4b);
+}

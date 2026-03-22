@@ -1,0 +1,6 @@
+[data-ui-mode="admin"] {
+  --grid-cols: 4;
+  --spacing-md: 12px;
+  --nav-width: 200px;
+  --nav-width-collapsed: 48px;
+}

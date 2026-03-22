@@ -1,0 +1,31 @@
+/* Route guard loading state */
+
+.route-guard__loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  min-height: 100dvh;
+  gap: var(--spacing-md, 16px);
+}
+
+.route-guard__spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--color-border, #e2e8f0);
+  border-top-color: var(--color-primary, #0066ff);
+  border-radius: 50%;
+  animation: route-guard-spin 0.8s linear infinite;
+}
+
+.route-guard__loading-text {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary, #64748b);
+}
+
+@keyframes route-guard-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

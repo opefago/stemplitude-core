@@ -24,14 +24,14 @@
 
 .instructor-dashboard__greeting {
   margin: 0 0 var(--spacing-xs, 4px);
-  font-size: 1.5rem;
+  font-size: 1.75rem;
   font-weight: 800;
   color: var(--color-text, #3c3c3c);
 }
 
 .instructor-dashboard__tenant {
   margin: 0;
-  font-size: 0.9375rem;
+  font-size: 1.0625rem;
   color: var(--color-text-secondary, #64748b);
 }
 
@@ -62,7 +62,7 @@
 
 .instructor-dashboard__section-title {
   margin: 0 0 var(--spacing-md, 16px);
-  font-size: 1.125rem;
+  font-size: 1.25rem;
   font-weight: 600;
   color: var(--color-text, #1e293b);
 }
@@ -100,14 +100,14 @@
 
 .instructor-dashboard__classroom-name {
   margin: 0;
-  font-size: 1rem;
+  font-size: 1.125rem;
   font-weight: 600;
   color: var(--color-text, #1e293b);
 }
 
 .instructor-dashboard__classroom-meta {
   margin: 0;
-  font-size: 0.875rem;
+  font-size: 1rem;
   color: var(--color-text-secondary, #64748b);
 }
 
@@ -120,7 +120,7 @@
   background: var(--color-primary, #58cc02);
   color: white;
   border-radius: var(--radius-md, 12px);
-  font-size: 0.875rem;
+  font-size: 0.9375rem;
   font-weight: 700;
   text-decoration: none;
   text-transform: uppercase;
@@ -158,7 +158,7 @@
   background: var(--color-surface, #fff);
   border: 2px solid var(--color-border, #e5e5e5);
   border-radius: var(--radius-md, 12px);
-  font-size: 0.875rem;
+  font-size: 0.9375rem;
   font-weight: 600;
   color: var(--color-secondary, #1cb0f6);
   cursor: pointer;
@@ -203,11 +203,11 @@
 }
 
 .instructor-dashboard__activity-text {
-  font-size: 0.875rem;
+  font-size: 1rem;
   color: var(--color-text, #1e293b);
 }
 
 .instructor-dashboard__activity-time {
-  font-size: 0.75rem;
+  font-size: 0.875rem;
   color: var(--color-text-secondary, #64748b);
 }

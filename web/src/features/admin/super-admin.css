@@ -1,0 +1,298 @@
+/* Super Admin Dashboard – Bento overrides (platform-level administration) */
+
+.super-admin__header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--spacing-md, 16px);
+}
+
+.super-admin__header-inner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-md, 16px);
+}
+
+.super-admin__shield {
+  color: var(--color-primary, #58cc02);
+  flex-shrink: 0;
+}
+
+.super-admin__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-sm, 8px);
+  padding: 10px 20px;
+  border: 2px solid var(--color-primary-dark, #46a302);
+  border-radius: 12px;
+  font-size: 0.875rem;
+  font-weight: 700;
+  cursor: pointer;
+  background: var(--color-primary, #58cc02);
+  color: white;
+  box-shadow: 0 3px 0 var(--color-primary-dark, #46a302);
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+
+.super-admin__btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 0 var(--color-primary-dark, #46a302);
+}
+
+.super-admin__btn--primary {
+  /* already styled above */
+}
+
+/* Stat blocks */
+.super-admin__stat-row {
+  margin-bottom: var(--spacing-md, 16px);
+}
+
+.super-admin__stat-block {
+  margin-bottom: var(--spacing-sm, 10px);
+}
+
+.super-admin__stat-value {
+  display: block;
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: var(--color-text, #1e293b);
+}
+
+.super-admin__stat-label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-text-secondary, #64748b);
+}
+
+.super-admin__trend {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #10b981;
+}
+
+/* Tenant toolbar (inside card) */
+.super-admin__tenant-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm, 8px);
+  align-items: center;
+  margin-bottom: var(--spacing-md, 16px);
+}
+
+.super-admin__search-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 160px;
+}
+
+.super-admin__search-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--color-text-secondary, #64748b);
+  pointer-events: none;
+}
+
+.super-admin__search-input {
+  width: 100%;
+  padding: 8px 12px 8px 36px;
+  border: 2px solid var(--color-border, #e8e8e8);
+  border-radius: 10px;
+  font-size: 0.875rem;
+  color: var(--color-text, #1e293b);
+  background: var(--color-surface, #fff);
+  transition: border-color 0.15s ease;
+}
+
+.super-admin__search-input:focus {
+  outline: none;
+  border-color: var(--color-primary, #1cb0f6);
+}
+
+.super-admin__filter-select {
+  padding: 8px 12px;
+  border: 2px solid var(--color-border, #e8e8e8);
+  border-radius: 10px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text, #1e293b);
+  background: var(--color-surface, #fff);
+  min-width: 120px;
+}
+
+/* Tenant list (compact rows) */
+.super-admin__tenant-list {
+  flex: 1;
+  min-height: 0;
+}
+
+.super-admin__tenant-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm, 8px);
+  padding: 10px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border, #e8e8e8) 50%, transparent);
+}
+
+.super-admin__tenant-row:last-child {
+  border-bottom: none;
+}
+
+.super-admin__tenant-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.super-admin__tenant-name {
+  font-weight: 600;
+  font-size: 0.9375rem;
+  color: var(--color-text, #1e293b);
+}
+
+.super-admin__tenant-meta {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary, #64748b);
+}
+
+.super-admin__tenant-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.super-admin__action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-secondary, #64748b);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.super-admin__action-btn:hover {
+  background: color-mix(in srgb, var(--color-primary, #1cb0f6) 15%, transparent);
+  color: var(--color-primary, #1cb0f6);
+}
+
+.super-admin__action-btn--danger:hover {
+  background: color-mix(in srgb, #ff4b4b 15%, transparent);
+  color: #ff4b4b;
+}
+
+/* Status badges */
+.super-admin__badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.super-admin__badge--active {
+  background: color-mix(in srgb, #10b981 15%, transparent);
+  color: #059669;
+}
+
+.super-admin__badge--trial {
+  background: color-mix(in srgb, #1cb0f6 15%, transparent);
+  color: #0284c7;
+}
+
+.super-admin__badge--suspended {
+  background: color-mix(in srgb, #f59e0b 15%, transparent);
+  color: #d97706;
+}
+
+.super-admin__badge--expired {
+  background: color-mix(in srgb, #ef4444 15%, transparent);
+  color: #dc2626;
+}
+
+/* System health grid */
+.super-admin__health-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--spacing-md, 16px);
+}
+
+.super-admin__health-item {
+  padding: 12px;
+  background: color-mix(in srgb, #ce82ff 8%, transparent);
+  border-radius: 12px;
+}
+
+.super-admin__health-label {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-secondary, #64748b);
+  margin-bottom: 4px;
+}
+
+.super-admin__health-value {
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--color-text, #1e293b);
+}
+
+.super-admin__health-value--ok {
+  color: #10b981;
+}
+
+.super-admin__health-item .dashboard-bento__xp-bar {
+  margin-top: 8px;
+}
+
+/* Quick actions grid */
+.super-admin__quick-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--spacing-sm, 10px);
+}
+
+.super-admin__quick-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm, 8px);
+  padding: 12px 16px;
+  background: color-mix(in srgb, #58cc02 10%, transparent);
+  border: 2px solid color-mix(in srgb, #58cc02 30%, transparent);
+  border-radius: 12px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text, #1e293b);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.super-admin__quick-btn:hover {
+  background: color-mix(in srgb, #58cc02 18%, transparent);
+  border-color: #58cc02;
+  transform: translateY(-1px);
+}
+
+.super-admin__quick-btn svg {
+  color: #58cc02;
+  flex-shrink: 0;
+}
+
+@media (max-width: 600px) {
+  .super-admin__health-grid {
+    grid-template-columns: 1fr;
+  }
+  .super-admin__quick-grid {
+    grid-template-columns: 1fr;
+  }
+}

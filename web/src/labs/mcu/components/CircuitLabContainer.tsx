@@ -39,10 +39,12 @@ const loadProjectsFromStorage = () => {
 
 type Props = {
   exitPath?: string;
+  onExit?: () => void;
 };
 
 export const CircuitLabContainer: React.FC<Props> = ({
   exitPath = "/playground",
+  onExit,
 }) => {
   const canvasRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<Application | null>(null);
@@ -370,18 +372,24 @@ export const CircuitLabContainer: React.FC<Props> = ({
         <div
           style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}
         >
-          <Tippy content="Return to Playground" {...tipProps}>
-            <a
-              href={exitPath}
+          <Tippy content="Exit lab" {...tipProps}>
+            <button
+              type="button"
+              onClick={() => {
+                if (onExit) {
+                  onExit();
+                  return;
+                }
+                window.location.assign(exitPath);
+              }}
               style={{
                 ...btnStyle,
                 background: "rgba(180,80,40,0.15)",
                 borderColor: "#d4a574",
-                textDecoration: "none",
               }}
             >
               <X size={14} /> Exit
-            </a>
+            </button>
           </Tippy>
         </div>
       </div>

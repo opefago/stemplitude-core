@@ -1,0 +1,254 @@
+/* ── TimePicker ─────────────────────────────────────────────────────────────── */
+
+.tp-wrap {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+}
+
+/* Trigger button — same visual language as DatePicker */
+.tp-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  background: var(--color-input-bg, #fff);
+  border: 1.5px solid var(--color-border, #d1d5db);
+  border-radius: 10px;
+  color: var(--color-text, #111827);
+  font-size: 0.875rem;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+
+.tp-trigger:hover:not(:disabled) {
+  border-color: var(--color-primary, #16a34a);
+}
+
+.tp-trigger--open,
+.tp-trigger:focus-visible {
+  border-color: var(--color-primary, #16a34a);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary, #16a34a) 18%, transparent);
+  outline: none;
+}
+
+.tp-trigger--error {
+  border-color: var(--color-danger, #dc2626) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-danger, #dc2626) 12%, transparent) !important;
+}
+
+.tp-trigger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.tp-trigger__icon {
+  color: var(--color-text-muted, #6b7280);
+  flex-shrink: 0;
+}
+
+.tp-trigger__text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tp-trigger__text--placeholder {
+  color: var(--color-text-muted, #9ca3af);
+}
+
+.tp-error {
+  font-size: 0.75rem;
+  color: var(--color-danger, #dc2626);
+}
+
+/* ── Popover ────────────────────────────────────────────────────────────────── */
+
+.tp-popover {
+  min-width: 200px;
+  background: var(--color-surface, #fff);
+  border: 1.5px solid var(--color-border, #e5e7eb);
+  border-radius: 16px;
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.12),
+    0 2px 8px rgba(0, 0, 0, 0.06);
+  padding: 16px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+/* ── Drums ──────────────────────────────────────────────────────────────────── */
+
+.tp-drums {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tp-colon {
+  font-size: 1.75rem;
+  font-weight: 800;
+  color: var(--color-text, #111827);
+  line-height: 1;
+  padding-bottom: 2px;
+  user-select: none;
+}
+
+/* Wrapper for a single drum column */
+.tp-drum-wrap {
+  position: relative;
+  width: 72px;
+  height: 220px; /* ITEM_H * VISIBLE = 44 * 5 */
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+/* Selection highlight band — sits behind the scrollable list */
+.tp-drum-band {
+  position: absolute;
+  top: 88px; /* PADDING = 44 * 2 */
+  left: 0;
+  right: 0;
+  height: 44px; /* ITEM_H */
+  background: color-mix(in srgb, var(--color-primary, #16a34a) 10%, transparent);
+  border: 2px solid color-mix(in srgb, var(--color-primary, #16a34a) 50%, transparent);
+  border-radius: 10px;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* Fade overlays */
+.tp-drum-fade {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 88px; /* PADDING */
+  z-index: 2;
+  pointer-events: none;
+}
+
+.tp-drum-fade--top {
+  top: 0;
+  background: linear-gradient(
+    to bottom,
+    var(--color-surface, #fff) 0%,
+    transparent 100%
+  );
+}
+
+.tp-drum-fade--bottom {
+  bottom: 0;
+  background: linear-gradient(
+    to top,
+    var(--color-surface, #fff) 0%,
+    transparent 100%
+  );
+}
+
+/* The scrollable drum list */
+.tp-drum {
+  position: relative;
+  z-index: 1;
+  height: 220px;
+  overflow-y: scroll;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  background: transparent;
+  cursor: pointer;
+  outline: none;
+}
+
+.tp-drum::-webkit-scrollbar {
+  display: none;
+}
+
+/* Individual item */
+.tp-drum-item {
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.35rem;
+  font-weight: 600;
+  color: var(--color-text-muted, #9ca3af);
+  user-select: none;
+  transition:
+    color 0.12s,
+    font-size 0.12s;
+  border-radius: 8px;
+}
+
+.tp-drum-item:hover {
+  color: var(--color-text, #374151);
+}
+
+.tp-drum-item--sel {
+  color: var(--color-primary, #16a34a);
+  font-size: 1.55rem;
+  font-weight: 800;
+}
+
+/* ── AM / PM ────────────────────────────────────────────────────────────────── */
+
+.tp-meridiem {
+  display: flex;
+  gap: 6px;
+}
+
+.tp-meridiem-chip {
+  padding: 5px 16px;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  border: 1.5px solid var(--color-border, #e5e7eb);
+  color: var(--color-text-muted, #6b7280);
+  background: transparent;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s;
+  user-select: none;
+}
+
+.tp-meridiem-chip:hover {
+  border-color: var(--color-primary, #16a34a);
+  color: var(--color-primary, #16a34a);
+}
+
+.tp-meridiem-chip--active {
+  background: var(--color-primary, #16a34a);
+  border-color: var(--color-primary, #16a34a);
+  color: #fff;
+}
+
+/* ── Done button ────────────────────────────────────────────────────────────── */
+
+.tp-done {
+  width: 100%;
+  padding: 9px;
+  border-radius: 10px;
+  background: var(--color-primary, #16a34a);
+  color: #fff;
+  font-size: 0.875rem;
+  font-weight: 700;
+  font-family: inherit;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.tp-done:hover {
+  background: color-mix(in srgb, var(--color-primary, #16a34a) 85%, black);
+}

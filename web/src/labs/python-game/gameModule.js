@@ -453,10 +453,12 @@ export function getGameModuleSource() {
   mod.Line = LineClass;
 
   function addAnimMethods($loc) {
-    $loc.play = new Sk.builtin.func(function(self, fpsVal) {
+    $loc.play = new Sk.builtin.func(function(self, fpsVal, startVal, endVal) {
       var o = engine.getObject(self._eid);
       if (!o) return NONE;
       if (fpsVal !== undefined) o._fps = Math.max(1, jsv(fpsVal));
+      o._animStart = startVal !== undefined ? Math.max(0, jsv(startVal)) : null;
+      o._animEnd = endVal !== undefined ? jsv(endVal) : null;
       o._animate = true;
       return NONE;
     });

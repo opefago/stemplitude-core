@@ -1,36 +1,106 @@
-import { Link } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import {
   Users,
-  GraduationCap,
   BookOpen,
   MessageSquare,
-  ClipboardList,
   FileEdit,
   ArrowRight,
   Calendar,
 } from "lucide-react";
 import { useAuth } from "../../providers/AuthProvider";
 import { useTenant } from "../../providers/TenantProvider";
+import {
+  createClassroomSession,
+  listClassroomSessions,
+  listClassrooms,
+  type ClassroomSessionRecord,
+} from "../../lib/api/classrooms";
+import { useTenantRealtime } from "../../hooks/useTenantRealtime";
 import "./dashboard-bento.css";
 import "./instructor-dashboard.css";
-
-const TODAYS_CLASSES = [
-  { id: "1", name: "Robotics 101", time: "3:00 PM", students: 12 },
-  { id: "2", name: "Game Dev 201", time: "4:30 PM", students: 8 },
-];
 
 const RECENT_ACTIVITY = [
   { id: 1, text: "Alex completed Lab 3", time: "2 hours ago" },
   { id: 2, text: "Maya submitted Circuit project", time: "3 hours ago" },
-  { id: 3, text: "Jordan started Game Dev module", time: "5 hours ago" },
+  { id: 3, text: "Jordan started Game Maker module", time: "5 hours ago" },
 ];
 
 export function InstructorDashboard() {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const { tenant } = useTenant();
+  const [upcoming, setUpcoming] = useState<
+    Array<{ classroomId: string; classroomName: string; session: ClassroomSessionRecord }>
+  >([]);
+  const [loadingUpcoming, setLoadingUpcoming] = useState(true);
+  const [startingClassId, setStartingClassId] = useState<string | null>(null);
 
   const firstName = user?.firstName ?? "Instructor";
   const tenantName = tenant?.name ?? "Your School";
+  const tenantId = tenant?.id ?? user?.tenantId;
+
+  const loadUpcoming = useCallback(async () => {
+    setLoadingUpcoming(true);
+    try {
+      const classrooms = await listClassrooms({ limit: 12, is_active: true });
+      const byClass = await Promise.all(
+        classrooms.map(async (c) => ({
+          classroomId: c.id,
+          classroomName: c.name,
+          sessions: await listClassroomSessions(c.id, 12),
+        })),
+      );
+      const now = Date.now();
+      const items = byClass
+        .flatMap((c) =>
+          c.sessions
+            .filter((s) => s.status !== "canceled" && new Date(s.session_start).getTime() >= now)
+            .map((s) => ({ classroomId: c.classroomId, classroomName: c.classroomName, session: s })),
+        )
+        .sort(
+          (a, b) =>
+            new Date(a.session.session_start).getTime() - new Date(b.session.session_start).getTime(),
+        )
+        .slice(0, 6);
+      setUpcoming(items);
+    } catch {
+      setUpcoming([]);
+    } finally {
+      setLoadingUpcoming(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadUpcoming();
+  }, [loadUpcoming]);
+
+  useTenantRealtime({
+    tenantId,
+    enabled: Boolean(user && tenantId),
+    onSessionsInvalidate: loadUpcoming,
+    onNotificationsInvalidate: loadUpcoming,
+    onMessagesInvalidate: loadUpcoming,
+  });
+
+  const nextClassroom = useMemo(() => upcoming[0], [upcoming]);
+
+  const handleStartClass = async () => {
+    if (!nextClassroom) return;
+    setStartingClassId(nextClassroom.classroomId);
+    try {
+      const start = new Date();
+      const end = new Date(start.getTime() + 60 * 60 * 1000);
+      await createClassroomSession(nextClassroom.classroomId, {
+        session_start: start.toISOString(),
+        session_end: end.toISOString(),
+        notes: "Started from instructor dashboard",
+      });
+      navigate(`/app/classrooms/${nextClassroom.classroomId}`);
+    } finally {
+      setStartingClassId(null);
+    }
+  };
 
   return (
     <div
@@ -47,48 +117,47 @@ export function InstructorDashboard() {
         {/* Today's Classes - large */}
         <div className="dashboard-bento__card dashboard-bento__card--span-2 dashboard-bento__card--row-2 dashboard-bento__card--blue">
           <div className="dashboard-bento__card-header">
-            <div className="dashboard-bento__card-icon" style={{ background: "rgba(28, 176, 246, 0.15)", color: "#1cb0f6" }}>
+            <div className="dashboard-bento__card-icon">
               <Calendar size={24} aria-hidden />
             </div>
           </div>
-          <h2 className="dashboard-bento__card-title">Today&apos;s Classes</h2>
+          <h2 className="dashboard-bento__card-title">Upcoming Classes</h2>
           <p className="dashboard-bento__card-desc">
-            {TODAYS_CLASSES.length} classes scheduled
+            {loadingUpcoming ? "Loading classes..." : `${upcoming.length} sessions coming up`}
           </p>
-          <ul className="dashboard-bento__activity-list" role="list">
-            {TODAYS_CLASSES.map((cls) => (
-              <li key={cls.id} className="dashboard-bento__activity-item" role="listitem">
-                <span className="dashboard-bento__activity-text">
-                  {cls.name} · {cls.time}
-                </span>
-                <span className="dashboard-bento__activity-time">{cls.students} students</span>
-              </li>
-            ))}
-          </ul>
+          {loadingUpcoming ? (
+            <p className="dashboard-bento__activity-time">Fetching scheduled sessions...</p>
+          ) : upcoming.length === 0 ? (
+            <p className="dashboard-bento__activity-time">No upcoming sessions. Start a class from your classroom page.</p>
+          ) : (
+            <ul className="dashboard-bento__activity-list" role="list">
+              {upcoming.map((entry) => (
+                <li key={entry.session.id} className="dashboard-bento__activity-item" role="listitem">
+                  <span className="dashboard-bento__activity-text">
+                    {entry.classroomName}
+                  </span>
+                  <span className="dashboard-bento__activity-time">
+                    {new Date(entry.session.session_start).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {nextClassroom && (
+            <button
+              type="button"
+              className="dashboard-bento__card-action"
+              onClick={handleStartClass}
+              disabled={startingClassId === nextClassroom.classroomId}
+            >
+              {startingClassId === nextClassroom.classroomId ? "Starting..." : "Start class now"}
+              <ArrowRight size={16} aria-hidden />
+            </button>
+          )}
           <Link to="/app/classrooms" className="dashboard-bento__card-action">
             View all <ArrowRight size={16} aria-hidden />
           </Link>
         </div>
-
-        {/* Assignments to Review */}
-        <Link
-          to="/app/classrooms"
-          className="dashboard-bento__card dashboard-bento__card-link dashboard-bento__card--red"
-          aria-label="Assignments to review"
-        >
-          <div className="dashboard-bento__card-header">
-            <div className="dashboard-bento__card-icon" style={{ background: "rgba(255, 75, 75, 0.15)", color: "#ff4b4b" }}>
-              <ClipboardList size={24} aria-hidden />
-            </div>
-          </div>
-          <h2 className="dashboard-bento__card-title">Assignments to Review</h2>
-          <p className="dashboard-bento__card-desc">
-            5 submissions pending
-          </p>
-          <span className="dashboard-bento__card-action">
-            Review <ArrowRight size={16} aria-hidden />
-          </span>
-        </Link>
 
         {/* Course Builder */}
         <Link
@@ -97,7 +166,7 @@ export function InstructorDashboard() {
           aria-label="Course Builder"
         >
           <div className="dashboard-bento__card-header">
-            <div className="dashboard-bento__card-icon" style={{ background: "rgba(88, 204, 2, 0.15)", color: "#58cc02" }}>
+            <div className="dashboard-bento__card-icon">
               <FileEdit size={24} aria-hidden />
             </div>
           </div>
@@ -113,7 +182,7 @@ export function InstructorDashboard() {
         {/* Student Activity */}
         <div className="dashboard-bento__card dashboard-bento__card--span-2 dashboard-bento__card--purple">
           <div className="dashboard-bento__card-header">
-            <div className="dashboard-bento__card-icon" style={{ background: "rgba(206, 130, 255, 0.15)", color: "#ce82ff" }}>
+            <div className="dashboard-bento__card-icon">
               <Users size={24} aria-hidden />
             </div>
           </div>
@@ -141,7 +210,7 @@ export function InstructorDashboard() {
           aria-label="Messages from students"
         >
           <div className="dashboard-bento__card-header">
-            <div className="dashboard-bento__card-icon" style={{ background: "rgba(255, 150, 0, 0.15)", color: "#ff9600" }}>
+            <div className="dashboard-bento__card-icon">
               <MessageSquare size={24} aria-hidden />
             </div>
           </div>

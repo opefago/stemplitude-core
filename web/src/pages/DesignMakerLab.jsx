@@ -1,5 +1,6 @@
 import React, { useEffect, useCallback, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useLabExit } from '../features/labs/useLabExit';
 import RichTip from '../labs/design-maker/RichTip';
 import TC from '../labs/design-maker/tooltipContent';
 import {
@@ -78,6 +79,7 @@ function buildExportScene(objects) {
 
 export default function DesignMakerLab() {
   const navigate = useNavigate();
+  const { exitLab } = useLabExit();
   const fileInputRef = useRef(null);
   const [exportOpen, setExportOpen] = React.useState(false);
   const [dragOver, setDragOver] = React.useState(false);
@@ -694,7 +696,7 @@ export default function DesignMakerLab() {
             </button>
           </RichTip>
           <RichTip label="Exit to Playground">
-            <button className="dml-header-btn dml-exit-btn icon-only" onClick={() => navigate('/playground')}>
+            <button className="dml-header-btn dml-exit-btn icon-only" onClick={exitLab}>
               <X size={18} />
             </button>
           </RichTip>

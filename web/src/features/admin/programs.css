@@ -1,0 +1,335 @@
+/* Programs management page - ClassDojo-inspired flat design */
+
+.programs-page {
+  padding: var(--spacing-lg);
+  max-width: 1200px;
+  margin: 0 auto;
+  background: var(--color-bg);
+}
+
+.programs-page__header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-lg);
+}
+
+.programs-page__title {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.programs-page__header-actions {
+  display: flex;
+  gap: var(--spacing-sm);
+}
+
+.programs-page__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.programs-page__form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--spacing-md);
+}
+
+.programs-page__field--full {
+  grid-column: 1 / -1;
+}
+
+.programs-page__field label {
+  display: block;
+  margin-bottom: var(--spacing-xs);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.programs-page__field input,
+.programs-page__field select,
+.programs-page__field textarea {
+  width: 100%;
+  padding: 12px 14px;
+  border: 2px solid color-mix(in srgb, var(--color-border) 75%, var(--color-secondary) 25%);
+  border-radius: var(--radius-md);
+  font-size: 0.9375rem;
+  color: var(--color-text);
+  background: var(--color-surface);
+}
+
+.programs-page__field textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+.programs-page__field input:focus,
+.programs-page__field select:focus,
+.programs-page__field textarea:focus {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* Narrow override for the ModalDialog content panel */
+.programs-page__dialog {
+  max-width: min(680px, 100%);
+}
+
+/* Filter bar */
+.programs-page__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-lg);
+}
+
+.programs-page__search-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 200px;
+}
+
+.programs-page__search-icon {
+  position: absolute;
+  left: var(--spacing-sm);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--color-text-secondary);
+  pointer-events: none;
+}
+
+.programs-page__search-input {
+  width: 100%;
+  padding: 12px 14px 12px 40px;
+  border: 2px solid color-mix(in srgb, var(--color-border) 75%, var(--color-secondary) 25%);
+  border-radius: var(--radius-md);
+  font-size: 0.9375rem;
+  color: var(--color-text);
+  background: var(--color-surface);
+  transition: border-color var(--transition-fast);
+}
+
+.programs-page__search-input::placeholder {
+  color: var(--color-text-secondary);
+}
+
+.programs-page__search-input:focus {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.programs-page__subtitle {
+  margin: 0 0 var(--spacing-sm);
+  font-size: 0.9375rem;
+  color: var(--color-text-secondary);
+}
+
+/* Cards list */
+.programs-page__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+/* Pagination */
+.programs-page__pagination {
+  margin-top: var(--spacing-md);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+}
+
+.programs-page__pagination-meta {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+  font-weight: 600;
+}
+
+.programs-page__pagination-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.programs-page__pagination-page {
+  font-size: 0.875rem;
+  color: var(--color-text);
+  font-weight: 700;
+}
+
+.programs-page__empty-state {
+  margin-top: var(--spacing-lg);
+  padding: 24px 20px;
+  border: 2px dashed color-mix(in srgb, var(--color-border) 70%, var(--color-secondary) 30%);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--color-secondary) 6%, white);
+  text-align: center;
+}
+
+.programs-page__empty-title {
+  margin: 0 0 6px;
+  font-size: 1.0625rem;
+  font-weight: 800;
+  color: var(--color-text);
+}
+
+.programs-page__empty-hint {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.programs-page__card-title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+  margin-bottom: var(--spacing-xs);
+}
+
+.programs-page__card-title {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.programs-page__card-desc {
+  margin: 0 0 var(--spacing-sm);
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+  line-height: 1.45;
+}
+
+.programs-page__card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-md);
+}
+
+.programs-page__card-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+  padding-top: var(--spacing-lg);
+}
+
+.programs-page__meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+}
+
+.programs-page__meta-item svg {
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+}
+
+/* Status badges */
+.programs-page__badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.programs-page__badge--active {
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--color-success);
+}
+
+.programs-page__badge--upcoming {
+  background: rgba(0, 102, 255, 0.15);
+  color: var(--color-primary);
+}
+
+.programs-page__badge--completed {
+  background: var(--color-border);
+  color: var(--color-text-secondary);
+}
+
+.programs-page__badge--draft {
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--color-warning);
+}
+
+.programs-page__action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 2px solid color-mix(in srgb, var(--color-secondary) 35%, var(--color-border));
+  border-radius: 14px;
+  font-size: 0.875rem;
+  font-weight: 700;
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--color-border) 85%, white);
+  transition: transform var(--transition-fast), background var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.programs-page__action-btn:hover {
+  transform: translateY(-1px);
+  background: color-mix(in srgb, var(--color-secondary) 10%, var(--color-surface));
+  border-color: color-mix(in srgb, var(--color-secondary) 55%, var(--color-border));
+}
+
+.programs-page__action-btn:active {
+  transform: translateY(1px);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--color-border) 85%, white);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .programs-page {
+    padding: var(--spacing-md);
+  }
+
+  .programs-page__form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .programs-page__filters {
+    flex-direction: column;
+  }
+
+  .programs-page__search-wrap {
+    min-width: 100%;
+  }
+
+  .programs-page__card-meta {
+    flex-direction: column;
+  }
+
+  .programs-page__card-detail-actions {
+    flex-direction: column;
+  }
+
+  .programs-page__action-btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .programs-page__pagination {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .programs-page__pagination-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+}

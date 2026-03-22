@@ -1,0 +1,118 @@
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+    depends_on:
+      - api
+
+  api:
+    build: .
+    expose:
+      - "8000"
+    depends_on:
+      - db
+      - redis
+      - localstack
+    env_file: .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://stem:stem@db:5432/stemplitude
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - S3_ENDPOINT_URL=http://localstack:4566
+      - S3_ACCESS_KEY_ID=test
+      - S3_SECRET_ACCESS_KEY=test
+      - S3_BUCKET_NAME=stemplitude-assets
+
+  celery_worker:
+    build: .
+    command: celery -A workers.celery_app worker --loglevel=info --concurrency=4
+    depends_on:
+      - db
+      - redis
+      - localstack
+    env_file: .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://stem:stem@db:5432/stemplitude
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - S3_ENDPOINT_URL=http://localstack:4566
+
+  celery_beat:
+    build: .
+    command: celery -A workers.celery_app beat --loglevel=info
+    depends_on:
+      - db
+      - redis
+    env_file: .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://stem:stem@db:5432/stemplitude
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+
+  db:
+    image: postgres:16-alpine
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: stem
+      POSTGRES_PASSWORD: stem
+      POSTGRES_DB: stemplitude
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  localstack:
+    image: localstack/localstack:latest
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=s3
+      - DEFAULT_REGION=us-east-1
+      - EAGER_SERVICE_LOADING=1
+    volumes:
+      - localstack_data:/var/lib/localstack
+      - ./scripts/localstack-init.sh:/etc/localstack/init/ready.d/init.sh:ro
+
+  migrate:
+    build: .
+    command: python -m app.manage db migrate
+    depends_on:
+      - db
+    env_file: .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://stem:stem@db:5432/stemplitude
+
+  seed:
+    build: .
+    command: python -m app.manage db seed
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    env_file: .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://stem:stem@db:5432/stemplitude
+
+  create-superadmin:
+    build: .
+    command: python -m app.manage users create-superadmin
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    env_file: .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://stem:stem@db:5432/stemplitude
+
+volumes:
+  pgdata:
+  localstack_data:

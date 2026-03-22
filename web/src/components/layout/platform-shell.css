@@ -1,0 +1,17 @@
+/* Platform shell - header only, no sidebar */
+
+.platform-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+.platform-shell__content {
+  flex: 1;
+  padding: var(--spacing-lg, 24px);
+}
+
+.platform-shell__content:focus {
+  outline: none;
+}

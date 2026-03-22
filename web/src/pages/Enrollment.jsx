@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { DatePicker } from '../components/ui';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Check, CreditCard, Calendar, Users, Shield, ArrowRight } from 'lucide-react';
@@ -347,13 +348,11 @@ const Enrollment = () => {
 
                   <div className="form-group">
                     <label htmlFor="startDate">Preferred Start Date *</label>
-                    <input
-                      type="date"
+                    <DatePicker
                       id="startDate"
-                      name="startDate"
                       value={formData.startDate}
-                      onChange={handleChange}
-                      required
+                      onChange={(val) => setFormData((prev) => ({ ...prev, startDate: val }))}
+                      placeholder="Select start date"
                     />
                   </div>
                 </div>

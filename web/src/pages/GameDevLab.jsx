@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
-import { Link } from 'react-router-dom';
 import { X, Save, FolderOpen, Download, Plus } from 'lucide-react';
+import { useLabExit } from '../features/labs/useLabExit';
 import './Labs.css';
 
 const MAKECODE_URL = 'https://arcade.makecode.com';
 
 const GameDevLab = () => {
+  const { exitLab } = useLabExit();
   const iframeRef = useRef(null);
   const [projectName, setProjectName] = useState('My Game');
   const [isSaving, setIsSaving] = useState(false);
@@ -113,10 +114,10 @@ const GameDevLab = () => {
           )}
         </div>
 
-        <Link to="/playground" className="gamedev-exit-btn">
+        <button type="button" className="gamedev-exit-btn" onClick={exitLab}>
           <X size={20} />
           Exit Lab
-        </Link>
+        </button>
       </div>
 
       {/* MakeCode Arcade */}

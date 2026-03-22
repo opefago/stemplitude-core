@@ -937,7 +937,7 @@ export class GameEngine {
         _drawW: w, _drawH: h,
         _frames: hasFrames ? custom.frames : null,
         _fps: hasFrames ? (custom.fps || 4) : 0,
-        _animate: hasFrames,
+        _animate: false,
         _frameIdx: 0,
         flipX: false, flipY: false,
         visible: true, rotation: 0, opacity: 1, layer: 0,
@@ -965,7 +965,7 @@ export class GameEngine {
       _drawW: first.width, _drawH: first.height,
       _frames: frames.length > 1 ? frames : null,
       _fps: info.fps || 4,
-      _animate: frames.length > 1,
+      _animate: false,
       _frameIdx: 0,
       flipX: false, flipY: false,
       visible: true, rotation: 0, opacity: 1, layer: 0,
@@ -1648,8 +1648,11 @@ export class GameEngine {
         case 'sprite': {
           let frame = obj._canvas;
           if (obj._frames && obj._animate) {
-            const interval = Math.max(1, Math.round(60 / obj._fps));
-            const idx = Math.floor(this.frameCount / interval) % obj._frames.length;
+            const interval = Math.max(1, Math.round(60 / (obj._fps || 8)));
+            const start = obj._animStart != null ? Math.max(0, Math.min(obj._animStart, obj._frames.length - 1)) : 0;
+            const end = obj._animEnd != null ? Math.max(0, Math.min(obj._animEnd, obj._frames.length - 1)) : obj._frames.length - 1;
+            const count = Math.max(1, end >= start ? end - start + 1 : 1);
+            const idx = start + (Math.floor(this.frameCount / interval) % count);
             frame = obj._frames[idx];
             obj._frameIdx = idx;
           } else if (obj._frames) {

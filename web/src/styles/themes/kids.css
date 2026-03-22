@@ -1,0 +1,115 @@
+[data-ui-mode="kids"] {
+  --font-family: "Nunito", system-ui, sans-serif;
+  --font-size-base: 20px;
+  --radius-md: 20px;
+  --radius-lg: 28px;
+  --spacing-md: 24px;
+  --spacing-lg: 32px;
+  --target-min: 56px;
+  --grid-cols: 2;
+  --nav-width: 0;
+  --nav-width-collapsed: 0;
+}
+
+/* Kids mode – larger, bolder typography for readability */
+[data-ui-mode="kids"] .dashboard-bento__greeting {
+  font-size: 2.25rem;
+  font-weight: 900;
+}
+
+[data-ui-mode="kids"] .dashboard-bento__subtitle {
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+[data-ui-mode="kids"] .dashboard-bento__card-title {
+  font-size: 1.5rem;
+  font-weight: 800;
+}
+
+[data-ui-mode="kids"] .dashboard-bento__card-desc {
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+[data-ui-mode="kids"] .dashboard-bento__card-action {
+  font-size: 1.125rem;
+  font-weight: 800;
+}
+
+[data-ui-mode="kids"] .dashboard-bento__activity-item {
+  font-size: 1.0625rem;
+  font-weight: 700;
+}
+
+[data-ui-mode="kids"] .dashboard-bento__activity-text {
+  font-weight: 700;
+}
+
+[data-ui-mode="kids"] .dashboard-bento__activity-time {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+[data-ui-mode="kids"] .dashboard-bento__streak {
+  font-size: 1.125rem;
+  font-weight: 800;
+}
+
+/* Labs – larger, bolder text */
+[data-ui-mode="kids"] .lab-launcher__title {
+  font-size: 2rem;
+  font-weight: 900;
+}
+
+[data-ui-mode="kids"] .lab-launcher__subtitle {
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+[data-ui-mode="kids"] .lab-launcher__card-title {
+  font-size: 1.625rem;
+  font-weight: 800;
+}
+
+[data-ui-mode="kids"] .lab-launcher__card-desc {
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+/* Achievements – larger, bolder text */
+[data-ui-mode="kids"] .achievements__title {
+  font-size: 2rem;
+  font-weight: 900;
+}
+
+[data-ui-mode="kids"] .achievements__subtitle {
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+[data-ui-mode="kids"] .achievements__section-title {
+  font-size: 1.375rem;
+  font-weight: 800;
+}
+
+[data-ui-mode="kids"] .achievements__badge-name {
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+/* Student dashboard specifics */
+[data-ui-mode="kids"] .student-dashboard__level {
+  font-size: 1.25rem;
+  font-weight: 800;
+}
+
+[data-ui-mode="kids"] .student-dashboard__xp-labels {
+  font-size: 1.125rem;
+  font-weight: 800;
+}
+
+[data-ui-mode="kids"] .student-dashboard__lab-chip {
+  font-size: 1.0625rem;
+  font-weight: 800;
+}

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Flame,
@@ -11,6 +11,8 @@ import {
 } from "lucide-react";
 import { useAuth } from "../../providers/AuthProvider";
 import { useTenant } from "../../providers/TenantProvider";
+import { useTenantRealtime } from "../../hooks/useTenantRealtime";
+import { listConversations, type Conversation } from "../../lib/api/messaging";
 import { ProgressBar } from "../../components/ui";
 import "../../components/ui/ui.css";
 import "./dashboard-bento.css";
@@ -23,7 +25,7 @@ const CHILDREN = [
 
 const UPCOMING_SESSIONS = [
   { id: "1", title: "Robotics 101", time: "Mon 3pm" },
-  { id: "2", title: "Game Dev", time: "Wed 2pm" },
+  { id: "2", title: "Game Maker", time: "Wed 2pm" },
   { id: "3", title: "Circuit Design", time: "Thu 10am" },
 ];
 
@@ -40,30 +42,40 @@ const RECENT_ACHIEVEMENTS = [
   { id: "3", name: "5-Day Streak", icon: "🔥" },
 ];
 
-const INSTRUCTOR_MESSAGES = [
-  {
-    id: "1",
-    from: "Ms. Chen",
-    subject: "Great progress on Circuit Design!",
-    preview: "Alex has been doing wonderfully in class...",
-    unread: true,
-  },
-  {
-    id: "2",
-    from: "Mr. Torres",
-    subject: "Robotics 101 - Session reminder",
-    preview: "Reminder: Robotics session tomorrow at 3pm...",
-    unread: true,
-  },
-];
-
 export function ParentDashboard() {
   const { user } = useAuth();
   const { tenant } = useTenant();
   const [activeChildId, setActiveChildId] = useState(CHILDREN[0].id);
+  const [inboxThreads, setInboxThreads] = useState<Conversation[]>([]);
+  const [inboxLoading, setInboxLoading] = useState(true);
 
   const firstName = user?.firstName ?? "Parent";
   const tenantName = tenant?.name ?? "";
+  const tenantId = tenant?.id ?? user?.tenantId;
+
+  const loadInbox = useCallback(async () => {
+    setInboxLoading(true);
+    try {
+      const conv = await listConversations().catch(() => ({ items: [], total: 0 }));
+      setInboxThreads(conv.items.slice(0, 4));
+    } catch {
+      setInboxThreads([]);
+    } finally {
+      setInboxLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadInbox();
+  }, [loadInbox]);
+
+  useTenantRealtime({
+    tenantId,
+    enabled: Boolean(user && tenantId),
+    onSessionsInvalidate: loadInbox,
+    onNotificationsInvalidate: loadInbox,
+    onMessagesInvalidate: loadInbox,
+  });
 
   const handleCancelSession = (sessionTitle: string) => {
     alert(`Cancel session "${sessionTitle}"? (Placeholder - no action)`);
@@ -126,13 +138,7 @@ export function ParentDashboard() {
             <div className="dashboard-bento__card dashboard-bento__card--span-2 dashboard-bento__card--row-2 dashboard-bento__card--green">
               <div className="dashboard-bento__card-header">
                 <h2 className="dashboard-bento__card-title">Child Progress</h2>
-                <div
-                  className="dashboard-bento__card-icon"
-                  style={{
-                    background: "color-mix(in srgb, #58cc02 15%, transparent)",
-                    color: "#58cc02",
-                  }}
-                >
+                <div className="dashboard-bento__card-icon">
                   <TrendingUp size={24} aria-hidden />
                 </div>
               </div>
@@ -200,36 +206,44 @@ export function ParentDashboard() {
             >
               <div className="dashboard-bento__card-header">
                 <h2 className="dashboard-bento__card-title">Teacher Messages</h2>
-                <div
-                  className="dashboard-bento__card-icon"
-                  style={{
-                    background: "color-mix(in srgb, #1cb0f6 15%, transparent)",
-                    color: "#1cb0f6",
-                  }}
-                >
+                <div className="dashboard-bento__card-icon">
                   <MessageSquare size={24} aria-hidden />
                 </div>
               </div>
               <div className="parent-dashboard__messages-preview">
-                {INSTRUCTOR_MESSAGES.map((msg) => (
-                  <div
-                    key={msg.id}
-                    className={`parent-dashboard__message-preview ${
-                      msg.unread ? "parent-dashboard__message-preview--unread" : ""
-                    }`}
-                  >
-                    <span className="parent-dashboard__message-from">
-                      {msg.from}
-                      {msg.unread && (
-                        <span
-                          className="parent-dashboard__message-unread"
-                          aria-label="Unread"
-                        />
-                      )}
-                    </span>
-                    <p className="parent-dashboard__message-text">{msg.preview}</p>
-                  </div>
-                ))}
+                {inboxLoading ? (
+                  <p className="parent-dashboard__message-text">Loading messages…</p>
+                ) : inboxThreads.length === 0 ? (
+                  <p className="parent-dashboard__message-text">
+                    No recent conversations. School updates may appear in Notifications.
+                  </p>
+                ) : (
+                  inboxThreads.map((thread) => {
+                    const unread = thread.unread_count > 0;
+                    const preview =
+                      thread.last_message?.body?.trim() ||
+                      (thread.classroom_id ? "Class conversation" : "Open to view messages");
+                    return (
+                      <div
+                        key={thread.id}
+                        className={`parent-dashboard__message-preview ${
+                          unread ? "parent-dashboard__message-preview--unread" : ""
+                        }`}
+                      >
+                        <span className="parent-dashboard__message-from">
+                          {thread.display_name}
+                          {unread && (
+                            <span
+                              className="parent-dashboard__message-unread"
+                              aria-label="Unread"
+                            />
+                          )}
+                        </span>
+                        <p className="parent-dashboard__message-text">{preview}</p>
+                      </div>
+                    );
+                  })
+                )}
               </div>
               <span className="dashboard-bento__card-action">
                 View all messages <ChevronRight size={14} aria-hidden />

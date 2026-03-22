@@ -4,6 +4,7 @@ import {
   Square, Minus, Circle, Type,
   FlipHorizontal, FlipVertical, Copy, Clipboard,
   ZoomIn, ZoomOut, Plus, Play, Pause, CopyPlus,
+  Undo2, Redo2,
 } from 'lucide-react';
 import './PixelArtEditor.css';
 
@@ -22,6 +23,19 @@ const BG_GRID_SIZES = [
   { w: 60, h: 40, label: '60x40' },
 ];
 const SHAPE_TOOLS = ['rect', 'line', 'circle'];
+const BRUSH_SIZES = [1, 3, 5];
+
+function getBrushCells(cx, cy, size, cols, rows) {
+  const half = Math.floor(size / 2);
+  const cells = [];
+  for (let dy = -half; dy <= half; dy++) {
+    for (let dx = -half; dx <= half; dx++) {
+      const x = cx + dx, y = cy + dy;
+      if (x >= 0 && x < cols && y >= 0 && y < rows) cells.push([x, y]);
+    }
+  }
+  return cells;
+}
 
 function makeGrid(w, h) {
   const rows = h || w;
@@ -128,6 +142,7 @@ export default function PixelArtEditor({ defaultName, onSave, onClose, mode = 's
   const [activeFrame, setActiveFrame] = useState(0);
   const [color, setColor] = useState('#ff0000');
   const [tool, setTool] = useState('pencil');
+  const [brushSize, setBrushSize] = useState(1);
   const [name, setName] = useState(defaultName || '');
   const [zoomLevel, setZoomLevel] = useState(0);
   const [clipboardGrid, setClipboardGrid] = useState(null);
@@ -137,24 +152,77 @@ export default function PixelArtEditor({ defaultName, onSave, onClose, mode = 's
   const [textValue, setTextValue] = useState('A');
   const [fps, setFps] = useState(4);
   const [playing, setPlaying] = useState(false);
+  const [customW, setCustomW] = useState(initW);
+  const [customH, setCustomH] = useState(initH);
   const gridRef = useRef(null);
-
-  useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  const historyRef = useRef({ past: [], future: [] });
+  const isUndoRedoRef = useRef(false);
+  const [historyLen, setHistoryLen] = useState({ past: 0, future: 0 });
 
   const grid = frames[activeFrame] || makeGrid(gridW, gridH);
 
-  const updateGrid = useCallback((updater) => {
+  const pushHistory = useCallback(() => {
+    if (isUndoRedoRef.current) return;
+    const snapshot = frames.map(f => f.map(r => [...r]));
+    historyRef.current.past.push({ frames: snapshot, activeFrame });
+    historyRef.current.future = [];
+    if (historyRef.current.past.length > 50) historyRef.current.past.shift();
+    setHistoryLen({ past: historyRef.current.past.length, future: 0 });
+  }, [frames, activeFrame]);
+
+  const undo = useCallback(() => {
+    if (historyRef.current.past.length === 0 || playing) return;
+    isUndoRedoRef.current = true;
+    const prev = historyRef.current.past.pop();
+    historyRef.current.future.push({ frames: frames.map(f => f.map(r => [...r])), activeFrame });
+    setFrames(prev.frames);
+    setActiveFrame(prev.activeFrame);
+    setHistoryLen({ past: historyRef.current.past.length, future: historyRef.current.future.length });
+    isUndoRedoRef.current = false;
+  }, [frames, activeFrame, playing]);
+
+  const redo = useCallback(() => {
+    if (historyRef.current.future.length === 0 || playing) return;
+    isUndoRedoRef.current = true;
+    const next = historyRef.current.future.pop();
+    historyRef.current.past.push({ frames: frames.map(f => f.map(r => [...r])), activeFrame });
+    setFrames(next.frames);
+    setActiveFrame(next.activeFrame);
+    setHistoryLen({ past: historyRef.current.past.length, future: historyRef.current.future.length });
+    isUndoRedoRef.current = false;
+  }, [frames, activeFrame, playing]);
+
+  const updateGrid = useCallback((updater, skipHistory = false) => {
+    if (!skipHistory) pushHistory();
     setFrames(prev => {
       const copy = [...prev];
       const old = copy[activeFrame] || makeGrid(gridW, gridH);
       copy[activeFrame] = typeof updater === 'function' ? updater(old) : updater;
       return copy;
     });
-  }, [activeFrame, gridW, gridH]);
+  }, [activeFrame, gridW, gridH, pushHistory]);
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape') onClose();
+      if (e.target.closest('input, textarea')) return;
+      const ctrl = e.ctrlKey || e.metaKey;
+      if (ctrl && e.key === 'z') { e.preventDefault(); undo(); return; }
+      if (ctrl && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) { e.preventDefault(); redo(); return; }
+      if (ctrl) return;
+      if (e.key === 'p' || e.key === 'b') { e.preventDefault(); setTool('pencil'); return; }
+      if (e.key === 'e') { e.preventDefault(); setTool('eraser'); return; }
+      if (e.key === 'g') { e.preventDefault(); setTool('fill'); return; }
+      if (e.key === 'l') { e.preventDefault(); setTool('line'); return; }
+      if (e.key === 'u') { e.preventDefault(); setTool('rect'); return; }
+      if (e.key === 'c') { e.preventDefault(); setTool('circle'); return; }
+      if (e.key === 't') { e.preventDefault(); setTool('text'); return; }
+      if (e.key === ',' || e.key === '<') { e.preventDefault(); setBrushSize(s => { const i = BRUSH_SIZES.indexOf(s); const idx = i < 0 ? 0 : (i > 0 ? i - 1 : BRUSH_SIZES.length - 1); return BRUSH_SIZES[idx]; }); return; }
+      if (e.key === '.' || e.key === '>') { e.preventDefault(); setBrushSize(s => { const i = BRUSH_SIZES.indexOf(s); const idx = i < 0 ? 0 : (i < BRUSH_SIZES.length - 1 ? i + 1 : 0); return BRUSH_SIZES[idx]; }); return; }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose, undo, redo]);
 
   // ========== Animation preview ==========
   useEffect(() => {
@@ -185,6 +253,15 @@ export default function PixelArtEditor({ defaultName, onSave, onClose, mode = 's
   , [frames, gridW, gridH]);
 
   // ========== Pointer handlers ==========
+  const applyBrush = useCallback((g, x, y, value) => {
+    const copy = g.map(r => [...r]);
+    const cells = (tool === 'pencil' || tool === 'eraser')
+      ? getBrushCells(x, y, brushSize, gridW, gridH)
+      : [[x, y]];
+    for (const [px, py] of cells) copy[py][px] = value;
+    return copy;
+  }, [tool, brushSize, gridW, gridH]);
+
   const handlePointerDown = useCallback((x, y) => {
     if (playing) return;
     if (SHAPE_TOOLS.includes(tool)) {
@@ -206,13 +283,10 @@ export default function PixelArtEditor({ defaultName, onSave, onClose, mode = 's
     if (tool === 'fill') {
       updateGrid(g => floodFill(g, x, y, color));
     } else {
-      updateGrid(g => {
-        const copy = g.map(r => [...r]);
-        copy[y][x] = tool === 'eraser' ? 'transparent' : color;
-        return copy;
-      });
+      const value = tool === 'eraser' ? 'transparent' : color;
+      updateGrid(g => applyBrush(g, x, y, value));
     }
-  }, [tool, color, textValue, gridW, gridH, updateGrid, playing]);
+  }, [tool, color, textValue, gridW, gridH, updateGrid, applyBrush, playing]);
 
   const handlePointerMove = useCallback((x, y) => {
     if (SHAPE_TOOLS.includes(tool) && shapeStart) {
@@ -220,13 +294,10 @@ export default function PixelArtEditor({ defaultName, onSave, onClose, mode = 's
       return;
     }
     if (isPainting && tool !== 'fill' && tool !== 'text') {
-      updateGrid(g => {
-        const copy = g.map(r => [...r]);
-        copy[y][x] = tool === 'eraser' ? 'transparent' : color;
-        return copy;
-      });
+      const value = tool === 'eraser' ? 'transparent' : color;
+      updateGrid(g => applyBrush(g, x, y, value), true);
     }
-  }, [tool, isPainting, color, shapeStart, updateGrid]);
+  }, [tool, isPainting, color, shapeStart, updateGrid, applyBrush]);
 
   const handlePointerUp = useCallback(() => {
     setIsPainting(false);
@@ -251,13 +322,30 @@ export default function PixelArtEditor({ defaultName, onSave, onClose, mode = 's
   const pasteFrame = () => { if (clipboardGrid) updateGrid(clipboardGrid.map(r => [...r])); };
   const clearFrame = () => updateGrid(makeGrid(gridW, gridH));
 
+  const clearHistory = useCallback(() => {
+    historyRef.current = { past: [], future: [] };
+    setHistoryLen({ past: 0, future: 0 });
+  }, []);
+
   const changeSize = (w, h) => {
+    const hVal = h || w;
     setGridW(w);
-    setGridH(h || w);
-    setFrames([makeGrid(w, h || w)]);
+    setGridH(hVal);
+    setCustomW(w);
+    setCustomH(hVal);
+    setFrames([makeGrid(w, hVal)]);
     setActiveFrame(0);
     setZoomLevel(0);
     setPlaying(false);
+    clearHistory();
+  };
+
+  const applyCustomSize = () => {
+    const minDim = isBg ? 10 : 4;
+    const maxDim = isBg ? 240 : 128;
+    const w = Math.max(minDim, Math.min(maxDim, Math.round(customW) || minDim));
+    const h = Math.max(minDim, Math.min(maxDim, Math.round(customH) || minDim));
+    changeSize(w, h);
   };
 
   const addFrame = () => {
@@ -316,67 +404,118 @@ export default function PixelArtEditor({ defaultName, onSave, onClose, mode = 's
           <button className="pae-close" onClick={onClose}><X size={18} /></button>
         </div>
 
-        {/* Toolbar */}
-        <div className="pae-toolbar">
-          <div className="pae-tool-group">
-            {[
-              ['pencil', Pencil, 'Pencil'],
-              ['eraser', Eraser, 'Eraser'],
-              ['fill', PaintBucket, 'Fill'],
-              ['rect', Square, 'Rectangle'],
-              ['line', Minus, 'Line'],
-              ['circle', Circle, 'Circle'],
-              ['text', Type, 'Text'],
-            ].map(([id, Icon, tip]) => (
-              <button
-                key={id}
-                className={`pae-tool ${tool === id ? 'active' : ''}`}
-                onClick={() => setTool(id)}
-                title={tip}
-              >
-                <Icon size={15} />
-              </button>
-            ))}
-            {tool === 'text' && (
+        {/* Top toolbar: zoom, dimensions, copy, paste, delete */}
+        <div className="pae-top-toolbar">
+          <div className="pae-top-group">
+            <button className={`pae-tool ${historyLen.past ? '' : 'disabled'}`} onClick={undo} title="Undo (Ctrl+Z)"><Undo2 size={16} /></button>
+            <button className={`pae-tool ${historyLen.future ? '' : 'disabled'}`} onClick={redo} title="Redo (Ctrl+Y)"><Redo2 size={16} /></button>
+          </div>
+          <div className="pae-top-group">
+            <button className="pae-tool" onClick={() => setZoomLevel(z => Math.min(z + 1, 5))} title="Zoom In"><ZoomIn size={16} /></button>
+            <button className="pae-tool" onClick={() => setZoomLevel(z => Math.max(z - 1, -3))} title="Zoom Out"><ZoomOut size={16} /></button>
+          </div>
+          <div className="pae-top-group pae-top-dimensions">
+            <div className="pae-sizes pae-sizes-horiz">
+              {isBg ? BG_GRID_SIZES.map(s => (
+                <button key={s.label} className={`pae-size-btn ${gridW === s.w && gridH === s.h ? 'active' : ''}`} onClick={() => changeSize(s.w, s.h)}>
+                  {s.label}
+                </button>
+              )) : GRID_SIZES.map(s => (
+                <button key={s} className={`pae-size-btn ${gridW === s && gridH === s ? 'active' : ''}`} onClick={() => changeSize(s)}>
+                  {s}×{s}
+                </button>
+              ))}
+            </div>
+            <div className="pae-custom-size">
               <input
-                className="pae-text-input"
-                value={textValue}
-                onChange={e => setTextValue(e.target.value)}
-                maxLength={8}
-                placeholder="Text"
-                title="Type text, then click on canvas to place"
+                type="number"
+                className="pae-dim-input"
+                value={customW}
+                onChange={e => setCustomW(Math.max(1, +(e.target.value) || 1))}
+                min={isBg ? 10 : 4}
+                max={isBg ? 240 : 128}
+                title="Width"
               />
-            )}
-          </div>
-          <div className="pae-tool-sep" />
-          <div className="pae-tool-group">
-            <button className="pae-tool" onClick={flipH} title="Flip Horizontal"><FlipHorizontal size={15} /></button>
-            <button className="pae-tool" onClick={flipV} title="Flip Vertical"><FlipVertical size={15} /></button>
-            <button className="pae-tool" onClick={copyFrame} title="Copy Frame"><Copy size={15} /></button>
-            <button className={`pae-tool ${clipboardGrid ? '' : 'disabled'}`} onClick={pasteFrame} title="Paste Frame"><Clipboard size={15} /></button>
-            <button className="pae-tool" onClick={clearFrame} title="Clear Frame"><Trash2 size={15} /></button>
-          </div>
-          <div className="pae-tool-sep" />
-          <div className="pae-tool-group">
-            <button className="pae-tool" onClick={() => setZoomLevel(z => Math.min(z + 1, 5))} title="Zoom In"><ZoomIn size={15} /></button>
-            <button className="pae-tool" onClick={() => setZoomLevel(z => Math.max(z - 1, -3))} title="Zoom Out"><ZoomOut size={15} /></button>
-          </div>
-          <div className="pae-tool-sep" />
-          <div className="pae-tool-group pae-sizes">
-            {isBg ? BG_GRID_SIZES.map(s => (
-              <button key={s.label} className={`pae-size-btn ${gridW === s.w && gridH === s.h ? 'active' : ''}`} onClick={() => changeSize(s.w, s.h)}>
-                {s.label}
+              <span className="pae-dim-sep">×</span>
+              <input
+                type="number"
+                className="pae-dim-input"
+                value={customH}
+                onChange={e => setCustomH(Math.max(1, +(e.target.value) || 1))}
+                min={isBg ? 10 : 4}
+                max={isBg ? 240 : 128}
+                title="Height"
+              />
+              <button className="pae-apply-btn" onClick={applyCustomSize} title="Apply custom size">
+                Apply
               </button>
-            )) : GRID_SIZES.map(s => (
-              <button key={s} className={`pae-size-btn ${gridW === s && gridH === s ? 'active' : ''}`} onClick={() => changeSize(s)}>
-                {s}x{s}
-              </button>
-            ))}
+            </div>
+          </div>
+          <div className="pae-top-group">
+            <button className="pae-tool" onClick={flipH} title="Flip Horizontal"><FlipHorizontal size={16} /></button>
+            <button className="pae-tool" onClick={flipV} title="Flip Vertical"><FlipVertical size={16} /></button>
+          </div>
+          <div className="pae-top-group">
+            <button className="pae-tool" onClick={copyFrame} title="Copy Frame"><Copy size={16} /></button>
+            <button className={`pae-tool ${clipboardGrid ? '' : 'disabled'}`} onClick={pasteFrame} title="Paste Frame"><Clipboard size={16} /></button>
+            <button className="pae-tool" onClick={clearFrame} title="Clear Frame"><Trash2 size={16} /></button>
           </div>
         </div>
 
-        {/* Body: canvas + palette */}
+        {/* Body: sidebar + canvas + palette */}
         <div className="pae-body">
+          {/* Left toolbar */}
+          <div className="pae-sidebar">
+            <div className="pae-sidebar-section">
+              <div className="pae-tool-stack">
+                {[
+                  ['pencil', Pencil, 'Pencil (P)'],
+                  ['eraser', Eraser, 'Eraser (E)'],
+                  ['fill', PaintBucket, 'Fill (G)'],
+                  ['rect', Square, 'Rectangle (U)'],
+                  ['line', Minus, 'Line (L)'],
+                  ['circle', Circle, 'Circle (C)'],
+                  ['text', Type, 'Text (T)'],
+                ].map(([id, Icon, tip]) => (
+                  <button
+                    key={id}
+                    className={`pae-tool ${tool === id ? 'active' : ''}`}
+                    onClick={() => setTool(id)}
+                    title={tip}
+                  >
+                    <Icon size={16} />
+                  </button>
+                ))}
+              </div>
+              {tool === 'text' && (
+                <input
+                  className="pae-text-input pae-sidebar-input"
+                  value={textValue}
+                  onChange={e => setTextValue(e.target.value)}
+                  maxLength={8}
+                  placeholder="Text"
+                  title="Type text, then click on canvas to place"
+                />
+              )}
+              {(tool === 'pencil' || tool === 'eraser') && (
+                <div className="pae-brush-sizes pae-brush-sizes-vert">
+                  {BRUSH_SIZES.map(s => (
+                    <button
+                      key={s}
+                      className={`pae-brush-btn ${brushSize === s ? 'active' : ''}`}
+                      onClick={() => setBrushSize(s)}
+                      title={`Brush ${s}×${s}`}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Canvas + palette */}
+          <div className="pae-content">
           <div className="pae-canvas-area">
             <div
               className="pae-grid-wrap"
@@ -427,6 +566,7 @@ export default function PixelArtEditor({ defaultName, onSave, onClose, mode = 's
                 style={color !== 'transparent' ? { background: color } : undefined}
               />
             </div>
+          </div>
           </div>
         </div>
 

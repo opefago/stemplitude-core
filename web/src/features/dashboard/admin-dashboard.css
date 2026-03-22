@@ -1,5 +1,67 @@
 /* Admin Dashboard – Bento overrides */
 
+/* ── Explicit puzzle-fit bento grid ─────────────────────────── */
+/*
+  Desktop 4-col layout:
+  Col:  [ 1 ]          [ 2 ]          [ 3 ]         [ 4 ]
+  Row 1: Active Classes ——————————     Enrollment    Announcements
+  Row 2: Active Classes ——————————     Revenue       Announcements
+  Row 3: Instructor Activity ——————————————————————————————————
+*/
+.admin-dashboard__card--classes {
+  grid-column: 1 / span 2;
+  grid-row: 1 / span 2;
+}
+
+.admin-dashboard__card--enrollment {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+.admin-dashboard__card--revenue {
+  grid-column: 3;
+  grid-row: 2;
+}
+
+.admin-dashboard__card--announcements {
+  grid-column: 4;
+  grid-row: 1 / span 2;
+}
+
+.admin-dashboard__card--activity {
+  grid-column: 1 / span 4;
+  grid-row: 3;
+}
+
+/* Tablet (2-col): reset explicit placement, use DOM order */
+@media (max-width: 1024px) {
+  .admin-dashboard__card--classes,
+  .admin-dashboard__card--enrollment,
+  .admin-dashboard__card--revenue,
+  .admin-dashboard__card--announcements,
+  .admin-dashboard__card--activity {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+  /* Full-width cards on 2-col tablet */
+  .admin-dashboard__card--classes      { grid-column: span 2; }
+  .admin-dashboard__card--activity     { grid-column: span 2; }
+  .admin-dashboard__card--announcements { grid-column: span 2; }
+}
+
+/* Mobile (1-col): all auto */
+@media (max-width: 600px) {
+  .admin-dashboard__card--classes,
+  .admin-dashboard__card--enrollment,
+  .admin-dashboard__card--revenue,
+  .admin-dashboard__card--announcements,
+  .admin-dashboard__card--activity {
+    grid-column: auto;
+    grid-row: auto;
+  }
+}
+
 .admin-dashboard__header-row {
   display: flex;
   align-items: flex-start;
@@ -17,7 +79,7 @@
   color: white;
   border-radius: 12px;
   text-decoration: none;
-  font-size: 0.875rem;
+  font-size: 1rem;
   font-weight: 700;
   border: 2px solid var(--color-primary-dark, #46a302);
   box-shadow: 0 3px 0 var(--color-primary-dark, #46a302);
@@ -29,6 +91,45 @@
   box-shadow: 0 4px 0 var(--color-primary-dark, #46a302);
 }
 
+.admin-dashboard__announcement-banner {
+  margin-bottom: var(--spacing-md, 16px);
+  border: 2px solid #ef4444;
+  background: linear-gradient(135deg, #fff1f2, #ffe4e6);
+  border-radius: 14px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #ef4444 20%, transparent);
+}
+
+.admin-dashboard__announcement-banner-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  background: #ef4444;
+  color: white;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.admin-dashboard__announcement-banner p {
+  margin: 2px 0 0;
+  color: #7f1d1d;
+  font-size: 0.92rem;
+}
+
+.admin-dashboard__announcement-banner-link {
+  margin-left: auto;
+  text-decoration: none;
+  color: #7f1d1d;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .admin-dashboard__stat-block {
   display: flex;
   flex-direction: column;
@@ -37,13 +138,13 @@
 }
 
 .admin-dashboard__stat-value {
-  font-size: 1.5rem;
+  font-size: 1.625rem;
   font-weight: 800;
   color: var(--color-text, #1e293b);
 }
 
 .admin-dashboard__stat-label {
-  font-size: 0.8125rem;
+  font-size: 0.9375rem;
   font-weight: 600;
   color: var(--color-text-secondary, #64748b);
 }
@@ -52,7 +153,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 0.8125rem;
+  font-size: 0.9375rem;
   font-weight: 600;
   color: #10b981;
   margin-bottom: var(--spacing-sm, 10px);
@@ -78,13 +179,13 @@
 }
 
 .admin-dashboard__class-name {
-  font-size: 0.9375rem;
+  font-size: 1.0625rem;
   font-weight: 600;
   color: var(--color-text, #1e293b);
 }
 
 .admin-dashboard__class-meta {
-  font-size: 0.8125rem;
+  font-size: 0.9375rem;
   color: var(--color-text-secondary, #64748b);
 }
 
@@ -111,21 +212,21 @@
 }
 
 .admin-dashboard__announcement-date {
-  font-size: 0.75rem;
+  font-size: 0.875rem;
   font-weight: 600;
   color: var(--color-text-secondary, #64748b);
 }
 
 .admin-dashboard__announcement-title {
   margin: 4px 0 6px;
-  font-size: 0.9375rem;
+  font-size: 1.0625rem;
   font-weight: 700;
   color: var(--color-text, #1e293b);
 }
 
 .admin-dashboard__announcement-preview {
   margin: 0;
-  font-size: 0.8125rem;
+  font-size: 0.9375rem;
   color: var(--color-text-secondary, #64748b);
   line-height: 1.4;
 }

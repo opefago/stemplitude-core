@@ -1,0 +1,630 @@
+/* ============================================================
+   Achievements Page – Duolingo-inspired, fully themed
+   ============================================================ */
+
+/* ── Page shell ─────────────────────────────────────────────── */
+.achievements {
+  padding: var(--spacing-lg);
+  max-width: 860px;
+  margin: 0 auto;
+}
+
+/* ── Header ─────────────────────────────────────────────────── */
+.achievements__header {
+  margin-bottom: var(--spacing-xl);
+  text-align: center;
+}
+
+.achievements__title {
+  font-size: 2.25rem;
+  font-weight: 900;
+  color: var(--color-text);
+  margin-bottom: var(--spacing-xs);
+  letter-spacing: -0.02em;
+}
+
+.achievements__subtitle {
+  font-size: 1rem;
+  color: var(--color-text-secondary);
+  font-weight: 700;
+}
+
+/* ── Section titles ─────────────────────────────────────────── */
+.achievements__section-title {
+  font-size: 0.875rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--spacing-md);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
+.achievements__section-title::before {
+  content: "";
+  display: inline-block;
+  width: 4px;
+  height: 1.1em;
+  background: var(--color-primary);
+  border-radius: 9999px;
+  flex-shrink: 0;
+}
+
+/* ── Override App.css global section { padding: 5rem 0 } ────── */
+.achievements__level-section,
+.achievements__badges-section,
+.achievements__streak-section,
+.achievements__xp-section,
+.achievements__shoutouts-section,
+.achievements__hof-section {
+  padding: 0;
+}
+
+/* stats-section gets its own padding set explicitly above */
+
+/* ── Section spacing ────────────────────────────────────────── */
+.achievements__level-section   { margin-bottom: var(--spacing-xl); }
+.achievements__stats-section   { margin-bottom: var(--spacing-xl); }
+.achievements__streak-section  { margin-bottom: var(--spacing-xl); }
+.achievements__badges-section  { margin-bottom: var(--spacing-xl); }
+.achievements__xp-section      { margin-bottom: var(--spacing-xl); }
+.achievements__shoutouts-section { margin-bottom: var(--spacing-xl); }
+.achievements__hof-section       { margin-bottom: var(--spacing-xl); }
+
+/* ── LEVEL & XP card ────────────────────────────────────────── */
+.achievements__level-section {
+  background: color-mix(in srgb, var(--color-xp, #ffc800) 10%, white);
+  border: 2px solid var(--color-xp, #ffc800);
+  border-radius: var(--radius-xl);
+  padding: var(--spacing-lg) !important;
+  box-shadow: 0 4px 0 color-mix(in srgb, var(--color-xp, #ffc800) 55%, #6b4c00);
+}
+
+/* Thicker, bolder XP progress bar */
+.achievements__level-section .progress-bar {
+  --progress-bar-height: 14px;
+}
+
+.achievements__level-section .progress-bar__track {
+  background: color-mix(in srgb, var(--color-xp, #ffc800) 22%, white);
+  border: 1px solid color-mix(in srgb, var(--color-xp, #ffc800) 35%, var(--color-border));
+}
+
+.achievements__level-section .progress-bar__label,
+.achievements__level-section .progress-bar__percent {
+  font-weight: 800;
+  color: color-mix(in srgb, var(--color-xp, #ffc800) 55%, #4a3000);
+}
+
+.achievements__level-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  background: var(--color-xp, #ffc800);
+  border: 2px solid color-mix(in srgb, var(--color-xp, #ffc800) 60%, #6b4c00);
+  border-radius: var(--radius-xl);
+  padding: 6px var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--color-xp, #ffc800) 50%, #6b4c00);
+}
+
+.achievements__level-number {
+  font-size: 1.5rem;
+  font-weight: 900;
+  color: #4a3000;
+}
+
+.achievements__level-name {
+  font-size: 1rem;
+  font-weight: 800;
+  color: #4a3000;
+}
+
+.achievements__level-hint {
+  margin: var(--spacing-sm) 0 0;
+  font-size: 0.875rem;
+  color: color-mix(in srgb, var(--color-xp, #ffc800) 40%, #4a3000);
+  font-weight: 600;
+  text-align: center;
+}
+
+/* ── STATS section card ─────────────────────────────────────── */
+.achievements__stats-section {
+  background: var(--color-surface);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  padding: var(--spacing-lg) !important;
+  box-shadow: 0 4px 0 var(--color-border);
+}
+
+/* ── STATS row ──────────────────────────────────────────────── */
+.achievements__stats-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--spacing-md);
+}
+
+/* Stat cards in achievements – colorful push-shadow treatment */
+.achievements__stats-row .stat-card {
+  border-width: 2px;
+  border-radius: var(--radius-xl);
+  padding: var(--spacing-md) var(--spacing-sm);
+  transition: transform var(--transition-bounce), box-shadow var(--transition-fast);
+}
+
+.achievements__stats-row .stat-card:hover {
+  transform: translateY(-3px);
+}
+
+.achievements__stats-row .stat-card .stat-card__value {
+  font-size: 1.875rem;
+  font-weight: 900;
+}
+
+.achievements__stats-row .stat-card .stat-card__label {
+  font-weight: 700;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* XP card – gold */
+.achievements__stats-row .stat-card:nth-child(1) {
+  background: color-mix(in srgb, var(--color-xp, #ffc800) 12%, white);
+  border-color: color-mix(in srgb, var(--color-xp, #ffc800) 45%, var(--color-border));
+  box-shadow: 0 4px 0 color-mix(in srgb, var(--color-xp, #ffc800) 50%, #6b4c00);
+}
+.achievements__stats-row .stat-card:nth-child(1) .stat-card__icon,
+.achievements__stats-row .stat-card:nth-child(1) .stat-card__value {
+  color: color-mix(in srgb, var(--color-xp, #ffc800) 55%, #4a3000);
+}
+
+/* Badges card – purple */
+.achievements__stats-row .stat-card:nth-child(2) {
+  background: color-mix(in srgb, #ce82ff 10%, white);
+  border-color: color-mix(in srgb, #ce82ff 42%, var(--color-border));
+  box-shadow: 0 4px 0 color-mix(in srgb, #ce82ff 50%, #3b0070);
+}
+.achievements__stats-row .stat-card:nth-child(2) .stat-card__icon,
+.achievements__stats-row .stat-card:nth-child(2) .stat-card__value {
+  color: #8b3fc8;
+}
+
+/* Streak card – orange */
+.achievements__stats-row .stat-card:nth-child(3) {
+  background: color-mix(in srgb, #f97316 8%, white);
+  border-color: color-mix(in srgb, #f97316 40%, var(--color-border));
+  box-shadow: 0 4px 0 color-mix(in srgb, #f97316 45%, #6b2900);
+}
+.achievements__stats-row .stat-card:nth-child(3) .stat-card__icon,
+.achievements__stats-row .stat-card:nth-child(3) .stat-card__value {
+  color: #c2410c;
+}
+
+/* Shoutouts card – blue */
+.achievements__stats-row .stat-card:nth-child(4) {
+  background: color-mix(in srgb, var(--color-secondary, #1cb0f6) 10%, white);
+  border-color: color-mix(in srgb, var(--color-secondary, #1cb0f6) 40%, var(--color-border));
+  box-shadow: 0 4px 0 color-mix(in srgb, var(--color-secondary, #1cb0f6) 50%, #003870);
+}
+.achievements__stats-row .stat-card:nth-child(4) .stat-card__icon,
+.achievements__stats-row .stat-card:nth-child(4) .stat-card__value {
+  color: color-mix(in srgb, var(--color-secondary, #1cb0f6) 75%, #003870);
+}
+
+/* ── STREAK section ─────────────────────────────────────────── */
+.achievements__streak-row {
+  display: flex;
+  gap: var(--spacing-lg);
+  flex-wrap: wrap;
+}
+
+.achievements__streak-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-lg);
+  background: color-mix(in srgb, #f97316 8%, white);
+  border: 2px solid color-mix(in srgb, #f97316 40%, var(--color-border));
+  border-radius: var(--radius-xl);
+  min-width: 150px;
+  flex: 1;
+  box-shadow: 0 4px 0 color-mix(in srgb, #f97316 35%, #6b2900);
+  transition: transform var(--transition-bounce);
+}
+
+.achievements__streak-card:hover {
+  transform: translateY(-2px);
+}
+
+.achievements__streak-flame {
+  color: #f97316;
+  filter: drop-shadow(0 2px 4px rgba(249,115,22,0.35));
+}
+
+.achievements__streak-flame--best {
+  color: #ea580c;
+}
+
+.achievements__streak-flame--cold {
+  color: var(--color-border);
+  filter: none;
+  opacity: 0.5;
+}
+
+.achievements__streak-value {
+  font-size: 2rem;
+  font-weight: 900;
+  color: #c2410c;
+  line-height: 1;
+}
+
+.achievements__streak-label {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: color-mix(in srgb, #c2410c 70%, var(--color-text-secondary));
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.achievements__streak-hint {
+  margin: var(--spacing-xs) 0 0;
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  text-align: center;
+  line-height: 1.4;
+}
+
+/* kids: bigger flame */
+[data-ui-mode="kids"] .achievements__streak-flame { width: 48px; height: 48px; }
+[data-ui-mode="kids"] .achievements__streak-card  { padding: var(--spacing-xl); min-width: 160px; }
+[data-ui-mode="kids"] .achievements__streak-value { font-size: 2.5rem; }
+
+/* ── BADGE grid ─────────────────────────────────────────────── */
+.achievements__badges-section {
+  background: color-mix(in srgb, var(--color-hero, #235390) 6%, white);
+  border: 2px solid color-mix(in srgb, var(--color-hero, #235390) 25%, var(--color-border));
+  border-radius: var(--radius-xl);
+  padding: var(--spacing-lg) !important;
+  box-shadow: 0 4px 0 color-mix(in srgb, var(--color-hero, #235390) 30%, var(--color-border));
+}
+
+.achievements__badges-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: var(--spacing-md);
+}
+
+/* kids */
+[data-ui-mode="kids"] .achievements__badges-grid { gap: var(--spacing-lg); }
+[data-ui-mode="kids"] .achievements__badge       { --badge-size: 90px; padding: var(--spacing-lg); }
+[data-ui-mode="kids"] .achievements__badge-icon-wrap { width: var(--badge-size); height: var(--badge-size); }
+
+/* explorer */
+[data-ui-mode="explorer"] .achievements__badge { --badge-size: 64px; }
+[data-ui-mode="explorer"] .achievements__badge-icon-wrap { width: var(--badge-size); height: var(--badge-size); }
+[data-ui-mode="explorer"] .achievements__badge--earned {
+  box-shadow: 0 0 14px color-mix(in srgb, var(--badge-color, var(--color-primary)) 35%, transparent);
+}
+
+/* pro */
+[data-ui-mode="pro"] .achievements__badge { --badge-size: 44px; padding: var(--spacing-sm); }
+[data-ui-mode="pro"] .achievements__badge-icon-wrap { width: var(--badge-size); height: var(--badge-size); }
+[data-ui-mode="pro"] .achievements__badge-name { font-size: 0.75rem; }
+
+/* Shared badge card */
+.achievements__badge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-md);
+  background: var(--color-surface);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  cursor: default;
+  transition: transform var(--transition-bounce), box-shadow var(--transition-fast);
+}
+
+/* Earned badge — colorful push-shadow */
+.achievements__badge--earned {
+  background: color-mix(in srgb, var(--badge-color, var(--color-primary)) 10%, white);
+  border-color: color-mix(in srgb, var(--badge-color, var(--color-primary)) 45%, var(--color-border));
+  box-shadow: 0 4px 0 color-mix(in srgb, var(--badge-color, var(--color-primary)) 40%, #333);
+}
+
+.achievements__badge--earned:hover {
+  transform: translateY(-3px) scale(1.04);
+  box-shadow: 0 6px 0 color-mix(in srgb, var(--badge-color, var(--color-primary)) 40%, #333);
+}
+
+[data-ui-mode="kids"] .achievements__badge--earned {
+  border-width: 3px;
+  box-shadow: 0 5px 0 color-mix(in srgb, var(--badge-color, var(--color-primary)) 40%, #333);
+}
+
+/* Locked badge */
+.achievements__badge--locked {
+  opacity: 0.5;
+  filter: grayscale(0.6);
+}
+
+.achievements__badge--locked .achievements__badge-icon-wrap {
+  color: var(--color-text-secondary);
+}
+
+.achievements__badges-grid--preview .achievements__badge--locked {
+  border-style: dashed;
+  border-color: var(--color-border);
+  opacity: 0.45;
+  cursor: default;
+}
+
+.achievements__badges-grid--preview .achievements__badge--locked:hover {
+  transform: none;
+}
+
+/* Badge icon wrap */
+.achievements__badge-icon-wrap {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--badge-color, var(--color-primary)) 15%, white);
+}
+
+.achievements__badge--earned .achievements__badge-icon-wrap {
+  color: var(--badge-color, var(--color-primary));
+}
+
+.achievements__badge-name {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--color-text);
+  text-align: center;
+  line-height: 1.2;
+}
+
+.achievements__badge--locked .achievements__badge-name {
+  color: var(--color-text-secondary);
+}
+
+.achievements__badge-date {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+/* ── EMPTY STATES ───────────────────────────────────────────── */
+.achievements__empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: var(--spacing-lg) var(--spacing-md);
+  background: color-mix(in srgb, var(--color-border) 25%, transparent);
+  border-radius: var(--radius-lg);
+  text-align: center;
+}
+
+.achievements__empty-state--badges {
+  margin-bottom: var(--spacing-md);
+}
+
+.achievements__empty-state-icon {
+  font-size: 2.25rem;
+  line-height: 1;
+}
+
+.achievements__empty-state-text {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--color-text);
+}
+
+.achievements__empty-state-hint {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  max-width: 340px;
+}
+
+/* ── RECENT XP section ──────────────────────────────────────── */
+.achievements__xp-section {
+  background: color-mix(in srgb, var(--color-primary) 6%, white);
+  border: 2px solid color-mix(in srgb, var(--color-primary) 30%, var(--color-border));
+  border-radius: var(--radius-xl);
+  padding: var(--spacing-lg) !important;
+  box-shadow: 0 4px 0 color-mix(in srgb, var(--color-primary) 35%, #1a5200);
+}
+
+.achievements__xp-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.achievements__xp-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: 10px var(--spacing-md);
+  background: var(--color-surface);
+  border: 2px solid var(--color-border);
+  border-left: 4px solid var(--color-primary);
+  border-radius: var(--radius-md);
+  transition: transform var(--transition-fast);
+}
+
+.achievements__xp-item:hover {
+  transform: translateX(3px);
+}
+
+.achievements__xp-amount {
+  font-weight: 900;
+  font-size: 1rem;
+  color: var(--color-primary-dark);
+  min-width: 64px;
+}
+
+.achievements__xp-reason {
+  flex: 1;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.achievements__xp-time {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+}
+
+/* ── SHOUTOUTS section ──────────────────────────────────────── */
+.achievements__shoutouts-section {
+  background: color-mix(in srgb, var(--color-xp, #ffc800) 8%, white);
+  border: 2px solid color-mix(in srgb, var(--color-xp, #ffc800) 40%, var(--color-border));
+  border-radius: var(--radius-xl);
+  padding: var(--spacing-lg) !important;
+  box-shadow: 0 4px 0 color-mix(in srgb, var(--color-xp, #ffc800) 50%, #6b4c00);
+}
+
+.achievements__shoutouts-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.achievements__shoutout-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md);
+  background: var(--color-surface);
+  border: 2px solid color-mix(in srgb, var(--color-xp, #ffc800) 35%, var(--color-border));
+  border-radius: var(--radius-lg);
+  transition: transform var(--transition-bounce), box-shadow var(--transition-fast);
+}
+
+.achievements__shoutout-item:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 0 color-mix(in srgb, var(--color-xp, #ffc800) 40%, var(--color-border));
+}
+
+.achievements__shoutout-emoji {
+  font-size: 2rem;
+  line-height: 1;
+  flex-shrink: 0;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.12));
+}
+
+.achievements__shoutout-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.achievements__shoutout-msg {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--color-text);
+  line-height: 1.4;
+}
+
+.achievements__shoutout-meta {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+/* ── LOADING ─────────────────────────────────────────────────── */
+.achievements__loading {
+  display: flex;
+  gap: var(--spacing-sm);
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-xl) 0;
+}
+
+.achievements__loading-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  animation: ach-bounce 1.2s ease-in-out infinite;
+}
+
+.achievements__loading-dot:nth-child(2) { animation-delay: 0.2s; background: var(--color-secondary); }
+.achievements__loading-dot:nth-child(3) { animation-delay: 0.4s; background: var(--color-xp, #ffc800); }
+
+@keyframes ach-bounce {
+  0%, 80%, 100% { transform: scale(0.7); opacity: 0.5; }
+  40%           { transform: scale(1.1); opacity: 1; }
+}
+
+/* ── Cold flame ──────────────────────────────────────────────── */
+.achievements__streak-flame--cold {
+  color: var(--color-border);
+  filter: none;
+  opacity: 0.45;
+}
+
+/* ── Section title accent colors per section ─────────────────── */
+.achievements__streak-section .achievements__section-title::before   { background: #f97316; }
+.achievements__badges-section .achievements__section-title::before   { background: #ce82ff; }
+.achievements__xp-section .achievements__section-title::before       { background: var(--color-primary); }
+.achievements__shoutouts-section .achievements__section-title::before { background: var(--color-xp, #ffc800); }
+.achievements__stats-section .achievements__section-title::before    { background: var(--color-secondary, #1cb0f6); }
+.achievements__hof-section .achievements__section-title::before      { background: #ffc800; }
+
+/* XP list items – push on hover */
+.achievements__xp-item:hover {
+  transform: translateX(4px);
+  box-shadow: 0 2px 0 color-mix(in srgb, var(--color-primary) 30%, var(--color-border));
+}
+
+/* Shoutout items – add push shadow on earned state */
+.achievements__shoutout-item {
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--color-xp, #ffc800) 35%, var(--color-border));
+}
+
+/* ── Kids mode overrides ─────────────────────────────────────── */
+[data-ui-mode="kids"] .achievements__title {
+  font-size: 2.5rem;
+}
+
+[data-ui-mode="kids"] .achievements__section-title {
+  font-size: 1.125rem;
+}
+
+[data-ui-mode="kids"] .achievements__streak-flame {
+  filter: drop-shadow(0 0 10px rgba(249, 115, 22, 0.55));
+}
+
+[data-ui-mode="kids"] .achievements__level-badge {
+  font-size: 1.25rem;
+  padding: 10px var(--spacing-lg);
+}
+
+[data-ui-mode="kids"] .achievements__badge--earned:hover {
+  animation: ach-wiggle 0.4s ease;
+}
+
+@keyframes ach-wiggle {
+  0%  { transform: rotate(0deg) scale(1.04); }
+  25% { transform: rotate(-6deg) scale(1.1); }
+  50% { transform: rotate(6deg) scale(1.1); }
+  75% { transform: rotate(-3deg) scale(1.06); }
+  100%{ transform: rotate(0deg) scale(1.04); }
+}

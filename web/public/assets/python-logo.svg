@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Python logo">
+  <defs>
+    <linearGradient id="pyBlue" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3776AB"/>
+      <stop offset="100%" stop-color="#2D5B8A"/>
+    </linearGradient>
+    <linearGradient id="pyYellow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFD43B"/>
+      <stop offset="100%" stop-color="#F2C833"/>
+    </linearGradient>
+  </defs>
+  <path fill="url(#pyBlue)" d="M32 8c-9.5 0-9 4.1-9 4.1V18h9.1v2.2H19.4S8 19 8 32s9.9 12.4 9.9 12.4h5.9V36s-.3-9 8.8-9h14.7S56 27 56 18.1 46.6 8 46.6 8H32z"/>
+  <circle cx="26.5" cy="13.8" r="2.1" fill="#fff"/>
+  <path fill="url(#pyYellow)" d="M32 56c9.5 0 9-4.1 9-4.1V46h-9.1v-2.2h12.7S56 45 56 32 46.1 19.6 46.1 19.6h-5.9V28s.3 9-8.8 9H16.7S8 37 8 45.9 17.4 56 17.4 56H32z"/>
+  <circle cx="37.5" cy="50.2" r="2.1" fill="#fff"/>
+</svg>

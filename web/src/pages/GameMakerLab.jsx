@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Link } from 'react-router-dom';
 import Tippy from '@tippyjs/react';
 import { Play, Square, RotateCcw, X, Puzzle, Code, Fullscreen, Shrink, HelpCircle, Save, FolderOpen, Trash2, ArrowLeft, Plus, Upload, Mic, AudioLines, Grid3x3 } from 'lucide-react';
+import { useLabExit } from '../features/labs/useLabExit';
 import * as Blockly from 'blockly';
 import { pythonGenerator } from 'blockly/python';
 import { registerBlocks, generateCode } from '../labs/game-maker/blocks';
@@ -189,6 +189,7 @@ function loadStarterBlocks(workspace) {
 }
 
 const GameMakerLab = () => {
+  const { exitLab } = useLabExit();
   const blocklyDiv = useRef(null);
   const workspaceRef = useRef(null);
   const canvasRef = useRef(null);
@@ -517,7 +518,11 @@ const GameMakerLab = () => {
     if (engineRef.current) engineRef.current.clearBackgroundImage();
     if (workspaceRef.current && project.workspace) {
       workspaceRef.current.clear();
-      Blockly.serialization.workspaces.load(project.workspace, workspaceRef.current);
+      try {
+        Blockly.serialization.workspaces.load(project.workspace, workspaceRef.current);
+      } catch (e) {
+        console.warn('Some blocks could not be restored (block definitions may have changed):', e.message);
+      }
     }
     setProjectId(project.id);
     setProjectName(project.name);
@@ -782,9 +787,9 @@ const GameMakerLab = () => {
         <div className="gml-controls-right">
           {skulptLoading && <span className="gml-loading">Loading Python...</span>}
           <Tippy content="Return to Playground" {...tipProps}>
-            <Link to="/playground" className="gml-exit-btn">
+            <button type="button" className="gml-exit-btn" onClick={exitLab}>
               <X size={18} /> Exit
-            </Link>
+            </button>
           </Tippy>
         </div>
       </div>

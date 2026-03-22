@@ -2,9 +2,14 @@
 node_modules
 .pnp
 .pnp.js
+__pycache__
+*.pyc
+.venv
 
 # Testing
 coverage
+.pytest_cache
+htmlcov
 
 # Production
 build

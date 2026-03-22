@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Link } from 'react-router-dom';
-import { Play, Square, RotateCcw, ChevronDown, X, Gamepad2, PanelLeftClose, PanelLeftOpen, Fullscreen, Shrink, Maximize2, Minimize2, HelpCircle, Save, Share2, FolderOpen, Trash2, Check, ArrowLeft, Plus } from 'lucide-react';
+import { Play, Square, RotateCcw, ChevronDown, X, PanelLeftClose, PanelLeftOpen, Fullscreen, Shrink, Maximize2, Minimize2, HelpCircle, Save, Share2, FolderOpen, Trash2, Check, ArrowLeft, Plus } from 'lucide-react';
+import { useLabExit } from '../features/labs/useLabExit';
 import { EditorView, basicSetup } from 'codemirror';
 import { EditorState } from '@codemirror/state';
 import { python, pythonLanguage } from '@codemirror/lang-python';
@@ -21,6 +21,7 @@ const loadProjectsFromStorage = () => {
 };
 
 const PythonGameLab = () => {
+  const { exitLab } = useLabExit();
   const canvasRef = useRef(null);
   const editorContainerRef = useRef(null);
   const editorViewRef = useRef(null);
@@ -351,8 +352,8 @@ const PythonGameLab = () => {
       <div className="pgl-topbar">
         <div className="pgl-controls-left">
           <div className="pgl-logo">
-            <Gamepad2 size={20} />
-            <span>Py Game Maker</span>
+            <img src="/assets/python-logo.svg" alt="" aria-hidden className="pgl-logo-icon" />
+            <span>Python Game Maker</span>
           </div>
 
           <div className="pgl-examples-dropdown">
@@ -389,9 +390,9 @@ const PythonGameLab = () => {
 
         <div className="pgl-controls-right">
           {skulptLoading && <span className="pgl-loading">Loading Python...</span>}
-          <Link to="/playground" className="pgl-exit-btn">
+          <button type="button" className="pgl-exit-btn" onClick={exitLab}>
             <X size={18} /> Exit
-          </Link>
+          </button>
         </div>
       </div>
 

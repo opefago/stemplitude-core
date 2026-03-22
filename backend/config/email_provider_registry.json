@@ -1,0 +1,8 @@
+{
+  "_description": "Central email provider registry. Defines available transactional email providers and their priority. Consumed by seed_all at startup.",
+  "providers": [
+    { "provider": "postmark", "priority": 1 },
+    { "provider": "mailgun", "priority": 2 },
+    { "provider": "ses", "priority": 3 }
+  ]
+}

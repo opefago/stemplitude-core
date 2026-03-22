@@ -106,7 +106,7 @@ const REF = [
   { cat: 'Physics', name: 'game.physics_enabled', sig: 'physics_enabled(on=True) → bool', desc: 'Enable or disable the physics engine. When off, vx/vy/ax/ay have no automatic effect.', example: 'game.physics_enabled(False)  # manual movement only' },
 
   // ── Sprite Animation ──
-  { cat: 'Animation', name: '.play()', sig: 'sprite.play(fps=8)', desc: 'Start animating a multi-frame sprite at the given frames per second.', example: 'walker = game.Sprite("player_run", 100, 200)\nwalker.play(8)  # 8 frames per second' },
+  { cat: 'Animation', name: '.play()', sig: 'sprite.play(fps=8, start=None, end=None)', desc: 'Start animating a multi-frame sprite at the given fps. Optionally play only frames start through end (0-based). Default: all frames.', example: 'walker = game.Sprite("player_run", 100, 200)\nwalker.play(8)  # all frames at 8 fps\nwalker.play(8, 2, 5)  # frames 2-5 only' },
   { cat: 'Animation', name: '.stop() (animation)', sig: 'sprite.stop()', desc: 'Pause sprite animation on the current frame.', example: 'walker.stop()  # freeze on current frame' },
   { cat: 'Animation', name: '.set_frame()', sig: 'sprite.set_frame(n)', desc: 'Jump to a specific frame number (0-based). Stops auto-animation.', example: 'coin.set_frame(0)  # show first frame' },
   { cat: 'Animation', name: 'Animation properties', sig: '.frame  .frame_count  .animating  .fps', desc: 'Read the current frame index, total frames, whether animating, and playback speed.', example: 'next_f = (coin.frame + 1) % coin.frame_count\ncoin.set_frame(next_f)\nif walker.animating:\n    walker.stop()' },

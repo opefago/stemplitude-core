@@ -1263,9 +1263,14 @@ export function registerBlocks() {
         { type: 'field_variable_creator', name: 'OBJ', variable: 'player', variableTypes: [''] },
         { type: 'input_value', name: 'FPS', check: 'Number' },
       ],
+      message1: 'from frame %1 to %2',
+      args1: [
+        { type: 'input_value', name: 'START', check: 'Number' },
+        { type: 'input_value', name: 'END', check: 'Number' },
+      ],
       previousStatement: null, nextStatement: null,
       colour: 45, inputsInline: true,
-      tooltip: 'Start sprite animation at given frames per second',
+      tooltip: 'Start sprite animation. Optionally limit to frames start–end (0-based).',
     },
     {
       type: 'game_anim_stop',
@@ -2515,13 +2520,17 @@ export function registerBlocks() {
   };
 
   pythonGenerator.forBlock['game_move'] = function(block, gen) {
-    const obj = gen.getVariableName(block.getFieldValue('OBJ'));
+    const fld = block.getFieldValue('OBJ');
+    if (!fld) return '';
+    const obj = gen.getVariableName(fld);
     const dx = gen.valueToCode(block, 'DX', Order.NONE) || '0';
     const dy = gen.valueToCode(block, 'DY', Order.NONE) || '0';
     return 'if ' + obj + ' is not None:\n' + gen.INDENT + obj + '.move(' + dx + ', -(' + dy + '))\n';
   };
   pythonGenerator.forBlock['game_move_to'] = function(block, gen) {
-    const obj = gen.getVariableName(block.getFieldValue('OBJ'));
+    const fld = block.getFieldValue('OBJ');
+    if (!fld) return '';
+    const obj = gen.getVariableName(fld);
     const x = gen.valueToCode(block, 'X', Order.NONE) || '0';
     const y = gen.valueToCode(block, 'Y', Order.NONE) || '0';
     return 'if ' + obj + ' is not None:\n' + gen.INDENT + obj + '.move_to(' + x + ', ' + y + ')\n';
@@ -2938,6 +2947,11 @@ export function registerBlocks() {
   pythonGenerator.forBlock['game_anim_play'] = function(block, gen) {
     const obj = gen.getVariableName(block.getFieldValue('OBJ'));
     const fps = gen.valueToCode(block, 'FPS', Order.NONE) || '8';
+    const start = gen.valueToCode(block, 'START', Order.NONE);
+    const end = gen.valueToCode(block, 'END', Order.NONE);
+    if (start && end) {
+      return obj + '.play(' + fps + ', ' + start + ', ' + end + ')\n';
+    }
     return obj + '.play(' + fps + ')\n';
   };
   pythonGenerator.forBlock['game_anim_stop'] = function(block, gen) {
@@ -3562,12 +3576,7 @@ export function generateCode(workspace) {
 
   code = pythonGenerator.finish(code);
 
-  const playerVariable = workspace.getVariableMap?.()?.getAllVariables?.().find((variable) => variable?.name === 'Player');
-  const playerBootstrap = playerVariable
-    ? pythonGenerator.getVariableName(playerVariable.getId()) + ' = game.Sprite("player", 100, 100, 5)\n'
-    : '';
-
-  code = 'import game\n' + playerBootstrap + code;
+  code = 'import game\n' + code;
   if (!code.includes('game.start()')) {
     code += '\ngame.start()\n';
   }

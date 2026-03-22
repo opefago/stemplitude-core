@@ -1,0 +1,107 @@
+/* Dark mode overrides - applied when data-color-scheme="dark" */
+
+[data-color-scheme="dark"] {
+  --color-bg: #131f24;
+  --color-surface: #1b2b33;
+  --color-text: #e8e8e8;
+  --color-text-secondary: #9ca3a8;
+  --color-border: #2d3e47;
+
+  --color-primary: #58cc02;
+  --color-primary-light: #78d92f;
+  --color-primary-dark: #46a302;
+
+  --color-secondary: #1cb0f6;
+  --color-secondary-light: #49c0f8;
+  --color-success: #58cc02;
+  --color-error: #ff4b4b;
+  --color-warning: #ff9600;
+  --color-xp: #ffc800;
+
+  --color-surface-subtle: #1b2b33;
+  --color-error-light: #5c1a1a;
+  --color-error-subtle: #3b0e0e;
+  --color-success-subtle: #0a2e0a;
+}
+
+/* Sidebar and cards use dark surface */
+[data-color-scheme="dark"] .sidebar {
+  --sidebar-bg: var(--color-surface);
+  --sidebar-border: var(--color-border);
+  --sidebar-text: var(--color-text);
+  --sidebar-text-muted: var(--color-text-secondary);
+}
+
+[data-color-scheme="dark"] .sidebar__nav-link:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+[data-color-scheme="dark"] .sidebar__toggle:hover {
+  background: var(--color-bg);
+}
+
+/* XP bars and progress bars - ensure visibility */
+[data-color-scheme="dark"] .progress-bar {
+  --progress-bar-bg: #334155;
+}
+
+[data-color-scheme="dark"] .progress-bar--xp {
+  --progress-bar-fill: #fcd34d;
+}
+
+[data-color-scheme="dark"] .progress-bar--success {
+  --progress-bar-fill: #34d399;
+}
+
+/* Auth pages respect dark mode */
+[data-color-scheme="dark"] .auth-page {
+  background-color: var(--color-bg);
+}
+
+[data-color-scheme="dark"] .auth-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+}
+
+[data-color-scheme="dark"] .auth-input {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+  color: var(--color-text);
+}
+
+[data-color-scheme="dark"] .auth-input::placeholder {
+  color: var(--color-text-secondary);
+}
+
+[data-color-scheme="dark"] .auth-toggle__btn--active {
+  background: var(--color-surface);
+}
+
+/* Kids mode dark */
+[data-ui-mode="kids"][data-color-scheme="dark"] {
+  --color-bg: #1a1229;
+  --color-surface: #251a33;
+  --color-border: #3d2d4a;
+  --color-primary: #ce82ff;
+  --color-primary-light: #d99eff;
+  --color-secondary: #ff7676;
+  --color-xp: #ffc800;
+}
+
+/* Explorer mode dark */
+[data-ui-mode="explorer"][data-color-scheme="dark"] {
+  --color-bg: #0f1929;
+  --color-surface: #192435;
+  --color-border: #2d3e50;
+  --color-primary: #1cb0f6;
+  --color-primary-light: #49c0f8;
+  --color-secondary: #58cc02;
+  --color-xp: #ff9600;
+}
+
+/* Admin mode dark */
+[data-ui-mode="admin"][data-color-scheme="dark"] {
+  --color-primary: #4a90d9;
+  --color-primary-light: #6ba8e8;
+  --color-secondary: #58cc02;
+}

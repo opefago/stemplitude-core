@@ -1,0 +1,78 @@
+{
+  "_description": "Central capability registry. Defines all capabilities, their rules (role gates, feature flags, seat limits), and metadata. Consumed by seed_capabilities at startup and available for external tooling.",
+  "categories": ["lab", "management", "analytics"],
+  "capabilities": [
+    {
+      "key": "create_student",
+      "name": "Create Student",
+      "category": "management",
+      "description": "Ability to create students in the organization",
+      "rules": [
+        { "role_required": "students:create", "required_feature": "create_student" }
+      ]
+    },
+    {
+      "key": "create_classroom",
+      "name": "Create Classroom",
+      "category": "management",
+      "description": "Ability to create classrooms",
+      "rules": [
+        { "role_required": "classrooms:create", "required_feature": "create_classroom" }
+      ]
+    },
+    {
+      "key": "access_robotics_lab",
+      "name": "Access Robotics Lab",
+      "category": "lab",
+      "description": "Ability to access the robotics lab",
+      "rules": [
+        { "required_feature": "access_robotics_lab" }
+      ]
+    },
+    {
+      "key": "access_game_maker",
+      "name": "Access Game Maker",
+      "category": "lab",
+      "description": "Ability to access the game maker lab",
+      "rules": [
+        { "required_feature": "access_game_maker" }
+      ]
+    },
+    {
+      "key": "access_electronics_lab",
+      "name": "Access Electronics Lab",
+      "category": "lab",
+      "description": "Ability to access the electronics lab",
+      "rules": [
+        { "required_feature": "access_electronics_lab" }
+      ]
+    },
+    {
+      "key": "access_design_maker",
+      "name": "Access Design Maker",
+      "category": "lab",
+      "description": "Ability to access the design maker lab",
+      "rules": [
+        { "required_feature": "access_design_maker" }
+      ]
+    },
+    {
+      "key": "manage_users",
+      "name": "Manage Users",
+      "category": "management",
+      "description": "Ability to manage organization users",
+      "rules": [
+        { "role_required": "users:*", "required_feature": "create_student" }
+      ]
+    },
+    {
+      "key": "view_analytics",
+      "name": "View Analytics",
+      "category": "analytics",
+      "description": "Ability to view advanced analytics",
+      "rules": [
+        { "role_required": "analytics:view", "required_feature": "advanced_analytics" }
+      ]
+    }
+  ]
+}

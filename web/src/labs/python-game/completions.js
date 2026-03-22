@@ -231,7 +231,7 @@ const SPRITE_PROPS = [
 ];
 
 const SPRITE_ANIM_METHODS = [
-  snippetCompletion('play(${fps})', { label: 'play', type: 'method', detail: '(fps=None)', info: 'Start animation. Optionally set FPS.\nmy_sprite.play(8)' }),
+  snippetCompletion('play(${fps}, ${start}, ${end})', { label: 'play', type: 'method', detail: '(fps=8, start=None, end=None)', info: 'Start animation. Optionally limit to frames start–end.\nmy_sprite.play(8)\nmy_sprite.play(8, 2, 5)' }),
   snippetCompletion('stop()', { label: 'stop', type: 'method', detail: '()', info: 'Stop animation on the current frame.' }),
   snippetCompletion('set_frame(${n})', { label: 'set_frame', type: 'method', detail: '(n)', info: 'Jump to frame n and stop animating.' }),
 ];

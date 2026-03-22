@@ -1,0 +1,179 @@
+/* Cartoony checkbox — thick border, offset shadow, bouncy check */
+
+.kid-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.kid-checkbox--solo {
+  flex-shrink: 0;
+}
+
+.kid-checkbox--disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+/* Hit target covers the visible box; face is non-interactive underneath */
+.kid-checkbox__control {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  vertical-align: middle;
+}
+
+.kid-checkbox__native {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  opacity: 0;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.kid-checkbox__native:focus-visible + .kid-checkbox__face {
+  outline: 3px solid color-mix(in srgb, var(--color-secondary, #1cb0f6) 65%, white);
+  outline-offset: 2px;
+}
+
+.kid-checkbox__native:disabled {
+  cursor: not-allowed;
+}
+
+.kid-checkbox__native:disabled + .kid-checkbox__face {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.kid-checkbox__face {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  border-radius: 8px;
+  border: 3px solid
+    color-mix(
+      in srgb,
+      var(--color-border, #cbd5e1) 70%,
+      var(--color-text-secondary, #64748b) 30%
+    );
+  background: var(--color-surface, #fff);
+  box-shadow: 0 3px 0
+    color-mix(
+      in srgb,
+      var(--color-border, #e2e8f0) 85%,
+      var(--color-text-secondary, #94a3b8) 15%
+    );
+  transition:
+    border-color 140ms ease,
+    background 140ms ease,
+    box-shadow 140ms ease,
+    transform 160ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.kid-checkbox:hover .kid-checkbox__native:not(:disabled) + .kid-checkbox__face {
+  border-color: color-mix(
+    in srgb,
+    var(--color-primary, #58cc02) 45%,
+    var(--color-border, #cbd5e1) 55%
+  );
+}
+
+.kid-checkbox__native:checked + .kid-checkbox__face {
+  border-color: var(--color-primary-dark, #46a302);
+  background: color-mix(in srgb, var(--color-primary, #58cc02) 22%, white);
+  box-shadow: 0 3px 0 var(--color-primary-dark, #46a302);
+}
+
+.kid-checkbox__native:checked + .kid-checkbox__face .kid-checkbox__check {
+  opacity: 1;
+  transform: scale(1) rotate(0deg);
+}
+
+.kid-checkbox:active .kid-checkbox__native:not(:disabled) + .kid-checkbox__face {
+  transform: translateY(1px);
+  box-shadow: 0 2px 0
+    color-mix(
+      in srgb,
+      var(--color-border, #e2e8f0) 85%,
+      var(--color-text-secondary, #94a3b8) 15%
+    );
+}
+
+.kid-checkbox__native:checked:active + .kid-checkbox__face {
+  box-shadow: 0 2px 0 var(--color-primary-dark, #46a302);
+}
+
+.kid-checkbox__check {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-primary-dark, #46a302);
+  opacity: 0;
+  transform: scale(0.3) rotate(-18deg);
+  transition:
+    opacity 120ms ease,
+    transform 200ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  pointer-events: none;
+}
+
+.kid-checkbox__check svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+
+.kid-checkbox__label {
+  font-size: inherit;
+  font-weight: inherit;
+  color: inherit;
+  line-height: 1.35;
+}
+
+.kid-checkbox--label-start {
+  flex-direction: row;
+}
+
+.kid-checkbox--label-start .kid-checkbox__label {
+  flex: 1;
+  min-width: 0;
+}
+
+.kid-checkbox--compact .kid-checkbox__control {
+  width: 20px;
+  height: 20px;
+}
+
+.kid-checkbox--compact .kid-checkbox__face {
+  border-radius: 6px;
+  border-width: 2px;
+  box-shadow: 0 2px 0
+    color-mix(
+      in srgb,
+      var(--color-border, #e2e8f0) 85%,
+      var(--color-text-secondary, #94a3b8) 15%
+    );
+}
+
+.kid-checkbox--compact .kid-checkbox__native:checked + .kid-checkbox__face {
+  box-shadow: 0 2px 0 var(--color-primary-dark, #46a302);
+}
+
+.kid-checkbox--compact .kid-checkbox__check svg {
+  width: 12px;
+  height: 12px;
+}

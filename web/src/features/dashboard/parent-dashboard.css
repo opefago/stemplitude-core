@@ -9,7 +9,7 @@
 }
 
 .parent-dashboard__tenant {
-  font-size: 0.875rem;
+  font-size: 1rem;
   color: var(--color-text-secondary, #64748b);
   font-weight: 600;
 }
@@ -64,7 +64,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 0.875rem;
+  font-size: 1rem;
   font-weight: 600;
   color: var(--color-text-secondary, #64748b);
 }
@@ -83,7 +83,7 @@
 
 .parent-dashboard__session-text {
   flex: 1;
-  font-size: 0.875rem;
+  font-size: 1rem;
   color: var(--color-text, #1e293b);
 }
 
@@ -93,7 +93,7 @@
   border-radius: 8px;
   background: transparent;
   color: var(--color-text-secondary, #777);
-  font-size: 0.75rem;
+  font-size: 0.875rem;
   font-weight: 600;
   cursor: pointer;
   display: inline-flex;
@@ -127,7 +127,7 @@
 
 .parent-dashboard__message-from {
   font-weight: 600;
-  font-size: 0.875rem;
+  font-size: 1rem;
   color: var(--color-text, #1e293b);
   display: flex;
   align-items: center;
@@ -144,7 +144,7 @@
 
 .parent-dashboard__message-text {
   margin: 8px 0 0;
-  font-size: 0.8125rem;
+  font-size: 0.9375rem;
   color: var(--color-text-secondary, #64748b);
   white-space: nowrap;
   overflow: hidden;
@@ -152,5 +152,5 @@
 }
 
 .parent-dashboard__achievement-badge {
-  font-size: 1.25rem;
+  font-size: 1.375rem;
 }

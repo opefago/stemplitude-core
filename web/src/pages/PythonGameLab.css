@@ -43,6 +43,12 @@
   white-space: nowrap;
 }
 
+.pgl-logo-icon {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+}
+
 .pgl-btn {
   display: inline-flex;
   align-items: center;

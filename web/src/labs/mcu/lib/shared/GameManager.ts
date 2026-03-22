@@ -5,7 +5,7 @@ import { BaseScene } from "./BaseScene";
  * Shared game manager for both mechanical and circuit simulations
  */
 export class GameManager {
-  private static instance: GameManager;
+  private static instance: GameManager | null = null;
   private app: Application;
   private currentScene: BaseScene | null;
   private scenes: Map<string, BaseScene>;
@@ -35,7 +35,16 @@ export class GameManager {
         );
       }
       GameManager.instance = new GameManager(app);
+      return GameManager.instance;
     }
+
+    // During remounts/HMR we can receive a fresh PIXI app while a stale singleton
+    // still exists. Recreate to avoid using a destroyed stage/canvas.
+    if (app && GameManager.instance.app !== app) {
+      GameManager.instance.destroy();
+      GameManager.instance = new GameManager(app);
+    }
+
     return GameManager.instance;
   }
 
@@ -66,6 +75,10 @@ export class GameManager {
     const scene = this.scenes.get(name);
     if (!scene) {
       console.error(`Scene "${name}" not found`);
+      return false;
+    }
+    if (!this.app.stage) {
+      console.error("Cannot switch scenes: PIXI stage is unavailable");
       return false;
     }
 
@@ -203,5 +216,8 @@ export class GameManager {
     this.scenes.forEach((scene) => scene.destroy());
     this.scenes.clear();
     this.currentScene = null;
+    if (GameManager.instance === this) {
+      GameManager.instance = null;
+    }
   }
 }

@@ -9,6 +9,121 @@
   margin-bottom: var(--spacing-md, 16px);
 }
 
+/* Mascot – playful character for younger users (spec: "learning world") */
+.student-dashboard__mascot-wrap {
+  flex-shrink: 0;
+}
+
+.student-dashboard__mascot {
+  position: relative;
+  width: 80px;
+  height: 96px;
+}
+
+.student-dashboard__mascot-face {
+  width: 56px;
+  height: 56px;
+  background: #58cc02;
+  border-radius: 50%;
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  box-shadow: 0 4px 0 #46a302;
+}
+
+.student-dashboard__mascot-eye {
+  width: 12px;
+  height: 12px;
+  background: white;
+  border-radius: 50%;
+  position: absolute;
+  top: 18px;
+}
+
+.student-dashboard__mascot-eye--left {
+  left: 14px;
+}
+
+.student-dashboard__mascot-eye--right {
+  right: 14px;
+}
+
+.student-dashboard__mascot-eye::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  background: #3c3c3c;
+  border-radius: 50%;
+  position: absolute;
+  bottom: 1px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.student-dashboard__mascot-mouth {
+  width: 18px;
+  height: 10px;
+  border-bottom-left-radius: 18px;
+  border-bottom-right-radius: 18px;
+  background: #3c3c3c;
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.student-dashboard__mascot-body {
+  width: 40px;
+  height: 32px;
+  background: #58cc02;
+  border-radius: 0 0 20px 20px;
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  box-shadow: 0 4px 0 #46a302;
+}
+
+.student-dashboard__mascot-arm {
+  width: 12px;
+  height: 24px;
+  background: #58cc02;
+  border-radius: 6px;
+  position: absolute;
+  top: 52px;
+}
+
+.student-dashboard__mascot-arm--left {
+  left: 2px;
+  transform: rotate(15deg);
+}
+
+.student-dashboard__mascot-arm--right {
+  right: 2px;
+  transform: rotate(-15deg);
+  animation: student-dashboard__wave 1.5s ease-in-out infinite;
+  transform-origin: top center;
+}
+
+@keyframes student-dashboard__wave {
+  0%, 100% { transform: rotate(-15deg); }
+  50% { transform: rotate(-40deg); }
+}
+
+.student-dashboard__mascot-bolt {
+  position: absolute;
+  top: -4px;
+  right: 4px;
+  color: #ffc800;
+  animation: student-dashboard__sparkle 2s ease-in-out infinite;
+}
+
+@keyframes student-dashboard__sparkle {
+  0%, 100% { opacity: 1; transform: scale(1) rotate(0deg); }
+  50% { opacity: 0.8; transform: scale(1.1) rotate(5deg); }
+}
+
 .student-dashboard__header-stats {
   display: flex;
   align-items: center;
@@ -16,7 +131,7 @@
 }
 
 .student-dashboard__level {
-  font-size: 0.9375rem;
+  font-size: 1.0625rem;
   font-weight: 700;
   color: var(--color-text-secondary, #64748b);
 }
@@ -30,7 +145,7 @@
 .student-dashboard__xp-labels {
   display: flex;
   justify-content: space-between;
-  font-size: 0.8125rem;
+  font-size: 0.9375rem;
   font-weight: 600;
   color: var(--color-text-secondary, #64748b);
 }
@@ -52,10 +167,10 @@
 }
 
 .student-dashboard__lab-chip {
-  padding: 6px 12px;
+  padding: 8px 14px;
   background: color-mix(in srgb, #1cb0f6 12%, transparent);
   border-radius: 999px;
-  font-size: 0.8125rem;
+  font-size: 0.9375rem;
   font-weight: 600;
   color: #1cb0f6;
   text-decoration: none;
@@ -68,11 +183,85 @@
   transform: translateY(-1px);
 }
 
-/* Kids mode – more playful */
-[data-ui-mode="kids"] .student-dashboard .dashboard-bento__greeting {
-  font-size: 1.75rem;
+/* ── Explicit puzzle-fit bento grid ─────────────────────────── */
+/*
+  Desktop 4-col layout:
+  Col:  [ 1 ]        [ 2 ]          [ 3–4 (span 2) ]
+  Row 1: Active       Leaderboard    Rewards & Badges
+  Row 2: Upcoming     Leaderboard    Rewards & Badges
+  Row 3: Continue ——————————————    Today's Challenge
+  Row 4: Continue ——————————————    My Projects
+*/
+.student-dashboard__card--active {
+  grid-column: 1;
+  grid-row: 1;
 }
 
+.student-dashboard__card--upcoming {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.student-dashboard__card--leaderboard {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
+.student-dashboard__card--rewards {
+  grid-column: 3 / span 2;
+  grid-row: 1 / span 2;
+}
+
+.student-dashboard__card--continue {
+  grid-column: 1 / span 2;
+  grid-row: 3 / span 2;
+}
+
+.student-dashboard__card--challenge {
+  grid-column: 3 / span 2;
+  grid-row: 3;
+}
+
+.student-dashboard__card--projects {
+  grid-column: 3 / span 2;
+  grid-row: 4;
+}
+
+/* Tablet (2-col): reset explicit placement, use DOM order + selective spans */
+@media (max-width: 1024px) {
+  .student-dashboard__card--active,
+  .student-dashboard__card--upcoming,
+  .student-dashboard__card--leaderboard,
+  .student-dashboard__card--rewards,
+  .student-dashboard__card--continue,
+  .student-dashboard__card--challenge,
+  .student-dashboard__card--projects {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+  /* Full-width cards on 2-col tablet */
+  .student-dashboard__card--rewards    { grid-column: span 2; }
+  .student-dashboard__card--leaderboard { grid-column: span 2; }
+  .student-dashboard__card--continue   { grid-column: span 2; }
+  .student-dashboard__card--projects   { grid-column: span 2; }
+}
+
+/* Mobile (1-col): all auto */
+@media (max-width: 600px) {
+  .student-dashboard__card--active,
+  .student-dashboard__card--upcoming,
+  .student-dashboard__card--leaderboard,
+  .student-dashboard__card--rewards,
+  .student-dashboard__card--continue,
+  .student-dashboard__card--challenge,
+  .student-dashboard__card--projects {
+    grid-column: auto;
+    grid-row: auto;
+  }
+}
+
+/* Kids mode – more playful */
 [data-ui-mode="kids"] .student-dashboard .dashboard-bento__card:hover {
   transform: translateY(-3px) scale(1.01);
 }
@@ -89,7 +278,7 @@
 
 /* Pro mode – slightly more compact */
 [data-ui-mode="pro"] .student-dashboard .dashboard-bento__greeting {
-  font-size: 1.25rem;
+  font-size: 1.5rem;
 }
 
 [data-ui-mode="pro"] .student-dashboard .dashboard-bento__badge {

@@ -8,12 +8,13 @@
   --bento-radius-lg: 24px;
   --bento-shadow: 0 3px 0 var(--color-border, #e8e8e8);
   --bento-shadow-hover: 0 4px 0 var(--color-border, #e8e8e8);
-  --bento-accent-green: #58cc02;
-  --bento-accent-blue: #1cb0f6;
-  --bento-accent-orange: #ff9600;
-  --bento-accent-purple: #ce82ff;
-  --bento-accent-red: #ff4b4b;
-  --bento-accent-yellow: #ffc800;
+  /* Card accents use theme variables for consistent theming */
+  --bento-accent-green: var(--color-primary, #58cc02);
+  --bento-accent-blue: var(--color-secondary, #1cb0f6);
+  --bento-accent-orange: var(--color-accent, #ff9600);
+  --bento-accent-purple: var(--color-purple, #ce82ff);
+  --bento-accent-red: var(--color-error, #ff4b4b);
+  --bento-accent-yellow: var(--color-xp, #ffc800);
 
   padding: var(--spacing-lg, 24px);
   max-width: 1200px;
@@ -27,14 +28,14 @@
 
 .dashboard-bento__greeting {
   margin: 0 0 var(--spacing-xs, 4px);
-  font-size: 1.5rem;
+  font-size: 1.75rem;
   font-weight: 800;
   color: var(--color-text, #3c3c3c);
 }
 
 .dashboard-bento__subtitle {
   margin: 0;
-  font-size: 0.9375rem;
+  font-size: 1.0625rem;
   color: var(--color-text-secondary, #64748b);
 }
 
@@ -107,6 +108,12 @@
   border-color: var(--color-primary, var(--bento-accent-blue));
 }
 
+/* Expandable feel: press feedback when entering workspace */
+.dashboard-bento__card-link:active {
+  transform: translateY(0) scale(0.98);
+  transition-duration: 0.05s;
+}
+
 /* Card accent variants */
 .dashboard-bento__card--green:hover { border-color: var(--bento-accent-green); }
 .dashboard-bento__card--blue:hover { border-color: var(--bento-accent-blue); }
@@ -130,18 +137,40 @@
   flex-shrink: 0;
 }
 
+/* Icon colors from card theme (replaces inline styles) */
+.dashboard-bento__card--green .dashboard-bento__card-icon {
+  background: color-mix(in srgb, var(--bento-accent-green) 15%, transparent);
+  color: var(--bento-accent-green);
+}
+.dashboard-bento__card--blue .dashboard-bento__card-icon {
+  background: color-mix(in srgb, var(--bento-accent-blue) 15%, transparent);
+  color: var(--bento-accent-blue);
+}
+.dashboard-bento__card--orange .dashboard-bento__card-icon {
+  background: color-mix(in srgb, var(--bento-accent-orange) 15%, transparent);
+  color: var(--bento-accent-orange);
+}
+.dashboard-bento__card--purple .dashboard-bento__card-icon {
+  background: color-mix(in srgb, var(--bento-accent-purple) 15%, transparent);
+  color: var(--bento-accent-purple);
+}
+.dashboard-bento__card--red .dashboard-bento__card-icon {
+  background: color-mix(in srgb, var(--bento-accent-red) 15%, transparent);
+  color: var(--bento-accent-red);
+}
+
 .dashboard-bento__card-title {
   margin: 0;
-  font-size: 1.0625rem;
+  font-size: 1.25rem;
   font-weight: 700;
   color: var(--color-text, #1e293b);
 }
 
 .dashboard-bento__card-desc {
   margin: 0;
-  font-size: 0.875rem;
+  font-size: 1rem;
   color: var(--color-text-secondary, #64748b);
-  line-height: 1.4;
+  line-height: 1.45;
 }
 
 .dashboard-bento__card-action {
@@ -149,7 +178,7 @@
   align-items: center;
   gap: 6px;
   margin-top: auto;
-  font-size: 0.8125rem;
+  font-size: 0.9375rem;
   font-weight: 700;
   color: var(--color-primary, var(--bento-accent-blue));
   text-decoration: none;
@@ -173,9 +202,9 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 6px 0;
+  padding: 8px 0;
   border-bottom: 1px solid color-mix(in srgb, var(--color-border, #e8e8e8) 50%, transparent);
-  font-size: 0.8125rem;
+  font-size: 0.9375rem;
 }
 
 .dashboard-bento__activity-item:last-child {
@@ -187,7 +216,7 @@
 }
 
 .dashboard-bento__activity-time {
-  font-size: 0.75rem;
+  font-size: 0.875rem;
   color: var(--color-text-secondary, #64748b);
   flex-shrink: 0;
 }
@@ -211,9 +240,10 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 12px;
+  padding: 8px 14px;
   background: color-mix(in srgb, var(--bento-accent-orange) 15%, transparent);
   border-radius: 999px;
+  font-size: 1rem;
   font-weight: 700;
   color: var(--bento-accent-orange);
 }
@@ -239,4 +269,21 @@
 
 .dashboard-bento__badge:hover {
   transform: scale(1.1);
+}
+
+/* Highlighted leaderboard row for current user */
+.dashboard-bento__activity-item--me {
+  font-weight: 700;
+  background: color-mix(in srgb, var(--color-primary, #58cc02) 8%, transparent);
+  border-radius: var(--radius-sm, 6px);
+  padding-left: 6px;
+  padding-right: 6px;
+}
+
+/* Empty badge slot message */
+.dashboard-bento__badges-empty {
+  font-size: 0.8125rem;
+  color: rgba(255, 255, 255, 0.75);
+  margin: 0;
+  line-height: 1.4;
 }

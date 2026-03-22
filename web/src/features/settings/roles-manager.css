@@ -1,0 +1,635 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   Roles Manager — AWS IAM-inspired, Duolingo-themed
+═══════════════════════════════════════════════════════════════════════════ */
+
+.rm {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: var(--spacing-lg);
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+/* ── Header ─────────────────────────────────────────────────────────────── */
+
+.rm__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-lg);
+  flex-wrap: wrap;
+}
+
+.rm__header-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rm__title {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: var(--color-text);
+}
+
+.rm__subtitle {
+  margin: 0;
+  font-size: 0.9375rem;
+  color: var(--color-text-secondary);
+}
+
+/* ── Split layout ────────────────────────────────────────────────────────── */
+
+.rm__body {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: var(--spacing-lg);
+  align-items: start;
+}
+
+@media (max-width: 800px) {
+  .rm__body {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Role list panel ─────────────────────────────────────────────────────── */
+
+.rm__list-panel {
+  background: var(--color-surface);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card-playful);
+  overflow: hidden;
+}
+
+.rm__list-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-md);
+  border-bottom: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-secondary) 6%, var(--color-surface));
+}
+
+.rm__list-panel-title {
+  font-size: 0.8125rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
+}
+
+.rm__role-count {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.rm__role-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.rm__role-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: 10px 12px;
+  border: 2px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  cursor: pointer;
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast);
+  text-align: left;
+  width: 100%;
+  min-height: 44px;
+}
+
+.rm__role-item:hover {
+  background: color-mix(in srgb, var(--color-secondary) 8%, white);
+  border-color: color-mix(in srgb, var(--color-secondary) 18%, var(--color-border));
+}
+
+.rm__role-item--active {
+  background: color-mix(in srgb, var(--color-primary) 10%, white);
+  border-color: color-mix(in srgb, var(--color-primary) 36%, white);
+}
+
+.rm__role-item--active:hover {
+  background: color-mix(in srgb, var(--color-primary) 13%, white);
+}
+
+.rm__role-item-icon {
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+}
+
+.rm__role-item--active .rm__role-item-icon {
+  color: var(--color-primary);
+}
+
+.rm__role-item-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.rm__role-item-name {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rm__role-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 2px;
+}
+
+.rm__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  line-height: 1;
+}
+
+.rm__badge--system {
+  background: color-mix(in srgb, var(--color-secondary) 12%, white);
+  color: color-mix(in srgb, var(--color-secondary) 80%, #0a4f7a);
+  border: 1px solid color-mix(in srgb, var(--color-secondary) 28%, white);
+}
+
+.rm__badge--custom {
+  background: color-mix(in srgb, var(--color-accent) 12%, white);
+  color: color-mix(in srgb, var(--color-accent) 75%, #5a3000);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 28%, white);
+}
+
+.rm__badge--inactive {
+  background: var(--color-border);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+}
+
+.rm__list-footer {
+  padding: var(--spacing-sm);
+  border-top: 1px solid var(--color-border);
+}
+
+/* ── Detail panel ────────────────────────────────────────────────────────── */
+
+.rm__detail-panel {
+  background: var(--color-surface);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card-playful);
+  overflow: hidden;
+}
+
+.rm__detail-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 32px;
+  gap: var(--spacing-md);
+  color: var(--color-text-secondary);
+  text-align: center;
+}
+
+.rm__detail-empty-icon {
+  opacity: 0.35;
+}
+
+.rm__detail-empty-text {
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.rm__detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  padding: var(--spacing-lg);
+  border-bottom: 2px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-secondary) 5%, var(--color-surface));
+  flex-wrap: wrap;
+}
+
+.rm__detail-header-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rm__detail-name {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+}
+
+.rm__detail-name-text {
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: var(--color-text);
+}
+
+.rm__detail-slug {
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+  font-weight: 600;
+  font-family: monospace;
+}
+
+.rm__detail-header-actions {
+  display: flex;
+  gap: var(--spacing-sm);
+  flex-shrink: 0;
+  align-items: center;
+}
+
+.rm__detail-body {
+  padding: var(--spacing-lg);
+}
+
+.rm__perm-count-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-lg);
+  padding-bottom: var(--spacing-md);
+  border-bottom: 1px solid var(--color-border);
+  flex-wrap: wrap;
+}
+
+.rm__perm-count-label {
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.rm__perm-count-num {
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 8%, white);
+  border: 2px solid color-mix(in srgb, var(--color-primary) 25%, white);
+  border-radius: 999px;
+  padding: 2px 12px;
+  line-height: 1.6;
+}
+
+/* ── Permissions matrix ─────────────────────────────────────────────────── */
+
+.rm__matrix-scroll {
+  overflow-x: auto;
+  /* inset shadow hints that content scrolls */
+  background:
+    linear-gradient(to right, var(--color-surface) 0, transparent 32px),
+    linear-gradient(to left, var(--color-surface) 0, transparent 32px)
+    right center / 100% 100% no-repeat;
+}
+
+.rm__matrix {
+  display: grid;
+  /* columns are set inline per instance */
+  row-gap: 6px;
+  column-gap: 0;
+  min-width: max-content;
+}
+
+/* ── Header row ── */
+
+.rm__matrix-header-corner {
+  /* invisible sticky spacer — no border, no background flash */
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  background: transparent;
+}
+
+.rm__matrix-col-label {
+  /* rotate so long names never overflow their column */
+  writing-mode: vertical-lr;
+  transform: rotate(180deg);
+  font-size: 0.6875rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary);
+  text-align: left;
+  padding: 8px 6px 8px;
+  white-space: nowrap;
+  height: 88px;
+  border-left: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent);
+  /* bottom line separates header from data rows */
+  border-bottom: 2px solid var(--color-border);
+}
+
+/* alternating column tints */
+.rm__matrix-col--even .rm__matrix-col-label,
+.rm__matrix-col-label.rm__matrix-col--even {
+  background: color-mix(in srgb, var(--color-secondary) 4%, transparent);
+}
+
+/* heavier left border to mark where special actions begin */
+.rm__matrix-col-label.rm__matrix-col--special-start {
+  border-left: 2px solid color-mix(in srgb, var(--color-accent) 40%, var(--color-border));
+}
+
+/* ── Label column (sticky) ── */
+
+.rm__matrix-label-cell {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  /* match the row bg */
+  background: color-mix(in srgb, var(--color-bg) 55%, var(--color-surface));
+  border-radius: 12px 0 0 12px;
+  border: 2px solid var(--color-border);
+  border-right: none;
+}
+
+/* Row backgrounds — every data row is a pair of (label + cells). Use
+   a pseudo-background trick via the label cell + adjacent cells. */
+.rm__matrix-resource {
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--color-text);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  min-height: 48px;
+  white-space: nowrap;
+}
+
+.rm__matrix-resource-icon {
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+}
+
+.rm__matrix-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 4px;
+  border-top: 2px solid var(--color-border);
+  border-bottom: 2px solid var(--color-border);
+  /* thin left divider between every action column */
+  border-left: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent);
+  background: color-mix(in srgb, var(--color-bg) 55%, var(--color-surface));
+}
+
+/* alternating column tints — same class applied in JSX */
+.rm__matrix-cell.rm__matrix-col--even {
+  background: color-mix(in srgb, var(--color-secondary) 4%, var(--color-surface));
+}
+
+/* heavier left border before the first special-action column */
+.rm__matrix-cell.rm__matrix-col--special-start {
+  border-left: 2px solid color-mix(in srgb, var(--color-accent) 40%, var(--color-border));
+}
+
+/* last cell in a row: right border + rounded right corner */
+.rm__matrix-cell--last {
+  border-right: 2px solid var(--color-border);
+  border-radius: 0 12px 12px 0;
+}
+
+.rm__matrix-cell--empty {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-border) 35%, transparent);
+}
+
+/* ── Permission toggle button ── */
+
+.rm__perm-check {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 2px solid var(--color-border);
+  background: var(--color-surface);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    transform var(--transition-fast);
+  color: transparent;
+  flex-shrink: 0;
+}
+
+.rm__perm-check:hover:not(.rm__perm-check--readonly) {
+  border-color: color-mix(in srgb, var(--color-primary) 55%, var(--color-border));
+  background: color-mix(in srgb, var(--color-primary) 6%, white);
+}
+
+.rm__perm-check--on {
+  background: var(--color-primary);
+  border-color: var(--color-primary-dark);
+  box-shadow: 0 2px 0 var(--color-primary-dark);
+  color: white;
+}
+
+.rm__perm-check--on:hover:not(.rm__perm-check--readonly) {
+  background: color-mix(in srgb, var(--color-primary) 85%, black);
+  transform: translateY(-1px);
+  box-shadow: 0 3px 0 var(--color-primary-dark);
+}
+
+.rm__perm-check--on:active:not(.rm__perm-check--readonly) {
+  transform: translateY(1px);
+  box-shadow: 0 1px 0 var(--color-primary-dark);
+}
+
+/* base-role hint: empty but with a dashed secondary border */
+.rm__perm-check--base {
+  border-style: dashed;
+  border-color: var(--color-secondary);
+  background: color-mix(in srgb, var(--color-secondary) 5%, white);
+}
+
+/* read-only states */
+.rm__perm-check--readonly {
+  cursor: default;
+  pointer-events: none;
+}
+
+.rm__perm-check--readonly.rm__perm-check--on {
+  background: var(--color-primary);
+  border-color: var(--color-primary-dark);
+  box-shadow: 0 2px 0 var(--color-primary-dark);
+  color: white;
+}
+
+.rm__perm-check--readonly.rm__perm-check--off {
+  background: var(--color-bg);
+  border-color: var(--color-border);
+  color: transparent;
+  opacity: 0.45;
+}
+
+.rm__system-perms-note {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: color-mix(in srgb, var(--color-secondary) 7%, white);
+  border: 2px solid color-mix(in srgb, var(--color-secondary) 22%, white);
+  border-radius: 12px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--color-secondary) 70%, var(--color-text));
+}
+
+/* ── Loading / error states ─────────────────────────────────────────────── */
+
+.rm__loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px;
+  gap: var(--spacing-sm);
+  color: var(--color-text-secondary);
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.rm__error {
+  margin: 0 0 var(--spacing-md);
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: color-mix(in srgb, var(--color-danger, #ff4b4b) 8%, white);
+  border: 2px solid color-mix(in srgb, var(--color-danger, #ff4b4b) 28%, white);
+  border-radius: 12px;
+  color: color-mix(in srgb, var(--color-danger, #ff4b4b) 80%, #7f1d1d);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+/* ── Create / Edit dialog form ──────────────────────────────────────────── */
+
+.rm__dialog-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.rm__form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--spacing-md);
+}
+
+.rm__dialog-section {
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--spacing-md);
+}
+
+.rm__dialog-section-title {
+  font-size: 0.8125rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--spacing-md);
+}
+
+.rm__dialog-matrix-wrap {
+  max-height: 380px;
+  overflow-y: auto;
+  overflow-x: hidden; /* rm__matrix-scroll handles x */
+  border: 2px solid var(--color-border);
+  border-radius: 12px;
+  padding: var(--spacing-sm);
+  background: var(--color-surface);
+}
+
+.rm__base-role-hint {
+  margin-top: 4px;
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+  font-weight: 500;
+}
+
+.rm__all-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-sm);
+}
+
+.rm__all-toggle-btn {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--color-secondary);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.rm__all-toggle-btn:hover {
+  color: color-mix(in srgb, var(--color-secondary) 80%, black);
+}
+
+/* ── Delete confirm dialog ──────────────────────────────────────────────── */
+
+.rm__delete-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.rm__delete-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: color-mix(in srgb, var(--color-danger, #ff4b4b) 7%, white);
+  border: 2px solid color-mix(in srgb, var(--color-danger, #ff4b4b) 22%, white);
+  border-radius: 12px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--color-danger, #ff4b4b) 75%, #7f1d1d);
+}
+
+.rm__delete-warning-icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
