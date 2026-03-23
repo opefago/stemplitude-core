@@ -8,6 +8,7 @@ export interface Program {
   is_active: boolean;
   start_date: string | null;
   end_date: string | null;
+  settings: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 }
@@ -18,6 +19,7 @@ export interface ProgramCreatePayload {
   is_active?: boolean;
   start_date?: string | null;
   end_date?: string | null;
+  settings?: Record<string, unknown>;
 }
 
 export interface ProgramUpdatePayload {
@@ -26,6 +28,7 @@ export interface ProgramUpdatePayload {
   is_active?: boolean | null;
   start_date?: string | null;
   end_date?: string | null;
+  settings?: Record<string, unknown> | null;
 }
 
 export async function listPrograms(params: {

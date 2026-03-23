@@ -6,7 +6,7 @@ import './Labs.css';
 const MAKECODE_URL = 'https://arcade.makecode.com';
 
 const GameDevLab = () => {
-  const { exitLab } = useLabSession();
+  const { exitLab, panel } = useLabSession();
   const iframeRef = useRef(null);
   const [projectName, setProjectName] = useState('My Game');
   const [isSaving, setIsSaving] = useState(false);
@@ -129,6 +129,7 @@ const GameDevLab = () => {
         allow="camera;microphone;xr-spatial-tracking;gamepad;gyroscope;accelerometer;magnetometer;serial;usb;midi;clipboard-read;clipboard-write"
         referrerPolicy="no-referrer-when-downgrade"
       />
+      {panel}
     </div>
   );
 };

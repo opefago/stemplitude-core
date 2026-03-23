@@ -204,6 +204,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try {
       const me = await apiGetMe();
       if (identity) {
+        if (me.first_name != null) identity.firstName = me.first_name;
+        if (me.last_name != null) identity.lastName = me.last_name;
+        if (me.email) identity.email = me.email;
         identity.resolvedUIMode = me.resolved_ui_mode;
         identity.uiModeSource = me.ui_mode_source;
       }

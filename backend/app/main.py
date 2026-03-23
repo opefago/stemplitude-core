@@ -19,7 +19,9 @@ async def lifespan(app: FastAPI):
     logger.info("Starting %s (env=%s)", settings.APP_NAME, settings.APP_ENV)
     await get_redis()
     logger.info("Redis connected")
-    yield
+    from app.labs.yjs_router import yjs_server
+    async with yjs_server:
+        yield
     await close_redis()
     logger.info("Shutdown complete")
 

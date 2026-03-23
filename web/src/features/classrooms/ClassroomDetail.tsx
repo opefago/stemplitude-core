@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams, Link } from "react-router-dom";
 import {
   ArrowLeft,
@@ -71,9 +71,20 @@ import {
   type Asset,
 } from "../../lib/api/assets";
 import { listStudents, type StudentProfile } from "../../lib/api/students";
+import {
+  AttendanceSettings,
+  type AttendanceConfig,
+} from "./AttendanceSettings";
+import {
+  calculateSessionAttendance,
+  getSessionAttendance,
+  updateClassroom,
+  type AttendanceRecord,
+} from "../../lib/api/classrooms";
 import "../../components/ui/ui.css";
 import "./classrooms.css";
 import { ClassroomFormWizard } from "./ClassroomFormWizard";
+import { useTenantRealtime } from "../../hooks/useTenantRealtime";
 
 type TabId =
   | "students"
@@ -133,6 +144,17 @@ export function ClassroomDetail() {
   const [showClassroomEditWizard, setShowClassroomEditWizard] = useState(false);
   /** Prevents duplicate edit-dialog opens (e.g. React Strict Mode or re-entrant effects). */
   const consumedClassroomEditQueryRef = useRef<string | null>(null);
+
+  // ── Attendance settings ─────────────────────────────────────────────────
+  const [attendanceCfg, setAttendanceCfg] = useState<AttendanceConfig | null>(null);
+  const [attendanceSaving, setAttendanceSaving] = useState(false);
+  const [attendanceSaved, setAttendanceSaved] = useState(false);
+  // Per-session attendance records
+  const [attendanceSessionId, setAttendanceSessionId] = useState<string>("");
+  const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
+  const [attendanceLoading, setAttendanceLoading] = useState(false);
+  const [attendanceCalcRunning, setAttendanceCalcRunning] = useState(false);
+  const [attendanceFilter, setAttendanceFilter] = useState<"all" | "present" | "absent">("all");
   // ── Session resources ────────────────────────────────────────────────────
   const [resourcesSession, setResourcesSession] =
     useState<ClassroomSessionRecord | null>(null);
@@ -287,6 +309,9 @@ export function ClassroomDetail() {
         setClassroom(klass);
         setSessions(classSessions);
         setStudents(classStudents);
+        // Hydrate attendance config from classroom settings
+        const raw = (klass.settings as Record<string, unknown> | undefined)?.attendance;
+        setAttendanceCfg(raw && typeof raw === "object" ? (raw as AttendanceConfig) : null);
       } catch (e: unknown) {
         if (!mounted) return;
         setError(e instanceof Error ? e.message : "Failed to load classroom");
@@ -299,6 +324,70 @@ export function ClassroomDetail() {
       mounted = false;
     };
   }, [id, isInstructorView]);
+
+  const refreshSessions = useCallback(async () => {
+    if (!id) return;
+    try {
+      const updated = await (isInstructorView
+        ? listClassroomSessions(id)
+        : listMyClassroomSessions(id));
+      setSessions(updated);
+    } catch {
+      // silently ignore — stale data is better than a crash
+    }
+  }, [id, isInstructorView]);
+
+  const tenantId = tenant?.id ?? user?.tenantId;
+  useTenantRealtime({
+    tenantId,
+    enabled: Boolean(user && tenantId),
+    onSessionsInvalidate: refreshSessions,
+  });
+
+  const handleSaveAttendanceSettings = async () => {
+    if (!id || !classroom) return;
+    setAttendanceSaving(true);
+    try {
+      const existingSettings = classroom.settings ?? {};
+      const settings = attendanceCfg
+        ? { ...existingSettings, attendance: attendanceCfg }
+        : { ...existingSettings, attendance: undefined };
+      const updated = await updateClassroom(id, { settings });
+      setClassroom(updated);
+      setAttendanceSaved(true);
+      setTimeout(() => setAttendanceSaved(false), 2500);
+    } catch {
+      // ignore
+    } finally {
+      setAttendanceSaving(false);
+    }
+  };
+
+  const handleLoadAttendanceRecords = async (sessionId: string) => {
+    if (!id || !sessionId) return;
+    setAttendanceLoading(true);
+    try {
+      const records = await getSessionAttendance(id, sessionId);
+      setAttendanceRecords(records);
+    } catch {
+      setAttendanceRecords([]);
+    } finally {
+      setAttendanceLoading(false);
+    }
+  };
+
+  const handleRecalculateAttendance = async (sessionId: string) => {
+    if (!id || !sessionId) return;
+    setAttendanceCalcRunning(true);
+    try {
+      const records = await calculateSessionAttendance(id, sessionId);
+      setAttendanceRecords(records);
+    } catch {
+      // ignore
+    } finally {
+      setAttendanceCalcRunning(false);
+    }
+  };
 
   useEffect(() => {
     if (!waitingSessionId) return;
@@ -2316,12 +2405,147 @@ export function ClassroomDetail() {
               className="classroom-detail__panel"
             >
               <h2 className="classroom-detail__panel-title">Attendance</h2>
-              <div className="classroom-detail__attendance-grid">
-                <div className="classroom-detail__attendance-placeholder">
-                  <p>Attendance date grid - placeholder</p>
-                  <p className="classroom-detail__attendance-hint">
-                    Select dates to view or record attendance.
+
+              {/* ── Session attendance records ─── */}
+              <div className="classroom-detail__attendance-section">
+                <h3 className="classroom-detail__subsection-title">Session Attendance</h3>
+                <div className="classroom-detail__attendance-controls">
+                  <KidDropdown
+                    value={attendanceSessionId}
+                    onChange={(v) => {
+                      setAttendanceSessionId(v);
+                      setAttendanceFilter("all");
+                      void handleLoadAttendanceRecords(v);
+                    }}
+                    ariaLabel="Select session"
+                    placeholder="— Select a session —"
+                    fullWidth
+                    options={[
+                      ...sessions
+                        .filter((s) => s.status === "completed")
+                        .sort(
+                          (a, b) =>
+                            new Date(b.session_start).getTime() -
+                            new Date(a.session_start).getTime(),
+                        )
+                        .map((s) => ({
+                          value: s.id,
+                          label: new Date(s.session_start).toLocaleString(),
+                        })),
+                    ]}
+                  />
+                  {attendanceSessionId && (
+                    <button
+                      type="button"
+                      className="ui-btn ui-btn--secondary"
+                      onClick={() => void handleRecalculateAttendance(attendanceSessionId)}
+                      disabled={attendanceCalcRunning}
+                    >
+                      {attendanceCalcRunning ? "Calculating…" : "Recalculate"}
+                    </button>
+                  )}
+                </div>
+
+                {attendanceLoading && (
+                  <p className="classroom-list__empty">Loading attendance…</p>
+                )}
+
+                {!attendanceLoading && attendanceSessionId && attendanceRecords.length === 0 && (
+                  <p className="classroom-list__empty">
+                    No attendance records yet. Click Recalculate to compute from presence data.
                   </p>
+                )}
+
+                {!attendanceLoading && attendanceRecords.length > 0 && (() => {
+                  const presentCount = attendanceRecords.filter((r) => r.status === "present").length;
+                  const absentCount = attendanceRecords.filter((r) => r.status === "absent").length;
+                  const filtered = attendanceFilter === "all"
+                    ? attendanceRecords
+                    : attendanceRecords.filter((r) => r.status === attendanceFilter);
+                  return (
+                    <>
+                      <div className="classroom-detail__attendance-filter">
+                        {(["all", "present", "absent"] as const).map((f) => {
+                          const label =
+                            f === "all" ? `All (${attendanceRecords.length})`
+                            : f === "present" ? `Present (${presentCount})`
+                            : `Absent (${absentCount})`;
+                          return (
+                            <button
+                              key={f}
+                              type="button"
+                              className={`classroom-detail__sub-pill${attendanceFilter === f ? " classroom-detail__sub-pill--active" : ""}`}
+                              onClick={() => setAttendanceFilter(f)}
+                            >
+                              {label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <table className="classroom-detail__attendance-table">
+                        <thead>
+                          <tr>
+                            <th>Student</th>
+                            <th>Status</th>
+                            <th>Notes</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filtered.map((rec) => {
+                            const student = students.find((s) => s.id === rec.student_id);
+                            const name = student
+                              ? (student.display_name || `${student.first_name} ${student.last_name}`.trim())
+                              : rec.student_id;
+                            return (
+                              <tr key={rec.id}>
+                                <td>{name}</td>
+                                <td>
+                                  <span
+                                    className={`classroom-detail__attendance-badge classroom-detail__attendance-badge--${rec.status}`}
+                                  >
+                                    {rec.status}
+                                  </span>
+                                </td>
+                                <td>{rec.notes ?? "—"}</td>
+                              </tr>
+                            );
+                          })}
+                          {filtered.length === 0 && (
+                            <tr>
+                              <td colSpan={3} style={{ textAlign: "center", color: "var(--color-text-secondary, #64748b)", padding: "16px" }}>
+                                No {attendanceFilter} records for this session.
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </>
+                  );
+                })()}
+              </div>
+
+              {/* ── Classroom-level attendance policy ─── */}
+              <div className="classroom-detail__attendance-section" style={{ marginTop: 32 }}>
+                <h3 className="classroom-detail__subsection-title">Attendance Policy</h3>
+                <p className="classroom-detail__section-desc">
+                  Override the attendance policy for this classroom. Leave unset to inherit from the program or tenant.
+                </p>
+                <AttendanceSettings
+                  value={attendanceCfg}
+                  onChange={setAttendanceCfg}
+                  allowInherit
+                  inheritLabel="Inherit from program / tenant"
+                  saving={attendanceSaving}
+                />
+                <div className="ui-form-actions" style={{ marginTop: 16 }}>
+                  <button
+                    type="button"
+                    className="ui-btn ui-btn--primary"
+                    onClick={() => void handleSaveAttendanceSettings()}
+                    disabled={attendanceSaving}
+                  >
+                    {attendanceSaving ? "Saving…" : attendanceSaved ? "Saved!" : "Save Policy"}
+                  </button>
                 </div>
               </div>
             </div>

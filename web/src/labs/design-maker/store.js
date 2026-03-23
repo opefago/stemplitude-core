@@ -231,6 +231,8 @@ export const DEFAULT_SHAPE_ROTATIONS = {
 // Mutable cursor state for high-frequency drag position updates (not in Zustand for perf)
 export const dragCursor = { x: 0, y: 0, active: false };
 export const sceneCamera = { current: null };
+export const sceneOrbitControls = { current: null };
+export const sceneReadOnly = { current: false };
 export const sceneInteracting = { active: false };
 
 export { getFloorY };

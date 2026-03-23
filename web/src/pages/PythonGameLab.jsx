@@ -1,6 +1,9 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Play, Square, RotateCcw, ChevronDown, X, PanelLeftClose, PanelLeftOpen, Fullscreen, Shrink, Maximize2, Minimize2, HelpCircle, Save, Share2, FolderOpen, Trash2, Check, ArrowLeft, Plus } from 'lucide-react';
 import { useLabSession } from '../features/labs/useLabSession';
+import { useLabSync } from '../features/labs/useLabSync';
+import { yCollab } from 'y-codemirror.next';
+import { Compartment } from '@codemirror/state';
 import { EditorView, basicSetup } from 'codemirror';
 import { EditorState } from '@codemirror/state';
 import { python, pythonLanguage } from '@codemirror/lang-python';
@@ -20,8 +23,11 @@ const loadProjectsFromStorage = () => {
   catch { return []; }
 };
 
+const collabCompartment = new Compartment();
+
 const PythonGameLab = () => {
-  const { exitLab } = useLabSession();
+  const { exitLab, panel, classroomContext } = useLabSession();
+  const { ydoc, provider } = useLabSync(null, classroomContext?.sessionId, false, !!classroomContext);
   const canvasRef = useRef(null);
   const editorContainerRef = useRef(null);
   const editorViewRef = useRef(null);
@@ -84,11 +90,25 @@ const PythonGameLab = () => {
           '.cm-content': { padding: '8px 0' },
           '.cm-gutters': { background: '#1e1e2e', border: 'none' },
         }),
+        collabCompartment.of([]),
       ],
     });
     editorViewRef.current = new EditorView({ state, parent: editorContainerRef.current });
     return () => { editorViewRef.current?.destroy(); editorViewRef.current = null; };
   }, []);
+
+  // Yjs collab extension — reconfigure CodeMirror compartment when provider is ready
+  useEffect(() => {
+    const view = editorViewRef.current;
+    if (!view || !provider || !classroomContext) return;
+    const yText = ydoc.getText('code');
+    view.dispatch({
+      effects: collabCompartment.reconfigure(yCollab(yText, provider.awareness)),
+    });
+    return () => {
+      view.dispatch({ effects: collabCompartment.reconfigure([]) });
+    };
+  }, [provider, classroomContext, ydoc]);
 
   // GameEngine
   useEffect(() => {
@@ -544,6 +564,7 @@ const PythonGameLab = () => {
         </div>
       )}
       {showHelp && <HelpPanel onClose={() => setShowHelp(false)} />}
+      {panel}
     </div>
   );
 };

@@ -1,12 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { type ReactElement, useCallback, useEffect, useMemo, useRef } from "react";
+import { createElement } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { heartbeatMySession } from "../../lib/api/classrooms";
+import { LabAssistantPanel } from "./LabAssistantPanel";
 
 /** Classroom context carried through URL params when a lab is launched from a live session. */
 export interface LabClassroomContext {
   classroomId: string;
   sessionId: string;
   referrer: string;
+  labType: string | null;
 }
 
 const IN_LAB_HEARTBEAT_MS = 30_000;
@@ -17,7 +20,7 @@ function parseClassroomContext(search: string): LabClassroomContext | null {
   const sessionId = params.get("session_id");
   const referrer = params.get("referrer");
   if (classroomId && sessionId && referrer === "classroom_live_session") {
-    return { classroomId, sessionId, referrer };
+    return { classroomId, sessionId, referrer, labType: params.get("lab") };
   }
   return null;
 }
@@ -68,10 +71,10 @@ export function useLabSession() {
   // Send in-lab heartbeats to keep the student listed as a participant
   useEffect(() => {
     if (!classroomContext) return;
-    const { classroomId, sessionId } = classroomContext;
+    const { classroomId, sessionId, labType } = classroomContext;
 
     const sendHeartbeat = () => {
-      void heartbeatMySession(classroomId, sessionId, "in_lab").catch(() => {});
+      void heartbeatMySession(classroomId, sessionId, "in_lab", labType).catch(() => {});
     };
 
     sendHeartbeat();
@@ -83,7 +86,7 @@ export function useLabSession() {
         heartbeatIntervalRef.current = null;
       }
     };
-  }, [classroomContext?.classroomId, classroomContext?.sessionId]);
+  }, [classroomContext?.classroomId, classroomContext?.sessionId, classroomContext?.labType]);
 
   const exitLab = useCallback(() => {
     const idx =
@@ -99,5 +102,9 @@ export function useLabSession() {
     navigate(fallbackExitPath, { replace: true });
   }, [fallbackExitPath, navigate]);
 
-  return { exitLab, fallbackExitPath, classroomContext };
+  const panel: ReactElement | null = classroomContext
+    ? createElement(LabAssistantPanel, { classroomContext })
+    : null;
+
+  return { exitLab, fallbackExitPath, classroomContext, panel };
 }

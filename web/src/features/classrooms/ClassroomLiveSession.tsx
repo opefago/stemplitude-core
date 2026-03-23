@@ -6,6 +6,8 @@ import {
   Video,
   MessageSquare,
   Gift,
+  AlertCircle,
+  Eye,
   FlaskConical,
   Share2,
   Upload,
@@ -68,9 +70,11 @@ import {
   uploadAsset,
   type Asset as LibraryAsset,
 } from "../../lib/api/assets";
-import { buildLabLaunchPath } from "../labs/labRouting";
+import { buildLabLaunchPath, resolveLabRoute } from "../labs/labRouting";
 import "../../components/ui/ui.css";
 import "./classrooms.css";
+import { RecognitionToast, type RecognitionEvent } from "./RecognitionToast";
+import { playAwardSound } from "../labs/labSounds";
 
 function isLiveSession(session: ClassroomSessionRecord): boolean {
   if (session.status === "canceled" || session.status === "completed") return false;
@@ -133,6 +137,7 @@ export function ClassroomLiveSession() {
   const [error, setError] = useState<string | null>(null);
   const [presenceSummary, setPresenceSummary] = useState<SessionPresenceSummary | null>(null);
   const [participants, setParticipants] = useState<SessionPresenceParticipant[]>([]);
+  const [helpRequests, setHelpRequests] = useState<Record<string, { note: string; ts: string }>>({});
   const [participantSearch, setParticipantSearch] = useState("");
   const [participantBonusPreset, setParticipantBonusPreset] = useState("5");
   const [selectedSessionLab, setSelectedSessionLab] = useState("");
@@ -218,10 +223,14 @@ export function ClassroomLiveSession() {
   const suppressVideoBroadcastRef = useRef(false);
   const suppressScrollBroadcastRef = useRef(false);
   const sessionEndedRedirectedRef = useRef(false);
-  const navigatingToLabRef = useRef(false);
+  const navigatingToLabRef = useRef<{ active: boolean; labType: string }>({ active: false, labType: "" });
+  // Tracks whether any WebSocket data has updated participants for the current session.
+  // Used to prevent the REST fallback from overwriting live in_lab state.
+  const wsParticipantsReceivedRef = useRef(false);
   const [nowMs, setNowMs] = useState(Date.now());
   const [realtimeConnected, setRealtimeConnected] = useState(false);
   const [showConfettiSplash, setShowConfettiSplash] = useState(false);
+  const [recognitionEvent, setRecognitionEvent] = useState<RecognitionEvent | null>(null);
   const [sharedContentPage, setSharedContentPage] = useState(1);
   const [pendingMediaControl, setPendingMediaControl] = useState<{
     action: "play" | "pause";
@@ -494,7 +503,22 @@ export function ClassroomLiveSession() {
       const summary = payload.summary as SessionPresenceSummary | undefined;
       const people = payload.participants as SessionPresenceParticipant[] | undefined;
       if (summary) setPresenceSummary(summary);
-      if (people) setParticipants(people);
+      if (people) {
+        wsParticipantsReceivedRef.current = true;
+        setParticipants(people);
+      }
+      return;
+    }
+
+    if (envelope.event_type === "help_request") {
+      const actorId = envelope.actor?.id ?? "";
+      if (actorId) {
+        const note = typeof payload.note === "string" ? payload.note : "";
+        setHelpRequests((prev) => ({
+          ...prev,
+          [actorId]: { note, ts: envelope.created_at ?? new Date().toISOString() },
+        }));
+      }
       return;
     }
 
@@ -674,14 +698,45 @@ export function ClassroomLiveSession() {
     const mapped = toSessionEvent(envelope);
     if (!mapped) return;
     upsertSessionEvent(mapped);
+
+    const isAwardEvent =
+      mapped.event_type === "points_awarded" ||
+      mapped.event_type === "high_five" ||
+      mapped.event_type === "callout";
+
+    if (isAwardEvent) {
+      // Play sound for everyone in the session (students and instructor).
+      playAwardSound(mapped.event_type as "points_awarded" | "high_five" | "callout");
+
+      // Show the recognition toast for everyone.
+      const studentName =
+        (envelope.payload as Record<string, unknown> | undefined)?.["student_display_name"] as
+          | string
+          | undefined ?? "A student";
+      const points =
+        mapped.event_type === "points_awarded"
+          ? ((envelope.payload as Record<string, unknown> | undefined)?.["points_delta"] as
+              | number
+              | undefined)
+          : undefined;
+      const message =
+        (envelope.payload as Record<string, unknown> | undefined)?.["message"] as
+          | string
+          | undefined;
+      setRecognitionEvent({
+        eventType: mapped.event_type as "points_awarded" | "high_five" | "callout",
+        studentName,
+        points,
+        message,
+      });
+    }
+
     if (
       !isInstructorView &&
+      isAwardEvent &&
       mapped.student_id &&
       user?.id &&
-      mapped.student_id === user.id &&
-      (mapped.event_type === "points_awarded" ||
-        mapped.event_type === "high_five" ||
-        mapped.event_type === "callout")
+      mapped.student_id === user.id
     ) {
       setShowConfettiSplash(true);
       if (confettiTimerRef.current != null) {
@@ -877,6 +932,7 @@ export function ClassroomLiveSession() {
     }
 
     let cancelled = false;
+    wsParticipantsReceivedRef.current = false; // reset for this session
     const client = new ClassroomRealtimeClient({
       classroomId: id,
       sessionId: activeSession.id,
@@ -892,6 +948,7 @@ export function ClassroomLiveSession() {
       },
       onSnapshot: (snapshot: RealtimeSnapshot) => {
         if (cancelled) return;
+        wsParticipantsReceivedRef.current = true;
         lastRealtimeSequenceRef.current = Math.max(
           lastRealtimeSequenceRef.current,
           snapshot.latest_sequence ?? 0,
@@ -947,7 +1004,11 @@ export function ClassroomLiveSession() {
       ]).then(([summary, people, events]) => {
         if (cancelled) return;
         if (summary) setPresenceSummary(summary);
-        setParticipants(people);
+        // Only apply REST participants if no WebSocket data has arrived yet.
+        // The WS snapshot/events are always more current than this fallback call.
+        if (!wsParticipantsReceivedRef.current) {
+          setParticipants(people);
+        }
         setSessionEvents(events);
       });
     } else {
@@ -995,9 +1056,9 @@ export function ClassroomLiveSession() {
 
     return () => {
       cancelled = true;
-      if (navigatingToLabRef.current) {
-        client.send("presence.in_lab");
-        navigatingToLabRef.current = false;
+      if (navigatingToLabRef.current.active) {
+        client.send("presence.in_lab", { lab_type: navigatingToLabRef.current.labType });
+        navigatingToLabRef.current = { active: false, labType: "" };
       } else {
         client.send("presence.leave");
       }
@@ -1212,7 +1273,14 @@ export function ClassroomLiveSession() {
       navigate("/app/labs");
       return;
     }
-    navigatingToLabRef.current = true;
+    const labType = resolveLabRoute(lab)?.id ?? lab;
+    navigatingToLabRef.current = { active: true, labType };
+    // Fire a REST heartbeat immediately so the DB is updated before this component
+    // unmounts. The WebSocket send in the cleanup effect is unreliable because
+    // disconnect() runs right after send(), potentially closing the socket first.
+    if (!isInstructorView && activeSession?.id) {
+      heartbeatMySession(id, activeSession.id, "in_lab", labType).catch(() => {});
+    }
     navigate(
       buildLabLaunchPath(lab, {
         classroomId: id,
@@ -1731,6 +1799,7 @@ export function ClassroomLiveSession() {
   return (
     <div ref={liveRootRef} className="classroom-live" role="main" aria-label="Live classroom session">
       {showConfettiSplash && <div className="classroom-live__confetti-splash" aria-hidden />}
+      <RecognitionToast event={recognitionEvent} onDismiss={() => setRecognitionEvent(null)} />
       <Link
         to={`/app/classrooms/${id}?tab=sessions`}
         className="classroom-detail__back"
@@ -2270,14 +2339,51 @@ export function ClassroomLiveSession() {
                             <li key={student.actor_id} className="classroom-live__participants-item" role="listitem">
                               <div className="classroom-live__participants-meta">
                                 <strong>{student.display_name}</strong>
+                                <div className="classroom-live__participants-badges">
+                                  {student.in_lab && (
+                                    <span className="classroom-live__in-lab-badge" title={`In Lab${student.lab_type ? `: ${student.lab_type}` : ""}`}>
+                                      <FlaskConical size={11} /> In Lab
+                                    </span>
+                                  )}
+                                  {helpRequests[student.actor_id] && (
+                                    <span
+                                      className="classroom-live__help-badge"
+                                      title={helpRequests[student.actor_id].note || "Needs help"}
+                                    >
+                                      <AlertCircle size={11} /> Help
+                                    </span>
+                                  )}
+                                </div>
                                 {student.email ? <span>{student.email}</span> : null}
                               </div>
                               {isInstructorView && (
                                 <div className="classroom-live__participants-actions">
+                                {student.in_lab && activeSession && (
+                                  <button
+                                    type="button"
+                                    className="classroom-live__participant-action classroom-live__participant-action--join"
+                                    onClick={() =>
+                                      navigate(
+                                        `/app/classrooms/${id}/observe-lab/${student.actor_id}` +
+                                          `?session_id=${activeSession.id}&lab=${student.lab_type ?? ""}`,
+                                      )
+                                    }
+                                    title="Observe this student's lab"
+                                  >
+                                    <Eye size={12} /> Join
+                                  </button>
+                                )}
                                 <button
                                   type="button"
                                   className="classroom-live__participant-action"
-                                  onClick={() => void runParticipantAction(student, "high_five")}
+                                  onClick={() => {
+                                    setHelpRequests((prev) => {
+                                      const next = { ...prev };
+                                      delete next[student.actor_id];
+                                      return next;
+                                    });
+                                    void runParticipantAction(student, "high_five");
+                                  }}
                                 >
                                   High 5
                                 </button>

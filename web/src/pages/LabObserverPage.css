@@ -1,0 +1,83 @@
+/* ==========================================
+   Lab Observer Page
+   ========================================== */
+
+.lab-observer {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #0f1117;
+  color: #e5e7eb;
+  z-index: 1000;
+}
+
+.lab-observer__header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  height: 48px;
+  background: rgba(22, 24, 35, 0.95);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
+  z-index: 10;
+}
+
+.lab-observer__back-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: transparent;
+  color: #9ca3af;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.lab-observer__back-btn:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: #f3f4f6;
+}
+
+.lab-observer__title {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 600;
+  color: #f3f4f6;
+  text-align: center;
+}
+
+.lab-observer__status {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: #ef4444;
+  font-weight: 500;
+}
+
+.lab-observer__status--connected {
+  color: #22c55e;
+}
+
+.lab-observer__content {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+.lab-observer__loading,
+.lab-observer__unsupported {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: #9ca3af;
+  font-size: 14px;
+}

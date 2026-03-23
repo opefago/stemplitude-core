@@ -6,6 +6,7 @@ import {
   Users,
   AlertTriangle,
   Shield,
+  ClipboardCheck,
 } from "lucide-react";
 import { useTenant } from "../../providers/TenantProvider";
 import {
@@ -13,11 +14,16 @@ import {
   getSupportAccessOptions,
   listSupportAccessGrants,
   revokeSupportAccessGrant,
+  updateTenantSettings,
   type SupportAccessGrant,
   type SupportAccessRoleOption,
   type SupportAccessUserOption,
 } from "../../lib/api/tenants";
 import { KidDropdown } from "../../components/ui";
+import {
+  AttendanceSettings,
+  type AttendanceConfig,
+} from "../classrooms/AttendanceSettings";
 import "../../components/ui/ui.css";
 import "./settings.css";
 
@@ -60,13 +66,14 @@ const UI_MODES = [
   { value: "pro", label: "Pro" },
 ];
 
-type TabId = "general" | "labs" | "ui" | "parent" | "support" | "danger";
+type TabId = "general" | "labs" | "ui" | "parent" | "attendance" | "support" | "danger";
 
 const TABS: { id: TabId; label: string; icon: typeof Settings }[] = [
   { id: "general", label: "General", icon: Settings },
   { id: "labs", label: "Lab Settings", icon: FlaskConical },
   { id: "ui", label: "UI Policy", icon: Palette },
   { id: "parent", label: "Parent Policies", icon: Users },
+  { id: "attendance", label: "Attendance", icon: ClipboardCheck },
   { id: "support", label: "Support Access", icon: Shield },
   { id: "danger", label: "Danger Zone", icon: AlertTriangle },
 ];
@@ -98,6 +105,45 @@ export function TenantSettings() {
       .toISOString()
       .slice(0, 16);
   });
+
+  // Attendance settings
+  const [attendanceCfg, setAttendanceCfg] = useState<AttendanceConfig>({
+    enabled: true,
+    mode: "any_join",
+    minimum_minutes: 15,
+    percentage: 75,
+  });
+  const [attendanceSaving, setAttendanceSaving] = useState(false);
+  const [attendanceSaved, setAttendanceSaved] = useState(false);
+
+  // Load attendance config from tenant settings on mount
+  useEffect(() => {
+    const raw = tenant?.settings?.attendance as Record<string, unknown> | undefined;
+    if (raw && typeof raw === "object") {
+      setAttendanceCfg((prev) => ({
+        ...prev,
+        ...(typeof raw.enabled === "boolean" ? { enabled: raw.enabled } : {}),
+        ...(typeof raw.mode === "string" ? { mode: raw.mode as AttendanceConfig["mode"] } : {}),
+        ...(typeof raw.minimum_minutes === "number" ? { minimum_minutes: raw.minimum_minutes } : {}),
+        ...(typeof raw.percentage === "number" ? { percentage: raw.percentage } : {}),
+      }));
+    }
+  }, [tenant?.settings]);
+
+  const handleSaveAttendance = async () => {
+    if (!tenant?.id) return;
+    setAttendanceSaving(true);
+    try {
+      const existing = (tenant.settings as Record<string, unknown> | undefined) ?? {};
+      await updateTenantSettings(tenant.id, { ...existing, attendance: attendanceCfg });
+      setAttendanceSaved(true);
+      setTimeout(() => setAttendanceSaved(false), 2500);
+    } catch {
+      // Silently ignore for now — settings page is non-critical
+    } finally {
+      setAttendanceSaving(false);
+    }
+  };
 
   const tenantName = tenant?.name ?? "Organization";
   const tenantSlug = tenant?.slug ?? "org";
@@ -444,6 +490,35 @@ export function TenantSettings() {
                 }
                 className="tenant-settings__input"
               />
+            </div>
+          </section>
+
+          {/* Attendance */}
+          <section
+            id="panel-attendance"
+            role="tabpanel"
+            aria-labelledby="tab-attendance"
+            hidden={activeTab !== "attendance"}
+            className="tenant-settings__panel"
+          >
+            <h2 className="tenant-settings__panel-title">Attendance</h2>
+            <p className="tenant-settings__panel-desc">
+              Set the default attendance policy for your organization. Programs and classes can override this setting.
+            </p>
+            <AttendanceSettings
+              value={attendanceCfg}
+              onChange={(v) => setAttendanceCfg(v ?? attendanceCfg)}
+              saving={attendanceSaving}
+            />
+            <div className="ui-form-actions" style={{ marginTop: 24 }}>
+              <button
+                type="button"
+                className="ui-btn ui-btn--primary"
+                onClick={() => void handleSaveAttendance()}
+                disabled={attendanceSaving}
+              >
+                {attendanceSaving ? "Saving…" : attendanceSaved ? "Saved!" : "Save Attendance Settings"}
+              </button>
             </div>
           </section>
 

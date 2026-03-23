@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import Tippy from '@tippyjs/react';
 import { Play, Square, RotateCcw, X, Puzzle, Code, Fullscreen, Shrink, HelpCircle, Save, FolderOpen, Trash2, ArrowLeft, Plus, Upload, Mic, AudioLines, Grid3x3 } from 'lucide-react';
 import { useLabSession } from '../features/labs/useLabSession';
+import { useLabSync } from '../features/labs/useLabSync';
 import * as Blockly from 'blockly';
 import { pythonGenerator } from 'blockly/python';
 import { registerBlocks, generateCode } from '../labs/game-maker/blocks';
@@ -189,7 +190,9 @@ function loadStarterBlocks(workspace) {
 }
 
 const GameMakerLab = () => {
-  const { exitLab } = useLabSession();
+  const { exitLab, panel, classroomContext } = useLabSession();
+  const { ydoc, provider } = useLabSync(null, classroomContext?.sessionId, false, !!classroomContext);
+  const yjsApplyingRef = useRef(false);
   const blocklyDiv = useRef(null);
   const workspaceRef = useRef(null);
   const canvasRef = useRef(null);
@@ -427,6 +430,50 @@ const GameMakerLab = () => {
       workspaceRef.current = null;
     };
   }, []);
+
+  // Yjs Blockly XML sync
+  useEffect(() => {
+    const workspace = workspaceRef.current;
+    if (!workspace || !provider || !classroomContext) return;
+
+    const yXml = ydoc.getText('workspace-xml');
+
+    // Push local changes to Yjs
+    const pushToYjs = (event) => {
+      if (yjsApplyingRef.current) return;
+      if (event?.isUiEvent) return;
+      const xml = Blockly.Xml.workspaceToDom(workspace);
+      const xmlStr = Blockly.Xml.domToText(xml);
+      ydoc.transact(() => {
+        yXml.delete(0, yXml.length);
+        yXml.insert(0, xmlStr);
+      });
+    };
+
+    workspace.addChangeListener(pushToYjs);
+
+    // Apply remote Yjs changes to Blockly
+    const onYjsChange = () => {
+      const xmlStr = yXml.toString();
+      if (!xmlStr || !workspaceRef.current) return;
+      try {
+        const dom = Blockly.utils.xml.textToDom(xmlStr);
+        yjsApplyingRef.current = true;
+        Blockly.Xml.clearWorkspaceAndLoadFromXml(dom, workspaceRef.current);
+      } catch (e) {
+        // ignore malformed XML during initial sync
+      } finally {
+        yjsApplyingRef.current = false;
+      }
+    };
+
+    yXml.observe(onYjsChange);
+
+    return () => {
+      workspace.removeChangeListener(pushToYjs);
+      yXml.unobserve(onYjsChange);
+    };
+  }, [provider, classroomContext, ydoc]);
 
   useEffect(() => {
     if (workspaceRef.current && viewMode === 'blocks') {
@@ -1147,6 +1194,7 @@ const GameMakerLab = () => {
           </div>
         </div>
       )}
+      {panel}
     </div>
   );
 };

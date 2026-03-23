@@ -1,6 +1,7 @@
 import React, { useEffect, useCallback, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useLabSession } from '../features/labs/useLabSession';
+import { useLabSync } from '../features/labs/useLabSync';
 import RichTip from '../labs/design-maker/RichTip';
 import TC from '../labs/design-maker/tooltipContent';
 import {
@@ -22,6 +23,7 @@ import {
   useDesignStore,
   dragCursor,
   sceneCamera,
+  sceneOrbitControls,
   sceneInteracting,
   getEffectiveSelectionIdsFromState,
 } from '../labs/design-maker/store';
@@ -79,7 +81,8 @@ function buildExportScene(objects) {
 
 export default function DesignMakerLab() {
   const navigate = useNavigate();
-  const { exitLab } = useLabSession();
+  const { exitLab, panel, classroomContext } = useLabSession();
+  const { ydoc, provider } = useLabSync(null, classroomContext?.sessionId, false, !!classroomContext);
   const fileInputRef = useRef(null);
   const [exportOpen, setExportOpen] = React.useState(false);
   const [dragOver, setDragOver] = React.useState(false);
@@ -116,6 +119,101 @@ export default function DesignMakerLab() {
   const getProjectList = useDesignStore(s => s.getProjectList);
   const [projectsOpen, setProjectsOpen] = useState(false);
   const [projectList, setProjectList] = useState([]);
+
+  // Yjs scene sync — push local object changes to Y.Map, receive remote changes
+  const yjsApplyingRef = useRef(false);
+  const yjsThrottleRef = useRef(null);   // trailing-edge timer
+  const yjsLastSentRef = useRef(0);      // timestamp of last push
+  const THROTTLE_MS = 50;               // ~20 fps to observers during drag
+
+  useEffect(() => {
+    if (!provider || !classroomContext) return;
+    const yScene = ydoc.getMap('scene');
+
+    // Push local object changes throttled: fires immediately if ≥50 ms since last push,
+    // otherwise schedules a trailing-edge update so the final position always lands.
+    const pushObjects = (objects) => {
+      try {
+        ydoc.transact(() => {
+          yScene.set('objects', JSON.parse(JSON.stringify(objects)));
+        });
+      } catch {}
+      yjsLastSentRef.current = Date.now();
+    };
+
+    const unsubscribe = useDesignStore.subscribe((state, prevState) => {
+      if (state.objects === prevState.objects) return;
+      if (yjsApplyingRef.current) return;
+
+      const elapsed = Date.now() - yjsLastSentRef.current;
+      if (elapsed >= THROTTLE_MS) {
+        // Send immediately; cancel any queued trailing send.
+        if (yjsThrottleRef.current) {
+          clearTimeout(yjsThrottleRef.current);
+          yjsThrottleRef.current = null;
+        }
+        pushObjects(state.objects);
+      } else {
+        // Schedule trailing-edge send.
+        if (yjsThrottleRef.current) clearTimeout(yjsThrottleRef.current);
+        yjsThrottleRef.current = setTimeout(() => {
+          yjsThrottleRef.current = null;
+          pushObjects(useDesignStore.getState().objects);
+        }, THROTTLE_MS - elapsed);
+      }
+    });
+
+    // Push the current scene state immediately so joining observers receive it.
+    const currentObjects = useDesignStore.getState().objects;
+    if (currentObjects.length > 0) pushObjects(currentObjects);
+
+    // Apply remote Yjs changes to local store.
+    const onYjsChange = () => {
+      const remoteObjects = yScene.get('objects');
+      if (!Array.isArray(remoteObjects)) return;
+      yjsApplyingRef.current = true;
+      try {
+        useDesignStore.setState({ objects: remoteObjects, selectedIds: [] });
+      } finally {
+        yjsApplyingRef.current = false;
+      }
+    };
+
+    yScene.observe(onYjsChange);
+
+    // Camera sync: push position + orbit target every 150 ms when the camera moves.
+    let lastCamPos = null;
+    const camInterval = setInterval(() => {
+      const cam = sceneCamera.current;
+      const orbit = sceneOrbitControls.current;
+      if (!cam || !orbit) return;
+      const pos = [
+        parseFloat(cam.position.x.toFixed(4)),
+        parseFloat(cam.position.y.toFixed(4)),
+        parseFloat(cam.position.z.toFixed(4)),
+      ];
+      const target = [
+        parseFloat(orbit.target.x.toFixed(4)),
+        parseFloat(orbit.target.y.toFixed(4)),
+        parseFloat(orbit.target.z.toFixed(4)),
+      ];
+      const key = pos.join(',') + '|' + target.join(',');
+      if (key === lastCamPos) return;
+      lastCamPos = key;
+      try {
+        ydoc.transact(() => {
+          yScene.set('camera', { position: pos, target });
+        });
+      } catch {}
+    }, 150);
+
+    return () => {
+      if (yjsThrottleRef.current) clearTimeout(yjsThrottleRef.current);
+      clearInterval(camInterval);
+      unsubscribe();
+      yScene.unobserve(onYjsChange);
+    };
+  }, [provider, classroomContext, ydoc]);
   const projectsRef = useRef(null);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [projectDialogOpen, setProjectDialogOpen] = useState(false);
@@ -956,6 +1054,7 @@ export default function DesignMakerLab() {
           </div>
         </div>
       )}
+      {panel}
     </div>
   );
 }

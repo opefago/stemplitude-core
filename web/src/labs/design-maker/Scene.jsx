@@ -39,6 +39,8 @@ import {
   DEFAULT_SHAPE_ROTATIONS,
   dragCursor,
   sceneCamera,
+  sceneOrbitControls,
+  sceneReadOnly,
   sceneInteracting,
 } from "./store";
 import { createGeometry } from "./geometryFactory";
@@ -3715,6 +3717,11 @@ function SceneContent() {
     sceneCamera.current = camera;
   }, [camera]);
 
+  // Keep sceneOrbitControls in sync so external code (Yjs camera sync) can read the target.
+  useFrame(() => {
+    if (orbitRef.current) sceneOrbitControls.current = orbitRef.current;
+  }, -99);
+
   const objects = useDesignStore((s) => s.objects);
   const selectedIds = useDesignStore((s) => s.selectedIds);
   const gridVisible = useDesignStore((s) => s.gridVisible);
@@ -3854,6 +3861,7 @@ function SceneContent() {
 
   const handleObjDragStart = useCallback(
     (e, id) => {
+      if (sceneReadOnly.current) return;
       const handleHit = (e.intersections || []).some((hit) => {
         let node = hit.object;
         while (node) {
@@ -3997,6 +4005,7 @@ function SceneContent() {
           isSelected={selectedIds.includes(obj.id)}
           wireframe={wireframe}
           onSelect={(e) => {
+            if (sceneReadOnly.current) return;
             e.stopPropagation();
             if (!objDrag.current?.dragging) selectObject(obj.id, e.shiftKey);
           }}
@@ -4005,7 +4014,7 @@ function SceneContent() {
       ))}
 
       <HandlesOverlay>
-        {!mirrorMode &&
+        {!mirrorMode && !sceneReadOnly.current &&
           (selectedIds.length > 1 ? (
             <GroupObjectHandles
               meshRefs={meshRefs}

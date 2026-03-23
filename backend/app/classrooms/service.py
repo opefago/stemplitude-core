@@ -12,7 +12,10 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.classrooms.attendance_config import resolve_attendance_config
 from app.classrooms.models import Classroom, ClassroomSession, ClassroomStudent
+from app.programs.models import Program
+from app.tenants.models import Tenant
 from app.curriculum.models import Course
 from app.dependencies import CurrentIdentity
 from app.notifications.models import Notification
@@ -385,6 +388,15 @@ class ClassroomService:
             tenant_id=session_obj.tenant_id,
         )
         await self.session.flush()
+        try:
+            await self.auto_calculate_session_attendance(
+                classroom_id=session_obj.classroom_id,
+                session_id=session_obj.id,
+                tenant_id=session_obj.tenant_id,
+            )
+            await self.session.flush()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Auto-attendance calculation failed session=%s: %s", session_obj.id, exc)
         await self._notify_sessions_changed_for_classroom(
             tenant_id=session_obj.tenant_id,
             classroom_id=session_obj.classroom_id,
@@ -878,6 +890,120 @@ class ClassroomService:
         )
         return [AttendanceResponse.model_validate(r) for r in records]
 
+    async def auto_calculate_session_attendance(
+        self,
+        *,
+        classroom_id: UUID,
+        session_id: UUID,
+        tenant_id: UUID,
+    ) -> list[AttendanceResponse]:
+        """Compute and persist attendance for all enrolled students in a session.
+
+        Resolves the effective attendance policy (classroom > program > tenant > default),
+        then compares each student's presence duration against the policy threshold.
+        Existing attendance records are upserted so re-calculation is idempotent.
+        """
+        session_obj = await self.repo.get_session_by_id(session_id, classroom_id, tenant_id)
+        if not session_obj:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+
+        classroom_obj = await self.repo.get_by_id(classroom_id, tenant_id)
+        if not classroom_obj:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Classroom not found")
+
+        # Load program settings (may be None if classroom has no program).
+        program_settings: dict | None = None
+        if classroom_obj.program_id:
+            prog_result = await self.session.execute(
+                select(Program).where(Program.id == classroom_obj.program_id)
+            )
+            program_obj = prog_result.scalar_one_or_none()
+            if program_obj:
+                program_settings = program_obj.settings or {}
+
+        # Load tenant settings.
+        tenant_result = await self.session.execute(
+            select(Tenant).where(Tenant.id == tenant_id)
+        )
+        tenant_obj = tenant_result.scalar_one_or_none()
+        tenant_settings = (tenant_obj.settings if tenant_obj else None) or {}
+
+        config = resolve_attendance_config(
+            tenant_settings=tenant_settings,
+            program_settings=program_settings,
+            classroom_settings=classroom_obj.settings or {},
+        )
+
+        if not config.enabled:
+            return []
+
+        # Compute session length in minutes.
+        session_end = session_obj.session_end
+        session_start = session_obj.session_start
+        session_duration_minutes = (session_end - session_start).total_seconds() / 60
+
+        # Fetch all student presence rows.
+        presence_rows = await self.repo.list_session_presence_rows(session_id)
+        presence_by_student: dict[UUID, object] = {row.actor_id: row for row in presence_rows}
+
+        # Fetch all enrolled students.
+        enrolled_result = await self.session.execute(
+            select(ClassroomStudent.student_id).where(
+                ClassroomStudent.classroom_id == classroom_id
+            )
+        )
+        student_ids = [row[0] for row in enrolled_result.all()]
+
+        results: list[AttendanceResponse] = []
+        now = datetime.now(timezone.utc)
+
+        for student_id in student_ids:
+            presence = presence_by_student.get(student_id)
+            attendance_status = "absent"
+
+            if presence is not None:
+                if config.mode == "any_join":
+                    attendance_status = "present"
+                elif config.mode == "minimum_duration":
+                    duration_minutes = (presence.last_seen_at - presence.first_seen_at).total_seconds() / 60
+                    if duration_minutes >= config.minimum_minutes:
+                        attendance_status = "present"
+                elif config.mode == "percentage_duration":
+                    if session_duration_minutes > 0:
+                        duration_minutes = (presence.last_seen_at - presence.first_seen_at).total_seconds() / 60
+                        if (duration_minutes / session_duration_minutes * 100) >= config.percentage:
+                            attendance_status = "present"
+
+            existing = await self.repo.get_attendance(session_id, student_id)
+            if existing:
+                existing.status = attendance_status
+                existing.notes = f"Auto-calculated ({config.mode})"
+                await self.session.flush()
+                await self.session.refresh(existing)
+                results.append(AttendanceResponse.model_validate(existing))
+            else:
+                record = Attendance(
+                    session_id=session_id,
+                    classroom_id=classroom_id,
+                    student_id=student_id,
+                    tenant_id=tenant_id,
+                    status=attendance_status,
+                    notes=f"Auto-calculated ({config.mode})",
+                )
+                self.session.add(record)
+                await self.session.flush()
+                await self.session.refresh(record)
+                results.append(AttendanceResponse.model_validate(record))
+
+        logger.info(
+            "Attendance calculated session=%s classroom=%s students=%d mode=%s",
+            session_id,
+            classroom_id,
+            len(results),
+            config.mode,
+        )
+        return results
+
     async def list_sessions(
         self,
         classroom_id: UUID,
@@ -1101,6 +1227,7 @@ class ClassroomService:
                 actor_id=identity.id,
                 actor_type=actor_type,
                 seen_at=now,
+                lab_type=data.lab_type,
             )
         else:
             await self.repo.upsert_presence(
@@ -1227,6 +1354,15 @@ class ClassroomService:
             {"type": "event", "data": envelope.model_dump(mode="json")},
         )
         await self.session.flush()
+        try:
+            await self.auto_calculate_session_attendance(
+                classroom_id=classroom_id,
+                session_id=session_id,
+                tenant_id=tenant_id,
+            )
+            await self.session.flush()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Auto-attendance calculation failed session=%s: %s", session_id, exc)
         await self.session.refresh(session_obj)
         await self._notify_sessions_changed_for_classroom(
             tenant_id=tenant_id,

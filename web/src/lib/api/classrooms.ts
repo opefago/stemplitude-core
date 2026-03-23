@@ -25,6 +25,7 @@ export interface ClassroomRecord {
   timezone?: string | null;
   max_students?: number | null;
   is_active: boolean;
+  settings: Record<string, unknown>;
   join_code: string;
   external_meeting_id?: string | null;
   meeting_auto_generated: boolean;
@@ -92,6 +93,8 @@ export interface SessionPresenceParticipant {
   display_name: string;
   email?: string | null;
   last_seen_at: string;
+  in_lab?: boolean;
+  lab_type?: string | null;
 }
 
 export interface ClassroomSessionEventRecord {
@@ -338,13 +341,44 @@ export async function heartbeatMySession(
   classroomId: string,
   sessionId: string,
   status: "active" | "left" | "in_lab" = "active",
+  labType?: string | null,
 ): Promise<SessionPresenceSummary> {
   return apiFetch<SessionPresenceSummary>(
     `/students/me/classrooms/${classroomId}/sessions/${sessionId}/presence`,
     {
       method: "POST",
-      body: { status },
+      body: { status, ...(labType != null ? { lab_type: labType } : {}) },
     },
+  );
+}
+
+export interface AttendanceRecord {
+  id: string;
+  session_id: string;
+  classroom_id: string;
+  student_id: string;
+  tenant_id: string;
+  status: string;
+  notes: string | null;
+  created_at: string;
+}
+
+export async function calculateSessionAttendance(
+  classroomId: string,
+  sessionId: string,
+): Promise<AttendanceRecord[]> {
+  return apiFetch<AttendanceRecord[]>(
+    `/classrooms/${classroomId}/sessions/${sessionId}/attendance/calculate`,
+    { method: "POST" },
+  );
+}
+
+export async function getSessionAttendance(
+  classroomId: string,
+  sessionId: string,
+): Promise<AttendanceRecord[]> {
+  return apiFetch<AttendanceRecord[]>(
+    `/classrooms/${classroomId}/attendance?session_id=${sessionId}`,
   );
 }
 
@@ -416,6 +450,7 @@ export type UpdateClassroomPayload = Partial<{
   timezone: string | null;
   max_students: number | null;
   is_active: boolean;
+  settings: Record<string, unknown> | null;
 }>;
 
 export async function updateClassroom(
@@ -687,6 +722,12 @@ export interface ClassroomRealtimeClientOptions {
   initialSequence?: number;
   heartbeatMs?: number;
   reconnectMaxDelayMs?: number;
+  /**
+   * When true, the server will not reset the participant's in_lab presence
+   * status on connect or heartbeat. Use this when connecting from inside a
+   * virtual lab (LabAssistantPanel) so the student stays visible as in_lab.
+   */
+  preserveInLab?: boolean;
   onSnapshot?: (snapshot: RealtimeSnapshot) => void;
   onEvent?: (event: RealtimeEventEnvelope) => void;
   onReplay?: (events: RealtimeEventEnvelope[]) => void;
@@ -789,6 +830,9 @@ export class ClassroomRealtimeClient {
       tenant_id: this.opts.tenantId,
       last_sequence: String(this.lastSequence),
     });
+    if (this.opts.preserveInLab) {
+      params.set("preserve_in_lab", "1");
+    }
     const url = buildWsUrl(
       `/api/v1/classrooms/${this.opts.classroomId}/sessions/${this.opts.sessionId}/ws?${params.toString()}`,
     );

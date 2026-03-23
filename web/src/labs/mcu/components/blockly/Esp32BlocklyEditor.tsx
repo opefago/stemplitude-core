@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import type * as Y from "yjs";
+import type { WebsocketProvider } from "y-websocket";
 import { Save, FolderOpen, HelpCircle, Cpu, X } from "lucide-react";
 import * as Blockly from "blockly";
 import "blockly/blocks"; // register core blocks (logic, loops, math, variables, etc.)
@@ -60,6 +62,8 @@ type Props = {
   title?: string;
   exitPath?: string;
   onExit?: () => void;
+  ydoc?: Y.Doc;
+  yjsProvider?: WebsocketProvider;
 };
 
 // Board configuration map for dynamic GPIO options
@@ -760,9 +764,12 @@ export const Esp32BlocklyEditor: React.FC<Props> = ({
   title = "Micro Maker",
   exitPath,
   onExit,
+  ydoc,
+  yjsProvider,
 }) => {
   const divRef = useRef<HTMLDivElement | null>(null);
   const workspaceRef = useRef<Blockly.WorkspaceSvg | null>(null);
+  const yjsApplyingRef = useRef(false);
   const codeEditorRef = useRef<HTMLDivElement | null>(null);
   const editorViewRef = useRef<EditorView | null>(null);
   const isInitializingRef = useRef<boolean>(false); // Flag to prevent validation during init
@@ -1221,6 +1228,48 @@ export const Esp32BlocklyEditor: React.FC<Props> = ({
       workspaceRef.current = null;
     };
   }, [toolbox]);
+
+  // Yjs Blockly XML sync
+  useEffect(() => {
+    const workspace = workspaceRef.current;
+    if (!workspace || !yjsProvider || !ydoc) return;
+
+    const yXml = ydoc.getText("workspace-xml");
+
+    const pushToYjs = (event: Blockly.Events.Abstract) => {
+      if (yjsApplyingRef.current) return;
+      if ((event as { isUiEvent?: boolean }).isUiEvent) return;
+      const xml = Blockly.Xml.workspaceToDom(workspace);
+      const xmlStr = Blockly.Xml.domToText(xml);
+      ydoc.transact(() => {
+        yXml.delete(0, yXml.length);
+        yXml.insert(0, xmlStr);
+      });
+    };
+
+    workspace.addChangeListener(pushToYjs);
+
+    const onYjsChange = () => {
+      const xmlStr = yXml.toString();
+      if (!xmlStr || !workspaceRef.current) return;
+      try {
+        const dom = Blockly.utils.xml.textToDom(xmlStr);
+        yjsApplyingRef.current = true;
+        Blockly.Xml.clearWorkspaceAndLoadFromXml(dom, workspaceRef.current);
+      } catch {
+        // ignore malformed XML during initial sync
+      } finally {
+        yjsApplyingRef.current = false;
+      }
+    };
+
+    yXml.observe(onYjsChange);
+
+    return () => {
+      workspace.removeChangeListener(pushToYjs);
+      yXml.unobserve(onYjsChange);
+    };
+  }, [yjsProvider, ydoc]);
 
   // Update dropdown pins and toolbox header when board changes
   useEffect(() => {

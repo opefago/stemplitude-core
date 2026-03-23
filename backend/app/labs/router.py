@@ -340,3 +340,6 @@ async def delete_assignment(
 router.include_router(projects_router)
 router.include_router(assignments_router)
 router.include_router(feedback_router)
+
+from .yjs_router import router as yjs_router  # noqa: E402
+router.include_router(yjs_router)

@@ -42,6 +42,7 @@ from app.assets.repository import AssetRepository
 from app.assets.service import AssetsService
 from app.core import blob_storage
 from app.classrooms.models import ClassroomSession
+from app.classrooms.realtime import emit_presence_updated_for_session
 
 router = APIRouter()
 
@@ -734,13 +735,20 @@ async def my_session_presence_heartbeat(
         tenant_id=tenant.tenant_id,
     )
     service = ClassroomService(db)
-    return await service.heartbeat_session_presence(
+    result = await service.heartbeat_session_presence(
         classroom_id=classroom_id,
         session_id=session_id,
         tenant_id=tenant.tenant_id,
         identity=identity,
         data=data,
     )
+    if data.status in {"in_lab", "left"}:
+        await emit_presence_updated_for_session(
+            classroom_id=classroom_id,
+            session_id=session_id,
+            tenant_id=tenant.tenant_id,
+        )
+    return result
 
 
 @router.get(

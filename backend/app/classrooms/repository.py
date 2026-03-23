@@ -383,6 +383,7 @@ class ClassroomRepository:
         actor_id: UUID,
         actor_type: str,
         seen_at: datetime,
+        lab_type: str | None = None,
     ) -> None:
         """Mark the actor as having transitioned to the lab (still a participant)."""
         row = await self.get_presence_row(session_id, actor_id, actor_type)
@@ -390,6 +391,8 @@ class ClassroomRepository:
             row.last_seen_at = seen_at
             row.in_lab = True
             row.left_at = None
+            if lab_type is not None:
+                row.lab_type = lab_type
 
     async def mark_presence_left(
         self,
@@ -463,6 +466,8 @@ class ClassroomRepository:
                 ClassroomSessionPresence.actor_id,
                 ClassroomSessionPresence.actor_type,
                 ClassroomSessionPresence.last_seen_at,
+                ClassroomSessionPresence.in_lab,
+                ClassroomSessionPresence.lab_type,
             ).where(
                 ClassroomSessionPresence.session_id == session_id,
                 ClassroomSessionPresence.left_at.is_(None),
@@ -473,8 +478,8 @@ class ClassroomRepository:
         if not rows:
             return []
 
-        student_ids = [actor_id for actor_id, actor_type, _ in rows if actor_type == "student"]
-        user_ids = [actor_id for actor_id, actor_type, _ in rows if actor_type in {"instructor", "user"}]
+        student_ids = [actor_id for actor_id, actor_type, *_ in rows if actor_type == "student"]
+        user_ids = [actor_id for actor_id, actor_type, *_ in rows if actor_type in {"instructor", "user"}]
 
         students_by_id: dict[UUID, Student] = {}
         users_by_id: dict[UUID, User] = {}
@@ -492,7 +497,7 @@ class ClassroomRepository:
             users_by_id = {user.id: user for user in user_result.scalars().all()}
 
         participants: list[dict[str, object]] = []
-        for actor_id, actor_type, last_seen_at in rows:
+        for actor_id, actor_type, last_seen_at, in_lab, lab_type in rows:
             display_name = "Participant"
             email = None
             if actor_type == "student":
@@ -512,6 +517,8 @@ class ClassroomRepository:
                     "display_name": display_name,
                     "email": email,
                     "last_seen_at": last_seen_at,
+                    "in_lab": bool(in_lab),
+                    "lab_type": lab_type,
                 }
             )
         participants.sort(key=lambda p: (str(p["actor_type"]), str(p["display_name"])))
@@ -528,6 +535,19 @@ class ClassroomRepository:
             )
         )
         return result.scalar_one_or_none()
+
+    async def list_session_presence_rows(
+        self,
+        session_id: UUID,
+    ) -> list[ClassroomSessionPresence]:
+        """Return all presence rows for a session (used for attendance calculation)."""
+        result = await self.session.execute(
+            select(ClassroomSessionPresence).where(
+                ClassroomSessionPresence.session_id == session_id,
+                ClassroomSessionPresence.actor_type == "student",
+            )
+        )
+        return list(result.scalars().all())
 
     async def list_attendance(
         self,

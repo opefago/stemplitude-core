@@ -11,6 +11,10 @@ import {
 import { listCourses } from "../../lib/api/curriculum";
 import { listClassrooms } from "../../lib/api/classrooms";
 import { AccordionCard, DatePicker, KidDropdown, ModalDialog } from "../../components/ui";
+import {
+  AttendanceSettings,
+  type AttendanceConfig,
+} from "../classrooms/AttendanceSettings";
 import "../../components/ui/ui.css";
 import "./programs.css";
 
@@ -52,6 +56,10 @@ export function ProgramsPage() {
   const [editActive, setEditActive] = useState(true);
   const [editStartDate, setEditStartDate] = useState("");
   const [editEndDate, setEditEndDate] = useState("");
+
+  // Attendance settings for create/edit dialogs (null = inherit from tenant)
+  const [createAttendance, setCreateAttendance] = useState<AttendanceConfig | null>(null);
+  const [editAttendance, setEditAttendance] = useState<AttendanceConfig | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -117,12 +125,14 @@ export function ProgramsPage() {
     if (!createName.trim()) return;
     setCreating(true);
     try {
+      const settings = createAttendance ? { attendance: createAttendance } : {};
       const created = await createProgram({
         name: createName.trim(),
         description: createDescription.trim() || null,
         is_active: createActive,
         start_date: createStartDate || null,
         end_date: createEndDate || null,
+        settings,
       });
       setPrograms((prev) => [created, ...prev]);
       setExpandedId(created.id);
@@ -132,6 +142,7 @@ export function ProgramsPage() {
       setCreateActive(true);
       setCreateStartDate("");
       setCreateEndDate("");
+      setCreateAttendance(null);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to create program");
     } finally {
@@ -144,12 +155,17 @@ export function ProgramsPage() {
     if (!editingProgram || !editName.trim()) return;
     setSavingEdit(true);
     try {
+      const existingSettings = (editingProgram.settings as Record<string, unknown> | undefined) ?? {};
+      const settings = editAttendance
+        ? { ...existingSettings, attendance: editAttendance }
+        : { ...existingSettings, attendance: undefined };
       const updated = await updateProgram(editingProgram.id, {
         name: editName.trim(),
         description: editDescription.trim() || null,
         is_active: editActive,
         start_date: editStartDate || null,
         end_date: editEndDate || null,
+        settings,
       });
       setPrograms((prev) => prev.map((entry) => (entry.id === updated.id ? updated : entry)));
       setEditingProgram(null);
@@ -257,6 +273,8 @@ export function ProgramsPage() {
                     setEditActive(program.is_active);
                     setEditStartDate(program.start_date ?? "");
                     setEditEndDate(program.end_date ?? "");
+                    const raw = (program.settings as Record<string, unknown> | undefined)?.attendance;
+                    setEditAttendance(raw && typeof raw === "object" ? (raw as AttendanceConfig) : null);
                   }}
                 >
                   <Edit size={16} /> Edit
@@ -371,6 +389,16 @@ export function ProgramsPage() {
               />
             </div>
           </div>
+          <div className="programs-page__field programs-page__field--full">
+            <label className="programs-page__section-label">Attendance Settings</label>
+            <AttendanceSettings
+              value={createAttendance}
+              onChange={setCreateAttendance}
+              allowInherit
+              inheritLabel="Inherit from tenant"
+              saving={creating}
+            />
+          </div>
           <div className="ui-form-actions">
             <button type="button" className="ui-btn ui-btn--ghost" onClick={() => setShowCreate(false)} disabled={creating}>
               Cancel
@@ -447,6 +475,16 @@ export function ProgramsPage() {
                 }
               />
             </div>
+          </div>
+          <div className="programs-page__field programs-page__field--full">
+            <label className="programs-page__section-label">Attendance Settings</label>
+            <AttendanceSettings
+              value={editAttendance}
+              onChange={setEditAttendance}
+              allowInherit
+              inheritLabel="Inherit from tenant"
+              saving={savingEdit}
+            />
           </div>
           <div className="ui-form-actions">
             <button type="button" className="ui-btn ui-btn--ghost" onClick={() => setEditingProgram(null)} disabled={savingEdit}>

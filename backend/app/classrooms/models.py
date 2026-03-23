@@ -34,6 +34,7 @@ class Classroom(Base):
     location_address: Mapped[str | None] = mapped_column(String(500))
     join_code: Mapped[str] = mapped_column(String(20), unique=True, nullable=False, index=True)
     schedule: Mapped[dict | None] = mapped_column(JSONB, default=dict)
+    settings: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     starts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     recurrence_rule: Mapped[str | None] = mapped_column(String(200))
@@ -111,6 +112,7 @@ class ClassroomSessionPresence(Base):
     )
     left_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     in_lab: Mapped[bool] = mapped_column(default=False, nullable=False, server_default="false")
+    lab_type: Mapped[str | None] = mapped_column(String(60), nullable=True)
 
 
 class ClassroomSessionEvent(Base):

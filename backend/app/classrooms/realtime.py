@@ -104,6 +104,26 @@ async def _emit_presence_updated(
     METRICS["events_published"] += 1
 
 
+async def emit_presence_updated_for_session(
+    *,
+    classroom_id: UUID,
+    session_id: UUID,
+    tenant_id: UUID,
+) -> None:
+    """Broadcast a presence.updated event on the classroom session channel.
+
+    Call this after any out-of-band presence change (e.g. an HTTP heartbeat)
+    so that connected instructors receive the update immediately.
+    """
+    channel = f"classroom:session:{session_id}"
+    await _emit_presence_updated(
+        channel=channel,
+        classroom_id=classroom_id,
+        session_id=session_id,
+        tenant_id=tenant_id,
+    )
+
+
 async def _authorize_ws_access(
     *,
     identity: CurrentIdentity,
@@ -146,6 +166,7 @@ class ClassroomRealtimeCommandRouter:
     def _register_defaults(self) -> None:
         self._handlers["presence.leave"] = self._handle_presence_leave
         self._handlers["presence.in_lab"] = self._handle_presence_in_lab
+        self._handlers["help.request"] = self._handle_help_request
         self._handlers["chat.send"] = self._handle_chat_send
         self._handlers["recognition.award"] = self._handle_recognition_award
         self._handlers["lab.select"] = self._handle_lab_select
@@ -187,20 +208,43 @@ class ClassroomRealtimeCommandRouter:
     async def _handle_presence_in_lab(
         self,
         service: ClassroomService,
-        _: dict,
+        msg: dict,
         identity: CurrentIdentity,
         __: str | None,
         context: RealtimeConnectionContext,
     ) -> CommandDispatchResult:
         """Mark actor as transitioning to a lab — remains a session participant."""
+        raw_lab_type = msg.get("lab_type")
+        lab_type: str | None = str(raw_lab_type).strip() or None if raw_lab_type else None
         await service.heartbeat_session_presence(
             classroom_id=context.classroom_id,
             session_id=context.session_id,
             tenant_id=context.tenant_id,
             identity=identity,
-            data=SessionPresenceHeartbeatRequest(status="in_lab"),
+            data=SessionPresenceHeartbeatRequest(status="in_lab", lab_type=lab_type),
         )
         return CommandDispatchResult(envelope=None, emit_presence=True)
+
+    async def _handle_help_request(
+        self,
+        service: ClassroomService,
+        msg: dict,
+        identity: CurrentIdentity,
+        correlation_id: str | None,
+        context: RealtimeConnectionContext,
+    ) -> CommandDispatchResult:
+        """Broadcast a help request event from a student so the instructor is notified."""
+        note = str(msg.get("note") or "")
+        envelope = await service.publish_generic_session_event(
+            classroom_id=context.classroom_id,
+            session_id=context.session_id,
+            tenant_id=context.tenant_id,
+            identity=identity,
+            event_type="help_request",
+            payload={"note": note},
+            correlation_id=correlation_id,
+        )
+        return CommandDispatchResult(envelope=envelope)
 
     async def _handle_chat_send(
         self,
@@ -348,6 +392,7 @@ async def classroom_session_ws_handler(
     *,
     classroom_id: UUID,
     session_id: UUID,
+    preserve_in_lab: bool = False,
 ) -> None:
     token = get_ws_token(websocket)
     tenant_raw = get_ws_tenant(websocket)
@@ -398,13 +443,17 @@ async def classroom_session_ws_handler(
                 after_sequence=max(0, after_sequence),
                 replay_limit=REPLAY_LIMIT,
             )
-            await service.heartbeat_session_presence(
-                classroom_id=classroom_id,
-                session_id=session_id,
-                tenant_id=tenant_id,
-                identity=identity,
-                data=SessionPresenceHeartbeatRequest(status="active"),
-            )
+            # When preserve_in_lab=True the connection is from LabAssistantPanel
+            # (student is inside a virtual lab). Skip the "active" heartbeat so we
+            # don't accidentally clear the student's in_lab presence status.
+            if not preserve_in_lab:
+                await service.heartbeat_session_presence(
+                    classroom_id=classroom_id,
+                    session_id=session_id,
+                    tenant_id=tenant_id,
+                    identity=identity,
+                    data=SessionPresenceHeartbeatRequest(status="active"),
+                )
             await db.commit()
             return snapshot.model_dump(mode="json")
 
@@ -419,13 +468,15 @@ async def classroom_session_ws_handler(
     async def handle_heartbeat() -> None:
         async with async_session_factory() as db:
             service = ClassroomService(db)
-            await service.heartbeat_session_presence(
-                classroom_id=classroom_id,
-                session_id=session_id,
-                tenant_id=tenant_id,
-                identity=identity,
-                data=SessionPresenceHeartbeatRequest(status="active"),
-            )
+            # Same guard as bootstrap: don't reset in_lab when coming from a lab panel.
+            if not preserve_in_lab:
+                await service.heartbeat_session_presence(
+                    classroom_id=classroom_id,
+                    session_id=session_id,
+                    tenant_id=tenant_id,
+                    identity=identity,
+                    data=SessionPresenceHeartbeatRequest(status="active"),
+                )
             await db.commit()
 
     async def handle_replay(after_sequence: int, limit: int) -> list[dict]:

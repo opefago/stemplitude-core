@@ -598,6 +598,33 @@ async def get_attendance(
 
 
 @router.post(
+    "/{id}/sessions/{session_id}/attendance/calculate",
+    response_model=list[AttendanceResponse],
+    dependencies=[_require_tenant(), require_permission("classrooms", "update")],
+)
+async def calculate_session_attendance(
+    id: UUID,
+    session_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(get_tenant_context),
+):
+    """Manually trigger attendance calculation for a session.
+
+    Uses the effective attendance policy (classroom > program > tenant) to mark
+    each enrolled student as present or absent based on their presence data.
+    Existing attendance records are overwritten.
+    """
+    service = ClassroomService(db)
+    results = await service.auto_calculate_session_attendance(
+        classroom_id=id,
+        session_id=session_id,
+        tenant_id=tenant.tenant_id,
+    )
+    await db.commit()
+    return results
+
+
+@router.post(
     "/{id}/regenerate-meeting",
     response_model=RegenerateMeetingResponse,
     dependencies=[_require_tenant(), require_permission("classrooms", "update")],
@@ -693,4 +720,10 @@ async def classroom_session_ws(
     id: UUID,
     session_id: UUID,
 ):
-    await classroom_session_ws_handler(websocket, classroom_id=id, session_id=session_id)
+    preserve_in_lab = websocket.query_params.get("preserve_in_lab", "0") == "1"
+    await classroom_session_ws_handler(
+        websocket,
+        classroom_id=id,
+        session_id=session_id,
+        preserve_in_lab=preserve_in_lab,
+    )

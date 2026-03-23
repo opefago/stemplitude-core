@@ -82,6 +82,13 @@ class ProgramUpdate(BaseModel):
         None,
         description="Optional term end date.",
     )
+    settings: dict | None = Field(
+        None,
+        description=(
+            "Program-level settings JSON (e.g. attendance policy). "
+            "Overrides tenant defaults for all classrooms in this program."
+        ),
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -103,6 +110,10 @@ class ProgramResponse(ProgramBase):
 
     id: UUID = Field(..., description="Unique identifier for the program.")
     tenant_id: UUID = Field(..., description="Tenant (organization) that owns the program.")
+    settings: dict = Field(
+        default_factory=dict,
+        description="Program-level settings including attendance policy.",
+    )
     created_at: datetime = Field(..., description="Timestamp when the program was created.")
     updated_at: datetime = Field(..., description="Timestamp when the program was last updated.")
 

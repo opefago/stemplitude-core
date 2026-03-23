@@ -1,4 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
+import type * as Y from "yjs";
+import type { WebsocketProvider } from "y-websocket";
 import Tippy from "@tippyjs/react";
 import "tippy.js/dist/tippy.css";
 import "tippy.js/animations/shift-away.css";
@@ -40,11 +42,15 @@ const loadProjectsFromStorage = () => {
 type Props = {
   exitPath?: string;
   onExit?: () => void;
+  ydoc?: Y.Doc;
+  yjsProvider?: WebsocketProvider;
 };
 
 export const CircuitLabContainer: React.FC<Props> = ({
   exitPath = "/playground",
   onExit,
+  ydoc,
+  yjsProvider,
 }) => {
   const canvasRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<Application | null>(null);

@@ -45,6 +45,34 @@ export async function getTenantById(id: string): Promise<TenantInfo> {
   };
 }
 
+export async function updateTenantSettings(
+  tenantId: string,
+  settings: Record<string, unknown>,
+): Promise<TenantInfo> {
+  const data = await apiFetch<{
+    id: string;
+    name: string;
+    slug: string;
+    code: string;
+    type: string;
+    logo_url?: string;
+    settings?: Record<string, unknown>;
+  }>(`/tenants/${tenantId}`, {
+    method: "PATCH",
+    tenantId,
+    body: { settings },
+  });
+  return {
+    id: data.id,
+    name: data.name,
+    slug: data.slug,
+    code: data.code,
+    type: data.type,
+    logoUrl: data.logo_url,
+    settings: data.settings,
+  };
+}
+
 export interface SupportAccessUserOption {
   id: string;
   email: string;

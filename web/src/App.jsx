@@ -40,6 +40,7 @@ import { AchievementsPage } from './features/progress';
 import { StudentDashboard, InstructorDashboard, ParentDashboard, AdminDashboard } from './features/dashboard';
 import { TenantSettings, BillingPage, RolesManager } from './features/settings';
 import { ClassroomList, ClassroomDetail, ClassroomLiveSession } from './features/classrooms';
+import { LabObserverPage } from './pages/LabObserverPage';
 import { Inbox, ConversationThread } from './features/messaging';
 import { StudentAssignmentsPage } from './features/assignments';
 import { MembersPage, IntegrationsPage, CurriculumPage, ProgramsPage, SuperAdminDashboard, AssetsPage, InvitationsPage } from './features/admin';
@@ -177,6 +178,7 @@ function DashboardRouter() {
       <Route path="/classrooms" element={<ClassroomList />} />
       <Route path="/classrooms/:id" element={<ClassroomDetail />} />
       <Route path="/classrooms/:id/live" element={<ClassroomLiveSession />} />
+      <Route path="/classrooms/:classroomId/observe-lab/:actorId" element={<LabObserverPage />} />
       <Route path="/achievements" element={<AchievementsPage />} />
       <Route path="/messages" element={<Inbox />}>
         <Route path=":id" element={<ConversationThread />} />
