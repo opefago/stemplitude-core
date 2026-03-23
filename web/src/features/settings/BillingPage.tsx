@@ -11,11 +11,7 @@ const BILLING_HISTORY = [
 
 export function BillingPage() {
   return (
-    <div
-      className="billing-page"
-      role="main"
-      aria-label="Billing"
-    >
+    <div className="billing-page" role="main" aria-label="Billing">
       <header className="billing-page__header">
         <h1 className="billing-page__title">Billing</h1>
         <p className="billing-page__subtitle">
@@ -25,10 +21,7 @@ export function BillingPage() {
 
       <div className="billing-page__content">
         {/* Current Plan */}
-        <section
-          className="billing-page__card"
-          aria-labelledby="plan-heading"
-        >
+        <section className="billing-page__card" aria-labelledby="plan-heading">
           <h2 id="plan-heading" className="billing-page__card-title">
             Current Plan
           </h2>
@@ -40,10 +33,7 @@ export function BillingPage() {
         </section>
 
         {/* Usage */}
-        <section
-          className="billing-page__card"
-          aria-labelledby="usage-heading"
-        >
+        <section className="billing-page__card" aria-labelledby="usage-heading">
           <h2 id="usage-heading" className="billing-page__card-title">
             Usage
           </h2>

@@ -1,0 +1,111 @@
+.growth-help {
+  padding: 18px;
+  display: grid;
+  gap: 16px;
+  align-content: start;
+  background: linear-gradient(180deg, #f8fff0 0%, #ffffff 100%);
+}
+
+.growth-help__hero {
+  border: 2px solid color-mix(in srgb, var(--color-border, #dbe6f4) 72%, var(--color-primary, #58cc02) 28%);
+  border-radius: 18px;
+  padding: 18px;
+  background: linear-gradient(180deg, #ffffff 0%, #f7fde9 100%);
+  box-shadow:
+    0 3px 0 color-mix(in srgb, #d9f99d 70%, #fff 30%),
+    0 14px 26px rgba(88, 204, 2, 0.08);
+}
+
+.growth-help__hero h1 {
+  margin: 0 0 6px;
+  font-size: 1.35rem;
+}
+
+.growth-help__hero p {
+  margin: 0 0 10px;
+  color: var(--color-text-secondary, #64748b);
+  font-weight: 600;
+}
+
+.growth-help__back {
+  display: inline-flex;
+  align-items: center;
+  color: #3f6212;
+  text-decoration: none;
+  font-weight: 700;
+  border: 2px solid #bef264;
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: #f7fee7;
+  box-shadow: 0 2px 0 #d9f99d;
+}
+
+.growth-help__section {
+  border: 2px solid color-mix(in srgb, var(--color-border, #dbe6f4) 76%, #d9f99d 24%);
+  border-radius: 18px;
+  padding: 16px;
+  background: linear-gradient(180deg, #ffffff 0%, #fafff3 100%);
+  box-shadow:
+    0 2px 0 #ecfccb,
+    0 12px 24px rgba(88, 204, 2, 0.06);
+}
+
+.growth-help__section h2 {
+  margin: 0 0 12px;
+  font-size: 1.05rem;
+}
+
+.growth-help__table {
+  width: 100%;
+  border-collapse: collapse;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.growth-help__table th,
+.growth-help__table td {
+  border: 1px solid color-mix(in srgb, var(--color-border, #dbe6f4) 82%, #d9f99d 18%);
+  padding: 9px 10px;
+  text-align: left;
+  vertical-align: top;
+  font-size: 0.9rem;
+}
+
+.growth-help__table th {
+  background: #ecfccb;
+  color: #365314;
+  font-weight: 800;
+}
+
+.growth-help__table tbody tr:nth-child(even) td {
+  background: #fcfff7;
+}
+
+.growth-help__table tbody tr:hover td {
+  background: #f7fee7;
+}
+
+.growth-help__section ol,
+.growth-help__section ul {
+  margin: 0;
+  padding-left: 20px;
+  color: #374151;
+  line-height: 1.55;
+}
+
+.growth-help__section li + li {
+  margin-top: 6px;
+}
+
+@media (max-width: 900px) {
+  .growth-help {
+    padding: 12px;
+    gap: 12px;
+  }
+
+  .growth-help__table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+}

@@ -7,3 +7,5 @@ export { EntityDetailPage } from "./EntityDetailPage";
 export { PlatformUsersPage } from "./PlatformUsersPage";
 export { PlatformRolesPage } from "./PlatformRolesPage";
 export { BlobFinderPage } from "./BlobFinderPage";
+export { GrowthOpsPage } from "./GrowthOpsPage";
+export { GrowthOpsHelpPage } from "./GrowthOpsHelpPage";

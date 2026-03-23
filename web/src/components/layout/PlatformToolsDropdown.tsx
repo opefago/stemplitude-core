@@ -9,19 +9,66 @@ import {
   HeartPulse,
   Cog,
   Database,
+  Handshake,
 } from "lucide-react";
 import { useAuth } from "../../providers/AuthProvider";
 import { useWorkspace } from "../../providers/WorkspaceProvider";
 import "./platform-tools-dropdown.css";
 
-const PLATFORM_TOOLS: { path: string; label: string; icon: typeof Terminal; permission: string }[] = [
-  { path: "/app", label: "Platform Admin", icon: Shield, permission: "platform.analytics:view" },
-  { path: "/app/platform/dashboard", label: "Analytics", icon: LayoutDashboard, permission: "platform.analytics:view" },
-  { path: "/app/platform/roles", label: "Role Manager", icon: Users, permission: "platform.users:view" },
-  { path: "/app/platform/tasks", label: "Admin Tasks", icon: Terminal, permission: "platform.tasks:view" },
-  { path: "/app/platform/health", label: "Health Check", icon: HeartPulse, permission: "platform.health:view" },
-  { path: "/app/platform/jobs", label: "Job Worker", icon: Cog, permission: "platform.jobs:view" },
-  { path: "/app/platform/entities", label: "Entity Browser", icon: Database, permission: "platform.entities:view" },
+const PLATFORM_TOOLS: {
+  path: string;
+  label: string;
+  icon: typeof Terminal;
+  permission: string;
+}[] = [
+  {
+    path: "/app",
+    label: "Platform Admin",
+    icon: Shield,
+    permission: "platform.analytics:view",
+  },
+  {
+    path: "/app/platform/dashboard",
+    label: "Analytics",
+    icon: LayoutDashboard,
+    permission: "platform.analytics:view",
+  },
+  {
+    path: "/app/platform/roles",
+    label: "Role Manager",
+    icon: Users,
+    permission: "platform.users:view",
+  },
+  {
+    path: "/app/platform/tasks",
+    label: "Admin Tasks",
+    icon: Terminal,
+    permission: "platform.tasks:view",
+  },
+  {
+    path: "/app/platform/health",
+    label: "Health Check",
+    icon: HeartPulse,
+    permission: "platform.health:view",
+  },
+  {
+    path: "/app/platform/jobs",
+    label: "Job Worker",
+    icon: Cog,
+    permission: "platform.jobs:view",
+  },
+  {
+    path: "/app/platform/entities",
+    label: "Entity Browser",
+    icon: Database,
+    permission: "platform.entities:view",
+  },
+  {
+    path: "/app/platform/growth",
+    label: "Growth Ops",
+    icon: Handshake,
+    permission: "platform.analytics:view",
+  },
 ];
 
 export function PlatformToolsDropdown() {
@@ -45,7 +92,11 @@ export function PlatformToolsDropdown() {
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       const target = e.target as Node;
-      if (triggerRef.current?.contains(target) || dropdownRef.current?.contains(target)) return;
+      if (
+        triggerRef.current?.contains(target) ||
+        dropdownRef.current?.contains(target)
+      )
+        return;
       setOpen(false);
     }
     document.addEventListener("mousedown", handleClickOutside);
@@ -86,7 +137,9 @@ export function PlatformToolsDropdown() {
               left: dropdownPosition.left,
             }}
           >
-            <div className="platform-tools-dropdown__group-label">Platform Tools</div>
+            <div className="platform-tools-dropdown__group-label">
+              Platform Tools
+            </div>
             {tools.map((item) => {
               const Icon = item.icon;
               return (
@@ -100,7 +153,11 @@ export function PlatformToolsDropdown() {
                     navigate(item.path);
                   }}
                 >
-                  <Icon size={16} className="platform-tools-dropdown__icon" aria-hidden />
+                  <Icon
+                    size={16}
+                    className="platform-tools-dropdown__icon"
+                    aria-hidden
+                  />
                   <span>{item.label}</span>
                 </button>
               );

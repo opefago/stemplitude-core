@@ -50,7 +50,9 @@
   font-weight: 500;
   text-align: left;
   cursor: pointer;
-  transition: background 0.2s ease, color 0.2s ease;
+  transition:
+    background 0.2s ease,
+    color 0.2s ease;
 }
 
 .tenant-settings__nav-btn:hover {
@@ -113,7 +115,12 @@
 .tenant-settings__input,
 .tenant-settings__select {
   padding: 12px 14px;
-  border: 2px solid color-mix(in srgb, var(--color-border, #e2e8f0) 75%, var(--color-secondary, #1cb0f6) 25%);
+  border: 2px solid
+    color-mix(
+      in srgb,
+      var(--color-border, #e2e8f0) 75%,
+      var(--color-secondary, #1cb0f6) 25%
+    );
   border-radius: var(--radius-md, 8px);
   font-size: 1rem;
   color: var(--color-text, #1e293b);
@@ -447,7 +454,11 @@
   font-weight: 700;
   box-shadow: 0 3px 0 var(--color-border, #e2e8f0);
   cursor: pointer;
-  transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+  transition:
+    transform 0.2s ease,
+    border-color 0.2s ease,
+    background 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
 .billing-page__btn-secondary:hover {
@@ -455,14 +466,21 @@
   border-color: var(--color-primary, #0066ff);
   background: var(--color-primary-light, #f0f7ff);
   color: var(--color-primary, #0066ff);
-  box-shadow: 0 4px 0 color-mix(in srgb, var(--color-primary, #0066ff) 35%, white);
+  box-shadow: 0 4px 0
+    color-mix(in srgb, var(--color-primary, #0066ff) 35%, white);
 }
 
 .billing-page__table-wrapper {
   overflow-x: auto;
-  border: 2px solid color-mix(in srgb, var(--color-border, #e2e8f0) 75%, var(--color-secondary, #1cb0f6) 25%);
+  border: 2px solid
+    color-mix(
+      in srgb,
+      var(--color-border, #e2e8f0) 75%,
+      var(--color-secondary, #1cb0f6) 25%
+    );
   border-radius: var(--radius-lg, 16px);
-  box-shadow: 0 4px 0 color-mix(in srgb, var(--color-border, #e2e8f0) 90%, white);
+  box-shadow: 0 4px 0
+    color-mix(in srgb, var(--color-border, #e2e8f0) 90%, white);
 }
 
 .billing-page__table {
@@ -522,7 +540,9 @@
   font-weight: 800;
   box-shadow: 0 3px 0 var(--color-primary-dark, #46a302);
   cursor: pointer;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
 .billing-page__btn-primary:hover {
@@ -655,9 +675,14 @@
   color: var(--color-primary-dark, #46a302);
   font-size: 0.9375rem;
   font-weight: 800;
-  box-shadow: 0 3px 0 color-mix(in srgb, var(--color-primary-dark, #46a302) 45%, white);
+  box-shadow: 0 3px 0
+    color-mix(in srgb, var(--color-primary-dark, #46a302) 45%, white);
   cursor: pointer;
-  transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+  transition:
+    transform 0.2s ease,
+    border-color 0.2s ease,
+    background 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
 .roles-manager__create-btn:hover {
@@ -665,5 +690,6 @@
   border-color: var(--color-primary-dark, #46a302);
   background: color-mix(in srgb, var(--color-primary, #58cc02) 10%, white);
   color: var(--color-primary-dark, #46a302);
-  box-shadow: 0 4px 0 color-mix(in srgb, var(--color-primary-dark, #46a302) 45%, white);
+  box-shadow: 0 4px 0
+    color-mix(in srgb, var(--color-primary-dark, #46a302) 45%, white);
 }

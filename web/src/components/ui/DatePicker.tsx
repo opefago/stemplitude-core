@@ -14,6 +14,7 @@ export interface DatePickerProps {
   min?: string; // YYYY-MM-DD — earliest selectable date
   max?: string; // YYYY-MM-DD — latest selectable date
   error?: string | null;
+  popoverClassName?: string;
 }
 
 interface PopoverPos {
@@ -31,7 +32,11 @@ function parseLocalDate(str: string): Date | undefined {
 }
 
 function formatDisplay(date: Date): string {
-  return date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  return date.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
 }
 
 function toYMD(date: Date): string {
@@ -50,9 +55,14 @@ export function DatePicker({
   min,
   max,
   error,
+  popoverClassName,
 }: DatePickerProps) {
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<PopoverPos>({ top: 0, left: 0, openUp: false });
+  const [pos, setPos] = useState<PopoverPos>({
+    top: 0,
+    left: 0,
+    openUp: false,
+  });
   const triggerRef = useRef<HTMLButtonElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const selected = parseLocalDate(value);
@@ -78,7 +88,11 @@ export function DatePicker({
       const rect = triggerRef.current.getBoundingClientRect();
       const spaceBelow = window.innerHeight - rect.bottom;
       const openUp = spaceBelow < POPOVER_HEIGHT && rect.top > POPOVER_HEIGHT;
-      setPos({ top: openUp ? rect.top - 8 : rect.bottom + 6, left: rect.left, openUp });
+      setPos({
+        top: openUp ? rect.top - 8 : rect.bottom + 6,
+        left: rect.left,
+        openUp,
+      });
     };
     window.addEventListener("scroll", update, true);
     window.addEventListener("resize", update);
@@ -116,7 +130,7 @@ export function DatePicker({
     ? createPortal(
         <div
           ref={wrapRef}
-          className={`dp-popover${pos.openUp ? " dp-popover--up" : ""}`}
+          className={`dp-popover${pos.openUp ? " dp-popover--up" : ""}${popoverClassName ? ` ${popoverClassName}` : ""}`}
           style={{
             position: "fixed",
             top: pos.openUp ? undefined : pos.top,
@@ -156,7 +170,9 @@ export function DatePicker({
         aria-expanded={open}
       >
         <CalendarDays size={15} className="dp-trigger__icon" aria-hidden />
-        <span className={`dp-trigger__text ${!selected ? "dp-trigger__text--placeholder" : ""}`}>
+        <span
+          className={`dp-trigger__text ${!selected ? "dp-trigger__text--placeholder" : ""}`}
+        >
           {selected ? formatDisplay(selected) : placeholder}
         </span>
         {selected && (
@@ -173,7 +189,11 @@ export function DatePicker({
           </button>
         )}
       </button>
-      {error && <span className="dp-error" role="alert">{error}</span>}
+      {error && (
+        <span className="dp-error" role="alert">
+          {error}
+        </span>
+      )}
 
       {popover}
     </div>

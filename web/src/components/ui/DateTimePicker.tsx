@@ -26,6 +26,8 @@ export interface DateTimePickerProps {
   error?: string | null;
   minuteStep?: number;
   label?: string;
+  datePopoverClassName?: string;
+  timePopoverClassName?: string;
 }
 
 function splitDateTime(v: string): { date: string; time: string } {
@@ -73,6 +75,8 @@ export function DateTimePicker({
   error,
   minuteStep = 5,
   label,
+  datePopoverClassName,
+  timePopoverClassName,
 }: DateTimePickerProps) {
   const { date, time } = splitDateTime(value);
   const { date: minDate, time: minTime } = splitDateTime(min ?? "");
@@ -94,8 +98,10 @@ export function DateTimePicker({
   const displayError = error ?? internalError;
 
   // Compute effective min/max for each sub-picker based on current selections
-  const timeMin = date && minDate && cmpDate(date, minDate) === 0 ? minTime : undefined;
-  const timeMax = date && maxDate && cmpDate(date, maxDate) === 0 ? maxTime : undefined;
+  const timeMin =
+    date && minDate && cmpDate(date, minDate) === 0 ? minTime : undefined;
+  const timeMax =
+    date && maxDate && cmpDate(date, maxDate) === 0 ? maxTime : undefined;
 
   return (
     <div className="dtp-wrap" id={id}>
@@ -110,9 +116,12 @@ export function DateTimePicker({
             disabled={disabled}
             min={minDate || undefined}
             max={maxDate || undefined}
+            popoverClassName={datePopoverClassName}
           />
         </div>
-        <div className="dtp-sep" aria-hidden>at</div>
+        <div className="dtp-sep" aria-hidden>
+          at
+        </div>
         <div className="dtp-field">
           <Clock size={13} className="dtp-field__icon" aria-hidden />
           <TimePicker
@@ -123,11 +132,14 @@ export function DateTimePicker({
             minuteStep={minuteStep}
             min={timeMin}
             max={timeMax}
+            popoverClassName={timePopoverClassName}
           />
         </div>
       </div>
       {displayError && (
-        <span className="dtp-error" role="alert">{displayError}</span>
+        <span className="dtp-error" role="alert">
+          {displayError}
+        </span>
       )}
     </div>
   );

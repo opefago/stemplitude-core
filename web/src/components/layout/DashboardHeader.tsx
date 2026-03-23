@@ -18,6 +18,7 @@ import {
   Cog,
   Database,
   FolderSearch,
+  Handshake,
   Menu,
   PanelLeftClose,
   X,
@@ -38,7 +39,11 @@ import { ProfilePage } from "../../features/profile";
 import { NotificationBell } from "../../features/notifications";
 import "./dashboard-header.css";
 
-function getInitials(firstName?: string, lastName?: string, email?: string): string {
+function getInitials(
+  firstName?: string,
+  lastName?: string,
+  email?: string,
+): string {
   const first = firstName?.charAt(0) ?? "";
   const last = lastName?.charAt(0) ?? "";
   if (first || last) return (first + last).toUpperCase();
@@ -46,19 +51,59 @@ function getInitials(firstName?: string, lastName?: string, email?: string): str
   return "?";
 }
 
-function getDisplayName(firstName?: string, lastName?: string, email?: string): string {
+function getDisplayName(
+  firstName?: string,
+  lastName?: string,
+  email?: string,
+): string {
   const name = `${firstName ?? ""} ${lastName ?? ""}`.trim();
   if (name) return name;
   if (email) return email;
   return "User";
 }
 
-const PLATFORM_TOOLS: { path: string; label: string; icon: typeof Terminal; permission: string }[] = [
-  { path: "/app/platform/tasks", label: "Admin Tasks", icon: Terminal, permission: "platform.tasks:view" },
-  { path: "/app/platform/health", label: "Health Check", icon: HeartPulse, permission: "platform.health:view" },
-  { path: "/app/platform/jobs", label: "Job Worker", icon: Cog, permission: "platform.jobs:view" },
-  { path: "/app/platform/entities", label: "Entity Browser", icon: Database, permission: "platform.entities:view" },
-  { path: "/app/platform/blobs", label: "Blob Finder", icon: FolderSearch, permission: "platform.blobs:view" },
+const PLATFORM_TOOLS: {
+  path: string;
+  label: string;
+  icon: typeof Terminal;
+  permission: string;
+}[] = [
+  {
+    path: "/app/platform/tasks",
+    label: "Admin Tasks",
+    icon: Terminal,
+    permission: "platform.tasks:view",
+  },
+  {
+    path: "/app/platform/health",
+    label: "Health Check",
+    icon: HeartPulse,
+    permission: "platform.health:view",
+  },
+  {
+    path: "/app/platform/jobs",
+    label: "Job Worker",
+    icon: Cog,
+    permission: "platform.jobs:view",
+  },
+  {
+    path: "/app/platform/entities",
+    label: "Entity Browser",
+    icon: Database,
+    permission: "platform.entities:view",
+  },
+  {
+    path: "/app/platform/blobs",
+    label: "Blob Finder",
+    icon: FolderSearch,
+    permission: "platform.blobs:view",
+  },
+  {
+    path: "/app/platform/growth",
+    label: "Growth Ops",
+    icon: Handshake,
+    permission: "platform.analytics:view",
+  },
 ];
 
 interface DashboardHeaderProps {
@@ -80,16 +125,19 @@ function resolveEnvironmentLabel(): string {
   return value;
 }
 
-function getEnvironmentTone(environmentLabel: string): "production" | "latest" | "development" | "default" {
+function getEnvironmentTone(
+  environmentLabel: string,
+): "production" | "latest" | "development" | "default" {
   if (environmentLabel === "production") return "production";
-  if (environmentLabel === "latest" || environmentLabel === "staging") return "latest";
-  if (environmentLabel === "development" || environmentLabel === "local") return "development";
+  if (environmentLabel === "latest" || environmentLabel === "staging")
+    return "latest";
+  if (environmentLabel === "development" || environmentLabel === "local")
+    return "development";
   return "default";
 }
 
 export function DashboardHeader({ variant = "default" }: DashboardHeaderProps) {
-  const { user, logout, role, isSuperAdmin, hasGlobalPermission } =
-    useAuth();
+  const { user, logout, role, isSuperAdmin, hasGlobalPermission } = useAuth();
   const { isPlatformView } = useWorkspace();
   const location = useLocation();
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -154,7 +202,8 @@ export function DashboardHeader({ variant = "default" }: DashboardHeaderProps) {
   const isOnPlatformAdminPage = location.pathname.startsWith("/app/platform/");
   const isPlatformAdminContext = isPlatformView || isOnPlatformAdminPage;
   const canAccessSettings =
-    (isSuperAdmin || role === "admin" || role === "owner") && !isOnPlatformAdminPage;
+    (isSuperAdmin || role === "admin" || role === "owner") &&
+    !isOnPlatformAdminPage;
   const canImpersonate = hasGlobalPermission("platform.impersonation:execute");
 
   const platformTools = PLATFORM_TOOLS.filter(
@@ -181,7 +230,8 @@ export function DashboardHeader({ variant = "default" }: DashboardHeaderProps) {
   const sidebar = useSidebarOptional();
   const showSidebarToggle = mode !== "kids" && sidebar;
   const showHamburger = showSidebarToggle && sidebar.closed;
-  const hidePaletteTrigger = variant === "platform" || location.pathname.startsWith("/app/platform/");
+  const hidePaletteTrigger =
+    variant === "platform" || location.pathname.startsWith("/app/platform/");
   const isAdminView = isSuperAdmin || role === "admin" || role === "owner";
   const environmentLabel = resolveEnvironmentLabel();
   const environmentTone = getEnvironmentTone(environmentLabel);
@@ -263,7 +313,9 @@ export function DashboardHeader({ variant = "default" }: DashboardHeaderProps) {
             </button>
             {platformOpen && (
               <div className="dash-header__platform-dropdown" role="menu">
-                <div className="dash-header__platform-header">Platform Tools</div>
+                <div className="dash-header__platform-header">
+                  Platform Tools
+                </div>
                 {role && (
                   <span className="dash-header__platform-role">{role}</span>
                 )}
@@ -293,7 +345,9 @@ export function DashboardHeader({ variant = "default" }: DashboardHeaderProps) {
         {variant === "platform" && (
           <div className="dash-header__identity">
             <span className="dash-header__identity-name">
-              {user ? getDisplayName(user.firstName, user.lastName, user.email) : "User"}
+              {user
+                ? getDisplayName(user.firstName, user.lastName, user.email)
+                : "User"}
             </span>
             {user?.email && (
               <span className="dash-header__identity-role">{user.email}</span>
@@ -312,7 +366,9 @@ export function DashboardHeader({ variant = "default" }: DashboardHeaderProps) {
               aria-haspopup="menu"
             >
               <div className="dash-header__avatar">
-                {user ? getInitials(user.firstName, user.lastName, user.email) : "?"}
+                {user
+                  ? getInitials(user.firstName, user.lastName, user.email)
+                  : "?"}
               </div>
               <ChevronDown size={14} className="dash-header__caret" />
             </button>
@@ -321,11 +377,19 @@ export function DashboardHeader({ variant = "default" }: DashboardHeaderProps) {
               <div className="dash-header__dropdown" role="menu">
                 <div className="dash-header__dropdown-user">
                   <div className="dash-header__dropdown-avatar">
-                    {user ? getInitials(user.firstName, user.lastName, user.email) : "?"}
+                    {user
+                      ? getInitials(user.firstName, user.lastName, user.email)
+                      : "?"}
                   </div>
                   <div className="dash-header__dropdown-info">
                     <span className="dash-header__dropdown-name">
-                      {user ? getDisplayName(user.firstName, user.lastName, user.email) : "User"}
+                      {user
+                        ? getDisplayName(
+                            user.firstName,
+                            user.lastName,
+                            user.email,
+                          )
+                        : "User"}
                     </span>
                     {user?.email && (
                       <span className="dash-header__dropdown-email">

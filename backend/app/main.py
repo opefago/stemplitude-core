@@ -74,6 +74,7 @@ from app.platform.router import router as platform_router  # noqa: E402
 from app.gamification.router import router as gamification_router  # noqa: E402
 from app.realtime.router import router as realtime_router  # noqa: E402
 from app.invitations.router import router as invitations_router  # noqa: E402
+from app.growth.router import router as growth_router  # noqa: E402
 
 prefix = settings.API_V1_PREFIX
 
@@ -103,6 +104,7 @@ app.include_router(platform_router, prefix=f"{prefix}/platform", tags=["Platform
 app.include_router(gamification_router, prefix=f"{prefix}/gamification", tags=["Gamification"])
 app.include_router(realtime_router, prefix=f"{prefix}/realtime", tags=["Realtime"])
 app.include_router(invitations_router, prefix=f"{prefix}/invitations", tags=["Invitations"])
+app.include_router(growth_router, prefix=f"{prefix}/growth", tags=["Growth"])
 
 
 @app.get("/health")
