@@ -8,28 +8,7 @@ import {
 } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
-  Home,
-  FlaskConical,
-  GraduationCap,
-  Trophy,
-  MessageSquare,
-  Settings,
-  Moon,
-  Sun,
-  LogOut,
   Search,
-  BookOpen,
-  Users,
-  Layers,
-  FolderOpen,
-  Plug,
-  CreditCard,
-  Shield,
-  FileText,
-  Play,
-  Video,
-  Clock,
-  type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "../../providers/AuthProvider";
 import { useWorkspace } from "../../providers/WorkspaceProvider";
@@ -40,7 +19,7 @@ import "./command-palette.css";
 type Command = {
   id: string;
   label: string;
-  icon: LucideIcon;
+  iconSrc: string;
   action: () => void;
   keywords: string[];
 };
@@ -62,7 +41,7 @@ export function CommandPalette() {
   const { isPlatformView } = useWorkspace();
   const location = useLocation();
   const navigate = useNavigate();
-  const { colorScheme, toggleColorScheme } = useColorScheme();
+  const { toggleColorScheme } = useColorScheme();
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -75,14 +54,14 @@ export function CommandPalette() {
       {
         id: "toggle-dark",
         label: "Toggle Dark Mode",
-        icon: colorScheme === "dark" ? Sun : Moon,
+        iconSrc: "/assets/cartoon-icons/gear.png",
         action: toggleColorScheme,
         keywords: ["dark", "light", "theme", "mode", "toggle"],
       },
       {
         id: "logout",
         label: "Log Out",
-        icon: LogOut,
+        iconSrc: "/assets/cartoon-icons/Forbidden.png",
         action: logout,
         keywords: ["logout", "log out", "sign out"],
       },
@@ -93,7 +72,7 @@ export function CommandPalette() {
             ? [{
                 id: "class-start-session",
                 label: "Start Session Now",
-                icon: Play,
+                iconSrc: "/assets/cartoon-icons/Rocket1.png",
                 action: () => navigate(`/app/classrooms/${classroomId}?sessionAction=start`),
                 keywords: ["start", "session", "class", "live"],
               }]
@@ -101,14 +80,14 @@ export function CommandPalette() {
           {
             id: "class-join-session",
             label: "Join Active Session",
-            icon: Video,
+            iconSrc: "/assets/cartoon-icons/portal1.png",
             action: () => navigate(`/app/classrooms/${classroomId}/live`),
             keywords: ["join", "session", "meeting"],
           },
           {
             id: "class-waiting-room",
             label: "Open Waiting Room",
-            icon: Clock,
+            iconSrc: "/assets/cartoon-icons/Clock.png",
             action: () => navigate(`/app/classrooms/${classroomId}?sessionAction=waiting`),
             keywords: ["waiting", "room", "class"],
           },
@@ -122,17 +101,17 @@ export function CommandPalette() {
 
     if (role === "admin" || role === "owner") {
       return [
-        { id: "dashboard", label: "Go to Dashboard", icon: Home, action: () => navigate("/app"), keywords: ["home", "dashboard"] },
-        { id: "labs", label: "Go to Labs", icon: FlaskConical, action: () => navigate("/app/labs"), keywords: ["labs", "lab", "workspace"] },
-        { id: "classrooms", label: "Go to Classrooms", icon: GraduationCap, action: () => navigate("/app/classrooms"), keywords: ["classrooms", "classroom", "class"] },
-        { id: "members", label: "Go to Users", icon: Users, action: () => navigate("/app/members"), keywords: ["users", "members", "people"] },
-        { id: "curriculum", label: "Go to Curriculum", icon: BookOpen, action: () => navigate("/app/curriculum"), keywords: ["curriculum", "course", "content"] },
-        { id: "programs", label: "Go to Programs", icon: Layers, action: () => navigate("/app/programs"), keywords: ["programs"] },
-        { id: "assets", label: "Go to Assets", icon: FolderOpen, action: () => navigate("/app/assets"), keywords: ["assets"] },
-        { id: "settings", label: "Go to Settings", icon: Settings, action: () => navigate("/app/settings"), keywords: ["settings", "setting", "preferences"] },
-        { id: "integrations", label: "Go to Integrations", icon: Plug, action: () => navigate("/app/integrations"), keywords: ["integrations"] },
-        { id: "billing", label: "Go to Billing", icon: CreditCard, action: () => navigate("/app/billing"), keywords: ["billing"] },
-        { id: "roles", label: "Go to Roles", icon: Shield, action: () => navigate("/app/roles"), keywords: ["roles", "permissions"] },
+        { id: "dashboard", label: "Go to Dashboard", iconSrc: "/assets/cartoon-icons/house.png", action: () => navigate("/app"), keywords: ["home", "dashboard"] },
+        { id: "labs", label: "Go to Labs", iconSrc: "/assets/cartoon-icons/telescope.png", action: () => navigate("/app/labs"), keywords: ["labs", "lab", "workspace"] },
+        { id: "classrooms", label: "Go to Classrooms", iconSrc: "/assets/cartoon-icons/bag.png", action: () => navigate("/app/classrooms"), keywords: ["classrooms", "classroom", "class"] },
+        { id: "members", label: "Go to Users", iconSrc: "/assets/cartoon-icons/Players.png", action: () => navigate("/app/members"), keywords: ["users", "members", "people"] },
+        { id: "curriculum", label: "Go to Curriculum", iconSrc: "/assets/cartoon-icons/Books.png", action: () => navigate("/app/curriculum"), keywords: ["curriculum", "course", "content"] },
+        { id: "programs", label: "Go to Programs", iconSrc: "/assets/cartoon-icons/Globe.png", action: () => navigate("/app/programs"), keywords: ["programs"] },
+        { id: "assets", label: "Go to Assets", iconSrc: "/assets/cartoon-icons/Chest.png", action: () => navigate("/app/assets"), keywords: ["assets"] },
+        { id: "settings", label: "Go to Settings", iconSrc: "/assets/cartoon-icons/settings.png", action: () => navigate("/app/settings"), keywords: ["settings", "setting", "preferences"] },
+        { id: "integrations", label: "Go to Integrations", iconSrc: "/assets/cartoon-icons/Thunder.png", action: () => navigate("/app/integrations"), keywords: ["integrations"] },
+        { id: "billing", label: "Go to Billing", iconSrc: "/assets/cartoon-icons/coin.png", action: () => navigate("/app/billing"), keywords: ["billing"] },
+        { id: "roles", label: "Go to Roles", iconSrc: "/assets/cartoon-icons/Lock.png", action: () => navigate("/app/roles"), keywords: ["roles", "permissions"] },
 
         ...sessionCommands,
         ...base,
@@ -141,11 +120,11 @@ export function CommandPalette() {
 
     if (role === "instructor") {
       return [
-        { id: "dashboard", label: "Go to Dashboard", icon: Home, action: () => navigate("/app"), keywords: ["home", "dashboard"] },
-        { id: "classrooms", label: "Go to Classrooms", icon: GraduationCap, action: () => navigate("/app/classrooms"), keywords: ["classrooms", "classroom", "class"] },
-        { id: "students", label: "Go to Students", icon: Users, action: () => navigate("/app/students"), keywords: ["students"] },
-        { id: "curriculum", label: "Go to Curriculum", icon: BookOpen, action: () => navigate("/app/curriculum"), keywords: ["curriculum", "course"] },
-        { id: "messages", label: "Go to Messages", icon: MessageSquare, action: () => navigate("/app/messages"), keywords: ["messages", "message", "inbox"] },
+        { id: "dashboard", label: "Go to Dashboard", iconSrc: "/assets/cartoon-icons/house.png", action: () => navigate("/app"), keywords: ["home", "dashboard"] },
+        { id: "classrooms", label: "Go to Classrooms", iconSrc: "/assets/cartoon-icons/bag.png", action: () => navigate("/app/classrooms"), keywords: ["classrooms", "classroom", "class"] },
+        { id: "students", label: "Go to Students", iconSrc: "/assets/cartoon-icons/Players.png", action: () => navigate("/app/students"), keywords: ["students"] },
+        { id: "curriculum", label: "Go to Curriculum", iconSrc: "/assets/cartoon-icons/Books.png", action: () => navigate("/app/curriculum"), keywords: ["curriculum", "course"] },
+        { id: "messages", label: "Go to Messages", iconSrc: "/assets/cartoon-icons/Information.png", action: () => navigate("/app/messages"), keywords: ["messages", "message", "inbox"] },
         ...sessionCommands,
         ...base,
       ];
@@ -153,24 +132,24 @@ export function CommandPalette() {
 
     if (role === "parent" || role === "homeschool_parent") {
       return [
-        { id: "dashboard", label: "Go to Dashboard", icon: Home, action: () => navigate("/app"), keywords: ["home", "dashboard"] },
-        { id: "children", label: "Go to Children", icon: Users, action: () => navigate("/app/children"), keywords: ["children", "kids"] },
-        { id: "messages", label: "Go to Messages", icon: MessageSquare, action: () => navigate("/app/messages"), keywords: ["messages", "message", "inbox"] },
-        { id: "notifications", label: "Go to Notifications", icon: MessageSquare, action: () => navigate("/app/notifications"), keywords: ["notifications"] },
+        { id: "dashboard", label: "Go to Dashboard", iconSrc: "/assets/cartoon-icons/house.png", action: () => navigate("/app"), keywords: ["home", "dashboard"] },
+        { id: "children", label: "Go to Children", iconSrc: "/assets/cartoon-icons/Players.png", action: () => navigate("/app/children"), keywords: ["children", "kids"] },
+        { id: "messages", label: "Go to Messages", iconSrc: "/assets/cartoon-icons/Information.png", action: () => navigate("/app/messages"), keywords: ["messages", "message", "inbox"] },
+        { id: "notifications", label: "Go to Notifications", iconSrc: "/assets/cartoon-icons/Bell.png", action: () => navigate("/app/notifications"), keywords: ["notifications"] },
         ...sessionCommands,
         ...base,
       ];
     }
 
     return [
-      { id: "dashboard", label: "Go to Dashboard", icon: Home, action: () => navigate("/app"), keywords: ["home", "dashboard"] },
-      { id: "labs", label: "Go to Labs", icon: FlaskConical, action: () => navigate("/app/labs"), keywords: ["labs", "lab", "workspace"] },
-      { id: "achievements", label: "Go to Achievements", icon: Trophy, action: () => navigate("/app/achievements"), keywords: ["achievements", "achievement", "badges"] },
-      { id: "messages", label: "Go to Messages", icon: MessageSquare, action: () => navigate("/app/messages"), keywords: ["messages", "message", "inbox"] },
+      { id: "dashboard", label: "Go to Dashboard", iconSrc: "/assets/cartoon-icons/house.png", action: () => navigate("/app"), keywords: ["home", "dashboard"] },
+      { id: "labs", label: "Go to Labs", iconSrc: "/assets/cartoon-icons/telescope.png", action: () => navigate("/app/labs"), keywords: ["labs", "lab", "workspace"] },
+      { id: "achievements", label: "Go to Achievements", iconSrc: "/assets/cartoon-icons/trophy.png", action: () => navigate("/app/achievements"), keywords: ["achievements", "achievement", "badges"] },
+      { id: "messages", label: "Go to Messages", iconSrc: "/assets/cartoon-icons/Information.png", action: () => navigate("/app/messages"), keywords: ["messages", "message", "inbox"] },
       ...sessionCommands,
       ...base,
     ];
-  }, [navigate, toggleColorScheme, logout, colorScheme, role, isSuperAdmin, isPlatformView, location.pathname]);
+  }, [navigate, toggleColorScheme, logout, role, isSuperAdmin, isPlatformView, location.pathname]);
 
   const filteredCommands = useMemo(() => {
     if (!query.trim()) return commands;
@@ -213,6 +192,17 @@ export function CommandPalette() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [setOpen]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const handleEscape = (e: globalThis.KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      closePalette();
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [open, closePalette]);
 
   useEffect(() => {
     setSelectedIndex(0);
@@ -323,7 +313,6 @@ export function CommandPalette() {
             </div>
           ) : (
             filteredCommands.map((cmd, idx) => {
-              const Icon = cmd.icon;
               return (
                 <button
                   key={cmd.id}
@@ -336,9 +325,10 @@ export function CommandPalette() {
                   onClick={() => executeCommand(cmd)}
                   onMouseEnter={() => setSelectedIndex(idx)}
                 >
-                  <Icon
-                    className="command-palette-item-icon"
-                    size={20}
+                  <img
+                    src={cmd.iconSrc}
+                    className="command-palette-item-icon command-palette-item-icon--img"
+                    alt=""
                     aria-hidden
                   />
                   {cmd.label}

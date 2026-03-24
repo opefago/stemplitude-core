@@ -14,7 +14,7 @@
 .tenant-settings__title {
   margin: 0 0 var(--spacing-xs, 4px);
   font-size: 1.5rem;
-  font-weight: 700;
+  font-weight: 800;
   color: var(--color-text, #1e293b);
 }
 
@@ -42,27 +42,40 @@
   align-items: center;
   gap: var(--spacing-sm, 8px);
   padding: var(--spacing-sm, 8px) var(--spacing-md, 16px);
-  border: none;
-  border-radius: var(--radius-md, 8px);
-  background: transparent;
+  border: 2px solid transparent;
+  border-radius: 14px;
+  background: var(--color-surface, #fff);
   color: var(--color-text-secondary, #64748b);
   font-size: 0.9375rem;
-  font-weight: 500;
+  font-weight: 700;
   text-align: left;
   cursor: pointer;
+  box-shadow: 0 2px 0 color-mix(in srgb, var(--color-border, #e2e8f0) 90%, white);
   transition:
     background 0.2s ease,
-    color 0.2s ease;
+    color 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.tenant-settings__nav-icon-img {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  flex-shrink: 0;
 }
 
 .tenant-settings__nav-btn:hover {
-  background: var(--color-surface-subtle, #f8fafc);
+  background: color-mix(in srgb, var(--color-secondary, #1cb0f6) 10%, white);
+  border-color: color-mix(in srgb, var(--color-secondary, #1cb0f6) 35%, var(--color-border, #e2e8f0));
   color: var(--color-text, #1e293b);
 }
 
 .tenant-settings__nav-btn--active {
-  background: var(--color-primary-light, #e0f0ff);
-  color: var(--color-primary, #0066ff);
+  background: color-mix(in srgb, var(--color-primary, #58cc02) 14%, white);
+  border-color: color-mix(in srgb, var(--color-primary, #58cc02) 40%, var(--color-border, #e2e8f0));
+  color: color-mix(in srgb, var(--color-primary-dark, #2f7a00) 80%, #1e293b);
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--color-primary, #58cc02) 28%, white);
 }
 
 .tenant-settings__content {
@@ -73,8 +86,14 @@
 .tenant-settings__panel {
   padding: var(--spacing-lg, 24px);
   background: var(--color-surface, #fff);
-  border: 1px solid var(--color-border, #e2e8f0);
-  border-radius: var(--radius-md, 8px);
+  border: 2px solid
+    color-mix(
+      in srgb,
+      var(--color-border, #e2e8f0) 74%,
+      var(--color-secondary, #1cb0f6) 26%
+    );
+  border-radius: var(--radius-lg, 16px);
+  box-shadow: var(--shadow-card-playful, 0 4px 0 rgba(226, 232, 240, 0.9));
 }
 
 .tenant-settings__panel[hidden] {
@@ -84,8 +103,14 @@
 .tenant-settings__panel-title {
   margin: 0 0 var(--spacing-sm, 8px);
   font-size: 1.125rem;
-  font-weight: 600;
+  font-weight: 800;
   color: var(--color-text, #1e293b);
+}
+
+.tenant-settings__panel-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .tenant-settings__panel-desc {
@@ -110,6 +135,28 @@
   font-size: 0.875rem;
   font-weight: 500;
   color: var(--color-text, #1e293b);
+}
+
+.tenant-settings__label-with-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tenant-settings__hint-btn {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-secondary, #1cb0f6) 18%, white);
+  color: color-mix(in srgb, var(--color-primary, #0066ff) 72%, #1e3a8a);
+  cursor: help;
+  padding: 0;
+  line-height: 1;
+  box-shadow: 0 2px 0 color-mix(in srgb, var(--color-secondary, #1cb0f6) 30%, white);
 }
 
 .tenant-settings__input,
@@ -238,11 +285,38 @@
   gap: var(--spacing-lg, 24px);
 }
 
+.tenant-settings__form--rewards {
+  margin-top: var(--spacing-md, 16px);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--spacing-md, 16px);
+}
+
+.tenant-settings__reward-duration-grid {
+  margin-top: var(--spacing-md, 16px);
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--spacing-md, 16px);
+}
+
+.tenant-settings__reward-error {
+  margin: 12px 0 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #b91c1c;
+}
+
 .tenant-settings__support-card {
   padding: var(--spacing-md, 16px);
-  border: 1px solid var(--color-border, #e2e8f0);
-  border-radius: var(--radius-md, 8px);
-  background: var(--color-surface-subtle, #f8fafc);
+  border: 2px solid
+    color-mix(
+      in srgb,
+      var(--color-border, #e2e8f0) 74%,
+      var(--color-secondary, #1cb0f6) 26%
+    );
+  border-radius: var(--radius-lg, 16px);
+  background: color-mix(in srgb, var(--color-surface-subtle, #f8fafc) 85%, white);
+  box-shadow: var(--shadow-card-playful, 0 4px 0 rgba(226, 232, 240, 0.9));
 }
 
 .tenant-settings__support-title {
@@ -523,6 +597,92 @@
   margin-top: var(--spacing-md, 16px);
 }
 
+.billing-page__actions--stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md, 16px);
+}
+
+.billing-page__checkout-panel {
+  border: 2px solid var(--color-border, #e2e8f0);
+  border-radius: var(--radius-lg, 16px);
+  padding: var(--spacing-md, 16px);
+  background: #fff;
+}
+
+.billing-page__checkout-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--spacing-sm, 8px) var(--spacing-md, 16px);
+}
+
+.billing-page__field {
+  display: grid;
+  gap: 6px;
+}
+
+.billing-page__field span {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--color-text, #1e293b);
+}
+
+.billing-page__field .kid-dropdown {
+  width: 100%;
+}
+
+.billing-page__input {
+  min-height: 38px;
+  height: 38px;
+  border: 2px solid
+    color-mix(
+      in srgb,
+      var(--color-border, #e2e8f0) 74%,
+      var(--color-secondary, #1cb0f6) 26%
+    );
+  border-radius: 14px;
+  padding: 8px 10px;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--color-text, #1e293b);
+  background: #fff;
+  box-shadow: 0 2px 0
+    color-mix(in srgb, var(--color-border, #e2e8f0) 90%, white);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.billing-page__input::placeholder {
+  color: color-mix(in srgb, var(--color-text-secondary, #64748b) 88%, white);
+  font-weight: 600;
+}
+
+.billing-page__input:focus-visible {
+  outline: none;
+  border-color: var(--color-primary, #0066ff);
+  box-shadow: 0 0 0 3px
+    color-mix(in srgb, var(--color-primary, #0066ff) 16%, white);
+}
+
+.billing-page__flash {
+  margin: var(--spacing-sm, 8px) 0 0;
+  border-radius: 12px;
+  padding: 8px 10px;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.billing-page__flash--error {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+}
+
+.billing-page__flash--info {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1e3a8a;
+}
+
 .billing-page__btn-primary {
   display: inline-flex;
   align-items: center;
@@ -548,6 +708,17 @@
 .billing-page__btn-primary:hover {
   transform: translateY(-1px);
   box-shadow: 0 4px 0 var(--color-primary-dark, #46a302);
+}
+
+@media (max-width: 720px) {
+  .tenant-settings__form--rewards,
+  .tenant-settings__reward-duration-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .billing-page__checkout-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* ========== Roles Manager ========== */

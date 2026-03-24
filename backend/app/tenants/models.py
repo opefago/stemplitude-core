@@ -18,6 +18,8 @@ class Tenant(Base):
     type: Mapped[str] = mapped_column(String(50), nullable=False, default="center")
     logo_url: Mapped[str | None] = mapped_column(String(500))
     settings: Mapped[dict | None] = mapped_column(JSONB, default=dict)
+    billing_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="live")
+    billing_email_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)

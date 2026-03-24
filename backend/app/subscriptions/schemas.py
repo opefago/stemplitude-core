@@ -28,6 +28,16 @@ class CheckoutRequest(BaseModel):
         pattern="^(monthly|yearly)$",
         description="Billing cycle: 'monthly' or 'yearly'.",
     )
+    promo_code: str | None = Field(
+        default=None,
+        max_length=64,
+        description="Optional promo code to validate and apply during checkout.",
+    )
+    affiliate_code: str | None = Field(
+        default=None,
+        max_length=64,
+        description="Optional affiliate/referral code used for attribution.",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -48,7 +58,7 @@ class CheckoutResponse(BaseModel):
 
     session_id: str = Field(
         ...,
-        description="Stripe Checkout Session ID.",
+        description="Provider checkout session ID.",
     )
     url: str | None = Field(
         None,
@@ -122,13 +132,25 @@ class SubscriptionResponse(BaseModel):
         ...,
         description="Subscription status (e.g. active, canceled, past_due).",
     )
+    provider: str = Field(
+        ...,
+        description="Billing provider identifier (e.g. stripe, paypal).",
+    )
+    provider_subscription_id: str | None = Field(
+        None,
+        description="Subscription ID from the configured billing provider.",
+    )
+    provider_customer_id: str | None = Field(
+        None,
+        description="Customer ID from the configured billing provider.",
+    )
     stripe_subscription_id: str | None = Field(
         None,
-        description="Stripe Subscription ID.",
+        description="Legacy Stripe Subscription ID (deprecated; use provider_subscription_id).",
     )
     stripe_customer_id: str | None = Field(
         None,
-        description="Stripe Customer ID.",
+        description="Legacy Stripe Customer ID (deprecated; use provider_customer_id).",
     )
     current_period_start: datetime | None = Field(
         None,

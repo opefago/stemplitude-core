@@ -1,12 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  Settings,
-  FlaskConical,
-  Palette,
-  Users,
   AlertTriangle,
-  Shield,
-  ClipboardCheck,
+  CircleHelp,
+  type LucideIcon,
 } from "lucide-react";
 import { useTenant } from "../../providers/TenantProvider";
 import {
@@ -19,7 +15,7 @@ import {
   type SupportAccessRoleOption,
   type SupportAccessUserOption,
 } from "../../lib/api/tenants";
-import { KidDropdown } from "../../components/ui";
+import { AppTooltip, KidDropdown, KidSwitch } from "../../components/ui";
 import {
   AttendanceSettings,
   type AttendanceConfig,
@@ -66,20 +62,117 @@ const UI_MODES = [
   { value: "pro", label: "Pro" },
 ];
 
-type TabId = "general" | "labs" | "ui" | "parent" | "attendance" | "support" | "danger";
+const REWARD_THEMES = [
+  { value: "classic", label: "Classic" },
+  { value: "celebration", label: "Celebration" },
+];
 
-const TABS: { id: TabId; label: string; icon: typeof Settings }[] = [
-  { id: "general", label: "General", icon: Settings },
-  { id: "labs", label: "Lab Settings", icon: FlaskConical },
-  { id: "ui", label: "UI Policy", icon: Palette },
-  { id: "parent", label: "Parent Policies", icon: Users },
-  { id: "attendance", label: "Attendance", icon: ClipboardCheck },
-  { id: "support", label: "Support Access", icon: Shield },
+const REWARD_INTENSITIES = [
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+];
+
+const REWARD_MIN_MS = 1000;
+const REWARD_MAX_DURATION_MS = 5000;
+const REWARD_MAX_BIG_WIN_POINTS = 200;
+const REWARD_LOW_MAX_MS = 3000;
+const REWARD_MEDIUM_MAX_MS = 4000;
+const REWARD_HIGH_MAX_MS = 5000;
+
+type RewardAnimationSettings = {
+  enabled: boolean;
+  theme: "classic" | "celebration";
+  max_intensity: "low" | "medium" | "high";
+  max_duration_ms: number;
+  big_win_enabled: boolean;
+  big_win_points: number;
+  durations: {
+    low: number;
+    medium: number;
+    high: number;
+  };
+};
+
+const DEFAULT_REWARD_SETTINGS: RewardAnimationSettings = {
+  enabled: true,
+  theme: "classic",
+  max_intensity: "high",
+  max_duration_ms: 4200,
+  big_win_enabled: true,
+  big_win_points: 50,
+  durations: {
+    low: 2200,
+    medium: 2800,
+    high: 3600,
+  },
+};
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, Math.floor(value)));
+}
+
+function clampRewardSettings(input: RewardAnimationSettings): RewardAnimationSettings {
+  return {
+    ...input,
+    max_duration_ms: clamp(
+      input.max_duration_ms,
+      REWARD_MIN_MS,
+      REWARD_MAX_DURATION_MS,
+    ),
+    big_win_points: clamp(input.big_win_points, 1, REWARD_MAX_BIG_WIN_POINTS),
+    durations: {
+      low: clamp(input.durations.low, REWARD_MIN_MS, REWARD_LOW_MAX_MS),
+      medium: clamp(input.durations.medium, REWARD_MIN_MS, REWARD_MEDIUM_MAX_MS),
+      high: clamp(input.durations.high, REWARD_MIN_MS, REWARD_HIGH_MAX_MS),
+    },
+  };
+}
+
+function FieldHint({ title, description }: { title: string; description: string }) {
+  return (
+    <AppTooltip title={title} description={description} placement="top">
+      <button
+        type="button"
+        className="tenant-settings__hint-btn"
+        aria-label={`Info: ${title}`}
+      >
+        <CircleHelp size={14} />
+      </button>
+    </AppTooltip>
+  );
+}
+
+function SectionHeading({
+  title,
+  description,
+}: {
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="tenant-settings__panel-title-row">
+      <h2 className="tenant-settings__panel-title">{title}</h2>
+      <FieldHint title={title} description={description} />
+    </div>
+  );
+}
+
+type TabId = "general" | "labs" | "ui" | "parent" | "attendance" | "rewards" | "support" | "danger";
+
+const TABS: { id: TabId; label: string; iconSrc?: string; icon?: LucideIcon }[] = [
+  { id: "general", label: "General", iconSrc: "/assets/cartoon-icons/settings.png" },
+  { id: "labs", label: "Lab Settings", iconSrc: "/assets/cartoon-icons/telescope.png" },
+  { id: "ui", label: "UI Policy", iconSrc: "/assets/cartoon-icons/cursor2.png" },
+  { id: "parent", label: "Parent Policies", iconSrc: "/assets/cartoon-icons/Players.png" },
+  { id: "attendance", label: "Attendance", iconSrc: "/assets/cartoon-icons/Callendar.png" },
+  { id: "rewards", label: "Reward Animations", iconSrc: "/assets/cartoon-icons/Gift1.png" },
+  { id: "support", label: "Support Access", iconSrc: "/assets/cartoon-icons/Information.png" },
   { id: "danger", label: "Danger Zone", icon: AlertTriangle },
 ];
 
 export function TenantSettings() {
-  const { tenant } = useTenant();
+  const { tenant, setTenant } = useTenant();
   const [activeTab, setActiveTab] = useState<TabId>("general");
   const [labEnabled, setLabEnabled] = useState<Record<string, boolean>>(() =>
     LABS.reduce((acc, lab) => ({ ...acc, [lab.id]: true }), {})
@@ -115,6 +208,12 @@ export function TenantSettings() {
   });
   const [attendanceSaving, setAttendanceSaving] = useState(false);
   const [attendanceSaved, setAttendanceSaved] = useState(false);
+  const [rewardCfg, setRewardCfg] = useState<RewardAnimationSettings>(
+    DEFAULT_REWARD_SETTINGS,
+  );
+  const [rewardSaving, setRewardSaving] = useState(false);
+  const [rewardSaved, setRewardSaved] = useState(false);
+  const [rewardError, setRewardError] = useState("");
 
   // Load attendance config from tenant settings on mount
   useEffect(() => {
@@ -130,6 +229,64 @@ export function TenantSettings() {
     }
   }, [tenant?.settings]);
 
+  useEffect(() => {
+    const raw =
+      tenant?.settings?.reward_animations as Record<string, unknown> | undefined;
+    if (!raw || typeof raw !== "object") {
+      setRewardCfg(DEFAULT_REWARD_SETTINGS);
+      return;
+    }
+    const durationsRaw =
+      raw.durations && typeof raw.durations === "object"
+        ? (raw.durations as Record<string, unknown>)
+        : {};
+    setRewardCfg(clampRewardSettings({
+      enabled:
+        typeof raw.enabled === "boolean"
+          ? raw.enabled
+          : DEFAULT_REWARD_SETTINGS.enabled,
+      theme:
+        raw.theme === "celebration" || raw.theme === "classic"
+          ? raw.theme
+          : DEFAULT_REWARD_SETTINGS.theme,
+      max_intensity:
+        raw.max_intensity === "low" ||
+        raw.max_intensity === "medium" ||
+        raw.max_intensity === "high"
+          ? raw.max_intensity
+          : DEFAULT_REWARD_SETTINGS.max_intensity,
+      max_duration_ms:
+        typeof raw.max_duration_ms === "number" &&
+        Number.isFinite(raw.max_duration_ms)
+          ? raw.max_duration_ms
+          : DEFAULT_REWARD_SETTINGS.max_duration_ms,
+      big_win_enabled:
+        typeof raw.big_win_enabled === "boolean"
+          ? raw.big_win_enabled
+          : DEFAULT_REWARD_SETTINGS.big_win_enabled,
+      big_win_points:
+        typeof raw.big_win_points === "number" &&
+        Number.isFinite(raw.big_win_points)
+          ? raw.big_win_points
+          : DEFAULT_REWARD_SETTINGS.big_win_points,
+      durations: {
+        low:
+          typeof durationsRaw.low === "number" && Number.isFinite(durationsRaw.low)
+            ? durationsRaw.low
+            : DEFAULT_REWARD_SETTINGS.durations.low,
+        medium:
+          typeof durationsRaw.medium === "number" &&
+          Number.isFinite(durationsRaw.medium)
+            ? durationsRaw.medium
+            : DEFAULT_REWARD_SETTINGS.durations.medium,
+        high:
+          typeof durationsRaw.high === "number" && Number.isFinite(durationsRaw.high)
+            ? durationsRaw.high
+            : DEFAULT_REWARD_SETTINGS.durations.high,
+      },
+    }));
+  }, [tenant?.settings]);
+
   const handleSaveAttendance = async () => {
     if (!tenant?.id) return;
     setAttendanceSaving(true);
@@ -142,6 +299,38 @@ export function TenantSettings() {
       // Silently ignore for now — settings page is non-critical
     } finally {
       setAttendanceSaving(false);
+    }
+  };
+
+  const handleSaveRewards = async () => {
+    if (!tenant?.id) return;
+    setRewardSaving(true);
+    setRewardSaved(false);
+    setRewardError("");
+    try {
+      const existing = (tenant.settings as Record<string, unknown> | undefined) ?? {};
+      const mergedSettings = {
+        ...existing,
+        reward_animations: clampRewardSettings(rewardCfg),
+      };
+      const updated = await updateTenantSettings(tenant.id, mergedSettings);
+      setTenant({
+        id: updated.id,
+        name: updated.name,
+        slug: updated.slug,
+        code: updated.code,
+        type: updated.type,
+        logoUrl: updated.logoUrl,
+        settings: updated.settings,
+      });
+      setRewardSaved(true);
+      setTimeout(() => setRewardSaved(false), 2500);
+    } catch (error) {
+      setRewardError(
+        error instanceof Error ? error.message : "Failed to save reward settings.",
+      );
+    } finally {
+      setRewardSaving(false);
     }
   };
 
@@ -238,7 +427,13 @@ export function TenantSettings() {
       aria-label="Tenant settings"
     >
       <header className="tenant-settings__header">
-        <h1 className="tenant-settings__title">Organization Settings</h1>
+        <div className="tenant-settings__panel-title-row">
+          <h1 className="tenant-settings__title">Organization Settings</h1>
+          <FieldHint
+            title="Organization Settings"
+            description="Manage tenant-wide defaults for labs, UI policy, attendance, rewards, and support access."
+          />
+        </div>
         <p className="tenant-settings__subtitle">
           Manage your organization configuration
         </p>
@@ -251,7 +446,6 @@ export function TenantSettings() {
           aria-label="Settings sections"
         >
           {TABS.map((tab) => {
-            const Icon = tab.icon;
             return (
               <button
                 key={tab.id}
@@ -264,7 +458,16 @@ export function TenantSettings() {
                 }`}
                 onClick={() => setActiveTab(tab.id)}
               >
-                <Icon size={18} aria-hidden />
+                {tab.iconSrc ? (
+                  <img
+                    src={tab.iconSrc}
+                    alt=""
+                    className="tenant-settings__nav-icon-img"
+                    aria-hidden
+                  />
+                ) : tab.icon ? (
+                  <tab.icon size={18} aria-hidden />
+                ) : null}
                 {tab.label}
               </button>
             );
@@ -280,7 +483,10 @@ export function TenantSettings() {
             hidden={activeTab !== "general"}
             className="tenant-settings__panel"
           >
-            <h2 className="tenant-settings__panel-title">General</h2>
+            <SectionHeading
+              title="General"
+              description="Core tenant identity and locale defaults. Name, slug, and contact are read-only from org setup."
+            />
             <div className="tenant-settings__form">
               <div className="tenant-settings__field">
                 <label htmlFor="org-name">Organization name</label>
@@ -346,7 +552,10 @@ export function TenantSettings() {
             hidden={activeTab !== "labs"}
             className="tenant-settings__panel"
           >
-            <h2 className="tenant-settings__panel-title">Lab Settings</h2>
+            <SectionHeading
+              title="Lab Settings"
+              description="Enable or disable lab surfaces available to this tenant. Disabled labs are hidden from learners."
+            />
             <p className="tenant-settings__panel-desc">
               Enable or disable labs for your organization
             </p>
@@ -364,25 +573,17 @@ export function TenantSettings() {
                   >
                     {lab.name}
                   </label>
-                  <button
+                  <KidSwitch
                     id={`lab-${lab.id}`}
-                    type="button"
-                    role="switch"
-                    aria-checked={labEnabled[lab.id]}
-                    className={`tenant-settings__switch ${
-                      labEnabled[lab.id] ? "tenant-settings__switch--on" : ""
-                    }`}
-                    onClick={() =>
+                    checked={labEnabled[lab.id]}
+                    onChange={(next) =>
                       setLabEnabled((prev) => ({
                         ...prev,
-                        [lab.id]: !prev[lab.id],
+                        [lab.id]: next,
                       }))
                     }
-                  >
-                    <span className="tenant-settings__switch-track">
-                      <span className="tenant-settings__switch-thumb" />
-                    </span>
-                  </button>
+                    ariaLabel={`${lab.name} lab toggle`}
+                  />
                 </div>
               ))}
             </div>
@@ -396,7 +597,10 @@ export function TenantSettings() {
             hidden={activeTab !== "ui"}
             className="tenant-settings__panel"
           >
-            <h2 className="tenant-settings__panel-title">UI Policy</h2>
+            <SectionHeading
+              title="UI Policy"
+              description="Controls the tenant-wide default UI mode for student experiences."
+            />
             <p className="tenant-settings__panel-desc">
               Set tenant-wide UI mode
             </p>
@@ -420,7 +624,10 @@ export function TenantSettings() {
             hidden={activeTab !== "parent"}
             className="tenant-settings__panel"
           >
-            <h2 className="tenant-settings__panel-title">Parent Policies</h2>
+            <SectionHeading
+              title="Parent Policies"
+              description="Defines whether parents can cancel or reschedule and how close to session start those actions are allowed."
+            />
             <p className="tenant-settings__panel-desc">
               Configure parent-facing policies
             </p>
@@ -436,20 +643,12 @@ export function TenantSettings() {
                 >
                   Allow cancel
                 </label>
-                <button
+                <KidSwitch
                   id="allow-cancel"
-                  type="button"
-                  role="switch"
-                  aria-checked={allowCancel}
-                  className={`tenant-settings__switch ${
-                    allowCancel ? "tenant-settings__switch--on" : ""
-                  }`}
-                  onClick={() => setAllowCancel((v) => !v)}
-                >
-                  <span className="tenant-settings__switch-track">
-                    <span className="tenant-settings__switch-thumb" />
-                  </span>
-                </button>
+                  checked={allowCancel}
+                  onChange={setAllowCancel}
+                  ariaLabel="Allow cancel toggle"
+                />
               </div>
               <div
                 className="tenant-settings__toggle-row"
@@ -462,20 +661,12 @@ export function TenantSettings() {
                 >
                   Allow reschedule
                 </label>
-                <button
+                <KidSwitch
                   id="allow-reschedule"
-                  type="button"
-                  role="switch"
-                  aria-checked={allowReschedule}
-                  className={`tenant-settings__switch ${
-                    allowReschedule ? "tenant-settings__switch--on" : ""
-                  }`}
-                  onClick={() => setAllowReschedule((v) => !v)}
-                >
-                  <span className="tenant-settings__switch-track">
-                    <span className="tenant-settings__switch-thumb" />
-                  </span>
-                </button>
+                  checked={allowReschedule}
+                  onChange={setAllowReschedule}
+                  ariaLabel="Allow reschedule toggle"
+                />
               </div>
             </div>
             <div className="tenant-settings__field">
@@ -501,7 +692,10 @@ export function TenantSettings() {
             hidden={activeTab !== "attendance"}
             className="tenant-settings__panel"
           >
-            <h2 className="tenant-settings__panel-title">Attendance</h2>
+            <SectionHeading
+              title="Attendance"
+              description="Sets the organization default attendance rule. Programs/classes can override this default."
+            />
             <p className="tenant-settings__panel-desc">
               Set the default attendance policy for your organization. Programs and classes can override this setting.
             </p>
@@ -522,6 +716,317 @@ export function TenantSettings() {
             </div>
           </section>
 
+          {/* Reward Animations */}
+          <section
+            id="panel-rewards"
+            role="tabpanel"
+            aria-labelledby="tab-rewards"
+            hidden={activeTab !== "rewards"}
+            className="tenant-settings__panel"
+          >
+            <SectionHeading
+              title="Reward Animations"
+              description="Global reward effects across live class and app pages, with guardrails to protect performance."
+            />
+            <p className="tenant-settings__panel-desc">
+              Configure global reward animation behavior for students across live class and app pages.
+            </p>
+            <div className="tenant-settings__toggles">
+              <div
+                className="tenant-settings__toggle-row"
+                role="group"
+                aria-label="Enable reward animations"
+              >
+                <label
+                  htmlFor="reward-enabled"
+                  className="tenant-settings__toggle-label"
+                >
+                  <span className="tenant-settings__label-with-hint">
+                    Enable reward animations
+                    <FieldHint
+                      title="Enable reward animations"
+                      description="Turns reward effects on/off globally for this tenant. Disable to maximize performance on very low-end devices."
+                    />
+                  </span>
+                </label>
+                <KidSwitch
+                  id="reward-enabled"
+                  checked={rewardCfg.enabled}
+                  onChange={(next) =>
+                    setRewardCfg((prev) => ({ ...prev, enabled: next }))
+                  }
+                  ariaLabel="Enable reward animations toggle"
+                />
+              </div>
+
+              <div
+                className="tenant-settings__toggle-row"
+                role="group"
+                aria-label="Enable big win mode"
+              >
+                <label
+                  htmlFor="reward-big-win"
+                  className="tenant-settings__toggle-label"
+                >
+                  <span className="tenant-settings__label-with-hint">
+                    Enable BIG WIN mode
+                    <FieldHint
+                      title="Enable BIG WIN mode"
+                      description="Adds a short flash + stronger effect for high-point rewards. Recommended to keep enabled."
+                    />
+                  </span>
+                </label>
+                <KidSwitch
+                  id="reward-big-win"
+                  checked={rewardCfg.big_win_enabled}
+                  onChange={(next) =>
+                    setRewardCfg((prev) => ({
+                      ...prev,
+                      big_win_enabled: next,
+                    }))
+                  }
+                  ariaLabel="Enable BIG WIN mode toggle"
+                />
+              </div>
+            </div>
+
+            <div className="tenant-settings__form tenant-settings__form--rewards">
+              <div className="tenant-settings__field">
+                <label htmlFor="reward-theme">
+                  <span className="tenant-settings__label-with-hint">
+                    Animation theme
+                    <FieldHint
+                      title="Animation theme"
+                      description="Classic is calmer. Celebration is brighter and more festive."
+                    />
+                  </span>
+                </label>
+                <KidDropdown
+                  value={rewardCfg.theme}
+                  onChange={(value) =>
+                    setRewardCfg((prev) => ({
+                      ...prev,
+                      theme:
+                        value === "celebration" || value === "classic"
+                          ? value
+                          : prev.theme,
+                    }))
+                  }
+                  fullWidth
+                  ariaLabel="Reward animation theme"
+                  options={REWARD_THEMES}
+                />
+              </div>
+              <div className="tenant-settings__field">
+                <label htmlFor="reward-max-intensity">
+                  <span className="tenant-settings__label-with-hint">
+                    Maximum intensity
+                    <FieldHint
+                      title="Maximum intensity"
+                      description="Caps all animations to Low, Medium, or High to prevent excessive particle load."
+                    />
+                  </span>
+                </label>
+                <KidDropdown
+                  value={rewardCfg.max_intensity}
+                  onChange={(value) =>
+                    setRewardCfg((prev) => ({
+                      ...prev,
+                      max_intensity:
+                        value === "low" || value === "medium" || value === "high"
+                          ? value
+                          : prev.max_intensity,
+                    }))
+                  }
+                  fullWidth
+                  ariaLabel="Reward maximum intensity"
+                  options={REWARD_INTENSITIES}
+                />
+              </div>
+              <div className="tenant-settings__field">
+                <label htmlFor="reward-max-duration">
+                  <span className="tenant-settings__label-with-hint">
+                    Max duration (ms)
+                    <FieldHint
+                      title="Max duration (ms)"
+                      description="Hard cap for any single animation. Allowed range: 1000 to 5000 ms."
+                    />
+                  </span>
+                </label>
+                <input
+                  id="reward-max-duration"
+                  type="number"
+                  min={REWARD_MIN_MS}
+                  max={REWARD_MAX_DURATION_MS}
+                  value={rewardCfg.max_duration_ms}
+                  onChange={(e) =>
+                    setRewardCfg((prev) => ({
+                      ...prev,
+                      max_duration_ms: clamp(
+                        Number(e.target.value) ||
+                          DEFAULT_REWARD_SETTINGS.max_duration_ms,
+                        REWARD_MIN_MS,
+                        REWARD_MAX_DURATION_MS,
+                      ),
+                    }))
+                  }
+                  className="tenant-settings__input"
+                />
+              </div>
+              <div className="tenant-settings__field">
+                <label htmlFor="reward-big-win-points">
+                  <span className="tenant-settings__label-with-hint">
+                    BIG WIN threshold (points)
+                    <FieldHint
+                      title="BIG WIN threshold (points)"
+                      description="Points needed to trigger BIG WIN visuals. Allowed range: 1 to 200 points."
+                    />
+                  </span>
+                </label>
+                <input
+                  id="reward-big-win-points"
+                  type="number"
+                  min={1}
+                  max={REWARD_MAX_BIG_WIN_POINTS}
+                  value={rewardCfg.big_win_points}
+                  onChange={(e) =>
+                    setRewardCfg((prev) => ({
+                      ...prev,
+                      big_win_points: clamp(
+                        Number(e.target.value) ||
+                          DEFAULT_REWARD_SETTINGS.big_win_points,
+                        1,
+                        REWARD_MAX_BIG_WIN_POINTS,
+                      ),
+                    }))
+                  }
+                  className="tenant-settings__input"
+                />
+              </div>
+            </div>
+
+            <div className="tenant-settings__reward-duration-grid">
+              <div className="tenant-settings__field">
+                <label htmlFor="reward-duration-low">
+                  <span className="tenant-settings__label-with-hint">
+                    Low duration (ms)
+                    <FieldHint
+                      title="Low duration (ms)"
+                      description="Animation length for low intensity. Allowed range: 1000 to 3000 ms."
+                    />
+                  </span>
+                </label>
+                <input
+                  id="reward-duration-low"
+                  type="number"
+                  min={REWARD_MIN_MS}
+                  max={REWARD_LOW_MAX_MS}
+                  value={rewardCfg.durations.low}
+                  onChange={(e) =>
+                    setRewardCfg((prev) => ({
+                      ...prev,
+                      durations: {
+                        ...prev.durations,
+                        low: clamp(
+                          Number(e.target.value) ||
+                            DEFAULT_REWARD_SETTINGS.durations.low,
+                          REWARD_MIN_MS,
+                          REWARD_LOW_MAX_MS,
+                        ),
+                      },
+                    }))
+                  }
+                  className="tenant-settings__input"
+                />
+              </div>
+              <div className="tenant-settings__field">
+                <label htmlFor="reward-duration-medium">
+                  <span className="tenant-settings__label-with-hint">
+                    Medium duration (ms)
+                    <FieldHint
+                      title="Medium duration (ms)"
+                      description="Animation length for medium intensity. Allowed range: 1000 to 4000 ms."
+                    />
+                  </span>
+                </label>
+                <input
+                  id="reward-duration-medium"
+                  type="number"
+                  min={REWARD_MIN_MS}
+                  max={REWARD_MEDIUM_MAX_MS}
+                  value={rewardCfg.durations.medium}
+                  onChange={(e) =>
+                    setRewardCfg((prev) => ({
+                      ...prev,
+                      durations: {
+                        ...prev.durations,
+                        medium: clamp(
+                          Number(e.target.value) ||
+                            DEFAULT_REWARD_SETTINGS.durations.medium,
+                          REWARD_MIN_MS,
+                          REWARD_MEDIUM_MAX_MS,
+                        ),
+                      },
+                    }))
+                  }
+                  className="tenant-settings__input"
+                />
+              </div>
+              <div className="tenant-settings__field">
+                <label htmlFor="reward-duration-high">
+                  <span className="tenant-settings__label-with-hint">
+                    High duration (ms)
+                    <FieldHint
+                      title="High duration (ms)"
+                      description="Animation length for high intensity. Allowed range: 1000 to 5000 ms."
+                    />
+                  </span>
+                </label>
+                <input
+                  id="reward-duration-high"
+                  type="number"
+                  min={REWARD_MIN_MS}
+                  max={REWARD_HIGH_MAX_MS}
+                  value={rewardCfg.durations.high}
+                  onChange={(e) =>
+                    setRewardCfg((prev) => ({
+                      ...prev,
+                      durations: {
+                        ...prev.durations,
+                        high: clamp(
+                          Number(e.target.value) ||
+                            DEFAULT_REWARD_SETTINGS.durations.high,
+                          REWARD_MIN_MS,
+                          REWARD_HIGH_MAX_MS,
+                        ),
+                      },
+                    }))
+                  }
+                  className="tenant-settings__input"
+                />
+              </div>
+            </div>
+
+            {rewardError ? (
+              <p className="tenant-settings__reward-error">{rewardError}</p>
+            ) : null}
+
+            <div className="ui-form-actions" style={{ marginTop: 24 }}>
+              <button
+                type="button"
+                className="ui-btn ui-btn--primary"
+                onClick={() => void handleSaveRewards()}
+                disabled={rewardSaving}
+              >
+                {rewardSaving
+                  ? "Saving…"
+                  : rewardSaved
+                    ? "Saved!"
+                    : "Save Reward Animation Settings"}
+              </button>
+            </div>
+          </section>
+
           {/* Support Access */}
           <section
             id="panel-support"
@@ -530,7 +1035,10 @@ export function TenantSettings() {
             hidden={activeTab !== "support"}
             className="tenant-settings__panel"
           >
-            <h2 className="tenant-settings__panel-title">Support Access</h2>
+            <SectionHeading
+              title="Support Access"
+              description="Grant temporary, role-scoped access to support staff for troubleshooting and operations."
+            />
             <p className="tenant-settings__panel-desc">
               Grant time-limited, role-scoped access to a specific STEMplitude support user.
             </p>
@@ -686,7 +1194,10 @@ export function TenantSettings() {
             hidden={activeTab !== "danger"}
             className="tenant-settings__panel tenant-settings__panel--danger"
           >
-            <h2 className="tenant-settings__panel-title">Danger Zone</h2>
+            <SectionHeading
+              title="Danger Zone"
+              description="High-risk organization actions. Use carefully because changes may be irreversible."
+            />
             <p className="tenant-settings__panel-desc">
               Irreversible actions. Proceed with caution.
             </p>

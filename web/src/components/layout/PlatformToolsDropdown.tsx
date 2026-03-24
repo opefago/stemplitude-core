@@ -1,73 +1,64 @@
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
-import {
-  Shield,
-  LayoutDashboard,
-  Users,
-  Terminal,
-  HeartPulse,
-  Cog,
-  Database,
-  Handshake,
-} from "lucide-react";
 import { useAuth } from "../../providers/AuthProvider";
 import { useWorkspace } from "../../providers/WorkspaceProvider";
+import { AppTooltip } from "../../components/ui";
 import "./platform-tools-dropdown.css";
 
 const PLATFORM_TOOLS: {
   path: string;
   label: string;
-  icon: typeof Terminal;
+  iconSrc: string;
   permission: string;
 }[] = [
   {
     path: "/app",
     label: "Platform Admin",
-    icon: Shield,
+    iconSrc: "/assets/cartoon-icons/portal1.png",
     permission: "platform.analytics:view",
   },
   {
     path: "/app/platform/dashboard",
     label: "Analytics",
-    icon: LayoutDashboard,
+    iconSrc: "/assets/cartoon-icons/Trail.png",
     permission: "platform.analytics:view",
   },
   {
     path: "/app/platform/roles",
     label: "Role Manager",
-    icon: Users,
+    iconSrc: "/assets/cartoon-icons/Players.png",
     permission: "platform.users:view",
   },
   {
     path: "/app/platform/tasks",
     label: "Admin Tasks",
-    icon: Terminal,
+    iconSrc: "/assets/cartoon-icons/portal1.png",
     permission: "platform.tasks:view",
   },
   {
     path: "/app/platform/health",
     label: "Health Check",
-    icon: HeartPulse,
+    iconSrc: "/assets/cartoon-icons/Heart.png",
     permission: "platform.health:view",
   },
   {
     path: "/app/platform/jobs",
     label: "Job Worker",
-    icon: Cog,
+    iconSrc: "/assets/cartoon-icons/gear.png",
     permission: "platform.jobs:view",
   },
   {
     path: "/app/platform/entities",
     label: "Entity Browser",
-    icon: Database,
+    iconSrc: "/assets/cartoon-icons/Chest.png",
     permission: "platform.entities:view",
   },
   {
     path: "/app/platform/growth",
     label: "Growth Ops",
-    icon: Handshake,
-    permission: "platform.analytics:view",
+    iconSrc: "/assets/cartoon-icons/Trail.png",
+    permission: "platform.growth:view",
   },
 ];
 
@@ -107,23 +98,30 @@ export function PlatformToolsDropdown() {
     (t) => isSuperAdmin || hasGlobalPermission(t.permission),
   );
 
-  if (!isSuperAdmin || !isPlatformView) return null;
+  if ((!isSuperAdmin && tools.length === 0) || !isPlatformView) return null;
 
   return (
     <div className="platform-tools-dropdown">
-      <button
-        ref={triggerRef}
-        type="button"
-        className="platform-tools-dropdown__trigger"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        aria-haspopup="menu"
-        aria-label="Platform tools"
+      <AppTooltip
+        title="Platform Tools"
+        description="Access platform admin shortcuts."
+        placement="bottom"
+        disabled={open}
       >
-        <div className="platform-tools-dropdown__shield" aria-hidden>
-          <Shield size={20} />
-        </div>
-      </button>
+        <button
+          ref={triggerRef}
+          type="button"
+          className="platform-tools-dropdown__trigger"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          aria-haspopup="menu"
+          aria-label="Platform tools"
+        >
+          <div className="platform-tools-dropdown__shield" aria-hidden>
+            <img src="/assets/cartoon-icons/portal1.png" alt="" />
+          </div>
+        </button>
+      </AppTooltip>
 
       {open &&
         createPortal(
@@ -141,7 +139,6 @@ export function PlatformToolsDropdown() {
               Platform Tools
             </div>
             {tools.map((item) => {
-              const Icon = item.icon;
               return (
                 <button
                   key={item.path}
@@ -153,11 +150,7 @@ export function PlatformToolsDropdown() {
                     navigate(item.path);
                   }}
                 >
-                  <Icon
-                    size={16}
-                    className="platform-tools-dropdown__icon"
-                    aria-hidden
-                  />
+                  <img src={item.iconSrc} className="platform-tools-dropdown__icon" alt="" aria-hidden />
                   <span>{item.label}</span>
                 </button>
               );

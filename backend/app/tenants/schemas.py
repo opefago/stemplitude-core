@@ -56,6 +56,14 @@ class TenantCreate(BaseModel):
         None,
         description="Optional tenant settings (timezone, language, etc.)",
     )
+    billing_mode: Literal["live", "test", "internal"] = Field(
+        "live",
+        description="Billing execution mode for this tenant.",
+    )
+    billing_email_enabled: bool = Field(
+        True,
+        description="Whether billing emails are enabled for this tenant.",
+    )
 
 
 class TenantUpdate(BaseModel):
@@ -67,6 +75,12 @@ class TenantUpdate(BaseModel):
     type: str | None = Field(None, max_length=50, description="Tenant type")
     logo_url: str | None = Field(None, max_length=500, description="Logo image URL")
     settings: dict | None = Field(None, description="Tenant settings")
+    billing_mode: Literal["live", "test", "internal"] | None = Field(
+        None, description="Billing execution mode"
+    )
+    billing_email_enabled: bool | None = Field(
+        None, description="Whether billing emails are enabled"
+    )
     is_active: bool | None = Field(None, description="Whether the tenant is active")
 
 
@@ -82,6 +96,12 @@ class TenantResponse(BaseModel):
     type: str = Field(..., description="Tenant type (center or parent)")
     logo_url: str | None = Field(None, description="Logo image URL")
     settings: dict | None = Field(None, description="Tenant settings (timezone, language, policies)")
+    billing_mode: Literal["live", "test", "internal"] = Field(
+        ..., description="Billing execution mode"
+    )
+    billing_email_enabled: bool = Field(
+        ..., description="Whether billing emails are enabled"
+    )
     is_active: bool = Field(..., description="Whether the tenant is active")
     created_at: datetime = Field(..., description="Creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")

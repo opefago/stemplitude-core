@@ -24,6 +24,8 @@ const RESOURCE_ACTIONS: Record<string, string[]> = {
   "platform.tasks": ["view", "execute", "manage"],
   "platform.health": ["view", "run"],
   "platform.analytics": ["view", "export"],
+  "platform.growth": ["view", "manage"],
+  "platform.billing": ["view", "manage"],
   "platform.jobs": ["view", "manage"],
   "platform.entities": ["view", "export"],
   "platform.impersonation": ["execute"],
@@ -40,6 +42,8 @@ const ROLE_ICON_MAP: Record<string, React.ElementType> = {
   platform_admin: Shield,
   devops: Wrench,
   support: Headphones,
+  platform_finance: Users,
+  growth_ops: Users,
 };
 
 const ROLE_COLOR_MAP: Record<string, string> = {
@@ -77,6 +81,8 @@ function deriveDescription(slug: string, name: string): string {
     platform_admin: "Most access; cannot manage platform owners",
     devops: "Health checks, jobs, and background tasks",
     support: "Entities, impersonation, and analytics",
+    platform_finance: "Growth, billing, and reporting operations",
+    growth_ops: "Promo, affiliate, and commission management",
   };
   return descMap[slug] ?? name;
 }

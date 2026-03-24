@@ -1,24 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
-  HelpCircle,
-  User,
-  Settings,
-  LogOut,
   ChevronDown,
-  UserCog,
   Search,
   Building2,
   Loader2,
   AlertCircle,
-  MessageSquare,
-  Shield,
-  Terminal,
-  HeartPulse,
-  Cog,
-  Database,
-  FolderSearch,
-  Handshake,
   Menu,
   PanelLeftClose,
   X,
@@ -37,6 +24,7 @@ import { startImpersonation } from "../../lib/tokens";
 import { TenantSettings } from "../../features/settings/TenantSettings";
 import { ProfilePage } from "../../features/profile";
 import { NotificationBell } from "../../features/notifications";
+import { AppTooltip } from "../../components/ui";
 import "./dashboard-header.css";
 
 function getInitials(
@@ -65,44 +53,44 @@ function getDisplayName(
 const PLATFORM_TOOLS: {
   path: string;
   label: string;
-  icon: typeof Terminal;
+  iconSrc: string;
   permission: string;
 }[] = [
   {
     path: "/app/platform/tasks",
     label: "Admin Tasks",
-    icon: Terminal,
+    iconSrc: "/assets/cartoon-icons/portal1.png",
     permission: "platform.tasks:view",
   },
   {
     path: "/app/platform/health",
     label: "Health Check",
-    icon: HeartPulse,
+    iconSrc: "/assets/cartoon-icons/Heart.png",
     permission: "platform.health:view",
   },
   {
     path: "/app/platform/jobs",
     label: "Job Worker",
-    icon: Cog,
+    iconSrc: "/assets/cartoon-icons/gear.png",
     permission: "platform.jobs:view",
   },
   {
     path: "/app/platform/entities",
     label: "Entity Browser",
-    icon: Database,
+    iconSrc: "/assets/cartoon-icons/Chest.png",
     permission: "platform.entities:view",
   },
   {
     path: "/app/platform/blobs",
     label: "Blob Finder",
-    icon: FolderSearch,
+    iconSrc: "/assets/cartoon-icons/Chest2.png",
     permission: "platform.blobs:view",
   },
   {
     path: "/app/platform/growth",
     label: "Growth Ops",
-    icon: Handshake,
-    permission: "platform.analytics:view",
+    iconSrc: "/assets/cartoon-icons/Trail.png",
+    permission: "platform.growth:view",
   },
 ];
 
@@ -279,38 +267,57 @@ export function DashboardHeader({ variant = "default" }: DashboardHeaderProps) {
           <>
             <NotificationBell />
             {!isPlatformAdminContext && (
-              <Link
-                to="/app/messages"
-                className="dash-header__icon-btn dash-header__icon-btn--link"
-                aria-label="Messages"
+              <AppTooltip
+                title="Messages"
+                description="Open your inbox and class conversations."
+                placement="bottom"
               >
-                <MessageSquare size={20} />
-              </Link>
+                <Link
+                  to="/app/messages"
+                  className="dash-header__icon-btn dash-header__icon-btn--link"
+                  aria-label="Messages"
+                >
+                  <img src="/assets/cartoon-icons/Papyrus.png" alt="" className="dash-header__icon-img" aria-hidden />
+                </Link>
+              </AppTooltip>
             )}
-            <button
-              type="button"
-              className="dash-header__icon-btn"
-              aria-label="Help"
+            <AppTooltip
+              title="Help"
+              description="Open help tips and quick guidance."
+              placement="bottom"
             >
-              <HelpCircle size={20} />
-            </button>
+              <button
+                type="button"
+                className="dash-header__icon-btn"
+                aria-label="Help"
+              >
+                <img src="/assets/cartoon-icons/Information.png" alt="" className="dash-header__icon-img" aria-hidden />
+              </button>
+            </AppTooltip>
           </>
         )}
 
         {/* Platform shield - only for users with sufficient permissions */}
         {canAccessPlatform && (
           <div className="dash-header__platform" ref={platformRef}>
-            <button
-              type="button"
-              className="dash-header__icon-btn dash-header__platform-trigger"
-              onClick={() => setPlatformOpen((p) => !p)}
-              aria-expanded={platformOpen}
-              aria-haspopup="menu"
-              aria-label="Platform tools"
-              data-active={platformOpen || undefined}
+            <AppTooltip
+              title="Platform Tools"
+              description="Open admin tools like tasks, jobs, and growth."
+              placement="bottom"
+              disabled={platformOpen}
             >
-              <Shield size={20} />
-            </button>
+              <button
+                type="button"
+                className="dash-header__icon-btn dash-header__platform-trigger"
+                onClick={() => setPlatformOpen((p) => !p)}
+                aria-expanded={platformOpen}
+                aria-haspopup="menu"
+                aria-label="Platform tools"
+                data-active={platformOpen || undefined}
+              >
+                <img src="/assets/cartoon-icons/portal1.png" alt="" className="dash-header__icon-img" aria-hidden />
+              </button>
+            </AppTooltip>
             {platformOpen && (
               <div className="dash-header__platform-dropdown" role="menu">
                 <div className="dash-header__platform-header">
@@ -320,7 +327,6 @@ export function DashboardHeader({ variant = "default" }: DashboardHeaderProps) {
                   <span className="dash-header__platform-role">{role}</span>
                 )}
                 {platformTools.map((item) => {
-                  const Icon = item.icon;
                   return (
                     <button
                       key={item.path}
@@ -332,7 +338,7 @@ export function DashboardHeader({ variant = "default" }: DashboardHeaderProps) {
                         window.open(item.path, "_blank", "noopener,noreferrer");
                       }}
                     >
-                      <Icon size={16} /> {item.label}
+                      <img src={item.iconSrc} alt="" className="dash-header__menu-icon" aria-hidden /> {item.label}
                     </button>
                   );
                 })}
@@ -410,7 +416,13 @@ export function DashboardHeader({ variant = "default" }: DashboardHeaderProps) {
                     setShowProfileDialog(true);
                   }}
                 >
-                  <User size={16} /> Profile
+                  <img
+                    src="/assets/cartoon-icons/Players.png"
+                    alt=""
+                    className="dash-header__menu-icon"
+                    aria-hidden
+                  />
+                  Profile
                 </button>
 
                 {canAccessSettings && (
@@ -423,7 +435,13 @@ export function DashboardHeader({ variant = "default" }: DashboardHeaderProps) {
                       setShowSettingsDialog(true);
                     }}
                   >
-                    <Settings size={16} /> Settings
+                    <img
+                      src="/assets/cartoon-icons/settings.png"
+                      alt=""
+                      className="dash-header__menu-icon"
+                      aria-hidden
+                    />
+                    Settings
                   </button>
                 )}
 
@@ -437,7 +455,13 @@ export function DashboardHeader({ variant = "default" }: DashboardHeaderProps) {
                       setShowImpersonate(true);
                     }}
                   >
-                    <UserCog size={16} /> Impersonate Tenant
+                    <img
+                      src="/assets/cartoon-icons/teleport.png"
+                      alt=""
+                      className="dash-header__menu-icon"
+                      aria-hidden
+                    />
+                    Impersonate Tenant
                   </button>
                 )}
 
@@ -452,7 +476,13 @@ export function DashboardHeader({ variant = "default" }: DashboardHeaderProps) {
                     logout();
                   }}
                 >
-                  <LogOut size={16} /> Logout
+                  <img
+                    src="/assets/cartoon-icons/Forbidden.png"
+                    alt=""
+                    className="dash-header__menu-icon"
+                    aria-hidden
+                  />
+                  Logout
                 </button>
               </div>
             )}

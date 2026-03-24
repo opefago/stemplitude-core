@@ -1,14 +1,21 @@
 import { NavLink } from "react-router-dom";
 import { motion } from "framer-motion";
-import { House, FlaskConical, Trophy, User } from "lucide-react";
+import { House, Trophy, User, type LucideIcon } from "lucide-react";
 import "./bottom-nav.css";
+
+type BottomNavTab = {
+  path: string;
+  label: string;
+  icon?: LucideIcon;
+  iconSrc?: string;
+};
 
 const TABS = [
   { path: "/app", label: "Home", icon: House },
-  { path: "/app/labs", label: "Labs", icon: FlaskConical },
+  { path: "/app/labs", label: "Labs", iconSrc: "/assets/cartoon-icons/telescope.png" },
   { path: "/app/achievements", label: "Badges", icon: Trophy },
   { path: "/app/profile", label: "Me", icon: User },
-] as const;
+] as const satisfies readonly BottomNavTab[];
 
 export function BottomNav() {
   return (
@@ -40,11 +47,20 @@ export function BottomNav() {
                       damping: 15,
                     }}
                   >
-                    <Icon
-                      className="bottom-nav__icon"
-                      aria-hidden
-                      strokeWidth={isActive ? 2.5 : 2}
-                    />
+                    {tab.iconSrc ? (
+                      <img
+                        src={tab.iconSrc}
+                        alt=""
+                        className="bottom-nav__icon"
+                        aria-hidden
+                      />
+                    ) : Icon ? (
+                      <Icon
+                        className="bottom-nav__icon"
+                        aria-hidden
+                        strokeWidth={isActive ? 2.5 : 2}
+                      />
+                    ) : null}
                   </motion.div>
                 </div>
                 <span className="bottom-nav__label">{tab.label}</span>

@@ -41,7 +41,14 @@ app = typer.Typer(
 
 MIN_PASSWORD_LENGTH = 12
 
-VALID_GLOBAL_ROLES = ("platform_owner", "platform_admin", "devops", "support")
+VALID_GLOBAL_ROLES = (
+    "platform_owner",
+    "platform_admin",
+    "devops",
+    "support",
+    "platform_finance",
+    "growth_ops",
+)
 
 
 async def _resolve_global_role(session, slug: str) -> Role | None:

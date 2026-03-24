@@ -219,7 +219,6 @@ export function ClassroomLiveSession() {
   const lastRealtimeSequenceRef = useRef(0);
   const realtimeIndicatorRef = useRef<HTMLSpanElement>(null);
   const realtimeTooltipRef = useRef<TippyInstance | null>(null);
-  const confettiTimerRef = useRef<number | null>(null);
   const suppressVideoBroadcastRef = useRef(false);
   const suppressScrollBroadcastRef = useRef(false);
   const sessionEndedRedirectedRef = useRef(false);
@@ -229,7 +228,6 @@ export function ClassroomLiveSession() {
   const wsParticipantsReceivedRef = useRef(false);
   const [nowMs, setNowMs] = useState(Date.now());
   const [realtimeConnected, setRealtimeConnected] = useState(false);
-  const [showConfettiSplash, setShowConfettiSplash] = useState(false);
   const [recognitionEvent, setRecognitionEvent] = useState<RecognitionEvent | null>(null);
   const [sharedContentPage, setSharedContentPage] = useState(1);
   const [pendingMediaControl, setPendingMediaControl] = useState<{
@@ -731,27 +729,10 @@ export function ClassroomLiveSession() {
       });
     }
 
-    if (
-      !isInstructorView &&
-      isAwardEvent &&
-      mapped.student_id &&
-      user?.id &&
-      mapped.student_id === user.id
-    ) {
-      setShowConfettiSplash(true);
-      if (confettiTimerRef.current != null) {
-        window.clearTimeout(confettiTimerRef.current);
-      }
-      confettiTimerRef.current = window.setTimeout(() => {
-        setShowConfettiSplash(false);
-        confettiTimerRef.current = null;
-      }, 2200);
-    }
   }, [
     isInstructorView,
     toSessionEvent,
     upsertSessionEvent,
-    user?.id,
     applyIncomingMediaControl,
     applyLiveSyncState,
     id,
@@ -1120,15 +1101,6 @@ export function ClassroomLiveSession() {
       window.removeEventListener("beforeunload", handlePageExit);
     };
   }, [id, activeSession?.id, markPresenceLeft]);
-
-  useEffect(() => {
-    return () => {
-      if (confettiTimerRef.current != null) {
-        window.clearTimeout(confettiTimerRef.current);
-        confettiTimerRef.current = null;
-      }
-    };
-  }, []);
 
   useEffect(() => {
     if (!recognitionNotice) return;
@@ -1798,7 +1770,6 @@ export function ClassroomLiveSession() {
 
   return (
     <div ref={liveRootRef} className="classroom-live" role="main" aria-label="Live classroom session">
-      {showConfettiSplash && <div className="classroom-live__confetti-splash" aria-hidden />}
       <RecognitionToast event={recognitionEvent} onDismiss={() => setRecognitionEvent(null)} />
       <Link
         to={`/app/classrooms/${id}?tab=sessions`}

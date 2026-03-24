@@ -126,8 +126,16 @@
   color: var(--color-text-secondary, #64748b);
 }
 
+.command-palette-item-icon--img {
+  object-fit: contain;
+}
+
 .command-palette-item[aria-selected="true"] .command-palette-item-icon {
   color: var(--color-primary, #0066ff);
+}
+
+.command-palette-item[aria-selected="true"] .command-palette-item-icon--img {
+  transform: scale(1.06);
 }
 
 .command-palette-empty {

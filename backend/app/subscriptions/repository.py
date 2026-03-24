@@ -80,3 +80,10 @@ class SubscriptionRepository:
         )
         invoices = list(result.scalars().all())
         return invoices, total
+
+    async def get_invoice_by_stripe_id(self, stripe_invoice_id: str) -> Invoice | None:
+        """Get invoice by Stripe invoice ID."""
+        result = await self.session.execute(
+            select(Invoice).where(Invoice.stripe_invoice_id == stripe_invoice_id)
+        )
+        return result.scalar_one_or_none()

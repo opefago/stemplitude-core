@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = logging.getLogger(__name__)
 
 from app.dependencies import CurrentIdentity, TenantContext
+from app.growth.router import validate_promo_for_checkout
 from app.plans.repository import PlanRepository
 from app.users.repository import UserRepository
 
@@ -50,6 +51,30 @@ class SubscriptionService:
         if not user or not user.email:
             return None
 
+        promo_code = (data.promo_code or "").strip().upper() or None
+        affiliate_code = (data.affiliate_code or "").strip().upper() or None
+        if promo_code:
+            promo_validation = await validate_promo_for_checkout(
+                db=self.session,
+                tenant_id=str(tenant_ctx.tenant_id),
+                code=promo_code,
+                user_id=str(identity.id),
+            )
+            if not promo_validation.get("ok"):
+                logger.warning(
+                    "Checkout failed: invalid promo tenant=%s user=%s reason=%s",
+                    tenant_ctx.tenant_id,
+                    identity.id,
+                    promo_validation.get("reason"),
+                )
+                return None
+
+        checkout_metadata = {}
+        if promo_code:
+            checkout_metadata["promo_code"] = promo_code
+        if affiliate_code:
+            checkout_metadata["affiliate_code"] = affiliate_code
+
         session = create_checkout_session(
             tenant_id=tenant_ctx.tenant_id,
             user_id=identity.id,
@@ -60,6 +85,7 @@ class SubscriptionService:
             price_id=price_id,
             billing_cycle=data.billing_cycle,
             trial_days=plan.trial_days or 0,
+            metadata=checkout_metadata or None,
         )
         if not session:
             return None

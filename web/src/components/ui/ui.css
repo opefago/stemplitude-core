@@ -252,6 +252,96 @@
   color: color-mix(in srgb, var(--color-primary) 80%, black);
 }
 
+/* Kid switch */
+.kid-switch {
+  --kid-switch-width: 64px;
+  --kid-switch-height: 34px;
+  --kid-switch-padding: 3px;
+  --kid-switch-thumb: 28px;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+.kid-switch--sm {
+  --kid-switch-width: 54px;
+  --kid-switch-height: 30px;
+  --kid-switch-padding: 3px;
+  --kid-switch-thumb: 24px;
+}
+
+.kid-switch__native {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.kid-switch__track {
+  width: var(--kid-switch-width);
+  height: var(--kid-switch-height);
+  padding: var(--kid-switch-padding);
+  border-radius: 999px;
+  border: 3px solid color-mix(in srgb, var(--color-secondary, #1cb0f6) 45%, #2269d6);
+  background: color-mix(in srgb, #e2e8f0 75%, white);
+  box-shadow:
+    0 3px 0 color-mix(in srgb, var(--color-border, #dbe3ee) 80%, white),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  display: flex;
+  align-items: center;
+  transition:
+    background 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.kid-switch__thumb {
+  width: var(--kid-switch-thumb);
+  height: var(--kid-switch-thumb);
+  border-radius: 50%;
+  border: 3px solid color-mix(in srgb, var(--color-border, #dbe3ee) 80%, #93a6bf);
+  background:
+    radial-gradient(circle at 30% 30%, #ffffff 0 32%, #f3f4f6 60%, #e5e7eb 100%);
+  box-shadow:
+    0 2px 0 color-mix(in srgb, var(--color-border, #dbe3ee) 85%, white),
+    0 6px 10px rgba(15, 23, 42, 0.16);
+  transform: translateX(0);
+  transition:
+    transform 0.22s cubic-bezier(0.2, 0.95, 0.35, 1.12),
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.kid-switch--on .kid-switch__track {
+  border-color: color-mix(in srgb, var(--color-primary-dark, #2f7a00) 55%, #1f6ed4);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--color-primary-light, #83dd34) 65%, white),
+      var(--color-primary, #58cc02)
+    );
+  box-shadow:
+    0 3px 0 color-mix(in srgb, var(--color-primary-dark, #2f7a00) 58%, #2b6cb0),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+.kid-switch--on .kid-switch__thumb {
+  transform: translateX(calc(var(--kid-switch-width) - var(--kid-switch-thumb) - (var(--kid-switch-padding) * 2)));
+  border-color: color-mix(in srgb, var(--color-primary-dark, #2f7a00) 42%, var(--color-border, #dbe3ee));
+}
+
+.kid-switch__native:focus-visible + .kid-switch__track {
+  outline: 2px solid var(--color-primary, #58cc02);
+  outline-offset: 2px;
+}
+
+.kid-switch--disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
 /* Modal dialog */
 .ui-modal__backdrop {
   position: fixed;
@@ -569,4 +659,161 @@
   padding: var(--spacing-lg);
   border-top: 1px solid var(--color-border);
   background: color-mix(in srgb, var(--color-bg) 60%, var(--color-surface));
+}
+
+/* Shared app tooltip (Tippy.js theme wrapper) */
+.ui-tooltip__content {
+  display: grid;
+  gap: 6px;
+  max-width: 320px;
+  min-width: 210px;
+}
+
+.ui-tooltip__media {
+  width: 100%;
+  max-height: 128px;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.ui-tooltip__media img,
+.ui-tooltip__media svg,
+.ui-tooltip__media video {
+  display: block;
+  width: 100%;
+  max-height: 128px;
+  object-fit: cover;
+}
+
+.ui-tooltip__title {
+  font-size: 0.93rem;
+  font-weight: 700;
+  line-height: 1.3;
+  color: #1f2937;
+}
+
+.ui-tooltip__description {
+  font-size: 0.84rem;
+  font-weight: 500;
+  line-height: 1.45;
+  color: #374151;
+}
+
+.tippy-box[data-theme~="ui-kid-tooltip"] {
+  border: 3px solid #98ddff;
+  border-radius: 18px;
+  background: #ffffff;
+  color: #1f2937;
+  font-family: "Nunito", "DIN Round Pro", "Quicksand", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  box-shadow:
+    0 2px 0 #ddf3ff,
+    0 8px 14px rgba(15, 23, 42, 0.1);
+  overflow: visible;
+}
+
+.tippy-box[data-theme~="ui-kid-tooltip"] .tippy-content {
+  padding: 12px 14px;
+}
+
+.tippy-box[data-theme~="ui-kid-tooltip"] > .tippy-arrow {
+  width: 18px;
+  height: 10px;
+  color: transparent;
+}
+
+.tippy-box[data-theme~="ui-kid-tooltip"] > .tippy-arrow::before,
+.tippy-box[data-theme~="ui-kid-tooltip"] > .tippy-arrow::after {
+  content: "";
+  position: absolute;
+  width: 0;
+  height: 0;
+  border-style: solid;
+}
+
+.tippy-box[data-theme~="ui-kid-tooltip"][data-placement^="top"] > .tippy-arrow {
+  bottom: -10px;
+}
+
+.tippy-box[data-theme~="ui-kid-tooltip"][data-placement^="top"] > .tippy-arrow::before {
+  left: 0;
+  top: 0;
+  border-width: 10px 9px 0 9px;
+  border-color: #98ddff transparent transparent transparent;
+}
+
+.tippy-box[data-theme~="ui-kid-tooltip"][data-placement^="top"] > .tippy-arrow::after {
+  left: 2px;
+  top: 0;
+  border-width: 8px 7px 0 7px;
+  border-color: #ffffff transparent transparent transparent;
+}
+
+.tippy-box[data-theme~="ui-kid-tooltip"][data-placement^="bottom"] > .tippy-arrow {
+  top: -10px;
+}
+
+.tippy-box[data-theme~="ui-kid-tooltip"][data-placement^="bottom"] > .tippy-arrow::before {
+  left: 0;
+  top: 0;
+  border-width: 0 9px 10px 9px;
+  border-color: transparent transparent #98ddff transparent;
+}
+
+.tippy-box[data-theme~="ui-kid-tooltip"][data-placement^="bottom"] > .tippy-arrow::after {
+  left: 2px;
+  top: 2px;
+  border-width: 0 7px 8px 7px;
+  border-color: transparent transparent #ffffff transparent;
+}
+
+.tippy-box[data-theme~="ui-kid-tooltip"][data-placement^="left"] > .tippy-arrow {
+  width: 10px;
+  height: 18px;
+  right: -10px;
+}
+
+.tippy-box[data-theme~="ui-kid-tooltip"][data-placement^="left"] > .tippy-arrow::before {
+  left: 0;
+  top: 0;
+  border-width: 9px 0 9px 10px;
+  border-color: transparent transparent transparent #98ddff;
+}
+
+.tippy-box[data-theme~="ui-kid-tooltip"][data-placement^="left"] > .tippy-arrow::after {
+  left: 0;
+  top: 2px;
+  border-width: 7px 0 7px 8px;
+  border-color: transparent transparent transparent #ffffff;
+}
+
+.tippy-box[data-theme~="ui-kid-tooltip"][data-placement^="right"] > .tippy-arrow {
+  width: 10px;
+  height: 18px;
+  left: -10px;
+}
+
+.tippy-box[data-theme~="ui-kid-tooltip"][data-placement^="right"] > .tippy-arrow::before {
+  left: 0;
+  top: 0;
+  border-width: 9px 10px 9px 0;
+  border-color: transparent #98ddff transparent transparent;
+}
+
+.tippy-box[data-theme~="ui-kid-tooltip"][data-placement^="right"] > .tippy-arrow::after {
+  left: 0;
+  top: 2px;
+  border-width: 7px 8px 7px 0;
+  border-color: transparent #ffffff transparent transparent;
+}
+
+.tippy-box[data-theme~="ui-light-tooltip"] {
+  border-radius: 10px;
+  border: 1px solid var(--color-border, #dbe6f4);
+  background: #ffffff;
+  color: var(--color-text, #1e293b);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);
+}
+
+.tippy-box[data-theme~="ui-light-tooltip"] .tippy-content {
+  padding: 8px 10px;
 }

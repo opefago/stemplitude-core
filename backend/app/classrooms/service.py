@@ -24,7 +24,11 @@ from app.students.models import ParentStudent, Student
 from app.users.models import User
 from app.tenants.repository import MembershipRepository
 from app.realtime.gateway import publish_channel_message
-from app.realtime.user_events import publish_notifications_changed, publish_sessions_changed
+from app.realtime.user_events import (
+    publish_notifications_changed,
+    publish_reward_granted,
+    publish_sessions_changed,
+)
 
 from .repository import ClassroomRepository
 from .schemas import (
@@ -1731,6 +1735,39 @@ class ClassroomService:
                 )
             except Exception:
                 logger.exception("Failed to queue session activity notification")
+            try:
+                tenant = await self.session.get(Tenant, tenant_id)
+                tenant_settings = tenant.settings if tenant and isinstance(tenant.settings, dict) else {}
+                reward_cfg_raw = tenant_settings.get("reward_animations", {})
+                reward_cfg = reward_cfg_raw if isinstance(reward_cfg_raw, dict) else {}
+                big_win_threshold_raw = reward_cfg.get("big_win_points")
+                try:
+                    big_win_threshold = int(big_win_threshold_raw)
+                except (TypeError, ValueError):
+                    big_win_threshold = 50
+                student_name = None
+                student = await self.session.get(Student, data.student_id)
+                if student:
+                    full = f"{student.first_name or ''} {student.last_name or ''}".strip()
+                    student_name = full or student.email
+                await publish_reward_granted(
+                    tenant_id=tenant_id,
+                    principal_id=data.student_id,
+                    payload={
+                        "student_id": str(data.student_id),
+                        "student_name": student_name,
+                        "reward_type": activity_type,
+                        "points": points_delta,
+                        "message": msg,
+                        "classroom_id": str(classroom_id),
+                        "session_id": str(session_id),
+                        "classroom_name": class_name,
+                        "big_win": bool(points_delta and points_delta >= max(1, big_win_threshold)),
+                        "reward_config": reward_cfg,
+                    },
+                )
+            except Exception:
+                logger.exception("Failed to publish rewards.granted realtime signal")
         return await self._event_to_response(event)
 
     async def list_session_events(

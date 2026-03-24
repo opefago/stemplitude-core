@@ -87,6 +87,7 @@ import {
 } from "./features/platform";
 import { ProfilePage } from "./features/profile";
 import { NotificationsPage } from "./features/notifications";
+import { RewardRuntime } from "./rewards";
 import "./App.css";
 
 function PublicContent() {
@@ -344,6 +345,7 @@ function App() {
                         <GlobalBanner />
                         <ScrollToTop />
                         <PublicContent />
+                        <RewardRuntime />
                         <CommandPalette />
                       </Router>
                     </CommandPaletteProvider>

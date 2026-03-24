@@ -14,3 +14,6 @@ export type { DateTimePickerProps } from "./DateTimePicker";
 export { cmpDate, cmpTime, cmpDatetime } from "./DateTimePicker";
 export { ModalDialog } from "./ModalDialog";
 export { KidCheckbox } from "./KidCheckbox";
+export { KidSwitch } from "./KidSwitch";
+export { AppTooltip } from "./AppTooltip";
+export type { AppTooltipProps } from "./AppTooltip";

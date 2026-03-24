@@ -139,7 +139,7 @@ export function ParentDashboard() {
               <div className="dashboard-bento__card-header">
                 <h2 className="dashboard-bento__card-title">Child Progress</h2>
                 <div className="dashboard-bento__card-icon">
-                  <TrendingUp size={24} aria-hidden />
+                  <img src="/assets/cartoon-icons/strong.png" alt="" className="dashboard-bento__card-icon-img" aria-hidden />
                 </div>
               </div>
               <div className="parent-dashboard__progress-main">
@@ -152,12 +152,12 @@ export function ParentDashboard() {
               </div>
               <div className="parent-dashboard__progress-stats">
                 <div className="dashboard-bento__streak">
-                  <Flame size={18} aria-hidden />
+                  <img src="/assets/cartoon-icons/Thunder.png" alt="" className="dashboard-bento__card-icon-img" aria-hidden />
                   5 day streak
                 </div>
                 <span className="parent-dashboard__stat">Level 7</span>
                 <span className="parent-dashboard__stat">
-                  <Award size={18} aria-hidden /> Recent grade: A
+                  <img src="/assets/cartoon-icons/Crown.png" alt="" className="dashboard-bento__card-icon-img" aria-hidden /> Recent grade: A
                 </span>
               </div>
             </div>
@@ -181,7 +181,7 @@ export function ParentDashboard() {
                     className="parent-dashboard__session-row"
                     role="listitem"
                   >
-                    <Calendar size={16} aria-hidden />
+                    <img src="/assets/cartoon-icons/Callendar.png" alt="" className="dashboard-bento__card-icon-img" aria-hidden />
                     <span className="parent-dashboard__session-text">
                       {session.title} – {session.time}
                     </span>
@@ -207,7 +207,7 @@ export function ParentDashboard() {
               <div className="dashboard-bento__card-header">
                 <h2 className="dashboard-bento__card-title">Teacher Messages</h2>
                 <div className="dashboard-bento__card-icon">
-                  <MessageSquare size={24} aria-hidden />
+                  <img src="/assets/cartoon-icons/Papyrus.png" alt="" className="dashboard-bento__card-icon-img" aria-hidden />
                 </div>
               </div>
               <div className="parent-dashboard__messages-preview">

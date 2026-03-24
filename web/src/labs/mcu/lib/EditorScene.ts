@@ -72,7 +72,7 @@ export class EditorScene extends BaseScene {
     {
       id: "gear",
       name: "Gear",
-      icon: "/assets/gear.svg",
+      icon: "/assets/cartoon-icons/settings.png",
       type: "gear",
       description: "Mechanical gear for power transmission",
     },

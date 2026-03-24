@@ -94,7 +94,9 @@ class TenantService:
             type=data.type,
             logo_url=data.logo_url,
             settings=data.settings or {},
-            is_active=data.is_active,
+            billing_mode=data.billing_mode,
+            billing_email_enabled=data.billing_email_enabled,
+            is_active=True,
         )
         await self._seed_default_roles(tenant.id)
         # Add creator as admin

@@ -136,7 +136,9 @@ export function ClassroomDetail() {
   const [selectedStudentId, setSelectedStudentId] = useState("");
   const [enrollingStudent, setEnrollingStudent] = useState(false);
   const [enrollError, setEnrollError] = useState<string | null>(null);
-  const [removingStudentId, setRemovingStudentId] = useState<string | null>(null);
+  const [removingStudentId, setRemovingStudentId] = useState<string | null>(
+    null,
+  );
   const [materialLoadingKey, setMaterialLoadingKey] = useState<string | null>(
     null,
   );
@@ -146,15 +148,21 @@ export function ClassroomDetail() {
   const consumedClassroomEditQueryRef = useRef<string | null>(null);
 
   // ── Attendance settings ─────────────────────────────────────────────────
-  const [attendanceCfg, setAttendanceCfg] = useState<AttendanceConfig | null>(null);
+  const [attendanceCfg, setAttendanceCfg] = useState<AttendanceConfig | null>(
+    null,
+  );
   const [attendanceSaving, setAttendanceSaving] = useState(false);
   const [attendanceSaved, setAttendanceSaved] = useState(false);
   // Per-session attendance records
   const [attendanceSessionId, setAttendanceSessionId] = useState<string>("");
-  const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
+  const [attendanceRecords, setAttendanceRecords] = useState<
+    AttendanceRecord[]
+  >([]);
   const [attendanceLoading, setAttendanceLoading] = useState(false);
   const [attendanceCalcRunning, setAttendanceCalcRunning] = useState(false);
-  const [attendanceFilter, setAttendanceFilter] = useState<"all" | "present" | "absent">("all");
+  const [attendanceFilter, setAttendanceFilter] = useState<
+    "all" | "present" | "absent"
+  >("all");
   // ── Session resources ────────────────────────────────────────────────────
   const [resourcesSession, setResourcesSession] =
     useState<ClassroomSessionRecord | null>(null);
@@ -168,8 +176,10 @@ export function ClassroomDetail() {
   const [newAssignmentRequirement, setNewAssignmentRequirement] = useState<
     "none" | "lab" | "assets" | "both"
   >("none");
-  const [newAssignmentAllowEditAfterSubmit, setNewAssignmentAllowEditAfterSubmit] =
-    useState(false);
+  const [
+    newAssignmentAllowEditAfterSubmit,
+    setNewAssignmentAllowEditAfterSubmit,
+  ] = useState(false);
   const [addingAssignment, setAddingAssignment] = useState(false);
   const [showAssignmentForm, setShowAssignmentForm] = useState(false);
   const [resourceUploadedAssets, setResourceUploadedAssets] = useState<Asset[]>(
@@ -310,8 +320,11 @@ export function ClassroomDetail() {
         setSessions(classSessions);
         setStudents(classStudents);
         // Hydrate attendance config from classroom settings
-        const raw = (klass.settings as Record<string, unknown> | undefined)?.attendance;
-        setAttendanceCfg(raw && typeof raw === "object" ? (raw as AttendanceConfig) : null);
+        const raw = (klass.settings as Record<string, unknown> | undefined)
+          ?.attendance;
+        setAttendanceCfg(
+          raw && typeof raw === "object" ? (raw as AttendanceConfig) : null,
+        );
       } catch (e: unknown) {
         if (!mounted) return;
         setError(e instanceof Error ? e.message : "Failed to load classroom");
@@ -967,7 +980,9 @@ export function ClassroomDetail() {
       const refreshedRoster = await listClassroomRoster(id);
       setStudents(refreshedRoster);
     } catch (e: unknown) {
-      setEnrollError(e instanceof Error ? e.message : "Failed to remove student");
+      setEnrollError(
+        e instanceof Error ? e.message : "Failed to remove student",
+      );
     } finally {
       setRemovingStudentId(null);
     }
@@ -1059,15 +1074,15 @@ export function ClassroomDetail() {
     }
     try {
       const library = await getAssetLibrary();
-      const globalAsAssets: Asset[] = (library.global_assets as GlobalAsset[]).map(
-        (asset) => ({
-          ...asset,
-          owner_type: "global",
-          mime_type: null,
-          blob_url: null,
-          thumbnail_url: null,
-        }),
-      );
+      const globalAsAssets: Asset[] = (
+        library.global_assets as GlobalAsset[]
+      ).map((asset) => ({
+        ...asset,
+        owner_type: "global",
+        mime_type: null,
+        blob_url: null,
+        thumbnail_url: null,
+      }));
       const merged = [...library.own, ...library.shared, ...globalAsAssets];
       const byId = new Map(merged.map((asset) => [asset.id, asset]));
       const resolved: Asset[] = allIds
@@ -1089,7 +1104,9 @@ export function ClassroomDetail() {
         }
       }
       setResourceUploadedAssets(
-        Array.from(new Map(resolved.map((asset) => [asset.id, asset])).values()),
+        Array.from(
+          new Map(resolved.map((asset) => [asset.id, asset])).values(),
+        ),
       );
       const resolvedNames = Object.fromEntries(
         resolved
@@ -1126,9 +1143,7 @@ export function ClassroomDetail() {
         }),
       );
       const directNames = Object.fromEntries(
-        fetchedNames.filter(
-          (item): item is [string, string] => Boolean(item),
-        ),
+        fetchedNames.filter((item): item is [string, string] => Boolean(item)),
       );
       if (Object.keys(directNames).length > 0) {
         setResourceNameById((prev) => ({ ...prev, ...directNames }));
@@ -1368,7 +1383,9 @@ export function ClassroomDetail() {
     setSavedSubmissions([]);
   };
 
-  const parseSubmissionPayload = (raw: string): {
+  const parseSubmissionPayload = (
+    raw: string,
+  ): {
     note: string;
     labId: string | null;
     assetId: string | null;
@@ -1383,9 +1400,14 @@ export function ClassroomDetail() {
       return {
         note: typeof noteValue === "string" ? noteValue : "",
         labId: typeof labIdValue === "string" && labIdValue ? labIdValue : null,
-        assetId: typeof assetIdValue === "string" && assetIdValue ? assetIdValue : null,
+        assetId:
+          typeof assetIdValue === "string" && assetIdValue
+            ? assetIdValue
+            : null,
         assetName:
-          typeof assetNameValue === "string" && assetNameValue ? assetNameValue : null,
+          typeof assetNameValue === "string" && assetNameValue
+            ? assetNameValue
+            : null,
       };
     } catch {
       return {
@@ -1398,7 +1420,12 @@ export function ClassroomDetail() {
   };
 
   const handleSaveDraftAndOpenLab = async () => {
-    if (!id || !viewingAssignment || !viewingAssignmentSession || !viewingAssignment.lab_id) {
+    if (
+      !id ||
+      !viewingAssignment ||
+      !viewingAssignmentSession ||
+      !viewingAssignment.lab_id
+    ) {
       return;
     }
     setSubmittingWork(true);
@@ -1428,7 +1455,9 @@ export function ClassroomDetail() {
       });
       navigate(launchPath);
     } catch (err: unknown) {
-      setSubmitError(err instanceof Error ? err.message : "Failed to save draft");
+      setSubmitError(
+        err instanceof Error ? err.message : "Failed to save draft",
+      );
     } finally {
       setSubmittingWork(false);
     }
@@ -1467,8 +1496,14 @@ export function ClassroomDetail() {
       );
       return;
     }
-    if (status === "submitted" && viewingAssignment.requires_assets && !submissionAssetId) {
-      setSubmitError("This assignment requires an attached file or asset before submitting.");
+    if (
+      status === "submitted" &&
+      viewingAssignment.requires_assets &&
+      !submissionAssetId
+    ) {
+      setSubmitError(
+        "This assignment requires an attached file or asset before submitting.",
+      );
       return;
     }
     if (!submissionText.trim() && !submissionAssetId) {
@@ -1521,7 +1556,11 @@ export function ClassroomDetail() {
     }
     let cancelled = false;
     setLoadingSavedSubmissions(true);
-    listMySessionSubmissions(id, viewingAssignmentSession.id, viewingAssignment.id)
+    listMySessionSubmissions(
+      id,
+      viewingAssignmentSession.id,
+      viewingAssignment.id,
+    )
       .then((items) => {
         if (!cancelled) setSavedSubmissions(items);
       })
@@ -1542,20 +1581,25 @@ export function ClassroomDetail() {
   ]);
 
   const latestSubmittedSubmission = useMemo(() => {
-    const submitted = savedSubmissions.filter((sub) => sub.status === "submitted");
+    const submitted = savedSubmissions.filter(
+      (sub) => sub.status === "submitted",
+    );
     if (submitted.length === 0) return null;
     return [...submitted].sort(
-      (a, b) => new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime(),
+      (a, b) =>
+        new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime(),
     )[0];
   }, [savedSubmissions]);
 
   const latestFeedbackSubmission = useMemo(() => {
     const graded = savedSubmissions.filter(
-      (sub) => sub.grade != null || (sub.feedback && sub.feedback.trim().length > 0),
+      (sub) =>
+        sub.grade != null || (sub.feedback && sub.feedback.trim().length > 0),
     );
     if (graded.length === 0) return null;
     return [...graded].sort(
-      (a, b) => new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime(),
+      (a, b) =>
+        new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime(),
     )[0];
   }, [savedSubmissions]);
 
@@ -1767,7 +1811,9 @@ export function ClassroomDetail() {
                   })}
                 </ul>
               )}
-              {enrollError && <p className="classroom-list__empty">{enrollError}</p>}
+              {enrollError && (
+                <p className="classroom-list__empty">{enrollError}</p>
+              )}
             </div>
           )}
 
@@ -2408,7 +2454,9 @@ export function ClassroomDetail() {
 
               {/* ── Session attendance records ─── */}
               <div className="classroom-detail__attendance-section">
-                <h3 className="classroom-detail__subsection-title">Session Attendance</h3>
+                <h3 className="classroom-detail__subsection-title">
+                  Session Attendance
+                </h3>
                 <div className="classroom-detail__attendance-controls">
                   <KidDropdown
                     value={attendanceSessionId}
@@ -2438,7 +2486,9 @@ export function ClassroomDetail() {
                     <button
                       type="button"
                       className="ui-btn ui-btn--secondary"
-                      onClick={() => void handleRecalculateAttendance(attendanceSessionId)}
+                      onClick={() =>
+                        void handleRecalculateAttendance(attendanceSessionId)
+                      }
                       disabled={attendanceCalcRunning}
                     >
                       {attendanceCalcRunning ? "Calculating…" : "Recalculate"}
@@ -2450,85 +2500,117 @@ export function ClassroomDetail() {
                   <p className="classroom-list__empty">Loading attendance…</p>
                 )}
 
-                {!attendanceLoading && attendanceSessionId && attendanceRecords.length === 0 && (
-                  <p className="classroom-list__empty">
-                    No attendance records yet. Click Recalculate to compute from presence data.
-                  </p>
-                )}
+                {!attendanceLoading &&
+                  attendanceSessionId &&
+                  attendanceRecords.length === 0 && (
+                    <p className="classroom-list__empty">
+                      No attendance records yet. Click Recalculate to compute
+                      from presence data.
+                    </p>
+                  )}
 
-                {!attendanceLoading && attendanceRecords.length > 0 && (() => {
-                  const presentCount = attendanceRecords.filter((r) => r.status === "present").length;
-                  const absentCount = attendanceRecords.filter((r) => r.status === "absent").length;
-                  const filtered = attendanceFilter === "all"
-                    ? attendanceRecords
-                    : attendanceRecords.filter((r) => r.status === attendanceFilter);
-                  return (
-                    <>
-                      <div className="classroom-detail__attendance-filter">
-                        {(["all", "present", "absent"] as const).map((f) => {
-                          const label =
-                            f === "all" ? `All (${attendanceRecords.length})`
-                            : f === "present" ? `Present (${presentCount})`
-                            : `Absent (${absentCount})`;
-                          return (
-                            <button
-                              key={f}
-                              type="button"
-                              className={`classroom-detail__sub-pill${attendanceFilter === f ? " classroom-detail__sub-pill--active" : ""}`}
-                              onClick={() => setAttendanceFilter(f)}
-                            >
-                              {label}
-                            </button>
+                {!attendanceLoading &&
+                  attendanceRecords.length > 0 &&
+                  (() => {
+                    const presentCount = attendanceRecords.filter(
+                      (r) => r.status === "present",
+                    ).length;
+                    const absentCount = attendanceRecords.filter(
+                      (r) => r.status === "absent",
+                    ).length;
+                    const filtered =
+                      attendanceFilter === "all"
+                        ? attendanceRecords
+                        : attendanceRecords.filter(
+                            (r) => r.status === attendanceFilter,
                           );
-                        })}
-                      </div>
-                      <table className="classroom-detail__attendance-table">
-                        <thead>
-                          <tr>
-                            <th>Student</th>
-                            <th>Status</th>
-                            <th>Notes</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {filtered.map((rec) => {
-                            const student = students.find((s) => s.id === rec.student_id);
-                            const name = student
-                              ? (student.display_name || `${student.first_name} ${student.last_name}`.trim())
-                              : rec.student_id;
+                    return (
+                      <>
+                        <div className="classroom-detail__attendance-filter">
+                          {(["all", "present", "absent"] as const).map((f) => {
+                            const label =
+                              f === "all"
+                                ? `All (${attendanceRecords.length})`
+                                : f === "present"
+                                  ? `Present (${presentCount})`
+                                  : `Absent (${absentCount})`;
                             return (
-                              <tr key={rec.id}>
-                                <td>{name}</td>
-                                <td>
-                                  <span
-                                    className={`classroom-detail__attendance-badge classroom-detail__attendance-badge--${rec.status}`}
-                                  >
-                                    {rec.status}
-                                  </span>
-                                </td>
-                                <td>{rec.notes ?? "—"}</td>
-                              </tr>
+                              <button
+                                key={f}
+                                type="button"
+                                className={`classroom-detail__sub-pill${attendanceFilter === f ? " classroom-detail__sub-pill--active" : ""}`}
+                                onClick={() => setAttendanceFilter(f)}
+                              >
+                                {label}
+                              </button>
                             );
                           })}
-                          {filtered.length === 0 && (
+                        </div>
+                        <table className="classroom-detail__attendance-table">
+                          <thead>
                             <tr>
-                              <td colSpan={3} style={{ textAlign: "center", color: "var(--color-text-secondary, #64748b)", padding: "16px" }}>
-                                No {attendanceFilter} records for this session.
-                              </td>
+                              <th>Student</th>
+                              <th>Status</th>
+                              <th>Notes</th>
                             </tr>
-                          )}
-                        </tbody>
-                      </table>
-                    </>
-                  );
-                })()}
+                          </thead>
+                          <tbody>
+                            {filtered.map((rec) => {
+                              const student = students.find(
+                                (s) => s.id === rec.student_id,
+                              );
+                              const name = student
+                                ? student.display_name ||
+                                  `${student.first_name} ${student.last_name}`.trim()
+                                : rec.student_id;
+                              return (
+                                <tr key={rec.id}>
+                                  <td>{name}</td>
+                                  <td>
+                                    <span
+                                      className={`classroom-detail__attendance-badge classroom-detail__attendance-badge--${rec.status}`}
+                                    >
+                                      {rec.status}
+                                    </span>
+                                  </td>
+                                  <td>{rec.notes ?? "—"}</td>
+                                </tr>
+                              );
+                            })}
+                            {filtered.length === 0 && (
+                              <tr>
+                                <td
+                                  colSpan={3}
+                                  style={{
+                                    textAlign: "center",
+                                    color:
+                                      "var(--color-text-secondary, #64748b)",
+                                    padding: "16px",
+                                  }}
+                                >
+                                  No {attendanceFilter} records for this
+                                  session.
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </>
+                    );
+                  })()}
               </div>
 
               {/* ── Classroom-level attendance policy ─── */}
-              <div className="classroom-detail__attendance-section" style={{ marginTop: 32 }}>
-                <h3 className="classroom-detail__subsection-title">Attendance Policy</h3>
+              <div
+                className="classroom-detail__attendance-section"
+                style={{ marginTop: 32 }}
+              >
+                <h3 className="classroom-detail__subsection-title">
+                  Attendance Policy
+                </h3>
                 <p className="classroom-detail__section-desc">
-                  Override the attendance policy for this classroom. Leave unset to inherit from the program or tenant.
+                  Override the attendance policy for this classroom. Leave unset
+                  to inherit from the program or tenant.
                 </p>
                 <AttendanceSettings
                   value={attendanceCfg}
@@ -2544,7 +2626,11 @@ export function ClassroomDetail() {
                     onClick={() => void handleSaveAttendanceSettings()}
                     disabled={attendanceSaving}
                   >
-                    {attendanceSaving ? "Saving…" : attendanceSaved ? "Saved!" : "Save Policy"}
+                    {attendanceSaving
+                      ? "Saving…"
+                      : attendanceSaved
+                        ? "Saved!"
+                        : "Save Policy"}
                   </button>
                 </div>
               </div>
@@ -3157,7 +3243,9 @@ export function ClassroomDetail() {
                         })
                         .catch((e: unknown) => {
                           setGradeError(
-                            e instanceof Error ? e.message : "Failed to save grade",
+                            e instanceof Error
+                              ? e.message
+                              : "Failed to save grade",
                           );
                         })
                         .finally(() => setSavingGrade(false));
@@ -3171,14 +3259,27 @@ export function ClassroomDetail() {
           >
             {gradingSubmission ? (
               <>
-                <p className="classroom-detail__end-dialog-copy" style={{ marginBottom: 8 }}>
-                  Student: <strong>{gradingSubmission.student_display_name ?? gradingSubmission.student_id}</strong>
+                <p
+                  className="classroom-detail__end-dialog-copy"
+                  style={{ marginBottom: 8 }}
+                >
+                  Student:{" "}
+                  <strong>
+                    {gradingSubmission.student_display_name ??
+                      gradingSubmission.student_id}
+                  </strong>
                 </p>
-                <pre className="classroom-detail__sub-content" style={{ marginBottom: 16 }}>
+                <pre
+                  className="classroom-detail__sub-content"
+                  style={{ marginBottom: 16 }}
+                >
                   {gradingSubmission.content || "(no content)"}
                 </pre>
                 {gradeError && (
-                  <p className="classroom-list__empty" style={{ color: "var(--color-error, red)" }}>
+                  <p
+                    className="classroom-list__empty"
+                    style={{ color: "var(--color-error, red)" }}
+                  >
                     {gradeError}
                   </p>
                 )}
@@ -3580,25 +3681,25 @@ export function ClassroomDetail() {
                 {permittedLabs.length > 0 &&
                   (newAssignmentRequirement === "lab" ||
                     newAssignmentRequirement === "both") && (
-                  <div className="classroom-list__create-field">
-                    <label>Linked lab</label>
-                    <KidDropdown
-                      value={newAssignmentLabId}
-                      onChange={setNewAssignmentLabId}
-                      ariaLabel="Select a lab for this assignment"
-                      minWidth={240}
-                      options={[
-                        { value: "", label: "No lab" },
-                        ...permittedLabs.map((lab) => ({
-                          value: lab,
-                          label: lab
-                            .replace(/-/g, " ")
-                            .replace(/\b\w/g, (c) => c.toUpperCase()),
-                        })),
-                      ]}
-                    />
-                  </div>
-                )}
+                    <div className="classroom-list__create-field">
+                      <label>Linked lab</label>
+                      <KidDropdown
+                        value={newAssignmentLabId}
+                        onChange={setNewAssignmentLabId}
+                        ariaLabel="Select a lab for this assignment"
+                        minWidth={240}
+                        options={[
+                          { value: "", label: "No lab" },
+                          ...permittedLabs.map((lab) => ({
+                            value: lab,
+                            label: lab
+                              .replace(/-/g, " ")
+                              .replace(/\b\w/g, (c) => c.toUpperCase()),
+                          })),
+                        ]}
+                      />
+                    </div>
+                  )}
                 <div className="classroom-list__create-field">
                   <label htmlFor="new-assign-instructions">Instructions</label>
                   <textarea
@@ -3889,8 +3990,9 @@ export function ClassroomDetail() {
                       </h3>
                       {viewingAssignment.requires_lab && (
                         <p className="classroom-detail__resources-label">
-                          This assignment requires lab work. We save a draft before opening
-                          the lab so you can continue and submit later.
+                          This assignment requires lab work. We save a draft
+                          before opening the lab so you can continue and submit
+                          later.
                         </p>
                       )}
                       <button
@@ -3902,7 +4004,9 @@ export function ClassroomDetail() {
                         disabled={submittingWork}
                       >
                         <LabIcon size={18} aria-hidden />
-                        {submittingWork ? "Saving draft..." : "Save draft & open"}{" "}
+                        {submittingWork
+                          ? "Saving draft..."
+                          : "Save draft & open"}{" "}
                         {viewingAssignment.lab_id
                           .replace(/-/g, " ")
                           .replace(/\b\w/g, (c) => c.toUpperCase())}
@@ -3974,21 +4078,31 @@ export function ClassroomDetail() {
                         <div className="classroom-detail__av-resource-list">
                           {savedSubmissions.map((sub) => {
                             const parsed = parseSubmissionPayload(sub.content);
-                            const labToOpen = parsed.labId || viewingAssignment.lab_id;
+                            const labToOpen =
+                              parsed.labId || viewingAssignment.lab_id;
                             return (
                               <div
                                 key={sub.event_id}
                                 className="classroom-detail__av-resource-btn"
                               >
                                 <span>
-                                  {sub.status === "submitted" ? "Submitted" : "Draft"} -{" "}
+                                  {sub.status === "submitted"
+                                    ? "Submitted"
+                                    : "Draft"}{" "}
+                                  -{" "}
                                   {new Date(sub.submitted_at).toLocaleString()}
                                 </span>
                                 {(sub.grade != null || sub.feedback) && (
                                   <span className="classroom-detail__resources-label">
-                                    {sub.grade != null ? `Grade: ${sub.grade}/100` : ""}
-                                    {sub.grade != null && sub.feedback ? " - " : ""}
-                                    {sub.feedback ? `Feedback: ${sub.feedback}` : ""}
+                                    {sub.grade != null
+                                      ? `Grade: ${sub.grade}/100`
+                                      : ""}
+                                    {sub.grade != null && sub.feedback
+                                      ? " - "
+                                      : ""}
+                                    {sub.feedback
+                                      ? `Feedback: ${sub.feedback}`
+                                      : ""}
                                   </span>
                                 )}
                                 <div className="classroom-detail__resources-header-actions">
@@ -4001,10 +4115,12 @@ export function ClassroomDetail() {
                                       setSubmissionAssetName(parsed.assetName);
                                     }}
                                     disabled={
-                                      submissionLocked && sub.status === "submitted"
+                                      submissionLocked &&
+                                      sub.status === "submitted"
                                     }
                                   >
-                                    {submissionLocked && sub.status === "submitted"
+                                    {submissionLocked &&
+                                    sub.status === "submitted"
                                       ? "Locked"
                                       : "Load"}
                                   </button>
@@ -4016,7 +4132,8 @@ export function ClassroomDetail() {
                                         navigate(
                                           buildLabLaunchPath(labToOpen, {
                                             classroomId: id,
-                                            sessionId: viewingAssignmentSession.id,
+                                            sessionId:
+                                              viewingAssignmentSession.id,
                                             referrer: "assignment_view",
                                           }),
                                         )
@@ -4046,10 +4163,12 @@ export function ClassroomDetail() {
                         </span>
                       )}
                     </div>
-                    {(viewingAssignment.requires_lab || viewingAssignment.requires_assets) && (
+                    {(viewingAssignment.requires_lab ||
+                      viewingAssignment.requires_assets) && (
                       <p className="classroom-detail__resources-label">
                         Requirement:{" "}
-                        {viewingAssignment.requires_lab && viewingAssignment.requires_assets
+                        {viewingAssignment.requires_lab &&
+                        viewingAssignment.requires_assets
                           ? "Lab + asset upload"
                           : viewingAssignment.requires_lab
                             ? "Lab work"
@@ -4058,8 +4177,8 @@ export function ClassroomDetail() {
                     )}
                     {!viewingAssignment.allow_edit_after_submit && (
                       <p className="classroom-detail__resources-label">
-                        Submitted work is locked. You can continue editing only while it is
-                        in draft.
+                        Submitted work is locked. You can continue editing only
+                        while it is in draft.
                       </p>
                     )}
                     {latestFeedbackSubmission && (
@@ -4078,8 +4197,10 @@ export function ClassroomDetail() {
                     {submissionLocked && latestSubmittedSubmission && (
                       <p className="classroom-detail__resources-label">
                         This submission was finalized on{" "}
-                        {new Date(latestSubmittedSubmission.submitted_at).toLocaleString()}.
-                        Editing is disabled for this assignment.
+                        {new Date(
+                          latestSubmittedSubmission.submitted_at,
+                        ).toLocaleString()}
+                        . Editing is disabled for this assignment.
                       </p>
                     )}
 
@@ -4129,7 +4250,11 @@ export function ClassroomDetail() {
                         type="button"
                         className="classroom-list__create-btn classroom-list__create-btn--ghost classroom-detail__av-attach-btn"
                         onClick={() => submissionFileRef.current?.click()}
-                        disabled={uploadingSubmissionFile || submittingWork || submissionLocked}
+                        disabled={
+                          uploadingSubmissionFile ||
+                          submittingWork ||
+                          submissionLocked
+                        }
                       >
                         <Upload size={14} aria-hidden />
                         {uploadingSubmissionFile
@@ -4141,7 +4266,9 @@ export function ClassroomDetail() {
                           type="button"
                           className="classroom-list__create-btn classroom-list__create-btn--ghost"
                           onClick={() => void handleSubmitWork("draft")}
-                          disabled={submittingWork || submitSuccess || submissionLocked}
+                          disabled={
+                            submittingWork || submitSuccess || submissionLocked
+                          }
                         >
                           {submittingWork ? "Saving…" : "Save draft"}
                         </button>
@@ -4149,7 +4276,9 @@ export function ClassroomDetail() {
                           type="button"
                           className="classroom-list__create-btn"
                           onClick={() => void handleSubmitWork("submitted")}
-                          disabled={submittingWork || submitSuccess || submissionLocked}
+                          disabled={
+                            submittingWork || submitSuccess || submissionLocked
+                          }
                         >
                           {submittingWork ? "Submitting…" : "Submit"}
                         </button>
@@ -4193,7 +4322,9 @@ export function ClassroomDetail() {
               </div>
             )}
 
-            {enrollError && <p className="classroom-list__empty">{enrollError}</p>}
+            {enrollError && (
+              <p className="classroom-list__empty">{enrollError}</p>
+            )}
 
             <div className="classroom-list__create-actions">
               <button
@@ -4209,7 +4340,9 @@ export function ClassroomDetail() {
                 className="classroom-list__create-btn"
                 onClick={handleConfirmEnrollStudent}
                 disabled={
-                  enrollingStudent || loadingStudentsForEnroll || !selectedStudentId
+                  enrollingStudent ||
+                  loadingStudentsForEnroll ||
+                  !selectedStudentId
                 }
               >
                 {enrollingStudent ? "Adding..." : "Add student"}

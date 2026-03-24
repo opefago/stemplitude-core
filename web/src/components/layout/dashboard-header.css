@@ -172,6 +172,12 @@
   justify-content: center;
 }
 
+.dash-header__icon-img {
+  width: 26px;
+  height: 26px;
+  object-fit: contain;
+}
+
 /* Platform tools (super admin shield) */
 .dash-header__platform {
   position: relative;
@@ -397,6 +403,13 @@
   cursor: pointer;
   transition: background 0.12s ease;
   text-align: left;
+}
+
+.dash-header__menu-icon {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+  flex-shrink: 0;
 }
 
 .dash-header__dropdown-item:hover {

@@ -216,9 +216,13 @@
 
 .sidebar__nav-icon {
   flex-shrink: 0;
-  width: var(--ui-icon-size, 1.25rem);
-  height: var(--ui-icon-size, 1.25rem);
+  width: 1.875rem;
+  height: 1.875rem;
   color: inherit;
+}
+
+.sidebar__nav-icon--img {
+  object-fit: contain;
 }
 
 .sidebar.collapsed .sidebar__nav-link span:not(.sidebar__nav-icon) {

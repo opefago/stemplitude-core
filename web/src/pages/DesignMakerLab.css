@@ -39,8 +39,8 @@
   overflow: hidden;
 }
 
-/* --- Custom Tippy Tooltip Theme --- */
-.tippy-box {
+/* --- Custom Tippy Tooltip Theme (scoped to Design Maker only) --- */
+.dml-container .tippy-box {
   background: var(--dml-surface-2, #262640) !important;
   border: 1px solid var(--dml-border, #3a3a55) !important;
   border-radius: 10px !important;
@@ -48,11 +48,11 @@
   font-family: 'Nunito', 'Quicksand', 'Inter', sans-serif !important;
 }
 
-.tippy-content {
+.dml-container .tippy-content {
   padding: 6px 10px !important;
 }
 
-.tippy-arrow {
+.dml-container .tippy-arrow {
   color: var(--dml-surface-2, #262640) !important;
 }
 

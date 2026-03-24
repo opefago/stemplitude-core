@@ -82,3 +82,18 @@ async def publish_sessions_changed(
             event_type="sessions.changed",
             payload=pl,
         )
+
+
+async def publish_reward_granted(
+    tenant_id: UUID,
+    principal_id: UUID,
+    *,
+    payload: dict | None = None,
+) -> None:
+    """Push a reward event that can drive global student animations."""
+    await publish_user_channel_event(
+        tenant_id,
+        principal_id,
+        event_type="rewards.granted",
+        payload=payload or {},
+    )

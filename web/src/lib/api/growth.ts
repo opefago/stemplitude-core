@@ -89,7 +89,7 @@ export async function listCommissions(): Promise<CommissionRecord[]> {
 
 export async function updateCommissionStatus(
   id: string,
-  status: "approved" | "paid" | "reversed",
+  status: "accrued" | "pending" | "approved" | "available" | "paid" | "reversed",
 ): Promise<CommissionRecord> {
   return apiFetch<CommissionRecord>(`/growth/commissions/${id}/status`, {
     method: "PATCH",

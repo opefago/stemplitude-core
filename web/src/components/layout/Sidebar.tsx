@@ -2,22 +2,6 @@ import { useState, useEffect } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import {
   PanelLeftClose,
-  Home,
-  FlaskConical,
-  GraduationCap,
-  Trophy,
-  MessageSquare,
-  Users,
-  Bell,
-  BookOpen,
-  CreditCard,
-  FileText,
-  Shield,
-  Plug,
-  FolderOpen,
-  LayoutDashboard,
-  Layers,
-  Mail,
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "../../providers/AuthProvider";
@@ -30,54 +14,55 @@ import "./sidebar.css";
 type NavItem = {
   path: string;
   label: string;
-  icon: LucideIcon;
+  icon?: LucideIcon;
+  iconSrc?: string;
   section?: string;
 };
 
 const STUDENT_NAV: NavItem[] = [
-  { path: "/app", label: "Home", icon: Home },
-  { path: "/app/assignments", label: "Assignments", icon: FileText },
-  { path: "/app/labs", label: "Labs", icon: FlaskConical },
-  { path: "/app/achievements", label: "Achievements", icon: Trophy },
-  { path: "/app/messages", label: "Messages", icon: MessageSquare },
+  { path: "/app", label: "Home", iconSrc: "/assets/cartoon-icons/house.png" },
+  { path: "/app/assignments", label: "Assignments", iconSrc: "/assets/cartoon-icons/Papyrus.png" },
+  { path: "/app/labs", label: "Labs", iconSrc: "/assets/cartoon-icons/telescope.png" },
+  { path: "/app/achievements", label: "Achievements", iconSrc: "/assets/cartoon-icons/trophy.png" },
+  { path: "/app/messages", label: "Messages", iconSrc: "/assets/cartoon-icons/Information.png" },
 ];
 
 const PARENT_NAV: NavItem[] = [
-  { path: "/app", label: "Home", icon: Home },
-  { path: "/app/children", label: "Children", icon: Users },
-  { path: "/app/messages", label: "Messages", icon: MessageSquare },
-  { path: "/app/notifications", label: "Notifications", icon: Bell },
+  { path: "/app", label: "Home", iconSrc: "/assets/cartoon-icons/house.png" },
+  { path: "/app/children", label: "Children", iconSrc: "/assets/cartoon-icons/Players.png" },
+  { path: "/app/messages", label: "Messages", iconSrc: "/assets/cartoon-icons/Information.png" },
+  { path: "/app/notifications", label: "Notifications", iconSrc: "/assets/cartoon-icons/Bell.png" },
 ];
 
 const INSTRUCTOR_NAV: NavItem[] = [
-  { path: "/app", label: "Home", icon: Home },
-  { path: "/app/classrooms", label: "Classrooms", icon: GraduationCap },
-  { path: "/app/students", label: "Students", icon: Users },
-  { path: "/app/curriculum", label: "Curriculum", icon: BookOpen },
-  { path: "/app/messages", label: "Messages", icon: MessageSquare },
+  { path: "/app", label: "Home", iconSrc: "/assets/cartoon-icons/house.png" },
+  { path: "/app/classrooms", label: "Classrooms", iconSrc: "/assets/cartoon-icons/bag.png" },
+  { path: "/app/students", label: "Students", iconSrc: "/assets/cartoon-icons/Players.png" },
+  { path: "/app/curriculum", label: "Curriculum", iconSrc: "/assets/cartoon-icons/Books.png" },
+  { path: "/app/messages", label: "Messages", iconSrc: "/assets/cartoon-icons/Information.png" },
 ];
 
 const ADMIN_NAV: NavItem[] = [
-  { path: "/app", label: "Dashboard", icon: LayoutDashboard },
-  { path: "/app/labs", label: "Labs", icon: FlaskConical, section: "Learning" },
-  { path: "/app/members", label: "Users", icon: Users, section: "People" },
-  { path: "/app/invitations", label: "Invitations", icon: Mail },
-  { path: "/app/roles", label: "Roles", icon: Shield },
-  { path: "/app/classrooms", label: "Classrooms", icon: GraduationCap },
-  { path: "/app/curriculum", label: "Curriculum", icon: BookOpen, section: "Content" },
-  { path: "/app/programs", label: "Programs", icon: Layers },
-  { path: "/app/assets", label: "Assets", icon: FolderOpen },
-  { path: "/app/integrations", label: "Integrations", icon: Plug, section: "Organization" },
-  { path: "/app/billing", label: "Billing", icon: CreditCard },
+  { path: "/app", label: "Dashboard", iconSrc: "/assets/cartoon-icons/house.png" },
+  { path: "/app/labs", label: "Labs", iconSrc: "/assets/cartoon-icons/telescope.png", section: "Learning" },
+  { path: "/app/members", label: "Users", iconSrc: "/assets/cartoon-icons/Players.png", section: "People" },
+  { path: "/app/invitations", label: "Invitations", iconSrc: "/assets/cartoon-icons/Papyrus.png" },
+  { path: "/app/roles", label: "Roles", iconSrc: "/assets/cartoon-icons/Lock.png" },
+  { path: "/app/classrooms", label: "Classrooms", iconSrc: "/assets/cartoon-icons/bag.png" },
+  { path: "/app/curriculum", label: "Curriculum", iconSrc: "/assets/cartoon-icons/Books.png", section: "Content" },
+  { path: "/app/programs", label: "Programs", iconSrc: "/assets/cartoon-icons/Globe.png" },
+  { path: "/app/assets", label: "Assets", iconSrc: "/assets/cartoon-icons/Chest.png" },
+  { path: "/app/integrations", label: "Integrations", iconSrc: "/assets/cartoon-icons/Thunder.png", section: "Organization" },
+  { path: "/app/billing", label: "Billing", iconSrc: "/assets/cartoon-icons/coin.png" },
 ];
 
 /** Platform Administration nav - super admin in platform view.
     Admin Tasks, Health Check, Job Worker, Entity Browser are in TenantSwitcher dropdown only. */
 const PLATFORM_NAV: NavItem[] = [
-  { path: "/app", label: "Platform Admin", icon: Shield },
-  { path: "/app/platform/dashboard", label: "Analytics", icon: LayoutDashboard },
-  { path: "/app/platform/users", label: "Users", icon: Users },
-  { path: "/app/platform/roles", label: "Roles", icon: Shield },
+  { path: "/app", label: "Platform Admin", iconSrc: "/assets/cartoon-icons/Lock.png" },
+  { path: "/app/platform/dashboard", label: "Analytics", iconSrc: "/assets/cartoon-icons/Trail.png" },
+  { path: "/app/platform/users", label: "Users", iconSrc: "/assets/cartoon-icons/Players.png" },
+  { path: "/app/platform/roles", label: "Roles", iconSrc: "/assets/cartoon-icons/Lock.png" },
 ];
 
 function getNavItems(
@@ -198,7 +183,6 @@ export function Sidebar() {
       <nav className="sidebar__nav">
         <ul className="sidebar__nav-list">
           {navItems.map((item, idx) => {
-            const Icon = item.icon;
             const isActive =
               item.path === "/app"
                 ? location.pathname === "/app"
@@ -217,7 +201,16 @@ export function Sidebar() {
                   end={item.path === "/app"}
                   aria-current={isActive ? "page" : undefined}
                 >
-                  <Icon className="sidebar__nav-icon" aria-hidden />
+                  {item.iconSrc ? (
+                    <img
+                      src={item.iconSrc}
+                      alt=""
+                      className="sidebar__nav-icon sidebar__nav-icon--img"
+                      aria-hidden
+                    />
+                  ) : item.icon ? (
+                    <item.icon className="sidebar__nav-icon" aria-hidden />
+                  ) : null}
                   <span>{item.label}</span>
                 </NavLink>
               </li>

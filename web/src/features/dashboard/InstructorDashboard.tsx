@@ -118,7 +118,7 @@ export function InstructorDashboard() {
         <div className="dashboard-bento__card dashboard-bento__card--span-2 dashboard-bento__card--row-2 dashboard-bento__card--blue">
           <div className="dashboard-bento__card-header">
             <div className="dashboard-bento__card-icon">
-              <Calendar size={24} aria-hidden />
+              <img src="/assets/cartoon-icons/Callendar.png" alt="" className="dashboard-bento__card-icon-img" aria-hidden />
             </div>
           </div>
           <h2 className="dashboard-bento__card-title">Upcoming Classes</h2>
@@ -167,7 +167,7 @@ export function InstructorDashboard() {
         >
           <div className="dashboard-bento__card-header">
             <div className="dashboard-bento__card-icon">
-              <FileEdit size={24} aria-hidden />
+              <img src="/assets/cartoon-icons/Pencil.png" alt="" className="dashboard-bento__card-icon-img" aria-hidden />
             </div>
           </div>
           <h2 className="dashboard-bento__card-title">Course Builder</h2>
@@ -183,7 +183,7 @@ export function InstructorDashboard() {
         <div className="dashboard-bento__card dashboard-bento__card--span-2 dashboard-bento__card--purple">
           <div className="dashboard-bento__card-header">
             <div className="dashboard-bento__card-icon">
-              <Users size={24} aria-hidden />
+              <img src="/assets/cartoon-icons/Players.png" alt="" className="dashboard-bento__card-icon-img" aria-hidden />
             </div>
           </div>
           <h2 className="dashboard-bento__card-title">Student Activity</h2>
@@ -211,7 +211,7 @@ export function InstructorDashboard() {
         >
           <div className="dashboard-bento__card-header">
             <div className="dashboard-bento__card-icon">
-              <MessageSquare size={24} aria-hidden />
+              <img src="/assets/cartoon-icons/Information.png" alt="" className="dashboard-bento__card-icon-img" aria-hidden />
             </div>
           </div>
           <h2 className="dashboard-bento__card-title">Messages</h2>

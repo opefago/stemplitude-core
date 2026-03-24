@@ -7,6 +7,8 @@ from uuid import UUID
 
 from fastapi import APIRouter, WebSocket, status
 
+from app.auth.repository import AuthRepository
+from app.database import async_session_factory
 from app.realtime.auth import decode_ws_identity, get_ws_tenant, get_ws_token
 from app.realtime.gateway import CommandDispatchResult, GatewaySettings, run_redis_websocket_gateway
 from app.realtime.user_events import user_realtime_channel
@@ -47,8 +49,18 @@ async def tenant_user_realtime_ws(websocket: WebSocket) -> None:
         return
 
     if not identity.tenant_id and not identity.is_super_admin:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Missing tenant")
-        return
+        is_member = False
+        async with async_session_factory() as db:
+            repo = AuthRepository(db)
+            if identity.sub_type == "student":
+                membership = await repo.get_student_membership(identity.id, tenant_id)
+                is_member = membership is not None
+            elif identity.sub_type == "user":
+                membership = await repo.get_active_membership(identity.id, tenant_id)
+                is_member = membership is not None
+        if not is_member:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Missing tenant")
+            return
 
     channel = user_realtime_channel(tenant_id, identity.id)
 

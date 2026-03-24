@@ -48,6 +48,7 @@ export class UserRealtimeClient {
   private lastSequence: number;
   private readonly heartbeatMs: number;
   private readonly reconnectMaxDelayMs: number;
+  private shouldReconnect = true;
 
   constructor(options: UserRealtimeClientOptions) {
     this.opts = options;
@@ -63,6 +64,7 @@ export class UserRealtimeClient {
 
   disconnect() {
     this.stopped = true;
+    this.shouldReconnect = false;
     this.stopHeartbeat();
     if (this.reconnectTimer != null) {
       window.clearTimeout(this.reconnectTimer);
@@ -110,15 +112,21 @@ export class UserRealtimeClient {
     });
     const url = buildWsUrl(`/api/v1/realtime/ws?${params.toString()}`);
     this.ws = new WebSocket(url);
+    this.shouldReconnect = true;
     this.ws.onopen = () => {
       this.reconnectAttempt = 0;
       this.opts.onConnected?.();
       this.startHeartbeat();
     };
-    this.ws.onclose = () => {
+    this.ws.onclose = (evt) => {
       this.stopHeartbeat();
       this.opts.onDisconnected?.();
-      if (!this.stopped) this.scheduleReconnect();
+      // 1008 = policy violation (auth/tenant mismatch). Don't spam retries.
+      if (evt.code === 1008) {
+        this.shouldReconnect = false;
+        this.opts.onError?.("Realtime authorization failed.");
+      }
+      if (!this.stopped && this.shouldReconnect) this.scheduleReconnect();
     };
     this.ws.onerror = () => {
       if (!this.stopped) {

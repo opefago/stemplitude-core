@@ -135,14 +135,14 @@ export function AdminDashboard() {
           <p className="dashboard-bento__subtitle">{tenantName}</p>
         </div>
         <Link to="/app/members" className="admin-dashboard__header-btn">
-          <Users size={16} aria-hidden />
+          <img src="/assets/cartoon-icons/Players.png" alt="" className="dashboard-bento__card-icon-img" aria-hidden />
           Enroll Student
         </Link>
       </header>
       {unreadAnnouncements.length > 0 ? (
         <section className="admin-dashboard__announcement-banner" aria-live="polite">
           <div className="admin-dashboard__announcement-banner-icon" aria-hidden>
-            <AlertTriangle size={18} />
+            <img src="/assets/cartoon-icons/Information.png" alt="" className="dashboard-bento__card-icon-img" aria-hidden />
           </div>
           <div>
             <strong>
@@ -163,7 +163,7 @@ export function AdminDashboard() {
           <div className="dashboard-bento__card-header">
             <h2 className="dashboard-bento__card-title">Active Classes</h2>
             <div className="dashboard-bento__card-icon">
-              <School size={24} aria-hidden />
+              <img src="/assets/cartoon-icons/bag.png" alt="" className="dashboard-bento__card-icon-img" aria-hidden />
             </div>
           </div>
           <Link
@@ -200,7 +200,7 @@ export function AdminDashboard() {
           <div className="dashboard-bento__card-header">
             <h2 className="dashboard-bento__card-title">Enrollment</h2>
             <div className="dashboard-bento__card-icon">
-              <GraduationCap size={24} aria-hidden />
+              <img src="/assets/cartoon-icons/Players.png" alt="" className="dashboard-bento__card-icon-img" aria-hidden />
             </div>
           </div>
           <div className="admin-dashboard__stat-block">
@@ -225,7 +225,7 @@ export function AdminDashboard() {
           <div className="dashboard-bento__card-header">
             <h2 className="dashboard-bento__card-title">Revenue Overview</h2>
             <div className="dashboard-bento__card-icon">
-              <DollarSign size={24} aria-hidden />
+              <img src="/assets/cartoon-icons/coin.png" alt="" className="dashboard-bento__card-icon-img" aria-hidden />
             </div>
           </div>
           <div className="admin-dashboard__stat-block">
@@ -233,7 +233,7 @@ export function AdminDashboard() {
             <span className="admin-dashboard__stat-label">Unread Announcements</span>
           </div>
           <div className="admin-dashboard__trend">
-            <TrendingUp size={16} aria-hidden />
+            <img src="/assets/cartoon-icons/Trail.png" alt="" className="dashboard-bento__card-icon-img" aria-hidden />
             <span>Live from notifications feed</span>
           </div>
           <Link
@@ -259,7 +259,7 @@ export function AdminDashboard() {
               </Link>
             </div>
             <div className="dashboard-bento__card-icon">
-              <Activity size={24} aria-hidden />
+              <img src="/assets/cartoon-icons/Trail.png" alt="" className="dashboard-bento__card-icon-img" aria-hidden />
             </div>
           </div>
           <ul className="dashboard-bento__activity-list" role="list">
@@ -282,7 +282,7 @@ export function AdminDashboard() {
           <div className="dashboard-bento__card-header">
             <h2 className="dashboard-bento__card-title">Announcements</h2>
             <div className="dashboard-bento__card-icon">
-              <Megaphone size={24} aria-hidden />
+              <img src="/assets/cartoon-icons/Bell.png" alt="" className="dashboard-bento__card-icon-img" aria-hidden />
             </div>
           </div>
           <div className="admin-dashboard__announcements">

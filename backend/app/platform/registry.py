@@ -26,7 +26,14 @@ _EMAIL_RE = re.compile(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
 _CODE_RE = re.compile(r"^[A-Za-z0-9]{4,20}$")
 
-VALID_GLOBAL_ROLES = ("platform_owner", "platform_admin", "devops", "support")
+VALID_GLOBAL_ROLES = (
+    "platform_owner",
+    "platform_admin",
+    "devops",
+    "support",
+    "platform_finance",
+    "growth_ops",
+)
 DEFAULT_TENANT_ROLES = [
     ("admin", "Admin"),
     ("instructor", "Instructor"),

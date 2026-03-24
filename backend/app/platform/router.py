@@ -9,9 +9,10 @@ from __future__ import annotations
 import json
 import logging
 from typing import Literal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import blob_storage
@@ -37,6 +38,11 @@ from .schemas import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+class TenantBillingModeUpdate(BaseModel):
+    billing_mode: Literal["live", "test", "internal"]
+    billing_email_enabled: bool | None = None
 
 
 def _serialize_blob_object(obj: dict) -> dict:
@@ -692,6 +698,35 @@ async def run_health_checks(db: AsyncSession = Depends(get_db)):
 from app.auth.service import AuthService, AuthError
 from app.roles.models import Role
 from app.tenants.models import Membership, Tenant
+
+
+@router.patch(
+    "/tenants/{tenant_id}/billing-mode",
+    dependencies=[require_global_permission("platform.tenants", "manage")],
+)
+async def update_tenant_billing_mode(
+    tenant_id: UUID,
+    body: TenantBillingModeUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    """Update a tenant's billing execution mode (live/test/internal)."""
+    tenant_row = await db.execute(
+        sa_sel(Tenant).where(Tenant.id == tenant_id)
+    )
+    tenant = tenant_row.scalar_one_or_none()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    tenant.billing_mode = body.billing_mode
+    if body.billing_email_enabled is not None:
+        tenant.billing_email_enabled = body.billing_email_enabled
+    await db.flush()
+    return {
+        "ok": True,
+        "tenant_id": str(tenant.id),
+        "billing_mode": tenant.billing_mode,
+        "billing_email_enabled": tenant.billing_email_enabled,
+    }
 
 
 @router.get(

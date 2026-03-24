@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Bell } from "lucide-react";
 import { getAccessToken } from "../../lib/tokens";
 import { useAuth } from "../../providers/AuthProvider";
 import { useTenant } from "../../providers/TenantProvider";
@@ -15,6 +14,7 @@ import {
   getNotificationActionLabel,
   getNotificationActionPath,
 } from "./notificationActions";
+import { AppTooltip } from "../../components/ui";
 import "./notifications.css";
 
 const DROPDOWN_LIMIT = 8;
@@ -124,21 +124,33 @@ export function NotificationBell() {
 
   return (
     <div className="notif-bell" ref={wrapRef}>
-      <button
-        type="button"
-        className="dash-header__icon-btn notif-bell__trigger"
-        aria-label="Notifications"
-        aria-expanded={open}
-        aria-haspopup="menu"
-        onClick={() => setOpen((o) => !o)}
+      <AppTooltip
+        title="Notifications"
+        description="See announcements, grades, and classroom updates."
+        placement="bottom"
+        disabled={open}
       >
-        <Bell size={20} aria-hidden />
-        {unread > 0 ? (
-          <span className="notif-bell__badge" aria-hidden>
-            {unread > 99 ? "99+" : unread}
-          </span>
-        ) : null}
-      </button>
+        <button
+          type="button"
+          className="dash-header__icon-btn notif-bell__trigger"
+          aria-label="Notifications"
+          aria-expanded={open}
+          aria-haspopup="menu"
+          onClick={() => setOpen((o) => !o)}
+        >
+          <img
+            src="/assets/cartoon-icons/Bell.png"
+            alt=""
+            className="notif-bell__icon"
+            aria-hidden
+          />
+          {unread > 0 ? (
+            <span className="notif-bell__badge" aria-hidden>
+              {unread > 99 ? "99+" : unread}
+            </span>
+          ) : null}
+        </button>
+      </AppTooltip>
 
       {open && (
         <div className="notif-bell__panel" role="menu">

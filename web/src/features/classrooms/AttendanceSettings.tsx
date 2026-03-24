@@ -5,7 +5,7 @@
  * When `allowInherit` is true (program & classroom level) a "Use default" option
  * renders a toggle that clears the local override so the parent level applies.
  */
-import { KidDropdown } from "../../components/ui";
+import { KidDropdown, KidSwitch } from "../../components/ui";
 
 export interface AttendanceConfig {
   enabled: boolean;
@@ -38,31 +38,6 @@ interface Props {
   saving?: boolean;
 }
 
-function Switch({
-  id,
-  checked,
-  onChange,
-}: {
-  id: string;
-  checked: boolean;
-  onChange: (v: boolean) => void;
-}) {
-  return (
-    <button
-      id={id}
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      className={`tenant-settings__switch${checked ? " tenant-settings__switch--on" : ""}`}
-      onClick={() => onChange(!checked)}
-    >
-      <span className="tenant-settings__switch-track">
-        <span className="tenant-settings__switch-thumb" />
-      </span>
-    </button>
-  );
-}
-
 export function AttendanceSettings({
   value,
   onChange,
@@ -84,12 +59,13 @@ export function AttendanceSettings({
           <label htmlFor="attend-inherit" className="tenant-settings__toggle-label">
             {inheritLabel}
           </label>
-          <Switch
+          <KidSwitch
             id="attend-inherit"
             checked={true}
             onChange={(checked) => {
               if (!checked) onChange(DEFAULT_ATTENDANCE_CONFIG);
             }}
+            ariaLabel="Use parent attendance default"
           />
         </div>
         <p className="attendance-settings__hint">
@@ -106,12 +82,13 @@ export function AttendanceSettings({
           <label htmlFor="attend-inherit" className="tenant-settings__toggle-label">
             {inheritLabel}
           </label>
-          <Switch
+          <KidSwitch
             id="attend-inherit"
             checked={false}
             onChange={(checked) => {
               if (checked) onChange(null);
             }}
+            ariaLabel="Use parent attendance default"
           />
         </div>
       )}
@@ -120,10 +97,11 @@ export function AttendanceSettings({
         <label htmlFor="attend-enabled" className="tenant-settings__toggle-label">
           Enable automatic attendance tracking
         </label>
-        <Switch
+        <KidSwitch
           id="attend-enabled"
           checked={cfg.enabled}
           onChange={(v) => set({ enabled: v })}
+          ariaLabel="Enable automatic attendance tracking"
         />
       </div>
 

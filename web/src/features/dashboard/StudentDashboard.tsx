@@ -188,7 +188,7 @@ export function StudentDashboard() {
           </div>
             <div className="student-dashboard__header-stats">
             <div className="dashboard-bento__streak" aria-label={`${streak} day streak`}>
-              <Flame size={20} aria-hidden />
+              <img src="/assets/cartoon-icons/Thunder.png" alt="" className="dashboard-bento__card-icon-img" aria-hidden />
               <span>{streak}</span>
             </div>
             <div className="student-dashboard__level">Lv.{level} {levelName}</div>
@@ -233,7 +233,7 @@ export function StudentDashboard() {
         <div className="dashboard-bento__card dashboard-bento__card--purple student-dashboard__card--rewards">
           <div className="dashboard-bento__card-header">
             <div className="dashboard-bento__card-icon">
-              <Trophy size={24} aria-hidden />
+              <img src="/assets/cartoon-icons/trophy.png" alt="" className="dashboard-bento__card-icon-img" aria-hidden />
             </div>
           </div>
           <h2 className="dashboard-bento__card-title">Rewards & Badges</h2>
@@ -263,7 +263,7 @@ export function StudentDashboard() {
         <div className="dashboard-bento__card dashboard-bento__card--green student-dashboard__card--active">
           <div className="dashboard-bento__card-header">
             <div className="dashboard-bento__card-icon">
-              <Video size={24} aria-hidden />
+              <img src="/assets/cartoon-icons/Controller.png" alt="" className="dashboard-bento__card-icon-img" aria-hidden />
             </div>
           </div>
           <h2 className="dashboard-bento__card-title">Active Session</h2>
@@ -307,7 +307,7 @@ export function StudentDashboard() {
         <div className="dashboard-bento__card dashboard-bento__card--blue student-dashboard__card--upcoming">
           <div className="dashboard-bento__card-header">
             <div className="dashboard-bento__card-icon">
-              <Calendar size={24} aria-hidden />
+              <img src="/assets/cartoon-icons/Callendar.png" alt="" className="dashboard-bento__card-icon-img" aria-hidden />
             </div>
           </div>
           <h2 className="dashboard-bento__card-title">Upcoming Classes</h2>
@@ -372,7 +372,7 @@ export function StudentDashboard() {
         <div className="dashboard-bento__card dashboard-bento__card--green student-dashboard__card--leaderboard">
           <div className="dashboard-bento__card-header">
             <div className="dashboard-bento__card-icon">
-              <Users size={24} aria-hidden />
+              <img src="/assets/cartoon-icons/Players.png" alt="" className="dashboard-bento__card-icon-img" aria-hidden />
             </div>
           </div>
           <h2 className="dashboard-bento__card-title">Leaderboard</h2>
@@ -409,7 +409,7 @@ export function StudentDashboard() {
         >
           <div className="dashboard-bento__card-header">
             <div className="dashboard-bento__card-icon">
-              <BookOpen size={24} aria-hidden />
+              <img src="/assets/cartoon-icons/Books.png" alt="" className="dashboard-bento__card-icon-img" aria-hidden />
             </div>
             <Sparkles size={20} className="student-dashboard__sparkle" aria-hidden />
           </div>
@@ -428,7 +428,7 @@ export function StudentDashboard() {
         <div className="dashboard-bento__card dashboard-bento__card--orange student-dashboard__card--challenge">
           <div className="dashboard-bento__card-header">
             <div className="dashboard-bento__card-icon">
-              <Target size={24} aria-hidden />
+              <img src="/assets/cartoon-icons/Flag.png" alt="" className="dashboard-bento__card-icon-img" aria-hidden />
             </div>
           </div>
           <h2 className="dashboard-bento__card-title">Today&apos;s Challenge</h2>
@@ -442,7 +442,7 @@ export function StudentDashboard() {
         <div className="dashboard-bento__card dashboard-bento__card--blue student-dashboard__card--projects">
           <div className="dashboard-bento__card-header">
             <div className="dashboard-bento__card-icon">
-              <Sparkles size={24} aria-hidden />
+              <img src="/assets/cartoon-icons/Chest2.png" alt="" className="dashboard-bento__card-icon-img" aria-hidden />
             </div>
           </div>
           <h2 className="dashboard-bento__card-title">My Projects</h2>

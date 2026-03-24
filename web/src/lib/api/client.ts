@@ -29,6 +29,18 @@ function emitApiError(event: ApiErrorEvent) {
   _errorListeners.forEach((fn) => fn(event));
 }
 
+function resolveTenantId(
+  explicitTenantId?: string,
+  token?: string | null,
+): string | null {
+  if (explicitTenantId) return explicitTenantId;
+  const fromStorage = localStorage.getItem(TENANT_KEY);
+  if (fromStorage) return fromStorage;
+  if (!token) return null;
+  const payload = decodeToken(token);
+  return payload?.tenant_id ?? null;
+}
+
 export async function refreshAccessToken(): Promise<boolean> {
   const refresh = getRefreshToken();
   if (!refresh) return false;
@@ -78,7 +90,7 @@ export async function apiFetch<T>(
   if (!skipAuth) {
     const token = getAccessToken();
     if (token) headers["Authorization"] = `Bearer ${token}`;
-    const tenantId = optTenantId ?? localStorage.getItem(TENANT_KEY);
+    const tenantId = resolveTenantId(optTenantId, token);
     if (tenantId) headers["X-Tenant-ID"] = tenantId;
   }
 
@@ -102,6 +114,10 @@ export async function apiFetch<T>(
     if (refreshed) {
       const newToken = getAccessToken();
       if (newToken) headers["Authorization"] = `Bearer ${newToken}`;
+      const tenantId = resolveTenantId(optTenantId, newToken);
+      if (tenantId) {
+        headers["X-Tenant-ID"] = tenantId;
+      }
       res = await fetch(url, { ...init, headers });
     } else {
       clearTokens();
