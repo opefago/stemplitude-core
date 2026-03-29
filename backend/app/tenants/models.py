@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -20,6 +20,16 @@ class Tenant(Base):
     settings: Mapped[dict | None] = mapped_column(JSONB, default=dict)
     billing_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="live")
     billing_email_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    stripe_connect_account_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    member_billing_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    require_member_billing_for_access: Mapped[bool] = mapped_column(Boolean, default=False)
+    stripe_connect_charges_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    stripe_connect_payouts_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    stripe_connect_details_submitted: Mapped[bool] = mapped_column(Boolean, default=False)
+    member_billing_application_fee_bps: Mapped[int] = mapped_column(Integer, default=0)
+    member_billing_application_fee_use_platform_default: Mapped[bool] = mapped_column(
+        Boolean, default=False
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)

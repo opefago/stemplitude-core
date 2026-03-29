@@ -28,6 +28,11 @@ class LessonProgress(Base):
     score: Mapped[int | None] = mapped_column(Integer)
     time_spent_seconds: Mapped[int] = mapped_column(Integer, default=0)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
 
 class LabProgress(Base):
@@ -51,6 +56,11 @@ class LabProgress(Base):
     time_spent_seconds: Mapped[int] = mapped_column(Integer, default=0)
     state_snapshot: Mapped[dict | None] = mapped_column(JSONB)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
 
 class Attendance(Base):

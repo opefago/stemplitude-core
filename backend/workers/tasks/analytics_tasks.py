@@ -1,5 +1,6 @@
 import logging
 
+from workers.async_db import run_async_db
 from workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -12,14 +13,14 @@ def aggregate_progress_stats(tenant_id: str):
     Collects lesson completion rates, lab scores, and time spent metrics.
     """
     logger.info("aggregate_progress_stats started tenant_id=%s", tenant_id)
-    import asyncio
     from uuid import UUID
     from sqlalchemy import func, select
-    from app.database import async_session_factory
     from app.progress.models import LessonProgress, LabProgress
 
     async def _aggregate():
-        async with async_session_factory() as db:
+        import app.database as db_mod
+
+        async with db_mod.async_session_factory() as db:
             tid = UUID(tenant_id)
 
             lesson_stats = await db.execute(
@@ -47,7 +48,7 @@ def aggregate_progress_stats(tenant_id: str):
             }
 
     try:
-        result = asyncio.run(_aggregate())
+        result = run_async_db(_aggregate)
         logger.info("aggregate_progress_stats completed tenant_id=%s", tenant_id)
         return result
     except Exception as exc:

@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.repository import BaseRepository
+from app.students.models import ParentStudent, StudentMembership
 from app.tenants.models import Membership, SupportAccessGrant, Tenant, TenantHierarchy, TenantLabSetting
 from app.users.models import User
 from app.roles.models import Role
@@ -48,6 +49,30 @@ class TenantRepository(BaseRepository[Tenant]):
             .order_by(Tenant.name)
         )
         return list(result.scalars().all())
+
+    async def list_parent_linked_tenants(self, user_id: UUID) -> list[Tenant]:
+        """Tenants where the user is a linked guardian of a student with active enrollment."""
+        result = await self.session.execute(
+            select(Tenant)
+            .distinct()
+            .join(StudentMembership, StudentMembership.tenant_id == Tenant.id)
+            .join(ParentStudent, ParentStudent.student_id == StudentMembership.student_id)
+            .where(
+                ParentStudent.user_id == user_id,
+                StudentMembership.is_active == True,  # noqa: E712
+                Tenant.is_active == True,  # noqa: E712
+            )
+        )
+        return list(result.scalars().all())
+
+    async def list_user_accessible_tenants(self, user_id: UUID) -> list[Tenant]:
+        """Membership tenants plus guardian-linked enrollments (deduped)."""
+        members = await self.list_user_tenants(user_id)
+        linked = await self.list_parent_linked_tenants(user_id)
+        by_id: dict[UUID, Tenant] = {t.id: t for t in members}
+        for t in linked:
+            by_id.setdefault(t.id, t)
+        return sorted(by_id.values(), key=lambda x: (x.name or "").lower())
 
     async def create(self, **kwargs) -> Tenant:
         """Create a tenant."""

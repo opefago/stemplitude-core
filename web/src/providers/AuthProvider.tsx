@@ -23,6 +23,7 @@ import {
   studentLogin as apiStudentLogin,
   onboard as apiOnboard,
   getMe as apiGetMe,
+  type MeResponse,
   type StudentLoginData,
   type OnboardData,
 } from "../lib/api/auth";
@@ -40,6 +41,7 @@ export type UserIdentity = {
   subType: "user" | "student";
   tenantId?: string;
   tenantSlug?: string;
+  tenantName?: string;
   resolvedUIMode?: string;
   uiModeSource?: string;
 };
@@ -65,6 +67,33 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+function normalizeWorkspaceRoleSlug(raw: string | undefined | null): string {
+  return (raw ?? "").trim().toLowerCase();
+}
+
+function workspaceRoleForContext(u: UserIdentity | null): string | null {
+  if (!u || u.subType === "student") return null;
+  const r = normalizeWorkspaceRoleSlug(u.role);
+  return r || null;
+}
+
+function mergeMeIntoIdentity(identity: UserIdentity, me: MeResponse): void {
+  if (me.email) identity.email = me.email;
+  if (me.first_name != null) identity.firstName = me.first_name;
+  if (me.last_name != null) identity.lastName = me.last_name;
+  if (me.is_super_admin != null) identity.isSuperAdmin = me.is_super_admin;
+  if (me.global_role) identity.globalRole = me.global_role;
+  if (me.global_permissions?.length) identity.globalPermissions = me.global_permissions;
+  if (me.tenant_id) identity.tenantId = me.tenant_id;
+  if (me.tenant_slug) identity.tenantSlug = me.tenant_slug;
+  if (me.tenant_name) identity.tenantName = me.tenant_name;
+  if (me.resolved_ui_mode) identity.resolvedUIMode = me.resolved_ui_mode;
+  if (me.ui_mode_source) identity.uiModeSource = me.ui_mode_source;
+  if (me.sub_type === "user" && me.role != null && String(me.role).trim() !== "") {
+    identity.role = normalizeWorkspaceRoleSlug(me.role);
+  }
+}
+
 function payloadToIdentity(payload: ReturnType<typeof decodeToken>): UserIdentity | null {
   if (!payload) return null;
   const subType = payload.sub_type === "student" ? "student" : "user";
@@ -73,13 +102,15 @@ function payloadToIdentity(payload: ReturnType<typeof decodeToken>): UserIdentit
     email: payload.email,
     firstName: payload.first_name ?? "",
     lastName: payload.last_name ?? "",
-    role: payload.role,
+    role:
+      subType === "student" ? "" : normalizeWorkspaceRoleSlug(payload.role),
     isSuperAdmin: payload.is_super_admin ?? false,
     globalRole: payload.global_role,
     globalPermissions: payload.global_permissions ?? [],
     subType,
     tenantId: payload.tenant_id ?? undefined,
     tenantSlug: payload.tenant_slug,
+    tenantName: payload.tenant_name,
   };
 }
 
@@ -107,17 +138,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
     apiGetMe()
       .then((me) => {
-        if (me.email) identity.email = me.email;
-        if (me.first_name != null) identity.firstName = me.first_name;
-        if (me.last_name != null) identity.lastName = me.last_name;
-        if (me.role && !identity.role) identity.role = me.role;
-        if (me.is_super_admin != null) identity.isSuperAdmin = me.is_super_admin;
-        if (me.global_role) identity.globalRole = me.global_role;
-        if (me.global_permissions?.length) identity.globalPermissions = me.global_permissions;
-        if (me.tenant_id && !identity.tenantId) identity.tenantId = me.tenant_id;
-        if (me.tenant_slug && !identity.tenantSlug) identity.tenantSlug = me.tenant_slug;
-        if (me.resolved_ui_mode) identity.resolvedUIMode = me.resolved_ui_mode;
-        if (me.ui_mode_source) identity.uiModeSource = me.ui_mode_source;
+        mergeMeIntoIdentity(identity, me);
         setUser(identity);
       })
       .catch(() => {
@@ -155,28 +176,19 @@ export function AuthProvider({ children }: AuthProviderProps) {
             email: res.user.email,
             firstName: res.user.first_name,
             lastName: res.user.last_name,
-            role: res.user.role,
+            role: normalizeWorkspaceRoleSlug(res.user.role),
             isSuperAdmin: res.user.is_super_admin ?? payload?.is_super_admin ?? false,
             globalRole: payload?.global_role,
             globalPermissions: payload?.global_permissions ?? [],
             subType: res.user.sub_type,
             tenantId: res.user.tenant_id,
             tenantSlug: res.user.tenant_slug,
+            tenantName: res.user.tenant_name,
           }
         : payloadToIdentity(payload);
       try {
         const me = await apiGetMe();
-        if (identity) {
-          if (me.first_name != null) identity.firstName = me.first_name;
-          if (me.last_name != null) identity.lastName = me.last_name;
-          if (me.email) identity.email = me.email;
-          if (me.role) identity.role = me.role;
-          if (me.is_super_admin != null) identity.isSuperAdmin = me.is_super_admin;
-          if (me.global_role) identity.globalRole = me.global_role;
-          if (me.global_permissions?.length) identity.globalPermissions = me.global_permissions;
-          if (me.tenant_id) identity.tenantId = me.tenant_id;
-          if (me.tenant_slug) identity.tenantSlug = me.tenant_slug;
-        }
+        if (identity) mergeMeIntoIdentity(identity, me);
       } catch { /* role from JWT is sufficient */ }
       setUser(identity);
     },
@@ -193,23 +205,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
           email: res.user.email,
           firstName: res.user.first_name,
           lastName: res.user.last_name,
-          role: res.user.role,
+          role: normalizeWorkspaceRoleSlug(res.user.role),
           isSuperAdmin: false,
           globalPermissions: [] as string[],
           subType: res.user.sub_type,
           tenantId: res.user.tenant_id,
           tenantSlug: res.user.tenant_slug,
+          tenantName: res.user.tenant_name,
         }
       : payloadToIdentity(payload);
     try {
       const me = await apiGetMe();
-      if (identity) {
-        if (me.first_name != null) identity.firstName = me.first_name;
-        if (me.last_name != null) identity.lastName = me.last_name;
-        if (me.email) identity.email = me.email;
-        identity.resolvedUIMode = me.resolved_ui_mode;
-        identity.uiModeSource = me.ui_mode_source;
-      }
+      if (identity) mergeMeIntoIdentity(identity, me);
     } catch { /* fallback without mode */ }
     setUser(identity);
   }, []);
@@ -224,20 +231,43 @@ export function AuthProvider({ children }: AuthProviderProps) {
           email: res.user.email,
           firstName: res.user.first_name,
           lastName: res.user.last_name,
-          role: res.user.role,
+          role: normalizeWorkspaceRoleSlug(res.user.role),
           isSuperAdmin: false,
           globalPermissions: [] as string[],
           subType: res.user.sub_type,
           tenantId: res.user.tenant_id,
           tenantSlug: res.user.tenant_slug,
+          tenantName: res.user.tenant_name,
         }
       : payloadToIdentity(payload);
+    try {
+      const me = await apiGetMe();
+      if (identity) mergeMeIntoIdentity(identity, me);
+    } catch {
+      /* profile optional right after onboard */
+    }
     setUser(identity);
   }, []);
 
   const logout = useCallback(() => {
     clearTokens();
     setUser(null);
+  }, []);
+
+  const refreshProfile = useCallback(async () => {
+    const token = getAccessToken()?.trim();
+    if (!token || isTokenExpired(token)) return;
+    try {
+      const me = await apiGetMe();
+      setUser((prev) => {
+        if (!prev) return prev;
+        const next = { ...prev };
+        mergeMeIntoIdentity(next, me);
+        return next;
+      });
+    } catch {
+      /* ignore */
+    }
   }, []);
 
   const impersonating = checkImpersonating();
@@ -267,7 +297,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       user,
       isAuthenticated: !!user,
       isLoading,
-      role: user?.role ?? null,
+      role: workspaceRoleForContext(user),
       isSuperAdmin: user?.isSuperAdmin ?? false,
       globalRole: user?.globalRole ?? null,
       globalPermissions,
@@ -277,11 +307,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
       studentLogin,
       onboard,
       logout,
+      refreshProfile,
       isImpersonating: impersonating,
       impersonatedTenant,
       endImpersonation,
     }),
-    [user, isLoading, globalPermissions, hasGlobalPermission, login, studentLogin, onboard, logout, impersonating, impersonatedTenant, endImpersonation],
+    [user, isLoading, globalPermissions, hasGlobalPermission, login, studentLogin, onboard, logout, refreshProfile, impersonating, impersonatedTenant, endImpersonation],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

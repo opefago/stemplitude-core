@@ -6,6 +6,7 @@ export interface TokenPayload {
   sub_type: string;
   tenant_id: string | null;
   tenant_slug?: string;
+  tenant_name?: string;
   role: string;
   is_super_admin?: boolean;
   global_role?: string;
@@ -34,6 +35,7 @@ export function decodeToken(token: string): TokenPayload | null {
       sub_type: payload.sub_type ?? "",
       tenant_id: payload.tenant_id ?? null,
       tenant_slug: payload.tenant_slug,
+      tenant_name: payload.tenant_name,
       role: payload.role ?? "",
       is_super_admin: payload.is_super_admin ?? false,
       global_role: payload.global_role,

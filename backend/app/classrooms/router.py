@@ -41,6 +41,7 @@ from app.classrooms.schemas import (
     SubmissionRecord,
 )
 from app.dependencies import CurrentIdentity, get_current_identity
+from app.students.me_student import parse_optional_child_context_uuid
 from app.classrooms.service import ClassroomService
 from app.classrooms.realtime import classroom_session_ws_handler
 
@@ -366,11 +367,17 @@ async def list_session_events(
     session_id: UUID,
     db: AsyncSession = Depends(get_db),
     tenant: TenantContext = Depends(get_tenant_context),
-    event_type: str | None = Query(None),
+    event_type: str | None = Query(
+        None,
+        description="Single type or comma-separated list (e.g. student.submission.saved,student.submission.submitted).",
+    ),
     limit: int = Query(500, ge=1, le=1000),
 ):
     service = ClassroomService(db)
-    event_types = [event_type] if event_type else None
+    event_types: list[str] | None = None
+    if event_type:
+        parts = [p.strip() for p in event_type.split(",") if p.strip()]
+        event_types = parts or None
     return await service.list_session_events(
         classroom_id=id,
         session_id=session_id,
@@ -651,15 +658,20 @@ async def regenerate_meeting(
     dependencies=[_require_tenant()],
 )
 async def list_classroom_assignments(
+    request: Request,
     id: UUID,
     db: AsyncSession = Depends(get_db),
     tenant: TenantContext = Depends(get_tenant_context),
     identity: CurrentIdentity = Depends(get_current_identity),
 ):
-    """List all assignments across every session of a classroom (instructor view)."""
+    """List all assignments across every session of a classroom (instructor or enrolled learner)."""
     service = ClassroomService(db)
+    child_ctx = parse_optional_child_context_uuid(request)
     items = await service.list_classroom_assignments(
-        classroom_id=id, tenant_id=tenant.tenant_id, identity=identity
+        classroom_id=id,
+        tenant_id=tenant.tenant_id,
+        identity=identity,
+        child_context_student_id=child_ctx,
     )
     return [ClassroomAssignmentResponse.model_validate(i) for i in items]
 

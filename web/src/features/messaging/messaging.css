@@ -1496,3 +1496,118 @@
     max-width: 88%;
   }
 }
+
+/* ── Parent hub (Updates & Messages) ───────────────────────────────────────── */
+
+.msg-layout--parent-hub {
+  flex-direction: column;
+}
+
+.msg-layout__split {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+.msg-layout__split--pass {
+  display: contents;
+}
+
+.msg-hub-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 2px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-secondary) 5%, var(--color-surface));
+  flex-shrink: 0;
+  width: 100%;
+}
+
+.msg-hub-tabs__btn {
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 2px solid var(--color-border);
+  background: var(--color-surface);
+  font-weight: 700;
+  font-size: 0.875rem;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+}
+
+.msg-hub-tabs__btn--active {
+  border-color: #ff9600;
+  background: #ff9600;
+  color: #fff;
+}
+
+.msg-hub-panel {
+  flex: 1;
+  min-height: 0;
+  padding: var(--spacing-md, 16px) var(--spacing-lg, 24px);
+  overflow-y: auto;
+}
+
+.msg-layout--parent-hub > .msg-hub-panel {
+  flex: 1;
+}
+
+.msg-hub-panel__title {
+  margin: 0 0 0.5rem;
+  font-size: 1.125rem;
+  font-weight: 800;
+}
+
+.msg-hub-panel__desc {
+  margin: 0 0 1rem;
+  color: var(--color-text-secondary);
+  font-size: 0.9375rem;
+  line-height: 1.45;
+}
+
+.msg-hub-panel__muted {
+  color: var(--color-text-secondary);
+  font-size: 0.9375rem;
+}
+
+.msg-hub-panel__link {
+  display: inline-flex;
+  margin-top: 1rem;
+  font-weight: 700;
+  color: #1cb0f6;
+}
+
+.msg-hub-updates {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.msg-hub-updates__item {
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 2px solid var(--color-border);
+  background: var(--color-surface);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.msg-hub-updates__title {
+  font-weight: 700;
+  font-size: 0.9375rem;
+}
+
+.msg-hub-updates__body {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+}
+
+.msg-hub-updates__time {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+}

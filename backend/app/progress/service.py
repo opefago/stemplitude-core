@@ -7,6 +7,8 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import CurrentIdentity, TenantContext
+from app.gamification.streak_side_effects import bump_student_streak
+from app.students.parent_access import ensure_can_view_student_as_guardian
 from app.progress.models import LabProgress, LessonProgress
 
 from .repository import LabProgressRepository, LessonProgressRepository, ProgressRepository
@@ -41,13 +43,13 @@ class ProgressService:
 
     async def update_lesson_progress(
         self,
+        *,
+        student_id: UUID,
         lesson_id: UUID,
-        identity: CurrentIdentity,
         tenant_ctx: TenantContext,
         data: LessonProgressUpdate,
     ) -> LessonProgressResponse:
         """Create or update lesson progress."""
-        student_id = self._student_id(identity, None)
         existing = await self.lesson_repo.get(
             student_id, lesson_id, tenant_ctx.tenant_id
         )
@@ -66,6 +68,8 @@ class ProgressService:
                 completed_at=data.completed_at,
             )
             progress = await self.lesson_repo.upsert(progress)
+        if progress.status != "not_started" or progress.completed_at is not None:
+            await bump_student_streak(student_id, tenant_ctx.tenant_id)
         return LessonProgressResponse.model_validate(progress)
 
     async def get_lesson_progress(
@@ -108,18 +112,21 @@ class ProgressService:
                 completed_at=data.completed_at,
             )
             progress = await self.lab_repo.upsert(progress)
+        if progress.status != "not_started" or progress.completed_at is not None:
+            await bump_student_streak(student_id, tenant_ctx.tenant_id)
         return LabProgressResponse.model_validate(progress)
 
     async def get_lab_progress(
         self,
+        *,
+        student_id: UUID,
         lab_id: UUID,
-        identity: CurrentIdentity,
         tenant_ctx: TenantContext,
-        student_id: UUID | None = None,
     ) -> LabProgressResponse | None:
         """Get lab progress."""
-        sid = self._student_id(identity, student_id)
-        progress = await self.lab_repo.get(sid, lab_id, tenant_ctx.tenant_id)
+        progress = await self.lab_repo.get(
+            student_id, lab_id, tenant_ctx.tenant_id
+        )
         return LabProgressResponse.model_validate(progress) if progress else None
 
     async def get_student_summary(
@@ -135,6 +142,12 @@ class ProgressService:
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Students can only view their own progress",
             )
+        await ensure_can_view_student_as_guardian(
+            self.session,
+            identity=identity,
+            student_id=sid,
+            tenant_id=tenant_ctx.tenant_id,
+        )
         lesson_progress = await self.lesson_repo.list_by_student(
             sid, tenant_ctx.tenant_id
         )

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { UserRealtimeClient } from "../lib/api/userRealtime";
+import { useChildContextStudentId } from "../lib/childContext";
 
 const FALLBACK_POLL_MS = 50_000;
 const FALLBACK_START_DELAY_MS = 8_000;
@@ -11,8 +12,8 @@ export interface UseTenantRealtimeOptions {
   onSessionsInvalidate?: () => void;
   /** Server signaled new or updated notifications (in-app inbox). */
   onNotificationsInvalidate?: () => void;
-  /** Server signaled new messages / conversation updates. */
-  onMessagesInvalidate?: () => void;
+  /** Server signaled new messages / conversation updates (optional `conversation_id` in payload). */
+  onMessagesInvalidate?: (payload?: Record<string, unknown>) => void;
 }
 
 /**
@@ -21,6 +22,7 @@ export interface UseTenantRealtimeOptions {
  * the socket is down.
  */
 export function useTenantRealtime(options: UseTenantRealtimeOptions): void {
+  const childContextStudentId = useChildContextStudentId();
   const {
     tenantId,
     enabled = true,
@@ -53,7 +55,7 @@ export function useTenantRealtime(options: UseTenantRealtimeOptions): void {
   const runAllInvalidations = () => {
     sessionsRef.current?.();
     notificationsRef.current?.();
-    messagesRef.current?.();
+    messagesRef.current?.(undefined);
   };
 
   const startFallbackPoll = () => {
@@ -95,7 +97,7 @@ export function useTenantRealtime(options: UseTenantRealtimeOptions): void {
         } else if (evt.event_type === "notifications.changed") {
           notificationsRef.current?.();
         } else if (evt.event_type === "messages.changed") {
-          messagesRef.current?.();
+          messagesRef.current?.(evt.payload);
         }
       },
       onError: () => {
@@ -119,5 +121,5 @@ export function useTenantRealtime(options: UseTenantRealtimeOptions): void {
       client.disconnect();
       wsConnectedRef.current = false;
     };
-  }, [tenantId, enabled]);
+  }, [tenantId, enabled, childContextStudentId]);
 }

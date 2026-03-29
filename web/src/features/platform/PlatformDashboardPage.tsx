@@ -17,9 +17,12 @@ import {
   getPlatformStats,
   getTopTenants,
   getRecentEvents,
+  getPlatformEmailProviders,
+  updatePlatformEmailProvider,
   type PlatformStats,
   type TopTenant,
   type AuditEvent,
+  type PlatformEmailProvider,
 } from "../../lib/api/platform";
 import "./platform-dashboard.css";
 
@@ -61,26 +64,56 @@ export function PlatformDashboardPage() {
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [emailProviders, setEmailProviders] = useState<PlatformEmailProvider[]>([]);
+  const [emailSavingId, setEmailSavingId] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const period = PERIOD_MAP[timeRange];
-      const [statsRes, tenantsRes, eventsRes] = await Promise.all([
+      const [statsRes, tenantsRes, eventsRes, providersRes] = await Promise.allSettled([
         getPlatformStats(period),
         getTopTenants(10),
         getRecentEvents(20),
+        getPlatformEmailProviders(),
       ]);
-      setStats(statsRes);
-      setTenants(tenantsRes.tenants);
-      setEvents(eventsRes.events);
+      if (statsRes.status !== "fulfilled" || tenantsRes.status !== "fulfilled" || eventsRes.status !== "fulfilled") {
+        throw new Error("Failed to load dashboard data");
+      }
+      setStats(statsRes.value);
+      setTenants(tenantsRes.value.tenants);
+      setEvents(eventsRes.value.events);
+      if (providersRes.status === "fulfilled") {
+        setEmailProviders(providersRes.value.providers);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load dashboard data");
     } finally {
       setLoading(false);
     }
   }, [timeRange]);
+
+  const updateEmailProviderField = useCallback(
+    async (
+      providerId: string,
+      payload: { is_active?: boolean; priority?: number; config?: Record<string, unknown> }
+    ) => {
+      setEmailSavingId(providerId);
+      setEmailError(null);
+      try {
+        await updatePlatformEmailProvider(providerId, payload);
+        const next = await getPlatformEmailProviders();
+        setEmailProviders(next.providers);
+      } catch (err) {
+        setEmailError(err instanceof Error ? err.message : "Failed to update email provider");
+      } finally {
+        setEmailSavingId(null);
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     fetchAll();
@@ -331,6 +364,78 @@ export function PlatformDashboardPage() {
                       <ArrowRight size={14} className="pd-event__arrow" />
                     </div>
                   ))}
+                </div>
+              )}
+            </div>
+
+            <div className="pd-panel">
+              <div className="pd-panel__header">
+                <h3><Zap size={18} /> Email Routing Providers</h3>
+              </div>
+              {emailError && <p className="pd-error">{emailError}</p>}
+              {emailProviders.length === 0 ? (
+                <div className="pd-loading-inline">No providers found or insufficient permissions.</div>
+              ) : (
+                <div className="pd-panel__table-wrap">
+                  <table className="pd-table">
+                    <thead>
+                      <tr>
+                        <th>Provider</th>
+                        <th>Enabled</th>
+                        <th>Priority</th>
+                        <th>Route keys</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {emailProviders.map((provider) => {
+                        const routeKeys = Array.isArray(provider.config?.["route_keys"])
+                          ? (provider.config["route_keys"] as unknown[]).map(String)
+                          : [];
+                        return (
+                          <tr key={provider.id}>
+                            <td>{provider.provider}</td>
+                            <td>
+                              <input
+                                type="checkbox"
+                                checked={provider.is_active}
+                                disabled={emailSavingId === provider.id}
+                                onChange={(e) => void updateEmailProviderField(provider.id, { is_active: e.target.checked })}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                type="number"
+                                value={provider.priority}
+                                disabled={emailSavingId === provider.id}
+                                onChange={(e) => {
+                                  const value = Number(e.target.value || 0);
+                                  void updateEmailProviderField(provider.id, { priority: value });
+                                }}
+                                style={{ width: 80 }}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                type="text"
+                                value={routeKeys.join(", ")}
+                                disabled={emailSavingId === provider.id}
+                                onBlur={(e) => {
+                                  const keys = e.target.value
+                                    .split(",")
+                                    .map((v) => v.trim())
+                                    .filter(Boolean);
+                                  void updateEmailProviderField(provider.id, {
+                                    config: { ...provider.config, route_keys: keys },
+                                  });
+                                }}
+                                placeholder="invite, classroom_enrollment"
+                              />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </div>

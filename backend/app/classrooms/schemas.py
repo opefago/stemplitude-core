@@ -754,3 +754,8 @@ class SubmissionRecord(BaseModel):
     grade: int | None = None
     feedback: str | None = None
     graded_at: str | None = None
+    preview_image: str | None = Field(
+        default=None,
+        description="Optional data URL snapshot of lab work (not sent over realtime).",
+    )
+    lab_id: str | None = Field(default=None, description="Source lab identifier when provided.")

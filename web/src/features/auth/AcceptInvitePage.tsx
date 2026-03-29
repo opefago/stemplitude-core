@@ -17,7 +17,7 @@ type Tab = "login" | "register";
 export function AcceptInvitePage() {
   const { token } = useParams<{ token: string }>();
   const navigate = useNavigate();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user, logout } = useAuth();
 
   const [invite, setInvite] = useState<ValidateInviteResponse | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -48,6 +48,14 @@ export function AcceptInvitePage() {
       })
       .finally(() => setLoading(false));
   }, [token]);
+
+  const inviteEmailNorm = invite?.email?.trim().toLowerCase() ?? "";
+  const sessionEmailNorm = user?.email?.trim().toLowerCase() ?? "";
+  const sessionEmailMismatch =
+    isAuthenticated &&
+    Boolean(invite) &&
+    Boolean(sessionEmailNorm) &&
+    sessionEmailNorm !== inviteEmailNorm;
 
   async function handleAccept() {
     if (!token) return;
@@ -233,17 +241,41 @@ export function AcceptInvitePage() {
         {/* Already logged in — one-click accept */}
         {isAuthenticated ? (
           <>
-            <p className="auth-subtitle" style={{ marginBottom: "1rem" }}>
-              You're already signed in. Click below to accept and join.
-            </p>
-            {formError && <p className="accept-invite__error">{formError}</p>}
-            <button
-              className="ui-btn ui-btn--primary accept-invite__cta"
-              onClick={() => void handleAccept()}
-              disabled={submitting}
-            >
-              {submitting ? "Joining…" : "Accept & Join"}
-            </button>
+            {sessionEmailMismatch ? (
+              <>
+                <p className="auth-subtitle" style={{ marginBottom: "0.75rem" }}>
+                  You’re signed in as <strong>{user?.email ?? "another account"}</strong>, but this
+                  invitation was sent to <strong>{invite?.email}</strong>.
+                </p>
+                <p className="auth-subtitle" style={{ marginBottom: "1rem", fontSize: "0.95rem" }}>
+                  Sign out and sign in with the invited email, or create an account using that address.
+                </p>
+                <button
+                  type="button"
+                  className="ui-btn ui-btn--primary accept-invite__cta"
+                  onClick={() => {
+                    logout();
+                    setFormError(null);
+                  }}
+                >
+                  Sign out
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="auth-subtitle" style={{ marginBottom: "1rem" }}>
+                  You're already signed in. Click below to accept and join.
+                </p>
+                {formError && <p className="accept-invite__error">{formError}</p>}
+                <button
+                  className="ui-btn ui-btn--primary accept-invite__cta"
+                  onClick={() => void handleAccept()}
+                  disabled={submitting}
+                >
+                  {submitting ? "Joining…" : "Accept & Join"}
+                </button>
+              </>
+            )}
           </>
         ) : (
           <>
@@ -271,18 +303,22 @@ export function AcceptInvitePage() {
 
             {formError && <p className="accept-invite__error">{formError}</p>}
 
+            <p className="auth-subtitle accept-invite__email-hint" style={{ marginBottom: "1rem", fontSize: "0.9rem" }}>
+              Use the email this invitation was sent to — it can’t be changed here.
+            </p>
             {tab === "login" ? (
               <form className="auth-form" onSubmit={(e) => void handleLoginAndAccept(e)}>
                 <div className="auth-form-group">
                   <label className="auth-label" htmlFor="invite-email">Email</label>
                   <input
                     id="invite-email"
-                    className="auth-input"
+                    className="auth-input accept-invite__email-readonly"
                     type="email"
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    readOnly
                     required
                     autoComplete="email"
+                    title="Invitation is tied to this email"
                   />
                 </div>
                 <div className="auth-form-group">
@@ -335,12 +371,13 @@ export function AcceptInvitePage() {
                   <label className="auth-label" htmlFor="invite-reg-email">Email</label>
                   <input
                     id="invite-reg-email"
-                    className="auth-input"
+                    className="auth-input accept-invite__email-readonly"
                     type="email"
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    readOnly
                     required
                     autoComplete="email"
+                    title="Invitation is tied to this email"
                   />
                 </div>
                 <div className="auth-form-group">

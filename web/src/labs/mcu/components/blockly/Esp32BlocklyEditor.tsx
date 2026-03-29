@@ -57,6 +57,17 @@ import {
   getSensorsCategory,
   registerSensorsBlocks,
 } from "./categories/sensors";
+import { emitLabEvent, emitLabEventThrottled } from "../../../../lib/api/gamification";
+import { useChildContextStudentId } from "../../../../lib/childContext";
+import {
+  migrateLegacyLabProjectsIfNeeded,
+  readLabProjectsArray,
+  writeLabProjectsArray,
+} from "../../../../lib/learnerLabStorage";
+import { useAuth } from "../../../../providers/AuthProvider";
+
+const MM_PROJECTS_BASE_KEY = "stemplitude_micromaker_projects";
+const loadMmProjectsFromStorage = () => readLabProjectsArray(MM_PROJECTS_BASE_KEY);
 
 type Props = {
   title?: string;
@@ -806,20 +817,20 @@ export const Esp32BlocklyEditor: React.FC<Props> = ({
   const [showProjects, setShowProjects] = useState<boolean>(false);
   const [savedProjects, setSavedProjects] = useState<any[]>([]);
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
+  const childCtx = useChildContextStudentId();
+  const { user } = useAuth();
 
-  const MM_PROJECTS_KEY = "stemplitude_micromaker_projects";
-
-  const loadProjectsFromStorage = () => {
-    try { return JSON.parse(localStorage.getItem(MM_PROJECTS_KEY) || "[]"); }
-    catch { return []; }
-  };
+  useEffect(() => {
+    migrateLegacyLabProjectsIfNeeded(MM_PROJECTS_BASE_KEY);
+    setSavedProjects(loadMmProjectsFromStorage() as any[]);
+  }, [childCtx, user?.id, user?.subType]);
 
   const handleSaveProject = () => {
     if (!workspaceRef.current) return;
     const xml = Blockly.Xml.workspaceToDom(workspaceRef.current);
     const xmlText = Blockly.Xml.domToText(xml);
     const now = new Date().toISOString();
-    const projects = loadProjectsFromStorage();
+    const projects = loadMmProjectsFromStorage();
     const idx = projects.findIndex((p: any) => p.id === projectId);
     const project = {
       id: projectId, name: projectName, xml: xmlText,
@@ -827,7 +838,7 @@ export const Esp32BlocklyEditor: React.FC<Props> = ({
       createdAt: idx >= 0 ? projects[idx].createdAt : now,
     };
     if (idx >= 0) projects[idx] = project; else projects.unshift(project);
-    localStorage.setItem(MM_PROJECTS_KEY, JSON.stringify(projects));
+    writeLabProjectsArray(MM_PROJECTS_BASE_KEY, projects);
     setSavedProjects(projects);
     setSaveStatus("saved");
     setTimeout(() => setSaveStatus(null), 1500);
@@ -845,8 +856,8 @@ export const Esp32BlocklyEditor: React.FC<Props> = ({
   };
 
   const handleDeleteProject = (id: string) => {
-    const projects = loadProjectsFromStorage().filter((p: any) => p.id !== id);
-    localStorage.setItem(MM_PROJECTS_KEY, JSON.stringify(projects));
+    const projects = loadMmProjectsFromStorage().filter((p: any) => p.id !== id);
+    writeLabProjectsArray(MM_PROJECTS_BASE_KEY, projects);
     setSavedProjects(projects);
   };
 
@@ -875,7 +886,7 @@ export const Esp32BlocklyEditor: React.FC<Props> = ({
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [projectId, projectName, boardId]);
+  }, [projectId, projectName, boardId, childCtx, user?.id, user?.subType]);
 
   // Auto-scroll serial monitor to bottom when new output arrives
   useEffect(() => {
@@ -1143,6 +1154,20 @@ export const Esp32BlocklyEditor: React.FC<Props> = ({
     }, 200);
 
     const onChange = (event: any) => {
+      if (event?.type === Blockly.Events.BLOCK_CREATE) {
+        const blockType: string | undefined = event?.xml?.getAttribute?.("type");
+        if (blockType && blockType.toLowerCase().includes("sensor")) {
+          emitLabEventThrottled({
+            lab_id: "mcu",
+            lab_type: "micro-maker",
+            event_type: "SENSOR_CONNECTED",
+            context: {
+              block_type: blockType,
+              board_id: boardId,
+            },
+          }, 1500);
+        }
+      }
       // Validate block structure on ANY change
       setTimeout(() => {
         validateBlockStructure(ws);
@@ -1655,19 +1680,49 @@ export const Esp32BlocklyEditor: React.FC<Props> = ({
         uploader.attachPort(selectedPort);
         await uploader.open({ baudRate: Number(baud) || 115200 });
         const res = await uploader.upload(codeToSend);
+        const success = !!res.success;
         setMessage(
-          res.success
+          success
             ? "Uploaded and executed successfully."
             : res.message || "Upload failed"
         );
+        if (success) {
+          void emitLabEvent({
+            lab_id: "mcu",
+            lab_type: "micro-maker",
+            event_type: "CODE_DEPLOYED",
+            context: { board_id: boardId, transport: "serial" },
+          });
+          void emitLabEvent({
+            lab_id: "mcu",
+            lab_type: "micro-maker",
+            event_type: "PROGRAM_COMPLETE",
+            context: { board_id: boardId, transport: "serial" },
+          });
+        }
       } else {
         // No selection: fallback to default chooser
         const res = await uploadToMicroPython(codeToSend);
+        const success = !!res.success;
         setMessage(
-          res.success
+          success
             ? "Uploaded and executed successfully."
             : res.message || "Upload failed"
         );
+        if (success) {
+          void emitLabEvent({
+            lab_id: "mcu",
+            lab_type: "micro-maker",
+            event_type: "CODE_DEPLOYED",
+            context: { board_id: boardId, transport: "auto" },
+          });
+          void emitLabEvent({
+            lab_id: "mcu",
+            lab_type: "micro-maker",
+            event_type: "PROGRAM_COMPLETE",
+            context: { board_id: boardId, transport: "auto" },
+          });
+        }
       }
     } catch (e: any) {
       setMessage(e?.message ?? String(e));
@@ -2052,7 +2107,7 @@ export const Esp32BlocklyEditor: React.FC<Props> = ({
           <button
             style={headerBtnStyle}
             title="Open project"
-            onClick={() => { setSavedProjects(loadProjectsFromStorage()); setShowProjects(true); }}
+            onClick={() => { setSavedProjects(loadMmProjectsFromStorage() as any[]); setShowProjects(true); }}
           >
             <FolderOpen size={14} /> Open
           </button>

@@ -12,7 +12,7 @@ from typing import Literal
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import blob_storage
@@ -20,7 +20,7 @@ from app.core.permissions import require_global_permission
 from app.database import get_db
 from app.dependencies import require_identity
 
-from sqlalchemy import select as sa_sel
+from sqlalchemy import delete, select as sa_sel
 
 from app.users.models import User
 
@@ -43,6 +43,19 @@ router = APIRouter()
 class TenantBillingModeUpdate(BaseModel):
     billing_mode: Literal["live", "test", "internal"]
     billing_email_enabled: bool | None = None
+
+
+class TenantMemberBillingFeeUpdate(BaseModel):
+    """Per-tenant Stripe Connect application fee (basis points, 100 = 1%)."""
+
+    member_billing_application_fee_bps: int | None = Field(None, ge=0, le=10000)
+    member_billing_application_fee_use_platform_default: bool | None = None
+
+
+class PlatformMemberBillingDefaultFeeUpdate(BaseModel):
+    """Default platform take rate when a tenant uses the platform default."""
+
+    member_billing_default_application_fee_bps: int = Field(..., ge=0, le=10000)
 
 
 def _serialize_blob_object(obj: dict) -> dict:
@@ -510,6 +523,21 @@ async def get_blob_item_download_url(
 # ─── Role Manager endpoints ─────────────────────────────────────────────────
 
 from . import roles as role_manager  # noqa: E402
+from app.roles.models import Permission, Role, RolePermission, UserRole  # noqa: E402
+
+
+class GlobalRoleCreateBody(BaseModel):
+    name: str
+    slug: str
+
+
+class GlobalRoleUpdateBody(BaseModel):
+    name: str | None = None
+    is_active: bool | None = None
+
+
+class GlobalRoleAssignPermissionsBody(BaseModel):
+    permission_ids: list[UUID]
 
 
 @router.get(
@@ -519,6 +547,173 @@ from . import roles as role_manager  # noqa: E402
 async def list_global_roles(db: AsyncSession = Depends(get_db)):
     """List all global roles with permissions and user counts."""
     return {"roles": await role_manager.list_roles_with_details(db)}
+
+
+@router.get(
+    "/roles/permissions",
+    dependencies=[require_global_permission("platform.users", "view")],
+)
+async def list_global_permissions(db: AsyncSession = Depends(get_db)):
+    """List all permissions available for global role assignment."""
+    result = await db.execute(sa_sel(Permission).order_by(Permission.resource, Permission.action))
+    rows = result.scalars().all()
+    return {
+        "permissions": [
+            {
+                "id": str(p.id),
+                "resource": p.resource,
+                "action": p.action,
+                "description": p.description,
+            }
+            for p in rows
+        ]
+    }
+
+
+@router.post(
+    "/roles",
+    dependencies=[require_global_permission("platform.users", "manage")],
+)
+async def create_global_role(
+    body: GlobalRoleCreateBody,
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a custom global role."""
+    slug = body.slug.strip().lower()
+    name = body.name.strip()
+    if not slug or not name:
+        raise HTTPException(status_code=400, detail="name and slug are required")
+
+    existing = await db.execute(
+        sa_sel(Role).where(Role.tenant_id.is_(None), Role.slug == slug)
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Global role slug already exists")
+
+    role = Role(
+        tenant_id=None,
+        name=name,
+        slug=slug,
+        is_system=False,
+        is_active=True,
+    )
+    db.add(role)
+    await db.flush()
+    return {"id": str(role.id), "name": role.name, "slug": role.slug}
+
+
+@router.patch(
+    "/roles/{role_id}",
+    dependencies=[require_global_permission("platform.users", "manage")],
+)
+async def update_global_role(
+    role_id: UUID,
+    body: GlobalRoleUpdateBody,
+    db: AsyncSession = Depends(get_db),
+):
+    """Update mutable fields for a custom global role."""
+    row = await db.execute(
+        sa_sel(Role).where(Role.id == role_id, Role.tenant_id.is_(None))
+    )
+    role = row.scalar_one_or_none()
+    if not role:
+        raise HTTPException(status_code=404, detail="Global role not found")
+    if role.is_system:
+        raise HTTPException(status_code=400, detail="System global roles cannot be edited")
+    if body.name is not None:
+        role.name = body.name.strip() or role.name
+    if body.is_active is not None:
+        role.is_active = body.is_active
+    await db.flush()
+    return {"id": str(role.id), "name": role.name, "slug": role.slug, "is_active": role.is_active}
+
+
+@router.delete(
+    "/roles/{role_id}",
+    dependencies=[require_global_permission("platform.users", "manage")],
+)
+async def delete_global_role(
+    role_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a custom global role."""
+    row = await db.execute(
+        sa_sel(Role).where(Role.id == role_id, Role.tenant_id.is_(None))
+    )
+    role = row.scalar_one_or_none()
+    if not role:
+        raise HTTPException(status_code=404, detail="Global role not found")
+    if role.is_system:
+        raise HTTPException(status_code=400, detail="System global roles cannot be deleted")
+
+    await db.execute(
+        delete(RolePermission).where(RolePermission.role_id == role.id)
+    )
+    await db.execute(
+        delete(UserRole).where(UserRole.role_id == role.id)
+    )
+    await db.delete(role)
+    await db.flush()
+    return {"ok": True}
+
+
+@router.post(
+    "/roles/{role_id}/permissions",
+    dependencies=[require_global_permission("platform.users", "manage")],
+)
+async def assign_permissions_to_global_role(
+    role_id: UUID,
+    body: GlobalRoleAssignPermissionsBody,
+    db: AsyncSession = Depends(get_db),
+):
+    """Assign permissions to a global role."""
+    row = await db.execute(
+        sa_sel(Role).where(Role.id == role_id, Role.tenant_id.is_(None))
+    )
+    role = row.scalar_one_or_none()
+    if not role:
+        raise HTTPException(status_code=404, detail="Global role not found")
+    if role.is_system:
+        raise HTTPException(status_code=400, detail="System global roles cannot be modified")
+
+    existing = await db.execute(
+        sa_sel(RolePermission.permission_id).where(RolePermission.role_id == role.id)
+    )
+    existing_ids = {pid for (pid,) in existing.all()}
+    to_add = [pid for pid in body.permission_ids if pid not in existing_ids]
+    for permission_id in to_add:
+        db.add(RolePermission(role_id=role.id, permission_id=permission_id))
+    await db.flush()
+    return {"ok": True, "added": len(to_add)}
+
+
+@router.delete(
+    "/roles/{role_id}/permissions/{permission_id}",
+    dependencies=[require_global_permission("platform.users", "manage")],
+)
+async def revoke_permission_from_global_role(
+    role_id: UUID,
+    permission_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Revoke one permission from a global role."""
+    row = await db.execute(
+        sa_sel(Role).where(Role.id == role_id, Role.tenant_id.is_(None))
+    )
+    role = row.scalar_one_or_none()
+    if not role:
+        raise HTTPException(status_code=404, detail="Global role not found")
+    if role.is_system:
+        raise HTTPException(status_code=400, detail="System global roles cannot be modified")
+
+    await db.execute(
+        delete(RolePermission).where(
+            RolePermission.role_id == role_id,
+            RolePermission.permission_id == permission_id,
+        )
+    )
+    await db.flush()
+    return {"ok": True}
 
 
 @router.get(
@@ -654,6 +849,11 @@ async def get_recent_job_results(
 async def retry_job(task_id: str):
     """Retry a completed/failed task."""
     result = await asyncio.to_thread(job_worker.retry_task, task_id)
+    if not result.get("success"):
+        raise HTTPException(
+            status_code=422,
+            detail=result.get("error") or "Retry failed",
+        )
     return result
 
 
@@ -670,6 +870,8 @@ async def cancel_job(task_id: str):
 # ─── Health Check endpoint ───────────────────────────────────────────────────
 
 from app.email.models import EmailProvider
+from app.email.schemas import EmailProviderUpdate
+from app.email.service import EmailService
 
 from . import health as health_checker  # noqa: E402
 
@@ -693,11 +895,68 @@ async def run_health_checks(db: AsyncSession = Depends(get_db)):
     return report
 
 
+@router.get(
+    "/email/providers",
+    dependencies=[require_global_permission("platform.billing", "view")],
+)
+async def list_email_providers(db: AsyncSession = Depends(get_db)):
+    """List global email providers for platform admins."""
+    service = EmailService(db)
+    return {"providers": await service.list_providers()}
+
+
+@router.patch(
+    "/email/providers/{provider_id}",
+    dependencies=[require_global_permission("platform.billing", "manage")],
+)
+async def update_email_provider(
+    provider_id: UUID,
+    data: EmailProviderUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    """Update global email provider settings for platform admins."""
+    service = EmailService(db)
+    provider = await service.update_provider(provider_id, data)
+    if not provider:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Provider not found")
+    return provider
+
+
 # ─── Impersonation endpoints ─────────────────────────────────────────────────
 
 from app.auth.service import AuthService, AuthError
-from app.roles.models import Role
+from app.platform.member_billing_fee_defaults import (
+    get_default_member_billing_application_fee_bps,
+    set_default_member_billing_application_fee_bps,
+)
 from app.tenants.models import Membership, Tenant
+
+
+@router.get(
+    "/member-billing/platform-application-fee",
+    dependencies=[require_global_permission("platform.tenants", "manage")],
+)
+async def get_platform_member_billing_application_fee(
+    db: AsyncSession = Depends(get_db),
+):
+    """Platform-wide default application fee for Stripe Connect member checkouts."""
+    bps = await get_default_member_billing_application_fee_bps(db)
+    return {"member_billing_default_application_fee_bps": bps}
+
+
+@router.patch(
+    "/member-billing/platform-application-fee",
+    dependencies=[require_global_permission("platform.tenants", "manage")],
+)
+async def patch_platform_member_billing_application_fee(
+    body: PlatformMemberBillingDefaultFeeUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    bps = await set_default_member_billing_application_fee_bps(
+        db, body.member_billing_default_application_fee_bps
+    )
+    await db.flush()
+    return {"ok": True, "member_billing_default_application_fee_bps": bps}
 
 
 @router.patch(
@@ -726,6 +985,51 @@ async def update_tenant_billing_mode(
         "tenant_id": str(tenant.id),
         "billing_mode": tenant.billing_mode,
         "billing_email_enabled": tenant.billing_email_enabled,
+    }
+
+
+@router.patch(
+    "/tenants/{tenant_id}/member-billing-fee",
+    dependencies=[require_global_permission("platform.tenants", "manage")],
+)
+async def update_tenant_member_billing_fee(
+    tenant_id: UUID,
+    body: TenantMemberBillingFeeUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    """Set the platform application fee for this tenant's family/member Stripe Connect charges."""
+    tenant_row = await db.execute(
+        sa_sel(Tenant).where(Tenant.id == tenant_id)
+    )
+    tenant = tenant_row.scalar_one_or_none()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    if (
+        body.member_billing_application_fee_bps is None
+        and body.member_billing_application_fee_use_platform_default is None
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Provide member_billing_application_fee_bps and/or "
+                "member_billing_application_fee_use_platform_default"
+            ),
+        )
+    if body.member_billing_application_fee_use_platform_default is not None:
+        tenant.member_billing_application_fee_use_platform_default = (
+            body.member_billing_application_fee_use_platform_default
+        )
+    if body.member_billing_application_fee_bps is not None:
+        tenant.member_billing_application_fee_bps = body.member_billing_application_fee_bps
+    await db.flush()
+    return {
+        "ok": True,
+        "tenant_id": str(tenant.id),
+        "member_billing_application_fee_bps": tenant.member_billing_application_fee_bps,
+        "member_billing_application_fee_use_platform_default": (
+            tenant.member_billing_application_fee_use_platform_default
+        ),
     }
 
 

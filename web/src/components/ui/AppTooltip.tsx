@@ -43,6 +43,9 @@ export function AppTooltip({
 
   if (disabled || !resolvedContent) return children;
 
+  /* Tippy must attach ref to a host DOM node. In React 19, refs on composite
+   * children (e.g. react-router Link) are regular props — @tippyjs/react still
+   * reads element.ref internally, which triggers a deprecation warning. */
   return (
     <Tippy
       content={resolvedContent}
@@ -57,7 +60,7 @@ export function AppTooltip({
       theme={theme === "cartoon" ? "ui-kid-tooltip" : "ui-light-tooltip"}
       {...tippyProps}
     >
-      {children}
+      <span className="ui-tooltip__ref-anchor">{children}</span>
     </Tippy>
   );
 }

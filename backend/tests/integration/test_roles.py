@@ -21,8 +21,9 @@ async def test_list_roles(
     )
     assert response.status_code == 200
     data = response.json()
-    assert isinstance(data, list)
-    slugs = [r["slug"] for r in data]
+    assert "items" in data
+    assert isinstance(data["items"], list)
+    slugs = [r["slug"] for r in data["items"]]
     assert "admin" in slugs
     assert "instructor" in slugs
     assert "student" in slugs

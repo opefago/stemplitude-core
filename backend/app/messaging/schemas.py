@@ -102,6 +102,8 @@ class ConversationListResponse(BaseModel):
 
     items: list[ConversationSummary]
     total: int
+    skip: int = 0
+    limit: int = 50
 
 
 class ConversationMessageListResponse(BaseModel):

@@ -2,7 +2,7 @@
 
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -23,10 +23,13 @@ class SubscriptionRepository:
         return result.scalar_one_or_none()
 
     async def get_by_stripe_id(self, stripe_subscription_id: str) -> Subscription | None:
-        """Get subscription by Stripe subscription ID."""
+        """Get subscription by Stripe subscription ID (legacy or provider column)."""
         result = await self.session.execute(
             select(Subscription).where(
-                Subscription.stripe_subscription_id == stripe_subscription_id
+                or_(
+                    Subscription.stripe_subscription_id == stripe_subscription_id,
+                    Subscription.provider_subscription_id == stripe_subscription_id,
+                )
             )
         )
         return result.scalar_one_or_none()

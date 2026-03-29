@@ -8,3 +8,4 @@ export { RouteGuard } from "./RouteGuard";
 export { CommandPalette } from "./CommandPalette";
 export { ColorSchemeInit } from "./ColorSchemeInit";
 export { ImpersonationBanner } from "./ImpersonationBanner";
+export { ChildModeBanner } from "./ChildModeBanner";

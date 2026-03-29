@@ -75,6 +75,11 @@ import "../../components/ui/ui.css";
 import "./classrooms.css";
 import { RecognitionToast, type RecognitionEvent } from "./RecognitionToast";
 import { playAwardSound } from "../labs/labSounds";
+import { ApiHttpError } from "../../lib/api/client";
+import { rewardEngine } from "../../rewards";
+import { useChildContextStudentId } from "../../lib/childContext";
+
+const RECOGNITION_TOAST_TIMEOUT_MS = 12000;
 
 function isLiveSession(session: ClassroomSessionRecord): boolean {
   if (session.status === "canceled" || session.status === "completed") return false;
@@ -128,7 +133,7 @@ function isUuid(value: string): boolean {
 export function ClassroomLiveSession() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { user, role, isSuperAdmin } = useAuth();
+  const { user, role, isSuperAdmin, isAuthenticated } = useAuth();
   const { tenant } = useTenant();
 
   const [classroom, setClassroom] = useState<ClassroomRecord | null>(null);
@@ -238,11 +243,22 @@ export function ClassroomLiveSession() {
   const isInstructorView =
     isSuperAdmin || role === "admin" || role === "owner" || role === "instructor";
 
+  const childContextStudentId = useChildContextStudentId();
+
   const pointsEnabled = useMemo(() => {
     const settings = tenant?.settings as Record<string, unknown> | undefined;
     const gamification = (settings?.gamification ?? {}) as Record<string, unknown>;
     return Boolean(gamification.points_enabled ?? settings?.points_enabled);
   }, [tenant?.settings]);
+
+  // Failsafe timeout at parent state level so toast always clears.
+  useEffect(() => {
+    if (!recognitionEvent) return;
+    const timer = window.setTimeout(() => {
+      setRecognitionEvent(null);
+    }, RECOGNITION_TOAST_TIMEOUT_MS + 400);
+    return () => window.clearTimeout(timer);
+  }, [recognitionEvent]);
 
   const sortedSessions = useMemo(
     () =>
@@ -721,12 +737,49 @@ export function ClassroomLiveSession() {
         (envelope.payload as Record<string, unknown> | undefined)?.["message"] as
           | string
           | undefined;
-      setRecognitionEvent({
+
+      const normalizedPoints =
+        typeof points === "number" && Number.isFinite(points)
+          ? points
+          : typeof points === "string"
+            ? Number(points)
+            : 0;
+      const animationType =
+        mapped.event_type === "points_awarded"
+          ? "trophy"
+          : mapped.event_type === "high_five"
+            ? "rocket"
+            : "stars";
+      const animationIntensity =
+        mapped.event_type === "points_awarded"
+          ? normalizedPoints >= 25
+            ? "high"
+            : normalizedPoints >= 10
+              ? "medium"
+              : "low"
+          : mapped.event_type === "callout"
+            ? "medium"
+            : "low";
+      rewardEngine.trigger({
+        type: animationType,
+        intensity: animationIntensity,
+        metadata: {
+          studentName,
+          points: Number.isFinite(normalizedPoints) ? normalizedPoints : undefined,
+          message,
+          rewardName: mapped.event_type,
+          classroomId: id,
+        },
+      });
+
+      const nextRecognitionEvent: RecognitionEvent = {
+        eventId: mapped.id || `${mapped.sequence ?? "na"}-${mapped.created_at}-${mapped.event_type}`,
         eventType: mapped.event_type as "points_awarded" | "high_five" | "callout",
         studentName,
         points,
         message,
-      });
+      };
+      setRecognitionEvent(nextRecognitionEvent);
     }
 
   }, [
@@ -918,6 +971,7 @@ export function ClassroomLiveSession() {
       classroomId: id,
       sessionId: activeSession.id,
       tenantId: tenant.id,
+      childContextStudentId: !isInstructorView ? childContextStudentId : null,
       onConnected: () => {
         if (!cancelled) setRealtimeConnected(true);
       },
@@ -1057,12 +1111,28 @@ export function ClassroomLiveSession() {
     toSessionEvent,
     isInstructorView,
     applyLiveSyncState,
+    childContextStudentId,
   ]);
 
   useEffect(() => {
-    if (!id || !activeSession || isInstructorView || realtimeConnected) return;
+    if (!id || !activeSession || isInstructorView || realtimeConnected || !isAuthenticated) return;
     let cancelled = false;
+    let timer: number | null = null;
+
+    const stop = () => {
+      cancelled = true;
+      if (timer != null) {
+        window.clearInterval(timer);
+        timer = null;
+      }
+    };
+
+    const shouldHaltFallbackPoll = (err: unknown): boolean =>
+      err instanceof ApiHttpError &&
+      (err.status === 401 || err.status === 403 || err.status === 409);
+
     const poll = async () => {
+      if (cancelled) return;
       try {
         const events = await listMySessionRealtimeEvents(id, activeSession.id, {
           after_sequence: lastRealtimeSequenceRef.current,
@@ -1072,24 +1142,30 @@ export function ClassroomLiveSession() {
         for (const event of events) {
           applyRealtimeEvent(event);
         }
-      } catch {
-        // Ignore transient polling errors while websocket is unavailable.
+      } catch (e) {
+        if (shouldHaltFallbackPoll(e)) {
+          stop();
+          return;
+        }
       }
+      if (cancelled) return;
       try {
         await heartbeatMySession(id, activeSession.id, "active");
-      } catch {
-        // Best effort only during fallback mode.
+      } catch (e) {
+        if (shouldHaltFallbackPoll(e)) {
+          stop();
+        }
       }
     };
-    void poll();
-    const timer = window.setInterval(() => {
+
+    timer = window.setInterval(() => {
       void poll();
     }, 3000);
+    void poll();
     return () => {
-      cancelled = true;
-      window.clearInterval(timer);
+      stop();
     };
-  }, [id, activeSession?.id, isInstructorView, realtimeConnected, applyRealtimeEvent]);
+  }, [id, activeSession?.id, isInstructorView, realtimeConnected, applyRealtimeEvent, isAuthenticated]);
 
   useEffect(() => {
     if (!id || !activeSession) return;
@@ -1375,7 +1451,7 @@ export function ClassroomLiveSession() {
         message:
           message ??
           (action === "callout"
-            ? "Awarded Classroom Contributor badge"
+            ? "Awarded Classroom Contributor sticker"
             : action === "high_five"
               ? "Great participation in class!"
               : undefined),
@@ -2374,11 +2450,11 @@ export function ClassroomLiveSession() {
                                   className="classroom-live__participant-action"
                                   onClick={() =>
                                     void runParticipantAction(student, "callout", {
-                                      message: "Awarded Classroom Contributor badge",
+                                      message: "Awarded Classroom Contributor sticker",
                                     })
                                   }
                                 >
-                                  Badge
+                                  Sticker
                                 </button>
                               </div>
                               )}
@@ -2416,17 +2492,17 @@ export function ClassroomLiveSession() {
                     onClick={() => toggleRailPanel("badges")}
                     aria-expanded={railPanels.badges}
                   >
-                    <span>Badges & points</span>
+                    <span>Stickers & points</span>
                     {railPanels.badges ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                   </button>
                   {railPanels.badges && (
                     <div className="classroom-live__accordion-body">
                       <p className="classroom-live__badge-copy">
-                        Students can earn a session badge after finishing activities and assignments.
+                        Students can earn a session sticker after finishing activities and assignments.
                       </p>
                       <div className="classroom-live__badge-row">
                         <Trophy size={18} />
-                        <span>Current badge: Classroom Contributor</span>
+                        <span>Current sticker: Classroom Contributor</span>
                       </div>
                       {isInstructorView && pointsEnabled && (
                         <button
@@ -2435,7 +2511,7 @@ export function ClassroomLiveSession() {
                           onClick={openRecognitionDialog}
                         >
                           <Gift size={16} />
-                          Assign badge / points
+                          Assign sticker / points
                         </button>
                       )}
                       {recognitionNotice ? (

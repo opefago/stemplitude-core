@@ -1,4 +1,5 @@
 import { apiFetch } from "./client";
+import type { Paginated } from "./pagination";
 
 export interface PermissionRecord {
   id: string;
@@ -31,8 +32,24 @@ export interface UpdateRoleBody {
   is_active?: boolean;
 }
 
+/** All permission rows (follows pagination until `total` is reached). */
 export async function listPermissions(): Promise<PermissionRecord[]> {
-  return apiFetch<PermissionRecord[]>("/roles/permissions");
+  const limit = 200;
+  let skip = 0;
+  const all: PermissionRecord[] = [];
+  for (;;) {
+    const q = new URLSearchParams({
+      skip: String(skip),
+      limit: String(limit),
+    });
+    const page = await apiFetch<Paginated<PermissionRecord>>(
+      `/roles/permissions?${q}`,
+    );
+    all.push(...page.items);
+    if (page.items.length < limit || all.length >= page.total) break;
+    skip += limit;
+  }
+  return all;
 }
 
 export async function getRole(id: string): Promise<RoleWithPermissions> {

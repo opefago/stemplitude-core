@@ -2,10 +2,13 @@ import logging
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.capabilities.repository import CapabilityEngineRepository
 from app.config import settings
+from app.email.outbox import enqueue_transactional_email
+from app.email.presets import build_invitation_email
 from app.invitations.models import Invitation
 from app.invitations.repository import InvitationRepository
 from app.invitations.schemas import (
@@ -19,11 +22,16 @@ from app.invitations.schemas import (
 from app.roles.models import Role
 from app.students.models import ParentStudent, Student
 from app.tenants.models import Membership, Tenant
+from app.tenants.service import TenantService
 from app.users.models import User
 
 logger = logging.getLogger(__name__)
 
 INVITE_EXPIRY_DAYS = 7
+
+
+class InvitationEmailEnqueueError(RuntimeError):
+    """Invitation email could not be queued (Celery broker unavailable or misconfigured)."""
 
 
 class InvitationService:
@@ -85,6 +93,7 @@ class InvitationService:
             expires_at=invite.expires_at,
             created_at=invite.created_at,
             accepted_at=invite.accepted_at,
+            role_id=invite.role_id,
             role_name=role_name,
             student_names=student_names,
             invite_link=self._build_invite_link(invite.token),
@@ -92,6 +101,7 @@ class InvitationService:
 
     def _send_invite_email(
         self,
+        tenant_id: UUID,
         to_email: str,
         subject: str,
         first_name: str | None,
@@ -99,34 +109,83 @@ class InvitationService:
         tenant_name: str,
         role_or_desc: str,
         link: str,
+        *,
+        invite_kind: str,
     ) -> None:
-        greeting = f"Hi {first_name}" if first_name else "Hi"
-        plain = (
-            f"{greeting},\n\n"
-            f"{inviter_name} has invited you to join {tenant_name} as {role_or_desc}.\n\n"
-            f"Click the link below to accept your invitation:\n{link}\n\n"
-            f"This invitation expires in {INVITE_EXPIRY_DAYS} days.\n\n"
-            f"If you did not expect this invitation, you can ignore this email."
-        )
-        html = (
-            f"<p>{greeting},</p>"
-            f"<p><strong>{inviter_name}</strong> has invited you to join "
-            f"<strong>{tenant_name}</strong> as {role_or_desc}.</p>"
-            f"<p style='margin:24px 0'>"
-            f"<a href='{link}' style='background:#059669;color:#fff;padding:12px 24px;"
-            f"border-radius:8px;text-decoration:none;font-weight:700;display:inline-block'>"
-            f"Accept Invitation</a></p>"
-            f"<p style='color:#666;font-size:0.9em'>Or copy this link: {link}</p>"
-            f"<p style='color:#666;font-size:0.85em'>This invitation expires in "
-            f"{INVITE_EXPIRY_DAYS} days.</p>"
+        """Enqueue invite email via Celery (or run inline when CELERY_TASK_ALWAYS_EAGER=true)."""
+        prepared = build_invitation_email(
+            subject=subject,
+            invite_link=link,
+            inviter_name=inviter_name,
+            tenant_name=tenant_name,
+            role_or_desc=role_or_desc,
+            recipient_first_name=first_name,
+            personal_message=personal_message,
+            expires_days=INVITE_EXPIRY_DAYS,
         )
         try:
-            from workers.tasks.email_tasks import send_email_task
-            send_email_task.delay(to_email, subject, plain, html)
-        except Exception:
-            logger.exception("Failed to enqueue invite email for %s", to_email)
+            async_result = enqueue_transactional_email(
+                to_email=to_email,
+                prepared=prepared,
+                tenant_id=tenant_id,
+            )
+            logger.info(
+                "Enqueued %s invite email task_id=%s to=%s tenant_id=%s",
+                invite_kind,
+                getattr(async_result, "id", None),
+                to_email,
+                tenant_id,
+            )
+        except Exception as exc:
+            logger.exception(
+                "Failed to enqueue %s invite email for %s", invite_kind, to_email
+            )
+            raise InvitationEmailEnqueueError(
+                "Could not queue the invitation email. Start Redis and run a Celery worker "
+                "(celery -A workers.celery_app worker -l info), or set CELERY_TASK_ALWAYS_EAGER=true "
+                "in the API environment for local development so mail sends inside the API process."
+            ) from exc
 
     # --- Public API ---
+
+    async def _count_pending_user_invites_for_role(
+        self, tenant_id: UUID, role_id: UUID
+    ) -> int:
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(Invitation)
+            .where(
+                Invitation.tenant_id == tenant_id,
+                Invitation.invite_type == "user",
+                Invitation.status == "pending",
+                Invitation.role_id == role_id,
+            )
+        )
+        return int(result.scalar_one() or 0)
+
+    async def _assert_instructor_seats_for_invites(
+        self, tenant_id: UUID, role: Role | None, additional: int
+    ) -> None:
+        if additional < 1 or role is None:
+            return
+        slug = (role.slug or "").lower()
+        if "instructor" not in slug:
+            return
+        lic_repo = LicenseRepository(self.session)
+        seats = await lic_repo.list_seats_for_tenant(tenant_id)
+        inst = next((s for s in seats if s.seat_type == "instructor"), None)
+        if inst is None:
+            return
+        cap_repo = CapabilityEngineRepository(self.session)
+        used = await cap_repo.count_instructors(tenant_id)
+        pending = await self._count_pending_user_invites_for_role(tenant_id, role.id)
+        if used + pending + additional > inst.max_count:
+            raise ValueError(
+                "Instructor seats are full for this plan "
+                f"({used + pending}/{inst.max_count} in use including pending invites; "
+                f"{additional} new invite(s) requested). Remove a member, revoke a pending invite, "
+                "or upgrade your plan."
+            )
 
     async def create_user_invite(
         self,
@@ -138,6 +197,8 @@ class InvitationService:
         inviter = await self._get_user(invited_by_id)
         role = await self._get_role(data.role_id)
         role_name = role.name if role else "a member"
+
+        await self._assert_instructor_seats_for_invites(tenant_id, role, 1)
 
         invite = Invitation(
             tenant_id=tenant_id,
@@ -156,7 +217,9 @@ class InvitationService:
             if inviter
             else tenant.name
         )
+        msg = (data.personal_message or "").strip() or None
         self._send_invite_email(
+            tenant_id=tenant.id,
             to_email=str(data.email),
             subject=f"You've been invited to join {tenant.name}",
             first_name=data.first_name,
@@ -164,6 +227,8 @@ class InvitationService:
             tenant_name=tenant.name,
             role_or_desc=role_name,
             link=self._build_invite_link(invite.token),
+            invite_kind="user",
+            personal_message=msg,
         )
         return self._to_response(invite, role_name=role_name)
 
@@ -174,6 +239,15 @@ class InvitationService:
         data: CreateParentInviteRequest,
     ) -> InvitationResponse:
         tenant = await self._get_tenant(tenant_id)
+        ts = TenantService(self.session)
+        parent_role = await self._get_parent_role(tenant_id)
+        if parent_role is None:
+            parent_role = await ts.ensure_system_role(tenant_id, "parent")
+        if parent_role is None:
+            raise ValueError(
+                "Could not create or find the Parent role for this organization. "
+                "Try running database role setup or contact support."
+            )
         inviter = await self._get_user(invited_by_id)
         students = await self._get_students(list(data.student_ids))
         student_names = [f"{s.first_name} {s.last_name}" for s in students]
@@ -197,6 +271,7 @@ class InvitationService:
             else tenant.name
         )
         self._send_invite_email(
+            tenant_id=tenant.id,
             to_email=str(data.email),
             subject=f"You're invited to join {tenant.name} as a parent",
             first_name=data.first_name,
@@ -204,6 +279,7 @@ class InvitationService:
             tenant_name=tenant.name,
             role_or_desc=f"a parent for {names_str}",
             link=self._build_invite_link(invite.token),
+            invite_kind="parent",
         )
         return self._to_response(invite, student_names=student_names)
 
@@ -261,10 +337,29 @@ class InvitationService:
             await self.session.flush()
             raise ValueError("This invitation has expired")
 
-        # Resolve role_id: for parent invite, find the tenant's parent role
+        user = await self._get_user(user_id)
+        if not user:
+            raise ValueError("User not found")
+        invited_norm = str(invite.email).strip().casefold()
+        account_norm = (user.email or "").strip().casefold()
+        if account_norm != invited_norm:
+            raise ValueError(
+                "This invitation was sent to a different email address. "
+                "Sign in or register with the invited email, or ask an admin to send a new invitation."
+            )
+
+        # Resolve role_id: for parent invite, ensure tenant has a Parent role row
         if invite.invite_type == "parent":
+            ts = TenantService(self.session)
             parent_role = await self._get_parent_role(invite.tenant_id)
-            role_id = parent_role.id if parent_role else None
+            if parent_role is None:
+                parent_role = await ts.ensure_system_role(invite.tenant_id, "parent")
+            if parent_role is None:
+                raise ValueError(
+                    "Parent role is not available for this organization. "
+                    "An administrator may need to repair roles."
+                )
+            role_id = parent_role.id
         else:
             role_id = invite.role_id
 

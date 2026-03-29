@@ -1,0 +1,94 @@
+.student-projects-page {
+  max-width: 980px;
+}
+
+.student-projects-page__filters-card {
+  margin-bottom: 10px;
+}
+
+.student-projects-page__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 0;
+}
+
+.student-projects-page__filter {
+  border: 2px solid color-mix(in srgb, var(--color-secondary, #1cb0f6) 35%, transparent);
+  background: color-mix(in srgb, var(--color-secondary, #1cb0f6) 12%, transparent);
+  color: var(--color-secondary, #1cb0f6);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.student-projects-page__filter.active {
+  background: var(--color-secondary, #1cb0f6);
+  color: #fff;
+}
+
+.student-projects-page__list-card {
+  min-height: 340px;
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--color-secondary, #1cb0f6) 10%, transparent);
+}
+
+.student-projects-page__list-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.student-projects-page__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.student-projects-page__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--color-border, #e8e8e8) 68%, transparent);
+  border-radius: 12px;
+  padding: 10px 12px;
+  box-shadow: 0 5px 12px color-mix(in srgb, var(--color-border, #e8e8e8) 30%, transparent);
+}
+
+.student-projects-page__meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.student-projects-page__name {
+  font-weight: 800;
+  color: var(--color-text, #1e293b);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.student-projects-page__lab {
+  font-size: 0.85rem;
+  color: var(--color-text-secondary, #64748b);
+}
+
+.student-projects-page__open {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  text-decoration: none;
+  font-weight: 700;
+  color: var(--color-primary, #58cc02);
+  white-space: nowrap;
+}
+
+.student-projects-page__empty {
+  padding: 8px 0;
+}

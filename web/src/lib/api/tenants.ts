@@ -1,4 +1,5 @@
 import { apiFetch } from "./client";
+import type { Paginated } from "./pagination";
 
 export interface TenantListItem {
   id: string;
@@ -12,6 +13,41 @@ export interface TenantListItem {
 export async function listUserTenants(): Promise<TenantListItem[]> {
   const data = await apiFetch<{ items: TenantListItem[]; total: number }>("/tenants/");
   return data.items ?? [];
+}
+
+export interface CreateTenantPayload {
+  name: string;
+  slug: string;
+  code: string;
+  type?: string;
+  logo_url?: string;
+  settings?: Record<string, unknown>;
+}
+
+/** Create a new organization; caller becomes admin. Omit tenant header. */
+export async function createTenant(payload: CreateTenantPayload): Promise<TenantInfo> {
+  const data = await apiFetch<{
+    id: string;
+    name: string;
+    slug: string;
+    code: string;
+    type: string;
+    logo_url?: string;
+    settings?: Record<string, unknown>;
+  }>("/tenants/", {
+    method: "POST",
+    body: payload,
+    skipTenantHeader: true,
+  });
+  return {
+    id: data.id,
+    name: data.name,
+    slug: data.slug,
+    code: data.code,
+    type: data.type,
+    logoUrl: data.logo_url,
+    settings: data.settings,
+  };
 }
 
 export interface TenantInfo {
@@ -154,8 +190,22 @@ export async function listTenantMembers(id: string): Promise<TenantMemberRecord[
   return apiFetch<TenantMemberRecord[]>(`/tenants/${id}/members`);
 }
 
+/** All tenant roles (follows pagination until `total` is reached). */
 export async function listTenantRoles(): Promise<TenantRoleRecord[]> {
-  return apiFetch<TenantRoleRecord[]>("/roles/");
+  const limit = 100;
+  let skip = 0;
+  const all: TenantRoleRecord[] = [];
+  for (;;) {
+    const q = new URLSearchParams({
+      skip: String(skip),
+      limit: String(limit),
+    });
+    const page = await apiFetch<Paginated<TenantRoleRecord>>(`/roles/?${q}`);
+    all.push(...page.items);
+    if (page.items.length < limit || all.length >= page.total) break;
+    skip += limit;
+  }
+  return all;
 }
 
 export async function addTenantMember(

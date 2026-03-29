@@ -1,4 +1,11 @@
 import React, { useEffect, useRef, useState } from "react";
+import { useChildContextStudentId } from "../../../lib/childContext";
+import {
+  migrateLegacyLabProjectsIfNeeded,
+  readLabProjectsArray,
+  writeLabProjectsArray,
+} from "../../../lib/learnerLabStorage";
+import { useAuth } from "../../../providers/AuthProvider";
 import type * as Y from "yjs";
 import type { WebsocketProvider } from "y-websocket";
 import Tippy from "@tippyjs/react";
@@ -7,6 +14,7 @@ import "tippy.js/animations/shift-away.css";
 import { Application } from "pixi.js";
 import { GameManager } from "../lib/shared/GameManager";
 import { CircuitScene } from "../lib/circuit/CircuitScene";
+import { emitLabEvent, emitLabEventThrottled } from "../../../lib/api/gamification";
 import {
   Zap,
   Play,
@@ -29,15 +37,9 @@ const tipProps = {
   duration: [200, 150] as [number, number],
 };
 
-const CM_PROJECTS_KEY = "stemplitude_circuitmaker_projects";
+const CM_PROJECTS_BASE_KEY = "stemplitude_circuitmaker_projects";
 
-const loadProjectsFromStorage = () => {
-  try {
-    return JSON.parse(localStorage.getItem(CM_PROJECTS_KEY) || "[]");
-  } catch {
-    return [];
-  }
-};
+const loadProjectsFromStorage = () => readLabProjectsArray(CM_PROJECTS_BASE_KEY);
 
 type Props = {
   exitPath?: string;
@@ -63,17 +65,48 @@ export const CircuitLabContainer: React.FC<Props> = ({
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
   const [showProjects, setShowProjects] = useState(false);
   const [savedProjects, setSavedProjects] = useState<any[]>([]);
+  const childCtx = useChildContextStudentId();
+  const { user } = useAuth();
+
+  useEffect(() => {
+    migrateLegacyLabProjectsIfNeeded(CM_PROJECTS_BASE_KEY);
+    setSavedProjects(loadProjectsFromStorage() as any[]);
+  }, [childCtx, user?.id, user?.subType]);
 
   const handleStartStop = () => {
     if (sceneRef.current) {
       (sceneRef.current as any).toggleSimulation?.();
       setIsSimulationRunning((r) => !r);
+      const outputs =
+        (sceneRef.current as any).getGamificationOutputSummary?.() ?? {};
+      emitLabEventThrottled({
+        lab_id: "circuit-maker",
+        lab_type: "circuit-maker",
+        event_type: "CIRCUIT_COMPLETE",
+        context: {
+          action: "toggle_simulation",
+          any_component: "any",
+          outputs,
+        },
+      }, 2500);
     }
   };
 
   const handleAnalyze = () => {
     if (sceneRef.current) {
       (sceneRef.current as any).runDCAnalysis?.();
+      const outputs =
+        (sceneRef.current as any).getGamificationOutputSummary?.() ?? {};
+      void emitLabEvent({
+        lab_id: "circuit-maker",
+        lab_type: "circuit-maker",
+        event_type: "CIRCUIT_COMPLETE",
+        context: {
+          action: "dc_analysis",
+          any_component: "any",
+          outputs,
+        },
+      });
     }
   };
 
@@ -90,6 +123,12 @@ export const CircuitLabContainer: React.FC<Props> = ({
   const handleClear = () => {
     if (sceneRef.current) {
       sceneRef.current.clearScene();
+      void emitLabEvent({
+        lab_id: "circuit-maker",
+        lab_type: "circuit-maker",
+        event_type: "OBJECT_ERROR",
+        context: { action: "clear_scene" },
+      });
     }
   };
 
@@ -105,7 +144,7 @@ export const CircuitLabContainer: React.FC<Props> = ({
     };
     if (idx >= 0) projects[idx] = project;
     else projects.unshift(project);
-    localStorage.setItem(CM_PROJECTS_KEY, JSON.stringify(projects));
+    writeLabProjectsArray(CM_PROJECTS_BASE_KEY, projects);
     setSavedProjects(projects);
     setSaveStatus("saved");
     setTimeout(() => setSaveStatus(null), 1500);
@@ -121,7 +160,7 @@ export const CircuitLabContainer: React.FC<Props> = ({
     const projects = loadProjectsFromStorage().filter(
       (p: any) => p.id !== id
     );
-    localStorage.setItem(CM_PROJECTS_KEY, JSON.stringify(projects));
+    writeLabProjectsArray(CM_PROJECTS_BASE_KEY, projects);
     setSavedProjects(projects);
   };
 

@@ -48,7 +48,7 @@ export function AdminDashboard() {
   const { tenant } = useTenant();
   const [loading, setLoading] = useState(true);
   const [activeClasses, setActiveClasses] = useState<
-    Array<{ id: string; name: string; students: number }>
+    Array<{ id: string; name: string; students: number; isLive: boolean }>
   >([]);
   const [allStudents, setAllStudents] = useState<StudentProfile[]>([]);
   const [totalUsers, setTotalUsers] = useState(0);
@@ -63,6 +63,10 @@ export function AdminDashboard() {
     [notifications],
   );
   const totalMembers = totalUsers + allStudents.length;
+  const ongoingClass = useMemo(
+    () => activeClasses.find((klass) => klass.isLive) ?? null,
+    [activeClasses],
+  );
 
   const tenantId = tenant?.id ?? user?.tenantId;
 
@@ -97,6 +101,9 @@ export function AdminDashboard() {
             id: classroom.id,
             name: classroom.name,
             students: roster.length,
+            isLive: classSessions
+              .find((entry) => entry.classroom.id === classroom.id)
+              ?.sessions.some((s) => isLiveSession(s.session_start, s.session_end, s.status)) ?? false,
           };
         }),
       );
@@ -120,7 +127,6 @@ export function AdminDashboard() {
     enabled: Boolean(user && tenantId),
     onSessionsInvalidate: loadDashboard,
     onNotificationsInvalidate: loadDashboard,
-    onMessagesInvalidate: loadDashboard,
   });
 
   return (
@@ -166,6 +172,41 @@ export function AdminDashboard() {
               <img src="/assets/cartoon-icons/bag.png" alt="" className="dashboard-bento__card-icon-img" aria-hidden />
             </div>
           </div>
+          {ongoingClass ? (
+            <div className="admin-dashboard__class-focus admin-dashboard__class-focus--live" aria-label="Ongoing class">
+              <div className="admin-dashboard__class-focus-top">
+                <span className="admin-dashboard__class-tag admin-dashboard__class-tag--active">Live Now</span>
+                <span className="admin-dashboard__class-focus-meta">{ongoingClass.students} students</span>
+              </div>
+              <h3 className="admin-dashboard__class-focus-title">{ongoingClass.name}</h3>
+              <Link
+                to={`/app/classrooms/${ongoingClass.id}/live`}
+                className="admin-dashboard__class-focus-cta admin-dashboard__class-focus-cta--live"
+              >
+                Open live room <ArrowRight size={18} aria-hidden />
+              </Link>
+            </div>
+          ) : (
+            <div className="admin-dashboard__class-focus admin-dashboard__class-focus--empty" aria-label="No live session">
+              <div className="admin-dashboard__class-focus-top">
+                <span className="admin-dashboard__class-tag admin-dashboard__class-tag--idle">
+                  {loading ? "Checking" : "No Live Session"}
+                </span>
+                <AlertTriangle size={16} aria-hidden />
+              </div>
+              <h3 className="admin-dashboard__class-focus-title">
+                {loading ? "Checking classrooms..." : "No class is live right now"}
+              </h3>
+              <p className="admin-dashboard__class-focus-sub">
+                {loading
+                  ? "Please wait while we fetch live session data."
+                  : "Start a session from any classroom to see it highlighted here."}
+              </p>
+              <Link to="/app/classrooms" className="admin-dashboard__class-focus-cta admin-dashboard__class-focus-cta--idle">
+                Open classrooms <ArrowRight size={16} aria-hidden />
+              </Link>
+            </div>
+          )}
           <Link
             to="/app/classrooms"
             className="dashboard-bento__card-action"
@@ -184,12 +225,17 @@ export function AdminDashboard() {
               </li>
             ) : activeClasses.map((c) => (
               <li key={c.id} className="admin-dashboard__class-item" role="listitem">
-                <div className="admin-dashboard__class-info">
-                  <span className="admin-dashboard__class-name">{c.name}</span>
-                  <span className="admin-dashboard__class-meta">
-                    {c.students} students
+                <Link to={`/app/classrooms/${c.id}`} className="admin-dashboard__class-link">
+                  <span className="admin-dashboard__class-info">
+                    <span className="admin-dashboard__class-name">{c.name}</span>
+                    <span className="admin-dashboard__class-meta">
+                      {c.students} students
+                    </span>
                   </span>
-                </div>
+                  <span className={`admin-dashboard__class-tag admin-dashboard__class-tag--${c.isLive ? "active" : "idle"}`}>
+                    {c.isLive ? "Live" : "Class"}
+                  </span>
+                </Link>
               </li>
             ))}
           </ul>

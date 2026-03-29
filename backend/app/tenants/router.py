@@ -32,6 +32,7 @@ from .schemas import (
     TenantResponse,
     TenantUpdate,
 )
+from .repository import MembershipRepository
 from .service import TenantService
 
 router = APIRouter()
@@ -94,10 +95,28 @@ async def get_tenant(
     id: UUID,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    _: None = require_permission("tenants", "view"),
+    identity: CurrentIdentity = Depends(get_current_identity),
 ):
-    """Get tenant details."""
-    _require_tenant_match(id, request)
+    """Get tenant details (``tenants:view`` or active membership in this tenant)."""
+    ctx = _require_tenant_match(id, request)
+    perms = getattr(ctx, "permissions", set()) or set()
+    if "tenants:view" not in perms and "tenants:*" not in perms:
+        if identity.sub_type != "user":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied",
+            )
+        m_repo = MembershipRepository(db)
+        m = await m_repo.get_by_user_tenant(identity.id, id)
+        allowed = m is not None and m.is_active
+        if not allowed and m is None:
+            ts = TenantService(db)
+            allowed = await ts.user_is_linked_parent_in_tenant(identity.id, id)
+        if not allowed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not a member of this organization",
+            )
     service = TenantService(db)
     tenant = await service.get_tenant(id)
     if not tenant:

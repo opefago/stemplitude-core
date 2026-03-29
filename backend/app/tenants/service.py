@@ -5,13 +5,14 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import CurrentIdentity, TenantContext
 from app.licenses.models import License, SeatUsage
 from app.roles.models import Permission, Role, RolePermission, UserRole
 from app.roles.defaults import DEFAULT_ROLES as ROLE_PERMISSION_MAP
-from app.students.models import StudentMembership
+from app.students.models import ParentStudent, StudentMembership
 from app.tenants.models import Membership, SupportAccessGrant, Tenant, TenantHierarchy, TenantLabSetting
 from app.users.models import User
 
@@ -81,6 +82,129 @@ class TenantService:
                 if perm:
                     self.session.add(RolePermission(role_id=role.id, permission_id=perm.id))
 
+    async def ensure_system_role(self, tenant_id: UUID, slug: str) -> Role | None:
+        """Create a missing tenant role from :mod:`app.roles.defaults` (idempotent)."""
+        if slug not in ROLE_PERMISSION_MAP:
+            logger.error("ensure_system_role: unknown slug=%s", slug)
+            return None
+        result = await self.session.execute(
+            select(Role).where(
+                Role.tenant_id == tenant_id,
+                Role.slug == slug,
+                Role.is_active == True,  # noqa: E712
+            )
+        )
+        existing = result.scalar_one_or_none()
+        if existing:
+            return existing
+
+        perm_result = await self.session.execute(select(Permission))
+        perms_by_key: dict[str, Permission] = {
+            f"{p.resource}:{p.action}": p for p in perm_result.scalars().all()
+        }
+        meta = ROLE_PERMISSION_MAP[slug]
+        name = meta["name"]
+        role = Role(
+            tenant_id=tenant_id,
+            name=name,
+            slug=slug,
+            is_system=True,
+        )
+        self.session.add(role)
+        await self.session.flush()
+        for key in meta.get("permissions", []):
+            perm = perms_by_key.get(key)
+            if perm:
+                self.session.add(RolePermission(role_id=role.id, permission_id=perm.id))
+        await self.session.flush()
+        logger.info("Ensured system role slug=%s tenant_id=%s", slug, tenant_id)
+        return role
+
+    async def ensure_parent_membership_role_if_linked(
+        self, user_id: UUID, tenant_id: UUID
+    ) -> bool:
+        """If membership has no role but user is a linked parent of a student in tenant, set Parent role."""
+        membership = await self.membership_repo.get_by_user_tenant(user_id, tenant_id)
+        if not membership or not membership.is_active or membership.role_id is not None:
+            return False
+
+        link = await self.session.execute(
+            select(ParentStudent.id)
+            .join(
+                StudentMembership,
+                StudentMembership.student_id == ParentStudent.student_id,
+            )
+            .where(
+                ParentStudent.user_id == user_id,
+                StudentMembership.tenant_id == tenant_id,
+                StudentMembership.is_active == True,  # noqa: E712
+            )
+            .limit(1)
+        )
+        if link.scalar_one_or_none() is None:
+            return False
+
+        role = await self.ensure_system_role(tenant_id, "parent")
+        if not role:
+            return False
+        membership.role_id = role.id
+        await self.session.flush()
+        logger.info(
+            "Repaired parent membership (was missing role_id) user=%s tenant=%s",
+            user_id,
+            tenant_id,
+        )
+        return True
+
+    async def user_is_linked_parent_in_tenant(self, user_id: UUID, tenant_id: UUID) -> bool:
+        """True if user has ParentStudent to a student with active StudentMembership in tenant."""
+        link = await self.session.execute(
+            select(ParentStudent.id)
+            .join(
+                StudentMembership,
+                StudentMembership.student_id == ParentStudent.student_id,
+            )
+            .where(
+                ParentStudent.user_id == user_id,
+                StudentMembership.tenant_id == tenant_id,
+                StudentMembership.is_active == True,  # noqa: E712
+            )
+            .limit(1)
+        )
+        return link.scalar_one_or_none() is not None
+
+    async def ensure_linked_parent_membership(self, user_id: UUID, tenant_id: UUID) -> bool:
+        """Create or repair Membership for linked guardians without a row (or missing role).
+
+        Returns True if this session should be committed (caller owns transaction).
+        """
+        membership = await self.membership_repo.get_by_user_tenant(user_id, tenant_id)
+        if membership:
+            if not membership.is_active:
+                return False
+            if membership.role_id is not None:
+                return False
+            return await self.ensure_parent_membership_role_if_linked(user_id, tenant_id)
+
+        if not await self.user_is_linked_parent_in_tenant(user_id, tenant_id):
+            return False
+
+        role = await self.ensure_system_role(tenant_id, "parent")
+        if not role:
+            return False
+        try:
+            await self.membership_repo.add_member(user_id, tenant_id, role.id)
+            await self.session.flush()
+            logger.info(
+                "Created parent membership from ParentStudent link user=%s tenant=%s",
+                user_id,
+                tenant_id,
+            )
+            return True
+        except IntegrityError:
+            await self.session.rollback()
+            return await self.ensure_parent_membership_role_if_linked(user_id, tenant_id)
+
     async def create_tenant(
         self,
         data: TenantCreate,
@@ -115,8 +239,8 @@ class TenantService:
         return tenant
 
     async def list_user_tenants(self, user_id: UUID) -> list[Tenant]:
-        """List tenants the user belongs to."""
-        return await self.repo.list_user_tenants(user_id)
+        """List tenants the user can open (membership or guardian of an enrolled student)."""
+        return await self.repo.list_user_accessible_tenants(user_id)
 
     async def get_tenant(self, tenant_id: UUID) -> Tenant | None:
         """Get tenant by ID."""

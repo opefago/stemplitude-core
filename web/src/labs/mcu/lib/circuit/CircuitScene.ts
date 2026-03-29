@@ -3626,6 +3626,69 @@ export class CircuitScene extends BaseScene {
   }
 
   /**
+   * Summary payload used by gamification rules to evaluate measurable outputs.
+   */
+  public getGamificationOutputSummary(): Record<string, unknown> {
+    let solverResults: unknown = {};
+    let currentTime = 0;
+    try {
+      solverResults = this.circuitSolver.getAnalysisResults();
+      currentTime = this.circuitSolver.getCurrentTime();
+    } catch {
+      // Keep fallback summary shape stable even if solver state is unavailable.
+    }
+
+    const components: Array<Record<string, unknown>> = [];
+    let totalCurrent = 0;
+    let totalAbsCurrent = 0;
+    let maxVoltage = Number.NEGATIVE_INFINITY;
+    let minVoltage = Number.POSITIVE_INFINITY;
+
+    this.gameObjects.forEach((obj) => {
+      if (!(obj instanceof CircuitComponent)) return;
+      const props = obj.getCircuitProperties();
+      const voltage = Number(props.voltage || 0);
+      const current = Number(props.current || 0);
+      totalCurrent += current;
+      totalAbsCurrent += Math.abs(current);
+      maxVoltage = Math.max(maxVoltage, voltage);
+      minVoltage = Math.min(minVoltage, voltage);
+      components.push({
+        id: obj.getName(),
+        type: obj.getComponentType(),
+        voltage_v: voltage,
+        current_a: current,
+        power_w: Number(props.power || 0),
+        burnt: Boolean(props.burnt),
+        glowing: Boolean(props.glowing),
+      });
+    });
+
+    return {
+      analysis_modes: ["dc", "transient"],
+      measurement_types: ["voltage", "current", "power"],
+      dc: {
+        available: true,
+        solver_results: solverResults,
+      },
+      transient: {
+        available: true,
+        simulation_running: this.isSimulationRunning,
+        time_s: currentTime,
+        step_s: this.timeStep,
+      },
+      outputs: {
+        component_count: components.length,
+        voltage_max_v: Number.isFinite(maxVoltage) ? maxVoltage : 0,
+        voltage_min_v: Number.isFinite(minVoltage) ? minVoltage : 0,
+        current_total_a: totalCurrent,
+        current_total_abs_a: totalAbsCurrent,
+        components,
+      },
+    };
+  }
+
+  /**
    * Show analysis results
    */
   private showAnalysisResults(results: any): void {

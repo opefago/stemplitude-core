@@ -35,6 +35,15 @@ interface TenantProviderProps {
   children: ReactNode;
 }
 
+function humanizeSlug(slug?: string): string {
+  if (!slug) return "";
+  return slug
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 export function TenantProvider({ children }: TenantProviderProps) {
   const { user } = useAuth();
   const [tenant, setTenantState] = useState<TenantInfo | null>(null);
@@ -73,10 +82,16 @@ export function TenantProvider({ children }: TenantProviderProps) {
     // We must also check token payload for first-render hydration, before `user` is set.
     if (user?.subType === "student" || tokenPayload?.sub_type === "student") {
       const tenantSlug = user?.tenantSlug ?? tokenPayload?.tenant_slug ?? "";
+      const tenantName =
+        user?.tenantName
+        || tokenPayload?.tenant_name
+        || tenantSlug
+        || humanizeSlug(tenantSlug)
+        || (tenantId ? `Tenant ${tenantId.slice(0, 8)}` : "Tenant");
       localStorage.setItem(TENANT_KEY, tenantId);
       setTenantState({
         id: tenantId,
-        name: "Your school",
+        name: tenantName,
         slug: tenantSlug,
         code: "",
         type: "school",

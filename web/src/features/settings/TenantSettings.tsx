@@ -15,11 +15,23 @@ import {
   type SupportAccessRoleOption,
   type SupportAccessUserOption,
 } from "../../lib/api/tenants";
+import {
+  getTenantGamificationConfig,
+  listGamificationGoals,
+  createGamificationGoal,
+  deleteGamificationGoal,
+  simulateLabEvent,
+  type GamificationGoal,
+  type GoalReward,
+  updateTenantGamificationConfig,
+  type TenantGamificationConfig,
+} from "../../lib/api/gamification";
 import { AppTooltip, KidDropdown, KidSwitch } from "../../components/ui";
 import {
   AttendanceSettings,
   type AttendanceConfig,
 } from "../classrooms/AttendanceSettings";
+import { GamificationPuzzleBuilder } from "./GamificationPuzzleBuilder";
 import "../../components/ui/ui.css";
 import "./settings.css";
 
@@ -73,12 +85,83 @@ const REWARD_INTENSITIES = [
   { value: "high", label: "High" },
 ];
 
+const GAMIFICATION_MODES = [
+  { value: "academic", label: "Academic (minimal gamification)" },
+  { value: "light", label: "Light gamification" },
+  { value: "balanced", label: "Balanced" },
+  { value: "full", label: "Full gamification" },
+];
+
+const LAB_EVENTS: Record<string, { value: string; label: string }[]> = {
+  "circuit-maker": [
+    { value: "OBJECT_CONNECTED", label: "Object connected" },
+    { value: "CIRCUIT_COMPLETE", label: "Circuit completed" },
+    { value: "OBJECT_ERROR", label: "Object error" },
+  ],
+  "design-maker": [
+    { value: "OBJECT_CREATED", label: "Object created" },
+    { value: "OBJECT_TRANSFORMED", label: "Object transformed" },
+    { value: "MODEL_COMPLETE", label: "Model complete" },
+  ],
+  "micro-maker": [
+    { value: "SENSOR_CONNECTED", label: "Sensor connected" },
+    { value: "CODE_DEPLOYED", label: "Code deployed" },
+    { value: "PROGRAM_COMPLETE", label: "Program complete" },
+  ],
+  "python-game": [
+    { value: "SCRIPT_RUN", label: "Script run" },
+    { value: "LEVEL_COMPLETE", label: "Level complete" },
+    { value: "BUG_FIXED", label: "Bug fixed" },
+  ],
+  "game-maker": [
+    { value: "SCENE_BUILT", label: "Scene built" },
+    { value: "LOGIC_CONNECTED", label: "Logic connected" },
+    { value: "GAME_COMPLETE", label: "Game complete" },
+  ],
+};
+
+const GOAL_TEMPLATES = [
+  {
+    key: "electronics-led",
+    label: "Electronics: Light an LED",
+    lab_type: "circuit-maker",
+    name: "Light an LED",
+    description: "Student successfully completes a safe LED circuit.",
+    eventType: "CIRCUIT_COMPLETE",
+  },
+  {
+    key: "electronics-series",
+    label: "Electronics: Build a series circuit",
+    lab_type: "circuit-maker",
+    name: "Build a series circuit",
+    description: "Student creates a valid series circuit connection path.",
+    eventType: "OBJECT_CONNECTED",
+  },
+  {
+    key: "design-mug",
+    label: "3D: Build a hollow mug",
+    lab_type: "design-maker",
+    name: "Build a hollow mug",
+    description: "Student builds mug shell and subtracts interior volume.",
+    eventType: "OBJECT_TRANSFORMED",
+  },
+  {
+    key: "design-handle",
+    label: "3D: Add handle",
+    lab_type: "design-maker",
+    name: "Add handle",
+    description: "Student unions a handle into the base model.",
+    eventType: "OBJECT_TRANSFORMED",
+  },
+];
+
 const REWARD_MIN_MS = 1000;
 const REWARD_MAX_DURATION_MS = 5000;
 const REWARD_MAX_BIG_WIN_POINTS = 200;
 const REWARD_LOW_MAX_MS = 3000;
 const REWARD_MEDIUM_MAX_MS = 4000;
 const REWARD_HIGH_MAX_MS = 5000;
+
 
 type RewardAnimationSettings = {
   enabled: boolean;
@@ -108,6 +191,17 @@ const DEFAULT_REWARD_SETTINGS: RewardAnimationSettings = {
   },
 };
 
+const DEFAULT_GAMIFICATION_CONFIG: TenantGamificationConfig = {
+  mode: "balanced",
+  enabled: true,
+  enabled_labs: [],
+  max_points_per_event: 50,
+  allow_badges: true,
+  allow_live_recognition: true,
+  allow_leaderboard: true,
+  allow_streaks: true,
+};
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.floor(value)));
 }
@@ -128,6 +222,7 @@ function clampRewardSettings(input: RewardAnimationSettings): RewardAnimationSet
     },
   };
 }
+
 
 function FieldHint({ title, description }: { title: string; description: string }) {
   return (
@@ -158,7 +253,15 @@ function SectionHeading({
   );
 }
 
-type TabId = "general" | "labs" | "ui" | "parent" | "attendance" | "rewards" | "support" | "danger";
+type TabId =
+  | "general"
+  | "labs"
+  | "ui"
+  | "parent"
+  | "attendance"
+  | "rewards"
+  | "support"
+  | "danger";
 
 const TABS: { id: TabId; label: string; iconSrc?: string; icon?: LucideIcon }[] = [
   { id: "general", label: "General", iconSrc: "/assets/cartoon-icons/settings.png" },
@@ -214,6 +317,31 @@ export function TenantSettings() {
   const [rewardSaving, setRewardSaving] = useState(false);
   const [rewardSaved, setRewardSaved] = useState(false);
   const [rewardError, setRewardError] = useState("");
+  const [gamificationCfg, setGamificationCfg] = useState<TenantGamificationConfig>(
+    DEFAULT_GAMIFICATION_CONFIG,
+  );
+  const [gamificationSaving, setGamificationSaving] = useState(false);
+  const [gamificationSaved, setGamificationSaved] = useState(false);
+  const [gamificationError, setGamificationError] = useState("");
+  const [goals, setGoals] = useState<GamificationGoal[]>([]);
+  const [goalLoading, setGoalLoading] = useState(false);
+  const [goalError, setGoalError] = useState("");
+  const [goalSaving, setGoalSaving] = useState(false);
+  const [goalName, setGoalName] = useState("");
+  const [selectedTemplateKey, setSelectedTemplateKey] = useState("");
+  const [goalDescription, setGoalDescription] = useState("");
+  const [goalLabType, setGoalLabType] = useState(LABS[0]?.id ?? "circuit-maker");
+  const [goalEventType, setGoalEventType] = useState("OBJECT_CONNECTED");
+  const [goalRewardType, setGoalRewardType] = useState<"points" | "reward">("points");
+  const [goalPoints, setGoalPoints] = useState(10);
+  const [goalRewardKind, setGoalRewardKind] = useState<"badge" | "hi-five" | "sticker" | "custom">("badge");
+  const [goalBadgeSlug, setGoalBadgeSlug] = useState("circuit_rookie");
+  const [simulateContextJson, setSimulateContextJson] = useState("{}");
+  const [simulateLoading, setSimulateLoading] = useState(false);
+  const [simulateResult, setSimulateResult] = useState<{
+    points_awarded_total: number;
+    matched_goals: Array<{ goal_name: string; points_awarded: number; reward_type: string }>;
+  } | null>(null);
 
   // Load attendance config from tenant settings on mount
   useEffect(() => {
@@ -228,6 +356,32 @@ export function TenantSettings() {
       }));
     }
   }, [tenant?.settings]);
+
+  useEffect(() => {
+    if (!tenant?.id) return;
+    let cancelled = false;
+    async function loadGamificationConfig() {
+      try {
+        const cfg = await getTenantGamificationConfig();
+        if (!cancelled) {
+          setGamificationCfg(cfg);
+        }
+      } catch {
+        if (!cancelled) {
+          setGamificationCfg(DEFAULT_GAMIFICATION_CONFIG);
+        }
+      }
+    }
+    void loadGamificationConfig();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenant?.id]);
+
+  useEffect(() => {
+    const defaultEvent = LAB_EVENTS[goalLabType]?.[0]?.value ?? "OBJECT_CONNECTED";
+    setGoalEventType(defaultEvent);
+  }, [goalLabType]);
 
   useEffect(() => {
     const raw =
@@ -331,6 +485,125 @@ export function TenantSettings() {
       );
     } finally {
       setRewardSaving(false);
+    }
+  };
+
+  const handleSaveGamification = async () => {
+    setGamificationSaving(true);
+    setGamificationSaved(false);
+    setGamificationError("");
+    try {
+      await updateTenantGamificationConfig(gamificationCfg);
+      setGamificationSaved(true);
+      setTimeout(() => setGamificationSaved(false), 2500);
+    } catch (error) {
+      setGamificationError(
+        error instanceof Error ? error.message : "Failed to save gamification settings.",
+      );
+    } finally {
+      setGamificationSaving(false);
+    }
+  };
+
+
+  const refreshGoals = async (labType?: string) => {
+    setGoalLoading(true);
+    setGoalError("");
+    try {
+      const list = await listGamificationGoals(
+        labType ? { lab_type: labType } : undefined,
+      );
+      setGoals(list);
+    } catch (error) {
+      setGoalError(error instanceof Error ? error.message : "Failed to load goals.");
+    } finally {
+      setGoalLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab !== "rewards") return;
+    void refreshGoals();
+  }, [activeTab]);
+
+  const handleApplyTemplate = () => {
+    const template = GOAL_TEMPLATES.find((item) => item.key === selectedTemplateKey);
+    if (!template) return;
+    setGoalLabType(template.lab_type);
+    setGoalName(template.name);
+    setGoalDescription(template.description);
+    setGoalEventType(template.eventType);
+    setGoalRewardType("points");
+    setGoalPoints(10);
+  };
+
+  const handleCreateGoal = async () => {
+    if (!goalName.trim()) {
+      setGoalError("Goal name is required.");
+      return;
+    }
+    setGoalSaving(true);
+    setGoalError("");
+    try {
+      const reward: GoalReward =
+        goalRewardType === "points"
+          ? { type: "points", value: Math.max(1, goalPoints) }
+          : { type: "reward", reward_kind: goalRewardKind, badge_slug: goalBadgeSlug || undefined };
+      await createGamificationGoal({
+        lab_type: goalLabType,
+        name: goalName.trim(),
+        description: goalDescription.trim(),
+        event_map: { events: [goalEventType], context_match: {} },
+        conditions: [],
+        reward,
+        is_active: true,
+      });
+      setGoalName("");
+      setGoalDescription("");
+      setGoalPoints(10);
+      setGoalRewardType("points");
+      await refreshGoals(goalLabType);
+    } catch (error) {
+      setGoalError(error instanceof Error ? error.message : "Failed to create goal.");
+    } finally {
+      setGoalSaving(false);
+    }
+  };
+
+  const handleDeleteGoal = async (goalId: string) => {
+    setGoalError("");
+    try {
+      await deleteGamificationGoal(goalId);
+      await refreshGoals(goalLabType);
+    } catch (error) {
+      setGoalError(error instanceof Error ? error.message : "Failed to delete goal.");
+    }
+  };
+
+  const handleSimulate = async () => {
+    setSimulateLoading(true);
+    setGoalError("");
+    setSimulateResult(null);
+    try {
+      const context = JSON.parse(simulateContextJson || "{}") as Record<string, unknown>;
+      const result = await simulateLabEvent({
+        lab_id: "preview-lab",
+        lab_type: goalLabType,
+        event_type: goalEventType,
+        context,
+      });
+      setSimulateResult({
+        points_awarded_total: result.points_awarded_total,
+        matched_goals: result.matched_goals.map((item) => ({
+          goal_name: item.goal_name,
+          points_awarded: item.points_awarded,
+          reward_type: item.reward_type,
+        })),
+      });
+    } catch (error) {
+      setGoalError(error instanceof Error ? error.message : "Simulation failed.");
+    } finally {
+      setSimulateLoading(false);
     }
   };
 
@@ -731,6 +1004,404 @@ export function TenantSettings() {
             <p className="tenant-settings__panel-desc">
               Configure global reward animation behavior for students across live class and app pages.
             </p>
+            {false ? (
+            <>
+            <div className="tenant-settings__support-card" style={{ marginBottom: 18 }}>
+              <h3 className="tenant-settings__support-title">Gamification Policy</h3>
+              <div className="tenant-settings__form tenant-settings__form--rewards">
+                <div className="tenant-settings__field">
+                  <label htmlFor="gamification-mode">
+                    <span className="tenant-settings__label-with-hint">
+                      Mode
+                      <FieldHint
+                        title="Gamification mode"
+                        description="Academic minimizes game mechanics. Full applies strongest point rewards."
+                      />
+                    </span>
+                  </label>
+                  <KidDropdown
+                    value={gamificationCfg.mode}
+                    onChange={(value) =>
+                      setGamificationCfg((prev) => ({
+                        ...prev,
+                        mode:
+                          value === "academic" ||
+                          value === "light" ||
+                          value === "balanced" ||
+                          value === "full"
+                            ? value
+                            : prev.mode,
+                      }))
+                    }
+                    fullWidth
+                    ariaLabel="Gamification mode"
+                    options={GAMIFICATION_MODES}
+                  />
+                </div>
+                <div className="tenant-settings__field">
+                  <label htmlFor="gamification-max-points">
+                    <span className="tenant-settings__label-with-hint">
+                      Max points per lab event
+                      <FieldHint
+                        title="Max points per lab event"
+                        description="Safety cap to prevent accidental oversized rewards from custom rules."
+                      />
+                    </span>
+                  </label>
+                  <input
+                    id="gamification-max-points"
+                    type="number"
+                    min={1}
+                    max={500}
+                    value={gamificationCfg.max_points_per_event}
+                    onChange={(event) =>
+                      setGamificationCfg((prev) => ({
+                        ...prev,
+                        max_points_per_event: clamp(
+                          Number(event.target.value) || 1,
+                          1,
+                          500,
+                        ),
+                      }))
+                    }
+                    className="tenant-settings__input"
+                  />
+                </div>
+              </div>
+              <div className="tenant-settings__toggles">
+                <div className="tenant-settings__toggle-row">
+                  <span className="tenant-settings__toggle-label">Enable gamification</span>
+                  <KidSwitch
+                    checked={gamificationCfg.enabled}
+                    onChange={(next) =>
+                      setGamificationCfg((prev) => ({ ...prev, enabled: next }))
+                    }
+                    ariaLabel="Enable gamification"
+                  />
+                </div>
+                <div className="tenant-settings__toggle-row">
+                  <span className="tenant-settings__toggle-label">Allow stickers</span>
+                  <KidSwitch
+                    checked={gamificationCfg.allow_badges}
+                    onChange={(next) =>
+                      setGamificationCfg((prev) => ({ ...prev, allow_badges: next }))
+                    }
+                    ariaLabel="Allow stickers"
+                  />
+                </div>
+                <div className="tenant-settings__toggle-row">
+                  <span className="tenant-settings__toggle-label">Allow leaderboard</span>
+                  <KidSwitch
+                    checked={gamificationCfg.allow_leaderboard}
+                    onChange={(next) =>
+                      setGamificationCfg((prev) => ({ ...prev, allow_leaderboard: next }))
+                    }
+                    ariaLabel="Allow leaderboard"
+                  />
+                </div>
+                <div className="tenant-settings__toggle-row">
+                  <span className="tenant-settings__toggle-label">Allow streaks</span>
+                  <KidSwitch
+                    checked={gamificationCfg.allow_streaks}
+                    onChange={(next) =>
+                      setGamificationCfg((prev) => ({ ...prev, allow_streaks: next }))
+                    }
+                    ariaLabel="Allow streaks"
+                  />
+                </div>
+                <div className="tenant-settings__toggle-row">
+                  <span className="tenant-settings__toggle-label">Allow live recognition popups</span>
+                  <KidSwitch
+                    checked={gamificationCfg.allow_live_recognition}
+                    onChange={(next) =>
+                      setGamificationCfg((prev) => ({
+                        ...prev,
+                        allow_live_recognition: next,
+                      }))
+                    }
+                    ariaLabel="Allow live recognition popups"
+                  />
+                </div>
+              </div>
+              <div className="tenant-settings__toggles" style={{ marginTop: 12 }}>
+                {LABS.map((lab) => {
+                  const enabled = gamificationCfg.enabled_labs.includes(lab.id);
+                  return (
+                    <div key={`gamification-lab-${lab.id}`} className="tenant-settings__toggle-row">
+                      <span className="tenant-settings__toggle-label">{lab.name} events</span>
+                      <KidSwitch
+                        checked={enabled}
+                        onChange={(next) =>
+                          setGamificationCfg((prev) => {
+                            const current = new Set(prev.enabled_labs);
+                            if (next) current.add(lab.id);
+                            else current.delete(lab.id);
+                            return { ...prev, enabled_labs: Array.from(current) };
+                          })
+                        }
+                        ariaLabel={`Enable ${lab.name} gamification events`}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+              {gamificationError ? (
+                <p className="tenant-settings__reward-error">{gamificationError}</p>
+              ) : null}
+              <div className="ui-form-actions" style={{ marginTop: 16 }}>
+                <button
+                  type="button"
+                  className="ui-btn ui-btn--primary"
+                  onClick={() => void handleSaveGamification()}
+                  disabled={gamificationSaving}
+                >
+                  {gamificationSaving
+                    ? "Saving…"
+                    : gamificationSaved
+                      ? "Saved!"
+                      : "Save Gamification Policy"}
+                </button>
+              </div>
+            </div>
+            <GamificationPuzzleBuilder />
+            <div className="tenant-settings__support-card" style={{ marginBottom: 18 }}>
+              <h3 className="tenant-settings__support-title">Goal Builder (Instructor-Friendly)</h3>
+              <p className="tenant-settings__panel-desc">
+                Create lab goals using templates or custom events. Choose points or rewards per goal.
+              </p>
+              <div className="tenant-settings__form tenant-settings__form--rewards">
+                <div className="tenant-settings__field">
+                  <label htmlFor="goal-template">Template</label>
+                  <KidDropdown
+                    value={selectedTemplateKey}
+                    onChange={setSelectedTemplateKey}
+                    fullWidth
+                    ariaLabel="Goal template"
+                    options={[
+                      { value: "", label: "Select a template" },
+                      ...GOAL_TEMPLATES.map((item) => ({ value: item.key, label: item.label })),
+                    ]}
+                  />
+                  <div className="ui-form-actions" style={{ marginTop: 8 }}>
+                    <button
+                      type="button"
+                      className="ui-btn ui-btn--ghost"
+                      onClick={handleApplyTemplate}
+                      disabled={!selectedTemplateKey}
+                    >
+                      Apply Template
+                    </button>
+                  </div>
+                </div>
+                <div className="tenant-settings__field">
+                  <label htmlFor="goal-lab-type">Lab type</label>
+                  <KidDropdown
+                    value={goalLabType}
+                    onChange={setGoalLabType}
+                    fullWidth
+                    ariaLabel="Goal lab type"
+                    options={LABS.map((lab) => ({ value: lab.id, label: lab.name }))}
+                  />
+                </div>
+                <div className="tenant-settings__field">
+                  <label htmlFor="goal-name">Goal name</label>
+                  <input
+                    id="goal-name"
+                    className="tenant-settings__input tenant-settings__input--wide"
+                    value={goalName}
+                    onChange={(event) => setGoalName(event.target.value)}
+                    placeholder="e.g. Light an LED"
+                  />
+                </div>
+                <div className="tenant-settings__field">
+                  <label htmlFor="goal-event-type">Event trigger</label>
+                  <KidDropdown
+                    value={goalEventType}
+                    onChange={setGoalEventType}
+                    fullWidth
+                    ariaLabel="Goal event type"
+                    options={(LAB_EVENTS[goalLabType] ?? LAB_EVENTS["circuit-maker"]).map((evt) => ({
+                      value: evt.value,
+                      label: evt.label,
+                    }))}
+                  />
+                </div>
+                <div className="tenant-settings__field">
+                  <label htmlFor="goal-description">Description</label>
+                  <input
+                    id="goal-description"
+                    className="tenant-settings__input tenant-settings__input--wide"
+                    value={goalDescription}
+                    onChange={(event) => setGoalDescription(event.target.value)}
+                    placeholder="Describe success criteria in simple terms"
+                  />
+                </div>
+                <div className="tenant-settings__field">
+                  <label htmlFor="goal-reward-type">Reward type</label>
+                  <KidDropdown
+                    value={goalRewardType}
+                    onChange={(value) => setGoalRewardType(value === "reward" ? "reward" : "points")}
+                    fullWidth
+                    ariaLabel="Goal reward type"
+                    options={[
+                      { value: "points", label: "Points" },
+                      { value: "reward", label: "Reward" },
+                    ]}
+                  />
+                </div>
+                {goalRewardType === "points" ? (
+                  <div className="tenant-settings__field">
+                    <label htmlFor="goal-points">Points</label>
+                    <input
+                      id="goal-points"
+                      type="number"
+                      min={1}
+                      max={500}
+                      className="tenant-settings__input"
+                      value={goalPoints}
+                      onChange={(event) =>
+                        setGoalPoints(clamp(Number(event.target.value) || 1, 1, 500))
+                      }
+                    />
+                  </div>
+                ) : (
+                  <>
+                    <div className="tenant-settings__field">
+                      <label htmlFor="goal-reward-kind">Reward kind</label>
+                      <KidDropdown
+                        value={goalRewardKind}
+                        onChange={(value) =>
+                          setGoalRewardKind(
+                            value === "hi-five" || value === "sticker" || value === "custom"
+                              ? value
+                              : "badge",
+                          )
+                        }
+                        fullWidth
+                        ariaLabel="Goal reward kind"
+                        options={[
+                          { value: "badge", label: "Sticker" },
+                          { value: "hi-five", label: "Hi-five" },
+                          { value: "sticker", label: "Sticker" },
+                          { value: "custom", label: "Custom image" },
+                        ]}
+                      />
+                    </div>
+                    <div className="tenant-settings__field">
+                      <label htmlFor="goal-badge-slug">Sticker slug (optional)</label>
+                      <input
+                        id="goal-badge-slug"
+                        className="tenant-settings__input tenant-settings__input--wide"
+                        value={goalBadgeSlug}
+                        onChange={(event) => setGoalBadgeSlug(event.target.value)}
+                        placeholder="e.g. circuit_master"
+                      />
+                    </div>
+                  </>
+                )}
+              </div>
+              <div className="ui-form-actions" style={{ marginTop: 16 }}>
+                <button
+                  type="button"
+                  className="ui-btn ui-btn--primary"
+                  onClick={() => void handleCreateGoal()}
+                  disabled={goalSaving}
+                >
+                  {goalSaving ? "Creating…" : "Create Goal"}
+                </button>
+              </div>
+              <div className="tenant-settings__field" style={{ marginTop: 16 }}>
+                <label htmlFor="goal-simulate-context">Simulation context (JSON)</label>
+                <input
+                  id="goal-simulate-context"
+                  className="tenant-settings__input tenant-settings__input--wide"
+                  value={simulateContextJson}
+                  onChange={(event) => setSimulateContextJson(event.target.value)}
+                />
+              </div>
+              <div className="ui-form-actions" style={{ marginTop: 10 }}>
+                <button
+                  type="button"
+                  className="ui-btn ui-btn--ghost"
+                  onClick={() => void handleSimulate()}
+                  disabled={simulateLoading}
+                >
+                  {simulateLoading ? "Simulating…" : "Preview / Simulate Rule Match"}
+                </button>
+              </div>
+              {simulateResult ? (
+                <div className="tenant-settings__support-message tenant-settings__support-message--success" style={{ marginTop: 12 }}>
+                  Matched {simulateResult.matched_goals.length} goal(s), total points preview: {simulateResult.points_awarded_total}
+                </div>
+              ) : null}
+              {goalError ? (
+                <p className="tenant-settings__reward-error">{goalError}</p>
+              ) : null}
+
+              <div style={{ marginTop: 16 }}>
+                <h4 className="tenant-settings__support-title" style={{ marginBottom: 8 }}>
+                  Existing goals
+                </h4>
+                {goalLoading ? (
+                  <p className="tenant-settings__panel-desc">Loading goals...</p>
+                ) : goals.length === 0 ? (
+                  <p className="tenant-settings__panel-desc">No goals yet for this tenant.</p>
+                ) : (
+                  <div className="tenant-settings__support-list">
+                    {goals.map((goal) => (
+                      <div key={goal.id} className="tenant-settings__support-item">
+                        <div className="tenant-settings__support-item-main">
+                          <div className="tenant-settings__support-item-name">
+                            {goal.name}
+                          </div>
+                          <div className="tenant-settings__support-item-meta">
+                            <span>{goal.lab_type}</span>
+                            <span>{goal.event_map?.events?.join(", ") || "No event"}</span>
+                            <span>
+                              {goal.reward.type === "points"
+                                ? `${goal.reward.value ?? 0} points`
+                                : `${goal.reward.reward_kind ?? "reward"}`}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="tenant-settings__support-item-actions">
+                          <span
+                            className={`tenant-settings__status-badge ${
+                              goal.is_active
+                                ? "tenant-settings__status-badge--active"
+                                : "tenant-settings__status-badge--inactive"
+                            }`}
+                          >
+                            {goal.is_active ? "Active" : "Inactive"}
+                          </span>
+                          <button
+                            type="button"
+                            className="tenant-settings__secondary-btn"
+                            onClick={() => void handleDeleteGoal(goal.id)}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+            </>
+            ) : (
+              <div className="tenant-settings__support-card" style={{ marginBottom: 18 }}>
+                <h3 className="tenant-settings__support-title">Gamification Moved</h3>
+                <p className="tenant-settings__panel-desc">
+                  Gamification policy and nested puzzle goal builder are now in the dedicated sidebar tab.
+                </p>
+                <div className="ui-form-actions">
+                  <a href="/app/gamification" className="ui-btn ui-btn--primary">
+                    Open Gamification Studio
+                  </a>
+                </div>
+              </div>
+            )}
             <div className="tenant-settings__toggles">
               <div
                 className="tenant-settings__toggle-row"

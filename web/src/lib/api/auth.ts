@@ -1,5 +1,5 @@
 import { apiFetch } from "./client";
-import { setTokens } from "../tokens";
+import { getRefreshToken, setTokens } from "../tokens";
 
 export interface LoginResponse {
   access_token: string;
@@ -14,6 +14,7 @@ export interface LoginResponse {
     sub_type: "user" | "student";
     tenant_id?: string;
     tenant_slug?: string;
+    tenant_name?: string;
   };
 }
 
@@ -23,8 +24,12 @@ export async function login(email: string, password: string): Promise<LoginRespo
     body: { email, password },
     skipAuth: true,
   });
-  if (data.access_token && data.refresh_token) {
-    setTokens(data.access_token, data.refresh_token);
+  if (data.access_token) {
+    const rt =
+      (data.refresh_token && String(data.refresh_token).trim()) ||
+      getRefreshToken()?.trim() ||
+      "";
+    setTokens(data.access_token, rt);
   }
   return data;
 }
@@ -44,8 +49,12 @@ export async function studentLogin(data: StudentLoginData): Promise<LoginRespons
     body: data,
     skipAuth: true,
   });
-  if (res.access_token && res.refresh_token) {
-    setTokens(res.access_token, res.refresh_token);
+  if (res.access_token) {
+    const rt =
+      (res.refresh_token && String(res.refresh_token).trim()) ||
+      getRefreshToken()?.trim() ||
+      "";
+    setTokens(res.access_token, rt);
   }
   return res;
 }
@@ -68,8 +77,12 @@ export async function onboard(data: OnboardData): Promise<LoginResponse> {
     body: data,
     skipAuth: true,
   });
-  if (res.access_token && res.refresh_token) {
-    setTokens(res.access_token, res.refresh_token);
+  if (res.access_token) {
+    const rt =
+      (res.refresh_token && String(res.refresh_token).trim()) ||
+      getRefreshToken()?.trim() ||
+      "";
+    setTokens(res.access_token, rt);
   }
   return res;
 }
@@ -87,8 +100,12 @@ export async function register(data: RegisterData): Promise<LoginResponse> {
     body: data,
     skipAuth: true,
   });
-  if (res.access_token && res.refresh_token) {
-    setTokens(res.access_token, res.refresh_token);
+  if (res.access_token) {
+    const rt =
+      (res.refresh_token && String(res.refresh_token).trim()) ||
+      getRefreshToken()?.trim() ||
+      "";
+    setTokens(res.access_token, rt);
   }
   return res;
 }

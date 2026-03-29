@@ -24,6 +24,9 @@ dist-ssr
 .env.test.local
 .env.production.local
 
+# Cursor
+.cursor/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

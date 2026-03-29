@@ -7,11 +7,14 @@ import { listPlans, type PlanRecord } from "../../lib/api/plans";
 import {
   createCheckoutSession,
   type BillingCycle,
+  listBillingProviders,
   listSubscriptionInvoices,
   listSubscriptions,
+  type BillingProviderOption,
   type InvoiceRecord,
   type SubscriptionRecord,
 } from "../../lib/api/subscriptions";
+import { useAuth } from "../../providers/AuthProvider";
 import "../../components/ui/ui.css";
 import "./settings.css";
 
@@ -71,6 +74,12 @@ function getProviderLabel(provider?: string | null): string {
 function normalizeBillingError(message: string): string {
   const text = message.trim().toLowerCase();
   if (
+    text.includes("tenant context required") ||
+    text.includes("x-tenant-id")
+  ) {
+    return "Choose an organization or school in the app (tenant), then open Billing again.";
+  }
+  if (
     text.includes("not authenticated") ||
     text.includes("session expired") ||
     text.includes("401")
@@ -81,6 +90,7 @@ function normalizeBillingError(message: string): string {
 }
 
 export function BillingPage() {
+  const { user, isLoading: authLoading } = useAuth();
   const hasLoadedBillingRef = useRef(false);
   const lastLoadedInvoiceSubscriptionRef = useRef<string | null>(null);
   const [plans, setPlans] = useState<PlanRecord[]>([]);
@@ -98,6 +108,22 @@ export function BillingPage() {
   const [affiliateCode, setAffiliateCode] = useState("");
   const [checkoutError, setCheckoutError] = useState("");
   const [checkoutInfo, setCheckoutInfo] = useState("");
+  const [billingProviders, setBillingProviders] = useState<BillingProviderOption[]>([]);
+  const [paymentProvider, setPaymentProvider] = useState("stripe");
+
+  useEffect(() => {
+    void listBillingProviders()
+      .then((rows) => {
+        setBillingProviders(rows);
+        const preferred = rows.find((r) => r.available_for_checkout);
+        if (preferred) {
+          setPaymentProvider((prev) =>
+            rows.some((r) => r.key === prev && r.available_for_checkout) ? prev : preferred.key,
+          );
+        }
+      })
+      .catch(() => setBillingProviders([]));
+  }, []);
 
   useEffect(() => {
     const query = new URLSearchParams(window.location.search);
@@ -110,6 +136,16 @@ export function BillingPage() {
   }, []);
 
   useEffect(() => {
+    if (authLoading) return;
+    if (!user) {
+      hasLoadedBillingRef.current = false;
+      setPlans([]);
+      setSubscriptions([]);
+      setSeatUsage([]);
+      setLoadError("");
+      setLoadingPlans(false);
+      return;
+    }
     if (hasLoadedBillingRef.current) {
       return;
     }
@@ -128,14 +164,14 @@ export function BillingPage() {
         }
         const [plansResult, subscriptionsResult, seatsResult] =
           await Promise.allSettled([
-            listPlans(),
+            listPlans({ limit: 100 }),
             listSubscriptions({ limit: 50 }),
             listSeatUsage(),
           ]);
         const errors: string[] = [];
 
         if (plansResult.status === "fulfilled") {
-          setPlans(plansResult.value);
+          setPlans(plansResult.value.items);
         } else {
           errors.push(
             plansResult.reason instanceof Error
@@ -167,14 +203,15 @@ export function BillingPage() {
         if (errors.length > 0) {
           setLoadError(errors.join(". "));
         }
-        if (plansResult.status === "fulfilled" && plansResult.value.length > 0) {
+        if (plansResult.status === "fulfilled" && plansResult.value.items.length > 0) {
           const current = subscriptionsResult.status === "fulfilled"
             ? selectCurrentSubscription(subscriptionsResult.value.items)
             : null;
+          const planItems = plansResult.value.items;
           const preferredPlanId =
-            current && plansResult.value.some((plan) => plan.id === current.plan_id)
+            current && planItems.some((plan) => plan.id === current.plan_id)
               ? current.plan_id
-              : plansResult.value[0].id;
+              : planItems[0].id;
           setSelectedPlanId((prev) => prev || preferredPlanId);
         }
       } catch (err) {
@@ -186,7 +223,7 @@ export function BillingPage() {
       }
     }
     void loadBillingData();
-  }, []);
+  }, [authLoading, user?.id]);
 
   const currentSubscription = useMemo(
     () => selectCurrentSubscription(subscriptions),
@@ -204,8 +241,8 @@ export function BillingPage() {
           setInvoices([]);
           return;
         }
-        const rows = await listSubscriptionInvoices(subscriptionId, { limit: 50 });
-        setInvoices(rows);
+        const page = await listSubscriptionInvoices(subscriptionId, { limit: 50 });
+        setInvoices(page.items);
       } catch (err) {
         const message =
           err instanceof Error ? err.message : "Unable to load billing history";
@@ -272,6 +309,41 @@ export function BillingPage() {
     return limit?.limit_value ?? null;
   }, [selectedPlan]);
 
+  const effectivePaymentProvider =
+    billingProviders.length === 0 ? "stripe" : paymentProvider;
+
+  const checkoutReadyForProvider = useMemo(() => {
+    if (!selectedPlan) return false;
+    if (effectivePaymentProvider === "stripe") {
+      if (billingCycle === "yearly") {
+        if (typeof selectedPlan.stripe_checkout_yearly_ready === "boolean") {
+          return selectedPlan.stripe_checkout_yearly_ready;
+        }
+        return Boolean((selectedPlan.stripe_price_id_yearly ?? "").trim());
+      }
+      if (typeof selectedPlan.stripe_checkout_monthly_ready === "boolean") {
+        return selectedPlan.stripe_checkout_monthly_ready;
+      }
+      return Boolean((selectedPlan.stripe_price_id_monthly ?? "").trim());
+    }
+    return false;
+  }, [selectedPlan, billingCycle, effectivePaymentProvider]);
+
+  const providerDropdownOptions = useMemo(
+    () =>
+      billingProviders.map((p) => ({
+        value: p.key,
+        label: p.available_for_checkout ? p.label : `${p.label} — not available`,
+        disabled: !p.available_for_checkout,
+      })),
+    [billingProviders],
+  );
+
+  const selectedProviderMeta = useMemo(
+    () => billingProviders.find((p) => p.key === effectivePaymentProvider),
+    [billingProviders, effectivePaymentProvider],
+  );
+
   const studentSeatUsage = useMemo(() => {
     return (
       seatUsage.find((row) => row.seat_type.toLowerCase() === "student") ??
@@ -301,10 +373,11 @@ export function BillingPage() {
       const response = await createCheckoutSession({
         plan_id: selectedPlanId,
         billing_cycle: billingCycle,
-        success_url: `${baseUrl}/app/settings/billing?checkout=success`,
-        cancel_url: `${baseUrl}/app/settings/billing?checkout=cancelled`,
+        success_url: `${baseUrl}/app/billing?checkout=success`,
+        cancel_url: `${baseUrl}/app/billing?checkout=cancelled`,
         promo_code: promoCode.trim() || null,
         affiliate_code: affiliateCode.trim() || null,
+        payment_provider: effectivePaymentProvider,
       });
       if (response.url) {
         window.location.assign(response.url);
@@ -445,6 +518,18 @@ export function BillingPage() {
           <section className="billing-page__checkout-panel" aria-label="Checkout options">
             <div className="billing-page__checkout-grid">
               <label className="billing-page__field">
+                <span>Payment method</span>
+                <KidDropdown
+                  value={paymentProvider}
+                  options={providerDropdownOptions}
+                  onChange={setPaymentProvider}
+                  ariaLabel="Payment provider"
+                  placeholder="Select provider"
+                  disabled={startingCheckout || providerDropdownOptions.length === 0}
+                  fullWidth
+                />
+              </label>
+              <label className="billing-page__field">
                 <span>Plan</span>
                 <KidDropdown
                   value={selectedPlanId}
@@ -501,6 +586,22 @@ export function BillingPage() {
                 {selectedSeats != null ? ` • Up to ${selectedSeats} students` : ""}
               </p>
             )}
+            {selectedPlan && effectivePaymentProvider === "stripe" && !checkoutReadyForProvider && (
+              <p className="billing-page__flash billing-page__flash--error">
+                Stripe checkout isn’t set up for this plan’s {billingCycle} billing yet. Add
+                stripe_price_id_{billingCycle === "yearly" ? "yearly" : "monthly"} in{" "}
+                backend/config/plan_registry.json (then run{" "}
+                <code className="billing-page__code">python -m app.manage db seed</code>) or update the
+                plan in the database. In local development you can set{" "}
+                STRIPE_DEV_FALLBACK_PRICE_MONTHLY / STRIPE_DEV_FALLBACK_PRICE_YEARLY in backend{" "}
+                <code className="billing-page__code">.env</code>.
+              </p>
+            )}
+            {selectedProviderMeta?.description && (
+              <p className="billing-page__usage-text" style={{ marginTop: "0.5rem" }}>
+                {selectedProviderMeta.description}
+              </p>
+            )}
             {checkoutError && (
               <p className="billing-page__flash billing-page__flash--error">{checkoutError}</p>
             )}
@@ -515,7 +616,12 @@ export function BillingPage() {
             type="button"
             className="billing-page__btn-primary"
             onClick={() => void handleStartCheckout()}
-            disabled={loadingPlans || startingCheckout || !selectedPlanId}
+            disabled={
+              loadingPlans ||
+              startingCheckout ||
+              !selectedPlanId ||
+              !checkoutReadyForProvider
+            }
           >
             <TrendingUp size={18} aria-hidden />
             {startingCheckout ? "Starting checkout..." : "Upgrade Plan"}

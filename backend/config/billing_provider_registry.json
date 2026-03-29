@@ -1,0 +1,17 @@
+{
+  "_comment": "Which payment providers appear in the API/UI. Each key must have a matching entry in app.subscriptions.billing_provider._REGISTRY (Python). Remove a provider from this list to hide it; add a row here and register the class to support a new provider.",
+  "providers": [
+    {
+      "key": "stripe",
+      "label": "Card (Stripe)",
+      "description": "Credit and debit cards, Apple Pay, Google Pay",
+      "implements_subscription_checkout": true
+    },
+    {
+      "key": "paypal",
+      "label": "PayPal",
+      "description": "PayPal balance or linked card — subscription checkout coming soon",
+      "implements_subscription_checkout": false
+    }
+  ]
+}

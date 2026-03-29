@@ -98,6 +98,23 @@ class StudentRepository:
         )
         return list(result.scalars().all())
 
+    async def list_students_for_parent_user(
+        self, *, parent_user_id: UUID, tenant_id: UUID
+    ) -> list[Student]:
+        """Students linked via ParentStudent with an active membership in ``tenant_id``."""
+        result = await self.session.execute(
+            select(Student)
+            .join(ParentStudent, ParentStudent.student_id == Student.id)
+            .join(StudentMembership, StudentMembership.student_id == Student.id)
+            .where(
+                ParentStudent.user_id == parent_user_id,
+                StudentMembership.tenant_id == tenant_id,
+                StudentMembership.is_active == True,  # noqa: E712
+            )
+            .distinct()
+        )
+        return list(result.scalars().all())
+
     async def get_parent_link(
         self, user_id: UUID, student_id: UUID
     ) -> ParentStudent | None:
@@ -247,6 +264,33 @@ class StudentRepository:
             )
             .where(
                 ClassroomStudent.student_id.in_(child_ids_subq),
+                ClassroomSession.tenant_id == tenant_id,
+                ClassroomSession.session_start > now,
+                ClassroomSession.status != "canceled",
+            )
+            .order_by(ClassroomSession.session_start.asc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def list_upcoming_sessions_for_student_ids(
+        self,
+        *,
+        student_ids: list[UUID],
+        tenant_id: UUID,
+        now,
+        limit: int,
+    ) -> list[ClassroomSession]:
+        if not student_ids:
+            return []
+        result = await self.session.execute(
+            select(ClassroomSession)
+            .join(
+                ClassroomStudent,
+                ClassroomSession.classroom_id == ClassroomStudent.classroom_id,
+            )
+            .where(
+                ClassroomStudent.student_id.in_(student_ids),
                 ClassroomSession.tenant_id == tenant_id,
                 ClassroomSession.session_start > now,
                 ClassroomSession.status != "canceled",

@@ -1,4 +1,5 @@
 import { apiFetch } from "./client";
+import type { Paginated } from "./pagination";
 
 export type BillingCycle = "monthly" | "yearly";
 
@@ -47,11 +48,26 @@ export interface CreateCheckoutPayload {
   billing_cycle: BillingCycle;
   promo_code?: string | null;
   affiliate_code?: string | null;
+  /** e.g. stripe, paypal — use GET /subscriptions/billing-providers */
+  payment_provider?: string;
 }
 
 export interface CheckoutSessionResponse {
   session_id: string;
   url?: string | null;
+  payment_provider?: string;
+}
+
+export interface BillingProviderOption {
+  key: string;
+  label: string;
+  description: string;
+  configured: boolean;
+  available_for_checkout: boolean;
+}
+
+export async function listBillingProviders(): Promise<BillingProviderOption[]> {
+  return apiFetch<BillingProviderOption[]>("/subscriptions/billing-providers");
 }
 
 export async function createCheckoutSession(
@@ -74,14 +90,16 @@ export async function listSubscriptions(params?: {
   if (params?.limit != null) {
     query.set("limit", String(params.limit));
   }
-  const suffix = query.toString() ? `?${query.toString()}` : "";
-  return apiFetch<SubscriptionListResponse>(`/subscriptions${suffix}`);
+  const q = query.toString();
+  // Trailing `/` avoids a slash redirect whose Location can be :8000 under the Vite proxy (drops Authorization).
+  const path = q ? `/subscriptions/?${q}` : "/subscriptions/";
+  return apiFetch<SubscriptionListResponse>(path);
 }
 
 export async function listSubscriptionInvoices(
   subscriptionId: string,
   params?: { skip?: number; limit?: number },
-): Promise<InvoiceRecord[]> {
+): Promise<Paginated<InvoiceRecord>> {
   const query = new URLSearchParams();
   if (params?.skip != null) {
     query.set("skip", String(params.skip));
@@ -90,8 +108,7 @@ export async function listSubscriptionInvoices(
     query.set("limit", String(params.limit));
   }
   const suffix = query.toString() ? `?${query.toString()}` : "";
-  return apiFetch<InvoiceRecord[]>(
+  return apiFetch<Paginated<InvoiceRecord>>(
     `/subscriptions/${subscriptionId}/invoices${suffix}`,
   );
 }
-

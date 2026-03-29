@@ -177,6 +177,25 @@ export function SuperAdminDashboard() {
           </span>
         </Link>
 
+        <Link
+          to="/app/platform/member-billing-fees"
+          className="dashboard-bento__card dashboard-bento__card-link dashboard-bento__card--orange"
+          aria-label="Open Stripe member billing fees"
+        >
+          <div className="dashboard-bento__card-header">
+            <h2 className="dashboard-bento__card-title">Member billing fees</h2>
+            <div className="dashboard-bento__card-icon">
+              <DollarSign size={24} aria-hidden />
+            </div>
+          </div>
+          <p className="dashboard-bento__card-desc">
+            Platform default and per-organization Stripe Connect application fees
+          </p>
+          <span className="dashboard-bento__card-action">
+            Configure fees <ArrowRight size={14} aria-hidden />
+          </span>
+        </Link>
+
         {/* Usage Analytics */}
         <div className="dashboard-bento__card dashboard-bento__card--green">
           <div className="dashboard-bento__card-header">

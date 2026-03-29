@@ -7,9 +7,12 @@ from uuid import UUID
 
 from fastapi import APIRouter, WebSocket, status
 
-from app.auth.repository import AuthRepository
-from app.database import async_session_factory
-from app.realtime.auth import decode_ws_identity, get_ws_tenant, get_ws_token
+from app.realtime.auth import (
+    decode_ws_identity,
+    get_ws_tenant,
+    get_ws_token,
+    ws_principal_allowed_for_tenant,
+)
 from app.realtime.gateway import CommandDispatchResult, GatewaySettings, run_redis_websocket_gateway
 from app.realtime.user_events import user_realtime_channel
 
@@ -30,37 +33,57 @@ async def tenant_user_realtime_ws(websocket: WebSocket) -> None:
     token = get_ws_token(websocket)
     tenant_raw = get_ws_tenant(websocket)
     if not token or not tenant_raw:
+        logger.debug(
+            "user_realtime_ws reject=missing_auth_context has_token=%s has_tenant_param=%s",
+            bool(token),
+            bool(tenant_raw),
+        )
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Missing auth context")
         return
 
     try:
         tenant_id = UUID(tenant_raw)
     except ValueError:
+        logger.debug("user_realtime_ws reject=invalid_tenant_uuid tenant_raw=%r", tenant_raw)
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Invalid tenant")
         return
 
     identity = await decode_ws_identity(token)
     if not identity:
+        logger.debug("user_realtime_ws reject=invalid_or_revoked_token tenant_id=%s", tenant_id)
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Invalid token")
         return
 
-    if identity.tenant_id and identity.tenant_id != tenant_id:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Tenant mismatch")
+    child_student_id = None
+    raw_child = (websocket.query_params.get("child_context") or "").strip()
+    if raw_child:
+        try:
+            child_student_id = UUID(raw_child)
+        except ValueError:
+            logger.debug(
+                "user_realtime_ws ignore invalid child_context prefix=%r",
+                raw_child[:16],
+            )
+
+    allowed = await ws_principal_allowed_for_tenant(identity, tenant_id, child_student_id)
+    if not allowed:
+        logger.debug(
+            "user_realtime_ws reject=tenant_not_allowed principal_id=%s sub_type=%s "
+            "jwt_tenant_id=%s requested_tenant_id=%s",
+            identity.id,
+            identity.sub_type,
+            identity.tenant_id,
+            tenant_id,
+        )
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Missing tenant")
         return
 
-    if not identity.tenant_id and not identity.is_super_admin:
-        is_member = False
-        async with async_session_factory() as db:
-            repo = AuthRepository(db)
-            if identity.sub_type == "student":
-                membership = await repo.get_student_membership(identity.id, tenant_id)
-                is_member = membership is not None
-            elif identity.sub_type == "user":
-                membership = await repo.get_active_membership(identity.id, tenant_id)
-                is_member = membership is not None
-        if not is_member:
-            await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Missing tenant")
-            return
+    logger.debug(
+        "user_realtime_ws accept principal_id=%s sub_type=%s tenant_id=%s",
+        identity.id,
+        identity.sub_type,
+        tenant_id,
+    )
 
     channel = user_realtime_channel(tenant_id, identity.id)
 

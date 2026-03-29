@@ -625,6 +625,55 @@
   color: var(--color-text);
 }
 
+.job-worker__banner--action {
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+}
+
+.job-worker__banner--success {
+  background: linear-gradient(180deg, rgba(34, 197, 94, 0.12) 0%, var(--color-surface) 100%);
+  border: 3px solid #22c55e;
+  color: var(--color-text);
+}
+
+.job-worker__banner--error {
+  background: linear-gradient(180deg, rgba(255, 75, 75, 0.08) 0%, var(--color-surface) 100%);
+  border: 3px solid var(--color-error);
+  color: var(--color-text);
+}
+
+.job-worker__banner-text {
+  flex: 1;
+  min-width: 12rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.job-worker__banner-dismiss {
+  flex-shrink: 0;
+  padding: var(--spacing-xs) var(--spacing-md);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  cursor: pointer;
+}
+
+.job-worker__banner-dismiss:hover {
+  border-color: var(--color-text-secondary);
+}
+
+.job-worker__celery-task-name {
+  display: block;
+  margin-top: var(--spacing-xs);
+  font-size: 0.75rem;
+  font-family: ui-monospace, monospace;
+  color: var(--color-text-secondary);
+  font-weight: 500;
+}
+
 /* Result preview / JSON */
 .job-worker__result-preview {
   margin: 0 0 var(--spacing-md);
@@ -654,6 +703,21 @@
   word-break: break-word;
   max-height: 300px;
   overflow-y: auto;
+}
+
+.job-worker__logs-panel .job-worker__logs-title:not(:first-child) {
+  margin-top: var(--spacing-md);
+}
+
+.job-worker__detail-hint {
+  margin: var(--spacing-md) 0 0;
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+  line-height: 1.45;
+}
+
+.job-worker__detail-hint code {
+  font-size: 0.85em;
 }
 
 /* Job Types grid */

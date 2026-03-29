@@ -25,6 +25,7 @@
     { "resource": "notifications", "action": "update" },
     { "resource": "messages", "action": "view" },
     { "resource": "messages", "action": "create" },
+    { "resource": "messages", "action": "update" },
     { "resource": "messages", "action": "edit" },
     { "resource": "messages", "action": "delete" },
     { "resource": "attendance", "action": "view" },
@@ -58,6 +59,9 @@
     { "resource": "gamification", "action": "view" },
     { "resource": "gamification", "action": "create" },
     { "resource": "gamification", "action": "edit" },
-    { "resource": "gamification", "action": "delete" }
+    { "resource": "gamification", "action": "delete" },
+    { "resource": "member_billing", "action": "view" },
+    { "resource": "member_billing", "action": "manage" },
+    { "resource": "member_billing", "action": "collect" }
   ]
 }

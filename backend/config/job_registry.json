@@ -16,7 +16,7 @@
       }
     },
     "email.send": {
-      "task_path": "workers.tasks.email_tasks.send_email_task",
+      "task_path": "email.send",
       "queue": "default",
       "runtime": "python",
       "max_retries": 3,
@@ -27,7 +27,11 @@
         "recipient": { "type": "string", "required": true, "description": "Recipient email address" },
         "subject": { "type": "string", "required": true, "description": "Email subject line" },
         "body": { "type": "string", "required": true, "description": "Plain text body" },
-        "html_body": { "type": "string", "required": false, "description": "Optional HTML body" }
+        "html_body": { "type": "string", "required": false, "description": "Optional HTML body" },
+        "tenant_id": { "type": "string", "required": false, "description": "Tenant UUID for provider resolution and optional-mail suppression scope" },
+        "route_key": { "type": "string", "required": false, "description": "Template/route slug for compliance footer and unsubscribe (see app.email.presets)" },
+        "attachments": { "type": "array", "required": false, "description": "Optional list of attachment payloads (see app.email.attachments.attachments_from_task_payload)" },
+        "list_unsubscribe_url": { "type": "string", "required": false, "description": "RFC 8058 one-click HTTPS URL for List-Unsubscribe header" }
       }
     },
     "notification.create": {
@@ -166,7 +170,7 @@
       "max_retries": 0,
       "retry_delay_seconds": 0,
       "dedup_ttl_seconds": 300,
-      "description": "Remove orphaned files from S3 that have no database reference",
+      "description": "Repair DB rows referencing missing S3/R2 objects; delete storage keys not referenced by DB",
       "schedule": { "type": "crontab", "hour": "4", "minute": "0", "day_of_week": "sunday" }
     },
     "cron.cleanup_audit_events": {
@@ -188,6 +192,26 @@
       "dedup_ttl_seconds": 300,
       "description": "Delete in-app notifications past retention days and trim per-recipient overflow",
       "schedule": { "type": "crontab", "hour": "3", "minute": "15" }
+    },
+    "cron.cleanup_email_logs": {
+      "task_path": "workers.tasks.cleanup_tasks.cleanup_email_logs",
+      "queue": "default",
+      "runtime": "python",
+      "max_retries": 0,
+      "retry_delay_seconds": 0,
+      "dedup_ttl_seconds": 300,
+      "description": "Delete email_logs rows older than EMAIL_LOG_RETENTION_DAYS (batched)",
+      "schedule": { "type": "crontab", "hour": "3", "minute": "45" }
+    },
+    "cron.member_billing_renewal_reminders": {
+      "task_path": "workers.tasks.member_billing_tasks.member_billing_renewal_reminders",
+      "queue": "default",
+      "runtime": "python",
+      "max_retries": 0,
+      "retry_delay_seconds": 0,
+      "dedup_ttl_seconds": 3600,
+      "description": "Send membership renewal reminder emails for Stripe Connect member subscriptions",
+      "schedule": { "type": "crontab", "hour": "10", "minute": "0" }
     }
   }
 }

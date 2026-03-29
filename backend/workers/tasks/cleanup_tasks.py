@@ -1,5 +1,6 @@
 import logging
 
+from workers.async_db import run_async_db
 from workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -11,19 +12,19 @@ AUDIT_RETENTION_DAYS = 180
 def cleanup_audit_events():
     """Delete audit events older than the configured retention period."""
     logger.info("cleanup_audit_events started")
-    import asyncio
     from datetime import datetime, timedelta, timezone
-    from app.database import async_session_factory
     from app.audit.service import AuditService
 
     async def _cleanup():
+        import app.database as db_mod
+
         cutoff = datetime.now(timezone.utc) - timedelta(days=AUDIT_RETENTION_DAYS)
-        async with async_session_factory() as db:
+        async with db_mod.async_session_factory() as db:
             service = AuditService(db)
             result = await service.cleanup(cutoff)
             return result.deleted_count
 
-    deleted = asyncio.run(_cleanup())
+    deleted = run_async_db(_cleanup)
     logger.info("cleanup_audit_events completed deleted=%d", deleted)
     return {"deleted": deleted, "retention_days": AUDIT_RETENTION_DAYS}
 
@@ -39,6 +40,15 @@ def cleanup_expired_tokens():
     logger.info("cleanup_expired_tokens started")
     import asyncio
     from app.core.redis import get_redis
+
+    # ``get_redis()`` caches a client on the current event loop; each
+    # ``asyncio.run()`` uses a new loop, so drop the global before running.
+    try:
+        import app.core.redis as _redis_mod
+
+        _redis_mod.redis_client = None
+    except Exception:
+        pass
 
     async def _cleanup():
         redis = await get_redis()
@@ -63,26 +73,28 @@ def cleanup_expired_tokens():
 
 @celery_app.task
 def cleanup_orphan_blobs():
-    """Remove orphaned files from R2/S3 that have no database reference.
-
-    Lists objects under ``tenants/`` and ``global/``, compares to ``projects``,
-    ``assets``, and ``global_assets`` blob/thumbnail keys, and deletes extras.
+    """Blob maintenance: repair DB rows that reference missing objects, then remove
+    orphaned R2/S3 keys under ``tenants/`` and ``global/`` (not referenced by DB).
     """
     logger.info("cleanup_orphan_blobs started")
-    import asyncio
-
     from app.config import settings
     from app.core.blob_orphan_cleanup import run_orphan_blob_cleanup
 
-    result = asyncio.run(
-        run_orphan_blob_cleanup(dry_run=settings.BLOB_ORPHAN_CLEANUP_DRY_RUN)
-    )
+    async def _go():
+        return await run_orphan_blob_cleanup(
+            dry_run=settings.BLOB_ORPHAN_CLEANUP_DRY_RUN
+        )
+
+    result = run_async_db(_go)
+    dr = result.get("db_repair") or {}
     logger.info(
-        "cleanup_orphan_blobs completed scanned=%d removed=%d dry_run=%s referenced=%d",
+        "cleanup_orphan_blobs completed scanned=%d removed=%d dry_run=%s referenced=%d "
+        "db_repair=%s",
         result["scanned"],
         result["removed"],
         result["dry_run"],
         result["referenced_count"],
+        dr,
     )
     return result
 
@@ -91,14 +103,14 @@ def cleanup_orphan_blobs():
 def cleanup_expired_support_grants():
     """Mark expired support access grants as expired."""
     logger.info("cleanup_expired_support_grants started")
-    import asyncio
     from datetime import datetime, timezone
-    from sqlalchemy import select, update
-    from app.database import async_session_factory
+    from sqlalchemy import update
     from app.tenants.models import SupportAccessGrant
 
     async def _cleanup():
-        async with async_session_factory() as db:
+        import app.database as db_mod
+
+        async with db_mod.async_session_factory() as db:
             now = datetime.now(timezone.utc)
             result = await db.execute(
                 update(SupportAccessGrant)
@@ -111,7 +123,7 @@ def cleanup_expired_support_grants():
             await db.commit()
             return result.rowcount
 
-    count = asyncio.run(_cleanup())
+    count = run_async_db(_cleanup)
     logger.info("cleanup_expired_support_grants completed cleaned=%d", count)
 
 
@@ -119,21 +131,20 @@ def cleanup_expired_support_grants():
 def cleanup_notifications():
     """Delete in-app notifications older than retention and trim per-recipient overflow."""
     logger.info("cleanup_notifications started")
-    import asyncio
-
     from app.config import settings
-    from app.database import async_session_factory
     from app.notifications.retention import cleanup_notification_retention
 
     async def _cleanup():
-        async with async_session_factory() as db:
+        import app.database as db_mod
+
+        async with db_mod.async_session_factory() as db:
             return await cleanup_notification_retention(
                 db,
                 retention_days=settings.NOTIFICATION_RETENTION_DAYS,
                 max_per_recipient=settings.NOTIFICATION_MAX_PER_RECIPIENT,
             )
 
-    result = asyncio.run(_cleanup())
+    result = run_async_db(_cleanup)
     logger.info(
         "cleanup_notifications completed older_than=%d cap_user=%d cap_student=%d",
         result["deleted_older_than"],
@@ -141,3 +152,42 @@ def cleanup_notifications():
         result["capped_student_rows"],
     )
     return result
+
+
+@celery_app.task
+def cleanup_email_logs():
+    """Delete email delivery log rows older than :setting:`EMAIL_LOG_RETENTION_DAYS` (batched)."""
+    logger.info("cleanup_email_logs started")
+    from datetime import datetime, timedelta, timezone
+
+    from app.config import settings
+    from app.email.repository import EmailLogRepository
+
+    retention = int(settings.EMAIL_LOG_RETENTION_DAYS or 0)
+    if retention <= 0:
+        logger.info("cleanup_email_logs skipped (EMAIL_LOG_RETENTION_DAYS is 0)")
+        return {"deleted": 0, "skipped": True, "reason": "retention_disabled"}
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=retention)
+
+    async def _purge():
+        import app.database as db_mod
+
+        total = 0
+        async with db_mod.async_session_factory() as db:
+            repo = EmailLogRepository(db)
+            while True:
+                n = await repo.delete_batch_older_than(cutoff, batch_size=5000)
+                await db.commit()
+                if n <= 0:
+                    break
+                total += n
+        return total
+
+    deleted = run_async_db(_purge)
+    logger.info(
+        "cleanup_email_logs completed deleted=%d retention_days=%d",
+        deleted,
+        retention,
+    )
+    return {"deleted": deleted, "retention_days": retention}

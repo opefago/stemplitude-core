@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, Outlet, useParams } from "react-router-dom";
 import { Hash, MessageSquarePlus, Search, Users } from "lucide-react";
 import { useAuth } from "../../providers/AuthProvider";
@@ -6,8 +6,15 @@ import {
   listConversations,
   type Conversation,
 } from "../../lib/api/messaging";
+import {
+  listNotifications,
+  type NotificationRecord,
+} from "../../lib/api/notifications";
 import { ComposeModal } from "./ComposeModal";
+import { subscribeMessagesInvalidate } from "../../lib/messagesInvalidate";
 import "./messaging.css";
+
+type HubTab = "updates" | "messages" | "events" | "attendance";
 
 function timeAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -108,29 +115,69 @@ function ConvItem({ conv, active }: ConvItemProps) {
   );
 }
 
-export function Inbox() {
+export function Inbox({ variant = "default" }: { variant?: "default" | "parent" }) {
   const { id: activeId } = useParams<{ id: string }>();
   const { user } = useAuth();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [composeOpen, setComposeOpen] = useState(false);
+  const [hubTab, setHubTab] = useState<HubTab>("messages");
+  const [updates, setUpdates] = useState<NotificationRecord[]>([]);
+  const [updatesLoading, setUpdatesLoading] = useState(false);
+
+  const loadConversations = useCallback(async () => {
+    setLoading(true);
+    try {
+      const limit = 100;
+      let skip = 0;
+      const all: Conversation[] = [];
+      for (;;) {
+        const res = await listConversations({ skip, limit });
+        all.push(...res.items);
+        if (res.items.length < limit || all.length >= res.total) break;
+        skip += limit;
+      }
+      setConversations(all);
+    } catch {
+      /* keep prior list */
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
+    if (variant === "parent" && activeId) setHubTab("messages");
+  }, [variant, activeId]);
+
+  useEffect(() => {
+    void loadConversations();
+  }, [loadConversations]);
+
+  useEffect(() => {
+    return subscribeMessagesInvalidate(() => {
+      void loadConversations();
+    });
+  }, [loadConversations]);
+
+  useEffect(() => {
+    if (variant !== "parent" || hubTab !== "updates") return;
     let mounted = true;
-    setLoading(true);
-    listConversations()
+    setUpdatesLoading(true);
+    listNotifications({ limit: 40 })
       .then((res) => {
-        if (mounted) setConversations(res.items);
+        if (mounted) setUpdates(res.items);
       })
-      .catch(() => {})
+      .catch(() => {
+        if (mounted) setUpdates([]);
+      })
       .finally(() => {
-        if (mounted) setLoading(false);
+        if (mounted) setUpdatesLoading(false);
       });
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [variant, hubTab]);
 
   const filtered = conversations.filter((c) =>
     c.display_name.toLowerCase().includes(search.toLowerCase())
@@ -140,10 +187,100 @@ export function Inbox() {
   const directMessages = filtered.filter((c) => c.type === "dm");
 
   const hasConversation = !!activeId;
+  const isParentHub = variant === "parent";
 
   return (
-    <div className="msg-layout">
-      {/* ── Sidebar ────────────────────────────────────────────────────── */}
+    <div
+      className={
+        isParentHub ? "msg-layout msg-layout--parent-hub" : "msg-layout"
+      }
+    >
+      {isParentHub ? (
+        <div className="msg-hub-tabs" role="tablist" aria-label="Updates and messages">
+          {(
+            [
+              ["updates", "Updates"],
+              ["messages", "Messages"],
+              ["events", "Events"],
+              ["attendance", "Attendance"],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={hubTab === key}
+              className={`msg-hub-tabs__btn${hubTab === key ? " msg-hub-tabs__btn--active" : ""}`}
+              onClick={() => setHubTab(key)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {isParentHub && hubTab === "updates" ? (
+        <main className="msg-hub-panel" aria-label="Important updates">
+          <h2 className="msg-hub-panel__title">Important updates</h2>
+          <p className="msg-hub-panel__desc">
+            Notifications from your school and workspace. For threads, open the Messages
+            tab.
+          </p>
+          {updatesLoading ? (
+            <p className="msg-hub-panel__muted">Loading…</p>
+          ) : updates.length === 0 ? (
+            <p className="msg-hub-panel__muted">No notifications yet.</p>
+          ) : (
+            <ul className="msg-hub-updates" role="list">
+              {updates.map((n) => (
+                <li key={n.id} className="msg-hub-updates__item" role="listitem">
+                  <span className="msg-hub-updates__title">{n.title}</span>
+                  {n.body ? (
+                    <span className="msg-hub-updates__body">{n.body}</span>
+                  ) : null}
+                  <span className="msg-hub-updates__time">
+                    {timeAgo(n.created_at)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <Link to="/app/notifications" className="msg-hub-panel__link">
+            Open all notifications
+          </Link>
+        </main>
+      ) : null}
+
+      {isParentHub && hubTab === "events" ? (
+        <main className="msg-hub-panel" aria-label="Events">
+          <h2 className="msg-hub-panel__title">Events</h2>
+          <p className="msg-hub-panel__desc">
+            A calendar view and ICS hooks are planned. For now, see upcoming class sessions
+            on Home or under Classes.
+          </p>
+          <Link to="/app/classrooms" className="msg-hub-panel__link">
+            Go to classes
+          </Link>
+        </main>
+      ) : null}
+
+      {isParentHub && hubTab === "attendance" ? (
+        <main className="msg-hub-panel" aria-label="Attendance">
+          <h2 className="msg-hub-panel__title">Attendance</h2>
+          <p className="msg-hub-panel__desc">
+            Attendance summaries and parent excusal requests will appear here in a later
+            phase.
+          </p>
+        </main>
+      ) : null}
+
+      {/* ── Sidebar + compose + thread ──────────────────────────────────── */}
+      {(!isParentHub || hubTab === "messages") && (
+      <div
+        className={
+          isParentHub ? "msg-layout__split" : "msg-layout__split--pass"
+        }
+      >
       <aside className="msg-sidebar" aria-label="Conversations">
         <div className="msg-sidebar__header">
           <div className="msg-sidebar__title-row">
@@ -247,6 +384,8 @@ export function Inbox() {
           </div>
         )}
       </main>
+      </div>
+      )}
     </div>
   );
 }

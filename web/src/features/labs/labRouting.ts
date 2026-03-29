@@ -21,6 +21,7 @@ export function buildLabLaunchPath(
     classroomId?: string;
     sessionId?: string;
     referrer?: string;
+    assignmentId?: string;
   } = {},
 ): string {
   const match = resolveLabRoute(labNameOrId);
@@ -30,5 +31,6 @@ export function buildLabLaunchPath(
   if (opts.referrer) params.set("referrer", opts.referrer);
   if (opts.classroomId) params.set("classroom_id", opts.classroomId);
   if (opts.sessionId) params.set("session_id", opts.sessionId);
+  if (opts.assignmentId) params.set("assignment_id", opts.assignmentId);
   return `${match.route}?${params.toString()}`;
 }

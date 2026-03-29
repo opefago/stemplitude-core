@@ -8,18 +8,37 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from app.database import async_session_factory
+from app.middleware.path_skips import tenant_middleware_skip_paths
 from app.dependencies import TenantContext
+from app.roles.defaults import DEFAULT_ROLES
+from app.students.parent_access import guardian_may_use_child_context_in_tenant
+from app.tenants.service import TenantService
 from app.tenants.models import Tenant, Membership, TenantHierarchy
 from app.students.models import StudentMembership
 from app.roles.models import Role, RolePermission, Permission
 
 logger = logging.getLogger(__name__)
 
+NOTIFICATION_INBOX_PERMISSIONS = frozenset(
+    {"notifications:view", "notifications:update"}
+)
+
+# Seeded roles often omit these; guardians in a child's workspace may have no Membership row.
+GUARDIAN_SHELL_EXTRA_PERMISSIONS = frozenset(
+    {"tenants:view", *NOTIFICATION_INBOX_PERMISSIONS}
+)
+
+PARENT_ROLE_SLUGS_WITH_INBOX = frozenset({"parent", "homeschool_parent"})
+
+# Mark-read / conversation read receipts (routers use messages:update); seeded roles often omitted it.
+MESSAGE_RECEIPT_PERMISSIONS = frozenset({"messages:update"})
+ROLES_WITH_MESSAGE_RECEIPTS = frozenset({"parent", "homeschool_parent", "instructor"})
+
 
 class TenantMiddleware(BaseHTTPMiddleware):
     """Resolves X-Tenant-ID header (UUID, slug, or code) and attaches TenantContext."""
 
-    SKIP_PATHS = {"/health", "/api/docs", "/api/redoc", "/api/openapi.json", "/api/v1/subscriptions/webhook"}
+    SKIP_PATHS = tenant_middleware_skip_paths()
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         if request.url.path in self.SKIP_PATHS:
@@ -45,6 +64,11 @@ class TenantMiddleware(BaseHTTPMiddleware):
 
             if identity:
                 if identity.sub_type == "user":
+                    tenant_service = TenantService(session)
+                    if await tenant_service.ensure_linked_parent_membership(
+                        identity.id, tenant.id
+                    ):
+                        await session.commit()
                     role_slug, permissions = await self._resolve_user_role(
                         session, identity.id, tenant.id
                     )
@@ -56,6 +80,44 @@ class TenantMiddleware(BaseHTTPMiddleware):
                     role_slug, permissions = await self._resolve_impersonation_role(
                         session, identity
                     )
+
+            if (
+                identity
+                and identity.sub_type == "user"
+                and role_slug in PARENT_ROLE_SLUGS_WITH_INBOX
+            ):
+                permissions = set(permissions) | NOTIFICATION_INBOX_PERMISSIONS
+
+            if (
+                identity
+                and identity.sub_type == "user"
+                and role_slug in ROLES_WITH_MESSAGE_RECEIPTS
+            ):
+                permissions = set(permissions) | MESSAGE_RECEIPT_PERMISSIONS
+
+            if identity and identity.sub_type == "user":
+                raw_child = (request.headers.get("X-Child-Context") or "").strip()
+                if raw_child:
+                    try:
+                        child_id = UUID(raw_child)
+                    except ValueError:
+                        child_id = None
+                    if child_id and await guardian_may_use_child_context_in_tenant(
+                        session,
+                        identity=identity,
+                        student_id=child_id,
+                        tenant_id=tenant.id,
+                    ):
+                        perms = set(permissions)
+                        if not perms:
+                            jwt_role = (identity.role or "parent").strip().lower()
+                            if jwt_role not in DEFAULT_ROLES:
+                                jwt_role = "parent"
+                            perms = set(DEFAULT_ROLES[jwt_role]["permissions"])
+                            if not role_slug:
+                                role_slug = jwt_role
+                        perms |= GUARDIAN_SHELL_EXTRA_PERMISSIONS
+                        permissions = perms
 
             parent_tenant_id = None
             billing_mode = None

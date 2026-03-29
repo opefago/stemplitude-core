@@ -11,6 +11,7 @@ import {
   type ConversationMessage,
 } from "../../lib/api/messaging";
 import { GroupManageModal } from "./GroupManageModal";
+import { subscribeMessagesInvalidate } from "../../lib/messagesInvalidate";
 import "./messaging.css";
 
 function formatTime(iso: string): string {
@@ -104,38 +105,84 @@ export function ConversationThread() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const setConvFromOutletRef = useRef<OutletCtx["setConversations"] | undefined>(
+    undefined,
+  );
+  setConvFromOutletRef.current = ctx?.setConversations;
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
     messagesEndRef.current?.scrollIntoView({ behavior });
   }, []);
 
-  // Load conversation + messages
+  const mergeConversationIntoSidebar = useCallback((conv: Conversation | null) => {
+    if (!conv) return;
+    setConvFromOutletRef.current?.((prev) => {
+      const rest = prev.filter((c) => c.id !== conv.id);
+      return [conv, ...rest];
+    });
+  }, []);
+
   useEffect(() => {
     if (!id) return;
-    let mounted = true;
+    let cancelled = false;
     setLoading(true);
     setMessages([]);
     setConversation(null);
-
-    Promise.all([
-      getConversation(id),
-      listConversationMessages(id, { limit: 100 }),
-    ])
-      .then(([conv, msgs]) => {
-        if (!mounted) return;
-        setConversation(conv);
-        setMessages(msgs.items);
-        markConversationRead(id).catch(() => {});
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (mounted) setLoading(false);
-      });
-
+    void (async () => {
+      try {
+        const [conv, msgs] = await Promise.all([
+          getConversation(id),
+          listConversationMessages(id, { limit: 100 }),
+        ]);
+        if (cancelled) return;
+        if (!conv) {
+          setConversation(null);
+          setMessages([]);
+        } else {
+          setConversation(conv);
+          setMessages(msgs.items);
+          mergeConversationIntoSidebar(conv);
+        }
+        void markConversationRead(id).catch(() => {});
+      } catch {
+        if (!cancelled) {
+          setConversation(null);
+          setMessages([]);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
     return () => {
-      mounted = false;
+      cancelled = true;
     };
-  }, [id]);
+  }, [id, mergeConversationIntoSidebar]);
+
+  const refreshThreadSilent = useCallback(async () => {
+    if (!id) return;
+    try {
+      const [conv, msgs] = await Promise.all([
+        getConversation(id),
+        listConversationMessages(id, { limit: 100 }),
+      ]);
+      if (!conv) return;
+      setConversation(conv);
+      setMessages(msgs.items);
+      mergeConversationIntoSidebar(conv);
+      void markConversationRead(id).catch(() => {});
+    } catch {
+      /* keep showing prior messages */
+    }
+  }, [id, mergeConversationIntoSidebar]);
+
+  useEffect(() => {
+    return subscribeMessagesInvalidate((detail) => {
+      if (!id) return;
+      const cid = detail.conversation_id;
+      if (cid && cid !== id) return;
+      void refreshThreadSilent();
+    });
+  }, [id, refreshThreadSilent]);
 
   // Scroll to bottom when messages load/change
   useEffect(() => {

@@ -21,7 +21,12 @@ from app.classrooms.schemas import (
 from app.classrooms.service import ClassroomService
 from app.database import async_session_factory
 from app.dependencies import CurrentIdentity
-from app.realtime.auth import decode_ws_identity, get_ws_tenant, get_ws_token
+from app.realtime.auth import (
+    decode_ws_identity,
+    get_ws_tenant,
+    get_ws_token,
+    ws_principal_allowed_for_tenant,
+)
 from app.realtime.gateway import (
     CommandDispatchResult,
     GatewaySettings,
@@ -29,6 +34,7 @@ from app.realtime.gateway import (
     publish_channel_message,
     run_redis_websocket_gateway,
 )
+from app.students.parent_access import guardian_may_use_child_context_in_tenant
 from app.students.repository import StudentRepository
 from app.tenants.models import Membership
 
@@ -52,6 +58,8 @@ class RealtimeConnectionContext:
     session_id: UUID
     tenant_id: UUID
     channel: str
+    """When set, presence and student-originated session events use this learner (parent child mode)."""
+    student_actor_id: UUID | None = None
 
 
 CommandHandler = Callable[
@@ -129,16 +137,15 @@ async def _authorize_ws_access(
     identity: CurrentIdentity,
     classroom_id: UUID,
     tenant_id: UUID,
+    acting_student_id: UUID | None = None,
 ) -> bool:
     async with async_session_factory() as db:
+        classroom_repo = ClassroomRepository(db)
         if identity.sub_type == "student":
             repo = StudentRepository(db)
             enrollment = await repo.get_membership(identity.id, tenant_id)
             if not enrollment:
                 return False
-            from app.classrooms.repository import ClassroomRepository
-
-            classroom_repo = ClassroomRepository(db)
             row = await classroom_repo.get_enrollment(classroom_id, identity.id)
             return row is not None
 
@@ -149,7 +156,24 @@ async def _authorize_ws_access(
                 Membership.is_active == True,
             )
         )
-        return membership.first() is not None
+        if membership.first() is not None:
+            return True
+
+        if acting_student_id is None:
+            return False
+
+        role = (identity.role or "").strip().lower()
+        if role not in ("parent", "homeschool_parent"):
+            return False
+        if not await guardian_may_use_child_context_in_tenant(
+            db,
+            identity=identity,
+            student_id=acting_student_id,
+            tenant_id=tenant_id,
+        ):
+            return False
+        row = await classroom_repo.get_enrollment(classroom_id, acting_student_id)
+        return row is not None
 
 
 class ClassroomRealtimeCommandRouter:
@@ -202,6 +226,7 @@ class ClassroomRealtimeCommandRouter:
             tenant_id=context.tenant_id,
             identity=identity,
             data=SessionPresenceHeartbeatRequest(status="left"),
+            student_actor_id=context.student_actor_id,
         )
         return CommandDispatchResult(envelope=None, emit_presence=True)
 
@@ -243,6 +268,7 @@ class ClassroomRealtimeCommandRouter:
             event_type="help_request",
             payload={"note": note},
             correlation_id=correlation_id,
+            student_actor_id=context.student_actor_id,
         )
         return CommandDispatchResult(envelope=envelope)
 
@@ -262,6 +288,7 @@ class ClassroomRealtimeCommandRouter:
             identity=identity,
             data=data,
             correlation_id=correlation_id,
+            student_actor_id=context.student_actor_id,
         )
         replay = await service.replay_session_events(
             classroom_id=context.classroom_id,
@@ -318,6 +345,7 @@ class ClassroomRealtimeCommandRouter:
             identity=identity,
             active_lab=(str(msg.get("active_lab") or "") or None),
             correlation_id=correlation_id,
+            student_actor_id=context.student_actor_id,
         )
         return CommandDispatchResult(envelope=envelope)
 
@@ -339,6 +367,7 @@ class ClassroomRealtimeCommandRouter:
             identity=identity,
             assignment=assignment_payload,
             correlation_id=correlation_id,
+            student_actor_id=context.student_actor_id,
         )
         return CommandDispatchResult(envelope=envelope)
 
@@ -360,6 +389,7 @@ class ClassroomRealtimeCommandRouter:
             identity=identity,
             assignment_id=assignment_id,
             correlation_id=correlation_id,
+            student_actor_id=context.student_actor_id,
         )
         return CommandDispatchResult(envelope=envelope)
 
@@ -383,6 +413,7 @@ class ClassroomRealtimeCommandRouter:
             event_type=msg_type or "session.generic",
             payload=payload or {},
             correlation_id=correlation_id,
+            student_actor_id=context.student_actor_id,
         )
         return CommandDispatchResult(envelope=envelope)
 
@@ -411,14 +442,63 @@ async def classroom_session_ws_handler(
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Invalid token")
         return
 
-    if identity.tenant_id and identity.tenant_id != tenant_id:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Tenant mismatch")
+    if not await ws_principal_allowed_for_tenant(identity, tenant_id):
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Missing tenant")
         return
+
+    raw_student_actor = websocket.query_params.get("student_actor_id")
+    student_actor_id: UUID | None = None
+    if raw_student_actor:
+        try:
+            parsed_actor = UUID(str(raw_student_actor).strip())
+        except ValueError:
+            await websocket.close(
+                code=status.WS_1008_POLICY_VIOLATION,
+                reason="Invalid student_actor_id",
+            )
+            return
+        if identity.sub_type == "student":
+            if parsed_actor != identity.id:
+                await websocket.close(
+                    code=status.WS_1008_POLICY_VIOLATION,
+                    reason="student_actor_id mismatch",
+                )
+                return
+        elif identity.sub_type == "user":
+            role = (identity.role or "").strip().lower()
+            if role in ("parent", "homeschool_parent"):
+                async with async_session_factory() as db:
+                    if not await guardian_may_use_child_context_in_tenant(
+                        db,
+                        identity=identity,
+                        student_id=parsed_actor,
+                        tenant_id=tenant_id,
+                    ):
+                        await websocket.close(
+                            code=status.WS_1008_POLICY_VIOLATION,
+                            reason="Not allowed for this student",
+                        )
+                        return
+                    classroom_repo = ClassroomRepository(db)
+                    if await classroom_repo.get_enrollment(classroom_id, parsed_actor) is None:
+                        await websocket.close(
+                            code=status.WS_1008_POLICY_VIOLATION,
+                            reason="Student not in this class",
+                        )
+                        return
+                student_actor_id = parsed_actor
+        else:
+            await websocket.close(
+                code=status.WS_1008_POLICY_VIOLATION,
+                reason="Invalid principal for student_actor_id",
+            )
+            return
 
     is_authorized = await _authorize_ws_access(
         identity=identity,
         classroom_id=classroom_id,
         tenant_id=tenant_id,
+        acting_student_id=student_actor_id,
     )
     if not is_authorized and not identity.is_super_admin:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Access denied")
@@ -430,6 +510,7 @@ async def classroom_session_ws_handler(
         session_id=session_id,
         tenant_id=tenant_id,
         channel=channel,
+        student_actor_id=student_actor_id,
     )
     command_router = ClassroomRealtimeCommandRouter()
 
@@ -453,6 +534,7 @@ async def classroom_session_ws_handler(
                     tenant_id=tenant_id,
                     identity=identity,
                     data=SessionPresenceHeartbeatRequest(status="active"),
+                    student_actor_id=context.student_actor_id,
                 )
             await db.commit()
             return snapshot.model_dump(mode="json")
@@ -476,6 +558,7 @@ async def classroom_session_ws_handler(
                     tenant_id=tenant_id,
                     identity=identity,
                     data=SessionPresenceHeartbeatRequest(status="active"),
+                    student_actor_id=context.student_actor_id,
                 )
             await db.commit()
 
@@ -520,13 +603,15 @@ async def classroom_session_ws_handler(
         )
 
     async def handle_disconnect() -> None:
-        actor_type = ClassroomService._presence_actor_type(identity)
+        aid = context.student_actor_id
+        presence_actor_id = aid if aid is not None else identity.id
+        presence_actor_type = "student" if aid is not None else ClassroomService._presence_actor_type(identity)
         async with async_session_factory() as db:
             repo = ClassroomRepository(db)
             in_lab = await repo.get_presence_in_lab(
                 session_id=session_id,
-                actor_id=identity.id,
-                actor_type=actor_type,
+                actor_id=presence_actor_id,
+                actor_type=presence_actor_type,
             )
             if not in_lab:
                 service = ClassroomService(db)
@@ -536,6 +621,7 @@ async def classroom_session_ws_handler(
                     tenant_id=tenant_id,
                     identity=identity,
                     data=SessionPresenceHeartbeatRequest(status="left"),
+                    student_actor_id=context.student_actor_id,
                 )
             await db.commit()
         await emit_presence_update()
@@ -546,7 +632,10 @@ async def classroom_session_ws_handler(
         logger=logger,
         metrics=METRICS,
         settings=GatewaySettings(replay_limit=REPLAY_LIMIT),
-        connection_log_fields=f"session={session_id} actor={identity.id} tenant={tenant_id}",
+        connection_log_fields=(
+            f"session={session_id} actor={identity.id} tenant={tenant_id}"
+            + (f" student_actor={context.student_actor_id}" if context.student_actor_id else "")
+        ),
         bootstrap=bootstrap,
         handle_heartbeat=handle_heartbeat,
         handle_replay=handle_replay,

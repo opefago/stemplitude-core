@@ -1,4 +1,5 @@
-from datetime import date
+from datetime import date, datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
@@ -362,6 +363,10 @@ class ParentResponse(BaseModel):
         ...,
         description="Whether this parent is the primary contact",
     )
+    user_email: str | None = Field(
+        None,
+        description="Guardian email when loaded for admin UIs (billing, comms).",
+    )
 
 
 class ResetPasswordRequest(BaseModel):
@@ -394,3 +399,41 @@ class UsernameCheckResponse(BaseModel):
         ...,
         description="The username that was checked",
     )
+
+
+class ParentWeeklyDigest(BaseModel):
+    """Rolling-window counts for the parent dashboard."""
+
+    period_start: datetime
+    period_end: datetime
+    lessons_completed: int
+    labs_completed: int
+    badges_earned: int
+    xp_earned: int
+    sessions_attended: int
+    assignments_submitted: int = 0
+
+
+class ParentActivityItem(BaseModel):
+    kind: Literal[
+        "lesson_completed",
+        "lab_completed",
+        "assignment_submitted",
+        "sticker_earned",
+        "xp_earned",
+        "attendance",
+    ]
+    occurred_at: datetime
+    title: str
+    detail: str | None = None
+    ref_id: str | None = None
+    classroom_id: str | None = None
+    class_name: str | None = None
+
+
+class ParentChildActivityResponse(BaseModel):
+    items: list[ParentActivityItem]
+    weekly_digest: ParentWeeklyDigest
+    total: int = Field(0, ge=0, description="Total activity events in the merged feed")
+    skip: int = 0
+    limit: int = 40

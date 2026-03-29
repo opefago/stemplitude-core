@@ -40,7 +40,7 @@ async def seed_all():
         cap_data = _load_json("capability_registry.json")
         email_data = _load_json("email_provider_registry.json")
 
-        # --- Plans ---
+        # --- Plans (create missing; stripe IDs also synced from registry below) ---
         for plan_def in plan_data.get("plans", []):
             existing = await db.execute(
                 select(Plan).where(Plan.slug == plan_def["slug"])
@@ -54,6 +54,8 @@ async def seed_all():
                 type=plan_def["type"],
                 price_monthly=plan_def.get("price_monthly"),
                 price_yearly=plan_def.get("price_yearly"),
+                stripe_price_id_monthly=plan_def.get("stripe_price_id_monthly"),
+                stripe_price_id_yearly=plan_def.get("stripe_price_id_yearly"),
                 trial_days=plan_def.get("trial_days", 0),
             )
             db.add(plan)
@@ -72,6 +74,22 @@ async def seed_all():
                     limit_key=lim["limit_key"],
                     limit_value=lim["limit_value"],
                 ))
+
+        # Sync Stripe Price IDs from registry onto existing plans (non-empty JSON values only).
+        for plan_def in plan_data.get("plans", []):
+            slug = plan_def.get("slug")
+            if not slug:
+                continue
+            result = await db.execute(select(Plan).where(Plan.slug == slug))
+            plan = result.scalar_one_or_none()
+            if not plan:
+                continue
+            m_raw = plan_def.get("stripe_price_id_monthly")
+            if isinstance(m_raw, str) and m_raw.strip():
+                plan.stripe_price_id_monthly = m_raw.strip()
+            y_raw = plan_def.get("stripe_price_id_yearly")
+            if isinstance(y_raw, str) and y_raw.strip():
+                plan.stripe_price_id_yearly = y_raw.strip()
 
         # --- Permissions ---
         for perm_def in perm_data.get("permissions", []):

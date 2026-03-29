@@ -1,15 +1,17 @@
 .student-assignments {
-  padding: var(--spacing-lg);
+  padding: var(--spacing-md);
   max-width: 980px;
   margin: 0 auto;
 }
 
 .student-assignments__header h1 {
   margin: 0;
+  font-size: 1.75rem;
+  font-weight: 800;
 }
 
 .student-assignments__header p {
-  margin-top: 0.4rem;
+  margin-top: 0.3rem;
   color: var(--color-text-secondary);
 }
 
@@ -67,6 +69,28 @@
   color: var(--color-text-secondary);
 }
 
+.student-assignments__gate {
+  margin-top: 1rem;
+  padding: 1.25rem 1.5rem;
+}
+
+.student-assignments__gate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 1rem 0 0;
+}
+
+.student-assignments__gate-link {
+  font-weight: 600;
+  color: var(--color-primary, #0066ff);
+  text-decoration: none;
+}
+
+.student-assignments__gate-link:hover {
+  text-decoration: underline;
+}
+
 /* ── Redesigned assignment list ─────────────────────────────────────────── */
 
 .sa-section-title {
@@ -80,35 +104,40 @@
 }
 
 .sa-due-soon {
-  margin-bottom: 28px;
-  padding: 16px;
-  border-radius: 12px;
-  background: #fffbeb;
-  border: 1px solid #fde68a;
+  margin-bottom: 14px;
 }
 
 .sa-filter-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
-  margin-bottom: 14px;
+  margin-bottom: 10px;
+}
+
+.sa-filter-row--secondary {
+  margin-top: -2px;
 }
 
 .sa-filter-btn {
   padding: 5px 16px;
   border-radius: 999px;
-  border: 1px solid var(--color-border, #e2e8f0);
-  background: var(--color-surface, #fff);
-  color: var(--color-text-muted, #64748b);
+  border: 1px solid color-mix(in srgb, var(--color-secondary, #1cb0f6) 25%, transparent);
+  background: color-mix(in srgb, var(--color-secondary, #1cb0f6) 10%, transparent);
+  color: var(--color-secondary, #1cb0f6);
   font-size: 0.875rem;
   cursor: pointer;
   transition: background 0.15s;
 }
 
 .sa-filter-btn--active {
-  background: var(--color-primary, #0066ff);
-  border-color: var(--color-primary, #0066ff);
+  background: var(--color-secondary, #1cb0f6);
+  border-color: var(--color-secondary, #1cb0f6);
   color: #fff;
   font-weight: 600;
+}
+
+.sa-all-card {
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--color-secondary, #1cb0f6) 10%, transparent);
 }
 
 .sa-list {
@@ -125,10 +154,11 @@
   align-items: center;
   gap: 12px;
   padding: 14px 16px;
-  border: 1px solid var(--color-border, #e2e8f0);
+  border: 1px solid color-mix(in srgb, var(--color-border, #e2e8e8) 68%, transparent);
   border-radius: 12px;
   background: var(--color-surface, #fff);
   transition: background 0.15s;
+  box-shadow: 0 5px 12px color-mix(in srgb, var(--color-border, #e2e8e8) 30%, transparent);
 }
 
 .sa-item--urgent {
@@ -222,4 +252,14 @@
 
 .sa-open-btn:hover {
   background: var(--color-primary-light, #dbeafe);
+}
+
+.sa-done-pill {
+  flex-shrink: 0;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: #dcfce7;
+  color: #15803d;
+  font-size: 0.8125rem;
+  font-weight: 700;
 }

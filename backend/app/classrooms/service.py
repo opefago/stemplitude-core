@@ -17,10 +17,11 @@ from app.classrooms.models import Classroom, ClassroomSession, ClassroomStudent
 from app.programs.models import Program
 from app.tenants.models import Tenant
 from app.curriculum.models import Course
-from app.dependencies import CurrentIdentity
+from app.dependencies import CurrentIdentity, TenantContext
 from app.notifications.models import Notification
 from app.progress.models import Attendance
 from app.students.models import ParentStudent, Student
+from app.students.parent_access import ensure_can_view_student_as_guardian
 from app.users.models import User
 from app.tenants.repository import MembershipRepository
 from app.realtime.gateway import publish_channel_message
@@ -29,6 +30,14 @@ from app.realtime.user_events import (
     publish_reward_granted,
     publish_sessions_changed,
 )
+from app.database import async_session_factory
+from app.email.outbox import enqueue_transactional_email
+from app.email.presets import (
+    build_classroom_grading_email,
+    build_classroom_session_content_email,
+    build_classroom_submission_email,
+)
+from app.gamification.streak_side_effects import bump_student_streak, bump_students_streak
 
 from .repository import ClassroomRepository
 from .schemas import (
@@ -307,8 +316,16 @@ class ClassroomService:
             # Flatten dict payloads into envelope.payload so clients can consume
             # fields directly (e.g. payload.view, payload.resource_id).
             if isinstance(event.metadata_, dict):
-                payload.update(event.metadata_)
-            payload["metadata"] = event.metadata_
+                meta_flat = dict(event.metadata_)
+                if event.event_type in (
+                    "student.submission.saved",
+                    "student.submission.submitted",
+                ) and meta_flat.get("preview_image"):
+                    # Avoid multi-hundred-KB websocket frames; full image is on REST list endpoints.
+                    meta_flat["has_preview"] = True
+                    meta_flat["preview_image"] = None
+                payload.update(meta_flat)
+                payload["metadata"] = meta_flat
         return RealtimeEventEnvelope(
             event_id=event.id,
             session_id=event.session_id,
@@ -861,6 +878,8 @@ class ClassroomService:
             existing.notes = data.notes
             await self.session.flush()
             await self.session.refresh(existing)
+            if data.status in ("present", "late"):
+                await bump_student_streak(data.student_id, tenant_id)
             return AttendanceResponse.model_validate(existing)
         attendance = Attendance(
             session_id=data.session_id,
@@ -873,6 +892,8 @@ class ClassroomService:
         self.session.add(attendance)
         await self.session.flush()
         await self.session.refresh(attendance)
+        if data.status in ("present", "late"):
+            await bump_student_streak(data.student_id, tenant_id)
         return AttendanceResponse.model_validate(attendance)
 
     async def list_attendance(
@@ -959,6 +980,7 @@ class ClassroomService:
         student_ids = [row[0] for row in enrolled_result.all()]
 
         results: list[AttendanceResponse] = []
+        streak_student_ids: list[UUID] = []
         now = datetime.now(timezone.utc)
 
         for student_id in student_ids:
@@ -985,6 +1007,8 @@ class ClassroomService:
                 await self.session.flush()
                 await self.session.refresh(existing)
                 results.append(AttendanceResponse.model_validate(existing))
+                if attendance_status in ("present", "late"):
+                    streak_student_ids.append(student_id)
             else:
                 record = Attendance(
                     session_id=session_id,
@@ -998,6 +1022,8 @@ class ClassroomService:
                 await self.session.flush()
                 await self.session.refresh(record)
                 results.append(AttendanceResponse.model_validate(record))
+                if attendance_status in ("present", "late"):
+                    streak_student_ids.append(student_id)
 
         logger.info(
             "Attendance calculated session=%s classroom=%s students=%d mode=%s",
@@ -1006,6 +1032,8 @@ class ClassroomService:
             len(results),
             config.mode,
         )
+        if streak_student_ids:
+            await bump_students_streak(streak_student_ids, tenant_id)
         return results
 
     async def list_sessions(
@@ -1196,6 +1224,7 @@ class ClassroomService:
         tenant_id: UUID,
         identity: CurrentIdentity,
         data: SessionPresenceHeartbeatRequest,
+        student_actor_id: UUID | None = None,
     ) -> SessionPresenceSummaryResponse:
         """Track participant presence while in a live session."""
         session_obj = await self._ensure_session_exists(
@@ -1216,35 +1245,42 @@ class ClassroomService:
                 detail="Session has already ended",
             )
 
-        actor_type = self._presence_actor_type(identity)
+        actor_id = student_actor_id if student_actor_id is not None else identity.id
+        actor_type = (
+            "student"
+            if student_actor_id is not None
+            else self._presence_actor_type(identity)
+        )
         became_active = False
         if data.status == "left":
             await self.repo.mark_presence_left(
                 session_id=session_obj.id,
-                actor_id=identity.id,
+                actor_id=actor_id,
                 actor_type=actor_type,
                 left_at=now,
             )
         elif data.status == "in_lab":
             await self.repo.mark_presence_in_lab(
                 session_id=session_obj.id,
-                actor_id=identity.id,
+                actor_id=actor_id,
                 actor_type=actor_type,
                 seen_at=now,
                 lab_type=data.lab_type,
             )
         else:
-            await self.repo.upsert_presence(
+            _, presence_created = await self.repo.upsert_presence(
                 session_id=session_obj.id,
                 classroom_id=classroom_id,
                 tenant_id=tenant_id,
-                actor_id=identity.id,
+                actor_id=actor_id,
                 actor_type=actor_type,
                 seen_at=now,
             )
             if session_obj.status == "scheduled" and session_obj.session_start <= now <= session_obj.session_end:
                 session_obj.status = "active"
                 became_active = True
+            if presence_created and actor_type == "student":
+                await bump_student_streak(actor_id, tenant_id)
 
         await self.session.flush()
         if became_active:
@@ -1517,7 +1553,6 @@ class ClassroomService:
         from sqlalchemy import select
         from app.students.models import ParentStudent
         from workers.tasks.notification_tasks import create_notification_task
-        from workers.tasks.email_tasks import send_email_task
 
         enrolled = await self.repo.list_enrolled_students(classroom_id)
         session_date = session_obj.session_start.strftime("%b %-d") if session_obj.session_start else "recent"
@@ -1528,6 +1563,14 @@ class ClassroomService:
             f"Your instructor has added new resources to the {session_date} session "
             f"in {classroom_name}. Log in to view them."
         )
+
+        prepared_session_email = None
+        if any(s.email for _, s in enrolled):
+            prepared_session_email = build_classroom_session_content_email(
+                classroom_id=classroom_id,
+                title=title,
+                body=body,
+            )
 
         for _enrollment, student in enrolled:
             # In-app notification: find parent users linked to this student
@@ -1545,12 +1588,11 @@ class ClassroomService:
                 )
 
             # Email notification: send to student email if available
-            if student.email:
-                send_email_task.delay(
-                    student.email,
-                    title,
-                    body,
-                    f"<p>{body}</p>",
+            if student.email and prepared_session_email:
+                enqueue_transactional_email(
+                    to_email=student.email,
+                    prepared=prepared_session_email,
+                    tenant_id=tenant_id,
                 )
 
     async def update_session_details(
@@ -1643,20 +1685,26 @@ class ClassroomService:
         identity: CurrentIdentity,
         data: SessionChatCreateRequest,
         correlation_id: str | None = None,
+        student_actor_id: UUID | None = None,
     ) -> SessionEventResponse:
         session_obj = await self._ensure_session_exists(
             classroom_id=classroom_id,
             session_id=session_id,
             tenant_id=tenant_id,
         )
-        actor_type = self._presence_actor_type(identity)
+        actor_id = student_actor_id if student_actor_id is not None else identity.id
+        actor_type = (
+            "student"
+            if student_actor_id is not None
+            else self._presence_actor_type(identity)
+        )
         event = await self.repo.create_session_event(
             session_id=session_obj.id,
             classroom_id=classroom_id,
             tenant_id=tenant_id,
             event_type="chat",
             correlation_id=correlation_id,
-            actor_id=identity.id,
+            actor_id=actor_id,
             actor_type=actor_type,
             message=data.message.strip(),
         )
@@ -1712,6 +1760,61 @@ class ClassroomService:
             classroom = await self.repo.get_by_id(classroom_id, tenant_id)
             class_name = (classroom.name or "Class").strip() if classroom else "Class"
             msg = (data.message or "").strip() or None
+            # Keep classroom recognitions in sync with gamification data used by dashboard cards.
+            try:
+                from app.gamification.service import GamificationService
+
+                # Use an isolated session so gamification write failures do not poison
+                # the classroom event transaction/session.
+                async with async_session_factory() as gamification_session:
+                    tenant_row = await gamification_session.get(Tenant, tenant_id)
+                    tenant_ctx = TenantContext(
+                        tenant_id=tenant_id,
+                        tenant_slug=(tenant_row.slug if tenant_row and tenant_row.slug else "tenant"),
+                    )
+                    gamification = GamificationService(gamification_session)
+                    if activity_type == "points_awarded" and points_delta:
+                        await gamification.award_xp(
+                            data.student_id,
+                            tenant_ctx,
+                            int(points_delta),
+                            reason=f"Classroom recognition in {class_name}",
+                            source="classroom_recognition",
+                            source_id=event.id,
+                        )
+                    elif activity_type in {"high_five", "callout"}:
+                        actor_user = await gamification_session.get(User, identity.id)
+                        student_obj = await gamification_session.get(Student, data.student_id)
+                        from_name = (
+                            f"{(actor_user.first_name or '').strip()} {(actor_user.last_name or '').strip()}".strip()
+                            if actor_user
+                            else "Instructor"
+                        ) or "Instructor"
+                        to_name = (
+                            f"{(student_obj.first_name or '').strip()} {(student_obj.last_name or '').strip()}".strip()
+                            if student_obj
+                            else "Student"
+                        ) or "Student"
+                        await gamification.create_shoutout(
+                            from_user_id=identity.id,
+                            from_user_name=from_name,
+                            to_student_id=data.student_id,
+                            to_student_name=to_name,
+                            tenant=tenant_ctx,
+                            message=msg
+                            or (
+                                "Great participation in class!"
+                                if activity_type == "high_five"
+                                else "Outstanding effort today!"
+                            ),
+                            emoji="👏" if activity_type == "high_five" else "🌟",
+                            classroom_id=classroom_id,
+                        )
+                    # Ensure student streaks are persisted/tracked for classroom recognitions
+                    # even when an event does not directly award XP.
+                    await gamification.track_student_activity(data.student_id, tenant_ctx)
+            except Exception:
+                logger.exception("Failed to mirror classroom recognition into gamification tables")
             if activity_type == "points_awarded":
                 pd = points_delta or 0
                 title = f"You earned {pd} points in {class_name}"
@@ -1738,8 +1841,16 @@ class ClassroomService:
             try:
                 tenant = await self.session.get(Tenant, tenant_id)
                 tenant_settings = tenant.settings if tenant and isinstance(tenant.settings, dict) else {}
+                gamification_cfg_raw = tenant_settings.get("gamification_config", {})
+                gamification_cfg = (
+                    gamification_cfg_raw if isinstance(gamification_cfg_raw, dict) else {}
+                )
+                mode = str(gamification_cfg.get("mode") or "balanced")
+                allow_live_recognition = bool(gamification_cfg.get("allow_live_recognition", True))
                 reward_cfg_raw = tenant_settings.get("reward_animations", {})
                 reward_cfg = reward_cfg_raw if isinstance(reward_cfg_raw, dict) else {}
+                if not allow_live_recognition or mode == "academic":
+                    return await self._event_to_response(event)
                 big_win_threshold_raw = reward_cfg.get("big_win_points")
                 try:
                     big_win_threshold = int(big_win_threshold_raw)
@@ -1877,13 +1988,19 @@ class ClassroomService:
         event_type: str,
         payload: dict | None = None,
         correlation_id: str | None = None,
+        student_actor_id: UUID | None = None,
     ) -> RealtimeEventEnvelope:
         session_obj = await self._ensure_session_exists(
             classroom_id=classroom_id,
             session_id=session_id,
             tenant_id=tenant_id,
         )
-        actor_type = self._presence_actor_type(identity)
+        actor_id = student_actor_id if student_actor_id is not None else identity.id
+        actor_type = (
+            "student"
+            if student_actor_id is not None
+            else self._presence_actor_type(identity)
+        )
         normalized_type = (event_type or "").strip() or "session.generic"
         await self._persist_live_sync_patch(
             classroom_id=classroom_id,
@@ -1898,11 +2015,16 @@ class ClassroomService:
             tenant_id=tenant_id,
             event_type=normalized_type,
             correlation_id=correlation_id,
-            actor_id=identity.id,
+            actor_id=actor_id,
             actor_type=actor_type,
             metadata_=payload or {},
         )
         await self.session.flush()
+        if normalized_type in (
+            "student.submission.saved",
+            "student.submission.submitted",
+        ) and actor_type == "student":
+            await bump_student_streak(actor_id, tenant_id)
         return await self._event_to_envelope(event)
 
     async def set_session_active_lab(
@@ -1914,6 +2036,7 @@ class ClassroomService:
         identity: CurrentIdentity,
         active_lab: str | None,
         correlation_id: str | None = None,
+        student_actor_id: UUID | None = None,
     ) -> RealtimeEventEnvelope:
         state_row = await self.repo.update_session_state(
             session_id=session_id,
@@ -1929,6 +2052,7 @@ class ClassroomService:
             event_type="session.lab.selected",
             payload={"active_lab": state_row.active_lab},
             correlation_id=correlation_id,
+            student_actor_id=student_actor_id,
         )
         return envelope
 
@@ -1941,6 +2065,7 @@ class ClassroomService:
         identity: CurrentIdentity,
         assignment: dict,
         correlation_id: str | None = None,
+        student_actor_id: UUID | None = None,
     ) -> RealtimeEventEnvelope:
         state_row = await self.repo.get_or_create_session_state(
             session_id=session_id,
@@ -1980,6 +2105,7 @@ class ClassroomService:
             event_type=event_type,
             payload={"assignment": normalized, "assignments": assignments},
             correlation_id=correlation_id,
+            student_actor_id=student_actor_id,
         )
 
     async def delete_session_assignment(
@@ -1991,6 +2117,7 @@ class ClassroomService:
         identity: CurrentIdentity,
         assignment_id: str,
         correlation_id: str | None = None,
+        student_actor_id: UUID | None = None,
     ) -> RealtimeEventEnvelope:
         state_row = await self.repo.get_or_create_session_state(
             session_id=session_id,
@@ -2013,6 +2140,7 @@ class ClassroomService:
             event_type="assignment.deleted",
             payload={"assignment_id": assignment_id, "assignments": next_assignments},
             correlation_id=correlation_id,
+            student_actor_id=student_actor_id,
         )
 
     async def regenerate_meeting(
@@ -2069,9 +2197,14 @@ class ClassroomService:
     # ── Assignments ───────────────────────────────────────────────────────────
 
     async def list_classroom_assignments(
-        self, *, classroom_id: UUID, tenant_id: UUID, identity: CurrentIdentity
+        self,
+        *,
+        classroom_id: UUID,
+        tenant_id: UUID,
+        identity: CurrentIdentity,
+        child_context_student_id: UUID | None = None,
     ) -> list[dict]:
-        """Return all assignments across every session of a classroom (instructor view)."""
+        """Return all assignments across every session of a classroom (instructor or enrolled learner)."""
         from sqlalchemy import select
         from app.classrooms.models import ClassroomSessionEvent, ClassroomSessionState
 
@@ -2081,12 +2214,33 @@ class ClassroomService:
 
         is_staff = identity.role in {"admin", "owner", "instructor", "super_admin"}
         if not is_staff:
-            if identity.sub_type != "student":
+            if identity.sub_type == "student":
+                enrollment_student_id = identity.id
+            elif (
+                identity.sub_type == "user"
+                and child_context_student_id is not None
+            ):
+                role = (identity.role or "").strip().lower()
+                if role not in ("parent", "homeschool_parent"):
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Insufficient permissions to view assignments",
+                    )
+                await ensure_can_view_student_as_guardian(
+                    self.session,
+                    identity=identity,
+                    student_id=child_context_student_id,
+                    tenant_id=tenant_id,
+                )
+                enrollment_student_id = child_context_student_id
+            else:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Insufficient permissions to view assignments",
                 )
-            enrollment = await self.repo.get_enrollment(classroom_id, identity.id)
+            enrollment = await self.repo.get_enrollment(
+                classroom_id, enrollment_student_id
+            )
             if enrollment is None:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
@@ -2276,6 +2430,10 @@ class ClassroomService:
                 student_display_name = await self._resolve_student_name(student_uuid)
             except Exception:
                 student_display_name = None
+            preview = meta.get("preview_image")
+            preview_str = preview if isinstance(preview, str) and preview.strip() else None
+            lab_id_raw = meta.get("lab_id")
+            lab_id_str = lab_id_raw if isinstance(lab_id_raw, str) and lab_id_raw.strip() else None
             result.append(
                 {
                     "event_id": ev_id,
@@ -2289,6 +2447,8 @@ class ClassroomService:
                     "grade": grade_meta.get("score") if grade_meta else None,
                     "feedback": grade_meta.get("feedback") if grade_meta else None,
                     "graded_at": grade_ev.created_at.isoformat() if grade_ev else None,
+                    "preview_image": preview_str,
+                    "lab_id": lab_id_str,
                 }
             )
         return result
@@ -2336,19 +2496,20 @@ class ClassroomService:
             logger.exception("Failed to publish instructor submission notification")
 
         if instructor.email:
-            from workers.tasks.email_tasks import send_email_task
-
             session_phrase = f"Session {session_id}"
             plain = (
                 f"{student_name} submitted work for {assignment_label} in {classroom_name} "
                 f"({session_phrase})."
             )
-            html = f"<p>{plain}</p>"
-            send_email_task.delay(
-                instructor.email,
-                title,
-                plain,
-                html,
+            prepared = build_classroom_submission_email(
+                classroom_id=classroom_id,
+                email_subject=title,
+                summary_plain=plain,
+            )
+            enqueue_transactional_email(
+                to_email=instructor.email,
+                prepared=prepared,
+                tenant_id=tenant_id,
             )
 
     async def grade_submission(
@@ -2441,11 +2602,17 @@ class ClassroomService:
                     or "Your child"
                 )
                 if student and student.email:
-                    from workers.tasks.email_tasks import send_email_task
-
-                    plain = f"{notif_title}. {notif_body}"
-                    html = f"<p>{plain}</p>"
-                    send_email_task.delay(student.email, notif_title, plain, html)
+                    prepared_grade = build_classroom_grading_email(
+                        classroom_id=classroom_id,
+                        email_subject=notif_title,
+                        body_plain=notif_body,
+                        cta_label="View feedback in app",
+                    )
+                    enqueue_transactional_email(
+                        to_email=student.email,
+                        prepared=prepared_grade,
+                        tenant_id=tenant_id,
+                    )
 
                 # Notify linked parents/guardians in-app and via email.
                 parent_links_result = await self.session.execute(
@@ -2476,15 +2643,16 @@ class ClassroomService:
                         )
                     )
                     if parent_user.email:
-                        from workers.tasks.email_tasks import send_email_task
-
-                        parent_plain = f"{parent_title}. {parent_body}"
-                        parent_html = f"<p>{parent_plain}</p>"
-                        send_email_task.delay(
-                            parent_user.email,
-                            parent_title,
-                            parent_plain,
-                            parent_html,
+                        parent_prepared = build_classroom_grading_email(
+                            classroom_id=classroom_id,
+                            email_subject=parent_title,
+                            body_plain=parent_body,
+                            cta_label="View classwork in app",
+                        )
+                        enqueue_transactional_email(
+                            to_email=parent_user.email,
+                            prepared=parent_prepared,
+                            tenant_id=tenant_id,
                         )
                 if parent_user_ids:
                     await self.session.flush()

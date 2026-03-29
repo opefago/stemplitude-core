@@ -7,6 +7,7 @@ import {
   type RealtimeSnapshot,
   type SessionPresenceParticipant,
 } from "../../lib/api/classrooms";
+import { useChildContextStudentId } from "../../lib/childContext";
 import { useAuth } from "../../providers/AuthProvider";
 import { useTenant } from "../../providers/TenantProvider";
 import type { LabClassroomContext } from "./useLabSession";
@@ -25,6 +26,7 @@ export function LabAssistantPanel({ classroomContext }: Props) {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { tenant } = useTenant();
+  const childContextStudentId = useChildContextStudentId();
 
   const isInstructor = user?.subType === "user";
 
@@ -117,6 +119,10 @@ export function LabAssistantPanel({ classroomContext }: Props) {
       }
       const payload = ev.payload as Record<string, unknown> | undefined;
       setRecognitionEvent({
+        eventId:
+          typeof (ev as { event_id?: unknown }).event_id === "string"
+            ? ((ev as { event_id?: string }).event_id ?? undefined)
+            : `${String((ev as { sequence?: number }).sequence ?? "na")}-${String((ev as { occurred_at?: string }).occurred_at ?? new Date().toISOString())}-${awardType}`,
         eventType: awardType,
         studentName: (payload?.["student_display_name"] as string | undefined) ?? "A student",
         points:
@@ -135,6 +141,7 @@ export function LabAssistantPanel({ classroomContext }: Props) {
       classroomId,
       sessionId,
       tenantId: tenant.id,
+      childContextStudentId,
       // Student is already in a lab — don't let this WS connection reset their in_lab status.
       preserveInLab: true,
       onConnected: () => setConnected(true),
@@ -148,7 +155,7 @@ export function LabAssistantPanel({ classroomContext }: Props) {
       client.disconnect();
       clientRef.current = null;
     };
-  }, [classroomId, sessionId, tenant, handleSnapshot, handleEvent]);
+  }, [classroomId, sessionId, tenant, childContextStudentId, handleSnapshot, handleEvent]);
 
   // Auto-scroll chat to bottom on new messages
   useEffect(() => {

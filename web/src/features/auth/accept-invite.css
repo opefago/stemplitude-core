@@ -60,6 +60,17 @@
   font-weight: 600;
 }
 
+.accept-invite__email-readonly {
+  background: var(--color-bg, #f1f5f9);
+  color: var(--color-text-secondary, #475569);
+  cursor: default;
+}
+
+.accept-invite__email-hint {
+  color: var(--color-text-secondary, #64748b);
+  line-height: 1.45;
+}
+
 /* Status icons */
 .accept-invite__status-icon {
   width: 72px;

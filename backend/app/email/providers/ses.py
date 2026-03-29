@@ -1,5 +1,7 @@
 """AWS SES email provider."""
 
+from app.config import settings
+
 from .base import BaseEmailProvider
 
 
@@ -12,7 +14,7 @@ class SESProvider(BaseEmailProvider):
         self.region = config.get("region", "us-east-1")
         self.access_key = config.get("access_key_id", "")
         self.secret_key = config.get("secret_access_key", "")
-        self.sender_email = config.get("sender_email", "")
+        self.sender_email = config.get("sender_email") or settings.EMAIL_DEFAULT_SENDER
 
     async def send(
         self,
@@ -23,8 +25,12 @@ class SESProvider(BaseEmailProvider):
         body_html: str | None = None,
         from_email: str | None = None,
         reply_to: str | None = None,
+        attachments=None,
+        extra_headers: dict[str, str] | None = None,
     ) -> tuple[bool, str | None, str | None]:
         """Send email via AWS SES."""
+        if attachments:
+            return False, None, "SES provider does not support attachments yet"
         # TODO: Implement actual SES API call
         # import boto3
         # from botocore.exceptions import ClientError

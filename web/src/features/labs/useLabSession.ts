@@ -4,23 +4,38 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { heartbeatMySession } from "../../lib/api/classrooms";
 import { LabAssistantPanel } from "./LabAssistantPanel";
 
-/** Classroom context carried through URL params when a lab is launched from a live session. */
+/** Classroom context carried through URL params when a lab is launched from a session or assignment. */
 export interface LabClassroomContext {
   classroomId: string;
   sessionId: string;
   referrer: string;
   labType: string | null;
+  /** Set when opened from the assignment workflow (for submitting back with snapshot). */
+  assignmentId: string | null;
 }
 
 const IN_LAB_HEARTBEAT_MS = 30_000;
+
+const CLASSROOM_LAB_REFERRERS = new Set(["classroom_live_session", "assignment_view"]);
 
 function parseClassroomContext(search: string): LabClassroomContext | null {
   const params = new URLSearchParams(search);
   const classroomId = params.get("classroom_id");
   const sessionId = params.get("session_id");
   const referrer = params.get("referrer");
-  if (classroomId && sessionId && referrer === "classroom_live_session") {
-    return { classroomId, sessionId, referrer, labType: params.get("lab") };
+  if (
+    classroomId &&
+    sessionId &&
+    referrer &&
+    CLASSROOM_LAB_REFERRERS.has(referrer)
+  ) {
+    return {
+      classroomId,
+      sessionId,
+      referrer,
+      labType: params.get("lab"),
+      assignmentId: params.get("assignment_id"),
+    };
   }
   return null;
 }

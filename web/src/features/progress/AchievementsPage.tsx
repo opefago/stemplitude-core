@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Flame, Star, Target, Trophy, Zap,
   BookOpen, FolderOpen, GraduationCap, Lock,
@@ -10,12 +11,13 @@ import { useUIMode } from "../../providers/UIModeProvider";
 import { ProgressBar, StatCard } from "../../components/ui";
 import {
   getMyGamificationProfile,
+  getStudentGamificationProfile,
   listShoutouts,
   type GamificationProfile,
   type ShoutoutItem,
-  iconSlugToEmoji,
   timeAgo,
 } from "../../lib/api/gamification";
+import { useChildContextStudentId } from "../../lib/childContext";
 import { HallOfFame } from "../gamification/HallOfFame";
 import "../../components/ui/ui.css";
 import "../gamification/gamification.css";
@@ -36,12 +38,52 @@ function getIcon(slug: string): LucideIcon {
 export function AchievementsPage() {
   const { user } = useAuth();
   const { mode } = useUIMode();
+  const [searchParams] = useSearchParams();
+  const studentIdParam = searchParams.get("studentId")?.trim() || "";
+  const childCtx = useChildContextStudentId();
+  const guardianView =
+    (Boolean(studentIdParam) || Boolean(childCtx)) &&
+    (user?.role === "parent" || user?.role === "homeschool_parent");
+
   const [profile, setProfile] = useState<GamificationProfile | null>(null);
   const [shoutouts, setShoutouts] = useState<ShoutoutItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [badgeCategory, setBadgeCategory] = useState<string>("all");
 
   useEffect(() => {
     let mounted = true;
+    setLoading(true);
+
+    const guardianStudentKey = studentIdParam || childCtx || "";
+
+    if (guardianView && guardianStudentKey) {
+      const profileReq = studentIdParam
+        ? getStudentGamificationProfile(studentIdParam)
+        : getMyGamificationProfile();
+      Promise.all([
+        profileReq,
+        listShoutouts({ student_id: guardianStudentKey, limit: 30 }),
+      ])
+        .then(([prof, shoutData]) => {
+          if (!mounted) return;
+          setProfile(prof);
+          setShoutouts(
+            shoutData.items.filter((s) => s.to_student_id === prof.student_id),
+          );
+        })
+        .catch(() => {
+          if (!mounted) return;
+          setProfile(null);
+          setShoutouts([]);
+        })
+        .finally(() => {
+          if (mounted) setLoading(false);
+        });
+      return () => {
+        mounted = false;
+      };
+    }
+
     Promise.all([
       getMyGamificationProfile(),
       listShoutouts({ limit: 5 }),
@@ -49,22 +91,68 @@ export function AchievementsPage() {
       .then(([prof, shoutData]) => {
         if (!mounted) return;
         setProfile(prof);
-        setShoutouts(shoutData.items.filter((s) => s.to_student_id === prof.student_id));
+        setShoutouts(
+          shoutData.items.filter((s) => s.to_student_id === prof.student_id),
+        );
       })
       .catch(() => {})
-      .finally(() => { if (mounted) setLoading(false); });
-    return () => { mounted = false; };
-  }, []);
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [guardianView, studentIdParam, childCtx]);
+
+  useEffect(() => {
+    setBadgeCategory("all");
+  }, [studentIdParam, childCtx]);
 
   const xpPercent = profile
     ? Math.min(100, ((profile.total_xp - profile.xp_start) / Math.max(1, profile.xp_end - profile.xp_start)) * 100)
     : 0;
 
+  const badgeCategoryOptions = useMemo(() => {
+    if (!profile?.badges.length) return ["all"] as string[];
+    const cats = new Set<string>();
+    for (const sb of profile.badges) {
+      const raw = (sb.badge.category ?? "").trim();
+      cats.add(raw || "general");
+    }
+    return ["all", ...[...cats].sort((a, b) => a.localeCompare(b))];
+  }, [profile?.badges]);
+
+  const filteredBadges = useMemo(() => {
+    if (!profile?.badges.length) return [];
+    if (!guardianView || badgeCategory === "all") return profile.badges;
+    return profile.badges.filter((sb) => {
+      const raw = (sb.badge.category ?? "").trim() || "general";
+      return raw === badgeCategory;
+    });
+  }, [profile?.badges, guardianView, badgeCategory]);
+
+  const sortedBadges = useMemo(() => {
+    const list = [...filteredBadges];
+    list.sort(
+      (a, b) =>
+        new Date(b.awarded_at).getTime() - new Date(a.awarded_at).getTime(),
+    );
+    return list;
+  }, [filteredBadges]);
+
   return (
     <div className="achievements" data-ui-mode={mode} role="main" aria-label="Achievements and progress">
       <header className="achievements__header">
         <h1 className="achievements__title">Achievements</h1>
-        {user && <p className="achievements__subtitle">Your progress, {user.firstName}</p>}
+        {guardianView ? (
+          <p className="achievements__subtitle">
+            {studentIdParam
+              ? "Viewing learner progress (read-only)"
+              : "Learner view — progress and rewards for the selected child"}
+          </p>
+        ) : user ? (
+          <p className="achievements__subtitle">Your progress, {user.firstName}</p>
+        ) : null}
       </header>
 
       {loading ? (
@@ -99,7 +187,7 @@ export function AchievementsPage() {
             <h2 id="stats-heading" className="achievements__section-title">Stats</h2>
             <div className="achievements__stats-row">
               <StatCard label="Total XP" value={profile?.total_xp ?? 0} icon={<Zap size={20} aria-hidden />} />
-              <StatCard label="Badges" value={profile?.stats.total_badges ?? 0} icon={<Trophy size={20} aria-hidden />} />
+              <StatCard label="Stickers" value={profile?.stats.total_badges ?? 0} icon={<Trophy size={20} aria-hidden />} />
               <StatCard label="Day Streak" value={profile?.streak.current_streak ?? 0} icon={<Flame size={20} aria-hidden />} />
               <StatCard label="Shoutouts" value={profile?.stats.total_shoutouts_received ?? 0} icon={<Star size={20} aria-hidden />} />
             </div>
@@ -132,20 +220,38 @@ export function AchievementsPage() {
             </div>
           </section>
 
-          {/* ── Badge Collection ───────────────────────────────────────── */}
+          {/* ── Sticker Collection ─────────────────────────────────────── */}
           <section className="achievements__badges-section" aria-labelledby="badges-heading">
-            <h2 id="badges-heading" className="achievements__section-title">Badge Collection</h2>
+            <h2 id="badges-heading" className="achievements__section-title">Sticker Collection</h2>
+            {guardianView && profile && profile.badges.length > 0 ? (
+              <div className="achievements__guardian-filters" role="toolbar" aria-label="Filter stickers">
+                <label className="achievements__filter-label">
+                  <span className="achievements__filter-text">Category</span>
+                  <select
+                    className="achievements__filter-select"
+                    value={badgeCategory}
+                    onChange={(e) => setBadgeCategory(e.target.value)}
+                  >
+                    {badgeCategoryOptions.map((c) => (
+                      <option key={c} value={c}>
+                        {c === "all" ? "All categories" : c}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            ) : null}
             {!profile || profile.badges.length === 0 ? (
               <>
                 <div className="achievements__empty-state achievements__empty-state--badges">
                   <span className="achievements__empty-state-icon">🏅</span>
-                  <p className="achievements__empty-state-text">No badges earned yet</p>
+                  <p className="achievements__empty-state-text">No stickers earned yet</p>
                   <p className="achievements__empty-state-hint">
-                    Complete labs, keep your streak and collect shoutouts to unlock badges.
+                    Complete labs, keep your streak and collect shoutouts to unlock stickers.
                   </p>
                 </div>
                 {/* Locked preview grid — shows students what they can earn */}
-                <div className="achievements__badges-grid achievements__badges-grid--preview" role="list" aria-label="Locked badges preview">
+                <div className="achievements__badges-grid achievements__badges-grid--preview" role="list" aria-label="Locked stickers preview">
                   {([
                     { slug: "first-circuit", label: "First Circuit" },
                     { slug: "code-ninja",    label: "Code Ninja" },
@@ -161,9 +267,15 @@ export function AchievementsPage() {
                   ))}
                 </div>
               </>
+            ) : sortedBadges.length === 0 ? (
+              <div className="achievements__empty-state achievements__empty-state--badges">
+                <span className="achievements__empty-state-icon">🏅</span>
+                <p className="achievements__empty-state-text">No stickers in this category</p>
+                <p className="achievements__empty-state-hint">Try another category or choose &quot;All categories&quot;.</p>
+              </div>
             ) : (
-              <div className="achievements__badges-grid" role="list" aria-label="Earned badges">
-                {profile?.badges.map((sb) => {
+              <div className="achievements__badges-grid" role="list" aria-label="Earned stickers">
+                {sortedBadges.map((sb) => {
                   const Icon = getIcon(sb.badge.icon_slug);
                   return (
                     <div
@@ -213,10 +325,12 @@ export function AchievementsPage() {
           </section>
 
           {/* ── Hall of Fame ───────────────────────────────────────────── */}
-          <section className="achievements__hof-section" aria-labelledby="hof-heading">
-            <h2 id="hof-heading" className="achievements__section-title">Hall of Fame</h2>
-            <HallOfFame compact />
-          </section>
+          {!guardianView ? (
+            <section className="achievements__hof-section" aria-labelledby="hof-heading">
+              <h2 id="hof-heading" className="achievements__section-title">Hall of Fame</h2>
+              <HallOfFame compact />
+            </section>
+          ) : null}
 
           {/* ── My Shoutouts ───────────────────────────────────────────── */}
           <section className="achievements__shoutouts-section" aria-labelledby="shoutouts-heading">

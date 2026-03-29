@@ -1,5 +1,5 @@
 {
-  "_description": "Central plan registry. Defines subscription plans, their features, and limits. Consumed by seed_plans and seed_all at startup.",
+  "_description": "Central plan registry. Defines subscription plans, their features, and limits. Consumed by seed_plans and seed_all at startup. For Stripe Checkout, add optional stripe_price_id_monthly and stripe_price_id_yearly (e.g. price_xxx) per plan — create matching recurring Prices in the Stripe Dashboard and paste IDs here, or set them on plans in the database later.",
   "plans": [
     {
       "name": "Free (Parent)",
@@ -22,6 +22,34 @@
       "limits": [
         { "limit_key": "max_students", "limit_value": 1 },
         { "limit_key": "max_projects", "limit_value": 10 }
+      ]
+    },
+    {
+      "name": "Evaluation trial (center)",
+      "slug": "trial-evaluation",
+      "type": "center",
+      "price_monthly": null,
+      "price_yearly": null,
+      "trial_days": 14,
+      "features": [
+        { "feature_key": "students_feature", "enabled": true },
+        { "feature_key": "classrooms", "enabled": true },
+        { "feature_key": "robotics_lab", "enabled": true },
+        { "feature_key": "game_maker", "enabled": true },
+        { "feature_key": "3d_designer", "enabled": true },
+        { "feature_key": "ai_lab", "enabled": true },
+        { "feature_key": "electronics_lab", "enabled": true },
+        { "feature_key": "python_lab", "enabled": true },
+        { "feature_key": "projects", "enabled": true },
+        { "feature_key": "create_student", "enabled": true },
+        { "feature_key": "create_classroom", "enabled": true }
+      ],
+      "limits": [
+        { "limit_key": "max_students", "limit_value": 12 },
+        { "limit_key": "max_classrooms", "limit_value": 2 },
+        { "limit_key": "max_instructors", "limit_value": 2 },
+        { "limit_key": "max_projects", "limit_value": 40 },
+        { "limit_key": "storage_mb", "limit_value": 1500 }
       ]
     },
     {

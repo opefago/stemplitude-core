@@ -350,10 +350,48 @@ class StudentService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
         return session_obj
 
+    async def list_guardian_children(
+        self, *, guardian_user_id: UUID, tenant_id: UUID, role_slug: str
+    ) -> list[Student]:
+        role = (role_slug or "").strip().lower()
+        if role == "homeschool_parent":
+            return await self.repo.list_by_tenant(
+                tenant_id, skip=0, limit=200, is_active=True
+            )
+        if role == "parent":
+            return await self.repo.list_students_for_parent_user(
+                parent_user_id=guardian_user_id, tenant_id=tenant_id
+            )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only parent or homeschool parent may list linked children",
+        )
+
     async def list_parent_children_upcoming_sessions(
-        self, *, parent_user_id: UUID, tenant_id: UUID, limit: int
+        self,
+        *,
+        parent_user_id: UUID,
+        tenant_id: UUID,
+        limit: int,
+        guardian_role_slug: str | None = None,
+        student_id: UUID | None = None,
     ) -> list[ClassroomSession]:
         now = datetime.now(timezone.utc)
+        role = (guardian_role_slug or "").strip().lower()
+        if student_id is not None:
+            return await self.repo.list_upcoming_sessions_for_student(
+                student_id, tenant_id, now, limit
+            )
+        if role == "homeschool_parent":
+            students = await self.repo.list_by_tenant(
+                tenant_id, skip=0, limit=500, is_active=True
+            )
+            return await self.repo.list_upcoming_sessions_for_student_ids(
+                student_ids=[s.id for s in students],
+                tenant_id=tenant_id,
+                now=now,
+                limit=limit,
+            )
         return await self.repo.list_upcoming_sessions_for_parent_children(
             parent_user_id=parent_user_id,
             tenant_id=tenant_id,

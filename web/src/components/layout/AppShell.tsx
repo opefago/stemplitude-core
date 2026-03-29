@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useLocation } from "react-router-dom";
 import { useUIMode } from "../../providers/UIModeProvider";
 import { useAuth } from "../../providers/AuthProvider";
 import { SidebarProvider } from "../../contexts/SidebarContext";
@@ -6,6 +7,8 @@ import { Sidebar } from "./Sidebar";
 import { DashboardHeader } from "./DashboardHeader";
 import { BottomNav } from "./BottomNav";
 import { ImpersonationBanner } from "./ImpersonationBanner";
+import { ChildModeBanner } from "./ChildModeBanner";
+import { TenantMessagesRealtimeBridge } from "./TenantMessagesRealtimeBridge";
 import "./app-shell.css";
 
 interface AppShellProps {
@@ -16,6 +19,9 @@ export function AppShell({ children }: AppShellProps) {
   const { mode } = useUIMode();
   const { isImpersonating } = useAuth();
   const isKidsMode = mode === "kids";
+  const location = useLocation();
+  const isChildModeRoute = location.pathname.startsWith("/app/child");
+  const showSidebar = !isKidsMode && !isChildModeRoute;
 
   return (
     <SidebarProvider>
@@ -30,10 +36,12 @@ export function AppShell({ children }: AppShellProps) {
 
         {isImpersonating && <ImpersonationBanner />}
 
-        {!isKidsMode && <Sidebar />}
+        {showSidebar && <Sidebar />}
 
         <div className="app-shell__main-area">
-        <DashboardHeader />
+        <ChildModeBanner />
+        <TenantMessagesRealtimeBridge />
+        {!isChildModeRoute && <DashboardHeader />}
 
         <main
           id="main-content"

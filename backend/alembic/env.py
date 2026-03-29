@@ -36,6 +36,10 @@ from app.assets.models import *  # noqa: F401, F403
 from app.admin.models import *  # noqa: F401, F403
 from app.integrations.models import *  # noqa: F401, F403
 from app.invitations.models import *  # noqa: F401, F403
+from app.trials.models import *  # noqa: F401, F403
+from app.gamification.models import *  # noqa: F401, F403
+from app.member_billing.models import *  # noqa: F401, F403
+from app.platform.models import *  # noqa: F401, F403
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)

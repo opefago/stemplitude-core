@@ -13,7 +13,7 @@ from app.invitations.schemas import (
     InvitationResponse,
     ValidateInviteResponse,
 )
-from app.invitations.service import InvitationService
+from app.invitations.service import InvitationEmailEnqueueError, InvitationService
 
 router = APIRouter()
 
@@ -46,6 +46,10 @@ async def invite_user(
     svc = InvitationService(db)
     try:
         return await svc.create_user_invite(identity.tenant_id, identity.id, data)
+    except InvitationEmailEnqueueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e)
+        )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
@@ -69,6 +73,10 @@ async def invite_parent(
     svc = InvitationService(db)
     try:
         return await svc.create_parent_invite(identity.tenant_id, identity.id, data)
+    except InvitationEmailEnqueueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e)
+        )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 

@@ -51,10 +51,12 @@ def tenant_ctx(identity):
 
 
 class TestCreateCheckout:
-    async def test_plan_not_found_returns_none(self, service, mock_repos, identity, tenant_ctx):
+    @patch("app.subscriptions.billing_provider.settings")
+    async def test_plan_not_found_returns_error(self, mock_settings, service, mock_repos, identity, tenant_ctx):
+        mock_settings.STRIPE_SECRET_KEY = "sk_test_x"
         mock_repos["plan_repo"].get_by_id.return_value = None
 
-        result = await service.create_checkout(
+        result, err, code = await service.create_checkout(
             identity,
             tenant_ctx,
             CheckoutRequest(
@@ -65,14 +67,24 @@ class TestCreateCheckout:
         )
 
         assert result is None
+        assert err is not None
+        assert code == 400
 
-    async def test_no_price_id_returns_none(self, service, mock_repos, identity, tenant_ctx):
+    @patch("app.plans.stripe_checkout.settings")
+    @patch("app.subscriptions.billing_provider.settings")
+    async def test_no_price_id_returns_error(
+        self, mock_bp_settings, mock_sc_settings, service, mock_repos, identity, tenant_ctx
+    ):
+        mock_bp_settings.STRIPE_SECRET_KEY = "sk_test_x"
+        mock_sc_settings.is_development = False
+        mock_sc_settings.STRIPE_DEV_FALLBACK_PRICE_MONTHLY = ""
+        mock_sc_settings.STRIPE_DEV_FALLBACK_PRICE_YEARLY = ""
         plan = MagicMock()
         plan.stripe_price_id_monthly = None
         plan.stripe_price_id_yearly = None
         mock_repos["plan_repo"].get_by_id.return_value = plan
 
-        result = await service.create_checkout(
+        result, err, code = await service.create_checkout(
             identity,
             tenant_ctx,
             CheckoutRequest(
@@ -83,9 +95,13 @@ class TestCreateCheckout:
         )
 
         assert result is None
+        assert err is not None
+        assert code == 400
 
-    @patch("app.subscriptions.service.create_checkout_session")
-    async def test_success(self, mock_stripe, service, mock_repos, identity, tenant_ctx):
+    @patch("app.subscriptions.billing_provider.settings")
+    @patch("app.subscriptions.billing_provider.stripe_create_checkout_session")
+    async def test_success(self, mock_stripe, mock_settings, service, mock_repos, identity, tenant_ctx):
+        mock_settings.STRIPE_SECRET_KEY = "sk_test_x"
         plan = MagicMock()
         plan.stripe_price_id_monthly = "price_123"
         plan.trial_days = 14
@@ -100,7 +116,7 @@ class TestCreateCheckout:
         stripe_session.url = "https://checkout.stripe.com/123"
         mock_stripe.return_value = stripe_session
 
-        result = await service.create_checkout(
+        result, err, code = await service.create_checkout(
             identity,
             tenant_ctx,
             CheckoutRequest(
@@ -110,6 +126,7 @@ class TestCreateCheckout:
             ),
         )
 
+        assert err is None and code is None
         assert result is not None
         assert result.session_id == "cs_123"
 

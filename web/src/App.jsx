@@ -7,6 +7,7 @@ import {
 } from "react-router-dom";
 import { AnimatePresence } from "framer-motion";
 import { AuthProvider } from "./providers/AuthProvider";
+import { GuardianLearnerProvider } from "./providers/GuardianLearnerProvider";
 import { TenantProvider } from "./providers/TenantProvider";
 import { UIModeProvider } from "./providers/UIModeProvider";
 import { ThemeProvider } from "./providers/ThemeProvider";
@@ -21,6 +22,7 @@ import { GlobalBanner } from "./components/feedback";
 import { GlobalBannerProvider } from "./contexts/GlobalBannerContext";
 import { CommandPaletteProvider } from "./contexts/CommandPaletteContext";
 import { useAuth } from "./providers/AuthProvider";
+import { useTenant } from "./providers/TenantProvider";
 import { useWorkspace } from "./providers/WorkspaceProvider";
 import { WorkspaceProvider } from "./providers/WorkspaceProvider";
 import { useUIMode } from "./providers/UIModeProvider";
@@ -52,16 +54,26 @@ import {
   StudentDashboard,
   InstructorDashboard,
   ParentDashboard,
+  ChildrenPage,
   AdminDashboard,
 } from "./features/dashboard";
+import { ChildModePage, MessagingHub, ParentActivityPage } from "./features/parent";
+import { useChildContextStudentId } from "./lib/childContext";
 import { TenantSettings, BillingPage, RolesManager } from "./features/settings";
+import {
+  MemberBillingAdminPage,
+  MemberBillingCancelPage,
+  MemberBillingSuccessPage,
+  MemberInvoicesPage,
+  MemberPayPage,
+} from "./features/member_billing";
 import {
   ClassroomList,
   ClassroomDetail,
   ClassroomLiveSession,
 } from "./features/classrooms";
 import { LabObserverPage } from "./pages/LabObserverPage";
-import { Inbox, ConversationThread } from "./features/messaging";
+import { ConversationThread } from "./features/messaging";
 import { StudentAssignmentsPage } from "./features/assignments";
 import {
   MembersPage,
@@ -81,14 +93,159 @@ import {
   EntityDetailPage,
   PlatformUsersPage,
   PlatformRolesPage,
+  PlatformEmailConfigPage,
+  PlatformMemberBillingFeesPage,
   BlobFinderPage,
   GrowthOpsPage,
   GrowthOpsHelpPage,
 } from "./features/platform";
 import { ProfilePage } from "./features/profile";
 import { NotificationsPage } from "./features/notifications";
+import { GamificationStudioPage } from "./features/gamification/GamificationStudioPage";
+import { StudentProjectsPage } from "./features/projects/StudentProjectsPage";
 import { RewardRuntime } from "./rewards";
 import "./App.css";
+
+function DashboardPlaceholder({ title, body }) {
+  return (
+    <div style={{ padding: "var(--spacing-lg)", maxWidth: 960 }}>
+      <h1
+        style={{
+          fontSize: "1.5rem",
+          fontWeight: 600,
+          marginBottom: "var(--spacing-md)",
+        }}
+      >
+        {title}
+      </h1>
+      <p style={{ color: "var(--color-text-secondary)" }}>
+        {body ??
+          "This page is under construction. Coming soon in Phase 2."}
+      </p>
+    </div>
+  );
+}
+
+function RoleDashboard() {
+  const { role, subType, isSuperAdmin } = useAuth();
+  const { isPlatformView } = useWorkspace();
+  const childCtx = useChildContextStudentId();
+  const guardianAsLearner =
+    Boolean(childCtx) &&
+    subType === "user" &&
+    (role === "parent" || role === "homeschool_parent");
+
+  if (subType === "student") return <StudentDashboard />;
+  if (guardianAsLearner) return <StudentDashboard />;
+  if (role === "instructor") return <InstructorDashboard />;
+  if (role === "parent" || role === "homeschool_parent")
+    return <ParentDashboard />;
+  if (isSuperAdmin && isPlatformView) return <SuperAdminDashboard />;
+  if (isSuperAdmin && !isPlatformView) return <AdminDashboard />;
+  if (role === "admin" || role === "owner") return <AdminDashboard />;
+  if (subType === "user") {
+    return (
+      <DashboardPlaceholder
+        title="Workspace access"
+        body="Your account is signed in, but this organization has not assigned you a role yet, or your role could not be loaded. Ask an admin to assign a role, or try signing out and back in."
+      />
+    );
+  }
+  return <StudentDashboard />;
+}
+
+function PlatformRouter() {
+  return (
+    <Routes>
+      <Route path="/" element={<SuperAdminDashboard />} />
+      <Route path="/tasks" element={<AdminTasksPage />} />
+      <Route path="/health" element={<HealthCheckPage />} />
+      <Route path="/jobs" element={<JobWorkerPage />} />
+      <Route path="/entities" element={<EntityBrowserPage />} />
+      <Route path="/blobs" element={<BlobFinderPage />} />
+      <Route path="/growth" element={<GrowthOpsPage />} />
+      <Route path="/growth/help" element={<GrowthOpsHelpPage />} />
+      <Route
+        path="/entities/:entityKey/:entityId"
+        element={<EntityDetailPage />}
+      />
+    </Routes>
+  );
+}
+
+function DashboardRouter() {
+  return (
+    <Routes>
+      <Route path="/" element={<RoleDashboard />} />
+
+      {/* Shared */}
+      <Route path="/labs" element={<LabLauncher />} />
+      <Route path="/projects" element={<StudentProjectsPage />} />
+      <Route path="/assignments" element={<StudentAssignmentsPage />} />
+      <Route path="/classrooms" element={<ClassroomList />} />
+      <Route path="/classrooms/:id" element={<ClassroomDetail />} />
+      <Route path="/classrooms/:id/live" element={<ClassroomLiveSession />} />
+      <Route
+        path="/classrooms/:classroomId/observe-lab/:actorId"
+        element={<LabObserverPage />}
+      />
+      <Route path="/achievements" element={<AchievementsPage />} />
+      <Route path="/child" element={<ChildModePage />} />
+      <Route path="/messages" element={<MessagingHub />}>
+        <Route path=":id" element={<ConversationThread />} />
+      </Route>
+      <Route path="/profile" element={<ProfilePage />} />
+      <Route path="/notifications" element={<NotificationsPage />} />
+
+      {/* Parent / guardian */}
+      <Route path="/children" element={<ChildrenPage />} />
+      <Route path="/activity" element={<ParentActivityPage />} />
+
+      {/* Instructor */}
+      <Route path="/students" element={<MembersPage />} />
+
+      {/* Admin / Owner */}
+      <Route path="/members" element={<MembersPage />} />
+      <Route path="/invitations" element={<InvitationsPage />} />
+      <Route path="/curriculum" element={<CurriculumPage />} />
+      <Route path="/programs" element={<ProgramsPage />} />
+      <Route path="/assets" element={<AssetsPage />} />
+      {/* More specific than /settings — Stripe checkout success/cancel URLs use this path */}
+      <Route path="/settings/billing" element={<BillingPage />} />
+      <Route path="/settings/member-billing" element={<MemberBillingAdminPage />} />
+      <Route path="/settings" element={<TenantSettings />} />
+      <Route path="/gamification" element={<GamificationStudioPage />} />
+      <Route path="/integrations" element={<IntegrationsPage />} />
+      <Route path="/billing" element={<BillingPage />} />
+      <Route path="/member-billing/pay" element={<MemberPayPage />} />
+      <Route path="/member-billing/invoices" element={<MemberInvoicesPage />} />
+      <Route path="/member-billing/success" element={<MemberBillingSuccessPage />} />
+      <Route path="/member-billing/cancel" element={<MemberBillingCancelPage />} />
+      <Route path="/roles" element={<RolesManager />} />
+      <Route
+        path="/audit"
+        element={<DashboardPlaceholder title="Audit Log" />}
+      />
+
+      {/* Super Admin overview (within sidebar shell) */}
+      <Route path="/platform" element={<SuperAdminDashboard />} />
+    </Routes>
+  );
+}
+
+/**
+ * Remount all /app/* routes when guardian learner context changes so pages refetch
+ * with the correct X-Child-Context (many screens only load data on mount).
+ */
+function AppDashboardLayout() {
+  const childCtx = useChildContextStudentId();
+  const dashboardMountKey = childCtx ?? "__no_learner_ctx__";
+  return (
+    <AppShell>
+      <DashboardRouter key={dashboardMountKey} />
+    </AppShell>
+  );
+}
 
 function PublicContent() {
   const location = useLocation();
@@ -172,6 +329,26 @@ function PublicContent() {
               </RouteGuard>
             }
           />
+          <Route
+            path="/app/platform/email"
+            element={
+              <RouteGuard>
+                <AppShell>
+                  <PlatformEmailConfigPage />
+                </AppShell>
+              </RouteGuard>
+            }
+          />
+          <Route
+            path="/app/platform/member-billing-fees"
+            element={
+              <RouteGuard>
+                <AppShell>
+                  <PlatformMemberBillingFeesPage />
+                </AppShell>
+              </RouteGuard>
+            }
+          />
 
           {/* Platform routes — header only, no sidebar */}
           <Route
@@ -190,9 +367,9 @@ function PublicContent() {
             path="/app/*"
             element={
               <RouteGuard>
-                <AppShell>
-                  <DashboardRouter />
-                </AppShell>
+                <GuardianLearnerProvider>
+                  <AppDashboardLayout />
+                </GuardianLearnerProvider>
               </RouteGuard>
             }
           />
@@ -203,107 +380,30 @@ function PublicContent() {
   );
 }
 
-function RoleDashboard() {
-  const { role, isSuperAdmin } = useAuth();
-  const { isPlatformView } = useWorkspace();
+/** When the selected tenant changes after initial load, refresh role from `/auth/me`. */
+function AuthTenantProfileSync() {
+  const { user, refreshProfile } = useAuth();
+  const { tenant } = useTenant();
+  const prevTenantIdRef = React.useRef(null);
 
-  if (role === "instructor") return <InstructorDashboard />;
-  if (role === "parent" || role === "homeschool_parent")
-    return <ParentDashboard />;
-  if (isSuperAdmin && isPlatformView) return <SuperAdminDashboard />;
-  if (isSuperAdmin && !isPlatformView) return <AdminDashboard />;
-  if (role === "admin" || role === "owner") return <AdminDashboard />;
-  return <StudentDashboard />;
-}
+  React.useEffect(() => {
+    if (!user?.id) {
+      prevTenantIdRef.current = null;
+      return;
+    }
+    if (user.subType !== "user" || !tenant?.id) return;
+    const id = tenant.id;
+    if (prevTenantIdRef.current === null) {
+      prevTenantIdRef.current = id;
+      return;
+    }
+    if (prevTenantIdRef.current !== id) {
+      prevTenantIdRef.current = id;
+      void refreshProfile();
+    }
+  }, [tenant?.id, user?.id, user?.subType, refreshProfile, user]);
 
-function PlatformRouter() {
-  return (
-    <Routes>
-      <Route path="/" element={<SuperAdminDashboard />} />
-      <Route path="/tasks" element={<AdminTasksPage />} />
-      <Route path="/health" element={<HealthCheckPage />} />
-      <Route path="/jobs" element={<JobWorkerPage />} />
-      <Route path="/entities" element={<EntityBrowserPage />} />
-      <Route path="/blobs" element={<BlobFinderPage />} />
-      <Route path="/growth" element={<GrowthOpsPage />} />
-      <Route path="/growth/help" element={<GrowthOpsHelpPage />} />
-      <Route
-        path="/entities/:entityKey/:entityId"
-        element={<EntityDetailPage />}
-      />
-    </Routes>
-  );
-}
-
-function DashboardRouter() {
-  return (
-    <Routes>
-      <Route path="/" element={<RoleDashboard />} />
-
-      {/* Shared */}
-      <Route path="/labs" element={<LabLauncher />} />
-      <Route path="/assignments" element={<StudentAssignmentsPage />} />
-      <Route path="/classrooms" element={<ClassroomList />} />
-      <Route path="/classrooms/:id" element={<ClassroomDetail />} />
-      <Route path="/classrooms/:id/live" element={<ClassroomLiveSession />} />
-      <Route
-        path="/classrooms/:classroomId/observe-lab/:actorId"
-        element={<LabObserverPage />}
-      />
-      <Route path="/achievements" element={<AchievementsPage />} />
-      <Route path="/messages" element={<Inbox />}>
-        <Route path=":id" element={<ConversationThread />} />
-      </Route>
-      <Route path="/profile" element={<ProfilePage />} />
-      <Route path="/notifications" element={<NotificationsPage />} />
-
-      {/* Parent */}
-      <Route
-        path="/children"
-        element={<DashboardPlaceholder title="My Children" />}
-      />
-
-      {/* Instructor */}
-      <Route path="/students" element={<MembersPage />} />
-
-      {/* Admin / Owner */}
-      <Route path="/members" element={<MembersPage />} />
-      <Route path="/invitations" element={<InvitationsPage />} />
-      <Route path="/curriculum" element={<CurriculumPage />} />
-      <Route path="/programs" element={<ProgramsPage />} />
-      <Route path="/assets" element={<AssetsPage />} />
-      <Route path="/settings" element={<TenantSettings />} />
-      <Route path="/integrations" element={<IntegrationsPage />} />
-      <Route path="/billing" element={<BillingPage />} />
-      <Route path="/roles" element={<RolesManager />} />
-      <Route
-        path="/audit"
-        element={<DashboardPlaceholder title="Audit Log" />}
-      />
-
-      {/* Super Admin overview (within sidebar shell) */}
-      <Route path="/platform" element={<SuperAdminDashboard />} />
-    </Routes>
-  );
-}
-
-function DashboardPlaceholder({ title }) {
-  return (
-    <div style={{ padding: "var(--spacing-lg)", maxWidth: 960 }}>
-      <h1
-        style={{
-          fontSize: "1.5rem",
-          fontWeight: 600,
-          marginBottom: "var(--spacing-md)",
-        }}
-      >
-        {title}
-      </h1>
-      <p style={{ color: "var(--color-text-secondary)" }}>
-        This page is under construction. Coming soon in Phase 2.
-      </p>
-    </div>
-  );
+  return null;
 }
 
 function UIModeSyncer({ children }) {
@@ -321,7 +421,9 @@ function UIModeSyncer({ children }) {
     } else if (
       user.role === "instructor" ||
       user.role === "admin" ||
-      user.role === "owner"
+      user.role === "owner" ||
+      user.role === "parent" ||
+      user.role === "homeschool_parent"
     ) {
       setMode("pro", "default");
     }
@@ -334,6 +436,7 @@ function App() {
   return (
     <AuthProvider>
       <TenantProvider>
+        <AuthTenantProfileSync />
         <WorkspaceProvider>
           <UIModeProvider>
             <UIModeSyncer>

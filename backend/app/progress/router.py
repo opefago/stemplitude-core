@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.permissions import require_permission
 from app.database import get_db
 from app.dependencies import CurrentIdentity, TenantContext, get_current_identity, get_tenant_context
+from app.students.me_student import require_me_student_id, resolve_progress_read_student_id
 
 from .schemas import (
     LabProgressResponse,
@@ -38,14 +39,14 @@ async def update_lesson_progress(
     data: LessonProgressUpdate,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    identity: CurrentIdentity = Depends(get_current_identity),
     tenant: TenantContext = Depends(get_tenant_context),
+    me_student_id: UUID = Depends(require_me_student_id),
 ):
     """Update lesson progress."""
     service = ProgressService(db)
     return await service.update_lesson_progress(
+        student_id=me_student_id,
         lesson_id=lesson_id,
-        identity=identity,
         tenant_ctx=tenant,
         data=data,
     )
@@ -65,12 +66,14 @@ async def get_lesson_progress(
     student_id: UUID | None = Query(None),
 ):
     """Get lesson progress."""
+    sid = await resolve_progress_read_student_id(
+        request, db, identity, tenant, student_id
+    )
     service = ProgressService(db)
     return await service.get_lesson_progress(
+        student_id=sid,
         lesson_id=lesson_id,
-        identity=identity,
         tenant_ctx=tenant,
-        student_id=student_id,
     )
 
 
@@ -84,14 +87,14 @@ async def update_lab_progress(
     data: LabProgressUpdate,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    identity: CurrentIdentity = Depends(get_current_identity),
     tenant: TenantContext = Depends(get_tenant_context),
+    me_student_id: UUID = Depends(require_me_student_id),
 ):
     """Update lab progress."""
     service = ProgressService(db)
     return await service.update_lab_progress(
+        student_id=me_student_id,
         lab_id=lab_id,
-        identity=identity,
         tenant_ctx=tenant,
         data=data,
     )
@@ -111,12 +114,14 @@ async def get_lab_progress(
     student_id: UUID | None = Query(None),
 ):
     """Get lab progress."""
+    sid = await resolve_progress_read_student_id(
+        request, db, identity, tenant, student_id
+    )
     service = ProgressService(db)
     return await service.get_lab_progress(
+        student_id=sid,
         lab_id=lab_id,
-        identity=identity,
         tenant_ctx=tenant,
-        student_id=student_id,
     )
 
 

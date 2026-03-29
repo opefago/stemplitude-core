@@ -9,6 +9,7 @@ class CreateUserInviteRequest(BaseModel):
     email: EmailStr
     role_id: UUID
     first_name: Optional[str] = None
+    personal_message: Optional[str] = None
 
 
 class CreateParentInviteRequest(BaseModel):
@@ -26,6 +27,7 @@ class InvitationResponse(BaseModel):
     expires_at: datetime
     created_at: datetime
     accepted_at: Optional[datetime] = None
+    role_id: Optional[UUID] = None
     role_name: Optional[str] = None
     student_names: Optional[list[str]] = None
     invite_link: str

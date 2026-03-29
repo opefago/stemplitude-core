@@ -1,5 +1,6 @@
 import logging
 
+from workers.async_db import run_async_db
 from workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -9,15 +10,15 @@ logger = logging.getLogger(__name__)
 def refresh_oauth_tokens_task(self, connection_id: str):
     """Refresh OAuth tokens for connections nearing expiry."""
     logger.info("refresh_oauth_tokens_task started connection_id=%s", connection_id)
-    import asyncio
     from uuid import UUID
     from datetime import datetime, timezone
     from sqlalchemy import select
-    from app.database import async_session_factory
     from app.integrations.models import OAuthConnection
 
     async def _refresh():
-        async with async_session_factory() as db:
+        import app.database as db_mod
+
+        async with db_mod.async_session_factory() as db:
             result = await db.execute(
                 select(OAuthConnection).where(
                     OAuthConnection.id == UUID(connection_id),
@@ -36,11 +37,11 @@ def refresh_oauth_tokens_task(self, connection_id: str):
             # await db.commit()
 
     try:
-        asyncio.run(_refresh())
+        run_async_db(_refresh)
         logger.info("refresh_oauth_tokens_task completed connection_id=%s", connection_id)
     except Exception as exc:
         logger.error("refresh_oauth_tokens_task failed connection_id=%s: %s", connection_id, exc)
-        self.retry(exc=exc)
+        raise self.retry(exc=exc)
 
 
 @celery_app.task

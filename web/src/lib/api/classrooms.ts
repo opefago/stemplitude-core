@@ -1,4 +1,4 @@
-import { apiFetch } from "./client";
+import { apiFetch, browserCalendarTimeZone } from "./client";
 import { getAccessToken } from "../tokens";
 import { ensureFreshAccessToken } from "./client";
 
@@ -569,6 +569,8 @@ export async function createMySessionSubmission(
     assignment_id?: string | null;
     content: string;
     status: "draft" | "submitted";
+    preview_image?: string | null;
+    lab_id?: string | null;
   },
 ): Promise<RealtimeEventEnvelope> {
   return apiFetch<RealtimeEventEnvelope>(
@@ -597,11 +599,14 @@ export async function submitAssignment(
   assignmentId: string,
   content: string,
   status: "draft" | "submitted",
+  opts?: { preview_image?: string | null; lab_id?: string | null },
 ): Promise<RealtimeEventEnvelope> {
   return createMySessionSubmission(classroomId, sessionId, {
     assignment_id: assignmentId,
     content,
     status,
+    preview_image: opts?.preview_image ?? undefined,
+    lab_id: opts?.lab_id ?? undefined,
   });
 }
 
@@ -635,6 +640,9 @@ export interface SubmissionRecord {
   grade?: number | null;
   feedback?: string | null;
   graded_at?: string | null;
+  /** Data URL image snapshot (labs); omitted on realtime payloads. */
+  preview_image?: string | null;
+  lab_id?: string | null;
 }
 
 export async function listClassroomAssignments(
@@ -728,6 +736,11 @@ export interface ClassroomRealtimeClientOptions {
    * virtual lab (LabAssistantPanel) so the student stays visible as in_lab.
    */
   preserveInLab?: boolean;
+  /**
+   * Parent child mode: same learner as `X-Child-Context` on HTTP. Presence and
+   * student-originated realtime commands use this student id.
+   */
+  childContextStudentId?: string | null;
   onSnapshot?: (snapshot: RealtimeSnapshot) => void;
   onEvent?: (event: RealtimeEventEnvelope) => void;
   onReplay?: (events: RealtimeEventEnvelope[]) => void;
@@ -832,6 +845,14 @@ export class ClassroomRealtimeClient {
     });
     if (this.opts.preserveInLab) {
       params.set("preserve_in_lab", "1");
+    }
+    const childId = this.opts.childContextStudentId?.trim();
+    if (childId) {
+      params.set("student_actor_id", childId);
+    }
+    const calTz = browserCalendarTimeZone();
+    if (calTz) {
+      params.set("calendar_tz", calTz);
     }
     const url = buildWsUrl(
       `/api/v1/classrooms/${this.opts.classroomId}/sessions/${this.opts.sessionId}/ws?${params.toString()}`,

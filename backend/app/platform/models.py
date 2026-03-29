@@ -3,11 +3,22 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Integer, SmallInteger, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
+
+PLATFORM_STRIPE_BILLING_SETTINGS_ID = 1
+
+
+class PlatformStripeBillingSettings(Base):
+    """Singleton row (id=1): platform-wide defaults for Stripe Connect member billing."""
+
+    __tablename__ = "platform_stripe_billing_settings"
+
+    id: Mapped[int] = mapped_column(SmallInteger, primary_key=True, default=PLATFORM_STRIPE_BILLING_SETTINGS_ID)
+    member_billing_default_application_fee_bps: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
 
 class CommandAuditLog(Base):

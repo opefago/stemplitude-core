@@ -1,5 +1,6 @@
 import logging
 
+from workers.async_db import run_async_db
 from workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -13,11 +14,10 @@ def process_stripe_webhook_task(event_type: str, event_data: dict):
     customer.subscription.updated, customer.subscription.deleted
     """
     logger.info("process_stripe_webhook_task started event_type=%s", event_type)
-    import asyncio
-    from app.database import async_session_factory
-
     async def _process():
-        async with async_session_factory() as db:
+        import app.database as db_mod
+
+        async with db_mod.async_session_factory() as db:
             if event_type == "checkout.session.completed":
                 await _handle_checkout_completed(db, event_data)
             elif event_type == "invoice.paid":
@@ -30,7 +30,7 @@ def process_stripe_webhook_task(event_type: str, event_data: dict):
                 await _handle_subscription_deleted(db, event_data)
 
     try:
-        asyncio.run(_process())
+        run_async_db(_process)
         logger.info("process_stripe_webhook_task completed event_type=%s", event_type)
     except Exception as exc:
         logger.error("process_stripe_webhook_task failed event_type=%s: %s", event_type, exc)

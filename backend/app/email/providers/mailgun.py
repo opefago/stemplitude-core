@@ -21,8 +21,12 @@ class MailgunProvider(BaseEmailProvider):
         body_html: str | None = None,
         from_email: str | None = None,
         reply_to: str | None = None,
+        attachments=None,
+        extra_headers: dict[str, str] | None = None,
     ) -> tuple[bool, str | None, str | None]:
         """Send email via Mailgun API."""
+        if attachments:
+            return False, None, "Mailgun provider does not support attachments yet"
         # TODO: Implement actual Mailgun API call
         # import httpx
         # recipients = to if isinstance(to, list) else [to]
@@ -31,7 +35,7 @@ class MailgunProvider(BaseEmailProvider):
         #         f"https://api.mailgun.net/v3/{self.domain}/messages",
         #         auth=("api", self.api_key),
         #         data={
-        #             "from": from_email or f"noreply@{self.domain}",
+        #             "from": from_email or f"info@{self.domain}",
         #             "to": recipients,
         #             "subject": subject,
         #             "text": body_text,

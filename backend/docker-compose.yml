@@ -1,3 +1,7 @@
+# Env: ``env_file`` paths are relative to this file. Use ``backend/.env`` (or symlink
+# it to ``../.env`` if you keep secrets at repo root). Extended ``env_file`` with
+# ``required: false`` needs Compose v2.24+; v2.10 only accepts string paths—missing
+# files make ``docker compose`` fail, so we list a single ``.env`` here.
 services:
   nginx:
     image: nginx:1.27-alpine
@@ -13,16 +17,19 @@ services:
     build: .
     expose:
       - "8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - db
-      - redis
       - localstack
     env_file: .env
     environment:
       - DATABASE_URL=postgresql+asyncpg://stem:stem@db:5432/stemplitude
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/1
-      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      # Containers cannot use localhost for Redis on the host; override .env here.
+      # Uncomment the redis service and set COMPOSE_REDIS_HOST=redis to use in-stack Redis.
+      - REDIS_URL=redis://${COMPOSE_REDIS_HOST:-host.docker.internal}:6379/0
+      - CELERY_BROKER_URL=redis://${COMPOSE_REDIS_HOST:-host.docker.internal}:6379/1
+      - CELERY_RESULT_BACKEND=redis://${COMPOSE_REDIS_HOST:-host.docker.internal}:6379/2
       - S3_ENDPOINT_URL=http://localstack:4566
       - S3_ACCESS_KEY_ID=test
       - S3_SECRET_ACCESS_KEY=test
@@ -31,30 +38,32 @@ services:
   celery_worker:
     build: .
     command: celery -A workers.celery_app worker --loglevel=info --concurrency=4
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - db
-      - redis
       - localstack
     env_file: .env
     environment:
       - DATABASE_URL=postgresql+asyncpg://stem:stem@db:5432/stemplitude
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/1
-      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - REDIS_URL=redis://${COMPOSE_REDIS_HOST:-host.docker.internal}:6379/0
+      - CELERY_BROKER_URL=redis://${COMPOSE_REDIS_HOST:-host.docker.internal}:6379/1
+      - CELERY_RESULT_BACKEND=redis://${COMPOSE_REDIS_HOST:-host.docker.internal}:6379/2
       - S3_ENDPOINT_URL=http://localstack:4566
 
   celery_beat:
     build: .
     command: celery -A workers.celery_app beat --loglevel=info
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - db
-      - redis
     env_file: .env
     environment:
       - DATABASE_URL=postgresql+asyncpg://stem:stem@db:5432/stemplitude
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/1
-      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - REDIS_URL=redis://${COMPOSE_REDIS_HOST:-host.docker.internal}:6379/0
+      - CELERY_BROKER_URL=redis://${COMPOSE_REDIS_HOST:-host.docker.internal}:6379/1
+      - CELERY_RESULT_BACKEND=redis://${COMPOSE_REDIS_HOST:-host.docker.internal}:6379/2
 
   db:
     image: postgres:16-alpine
@@ -67,10 +76,10 @@ services:
       POSTGRES_PASSWORD: stem
       POSTGRES_DB: stemplitude
 
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
+  # redis:
+  #   image: redis:7-alpine
+  #   ports:
+  #     - "6379:6379"
 
   localstack:
     image: localstack/localstack:latest

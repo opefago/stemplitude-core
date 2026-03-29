@@ -164,6 +164,22 @@ class AuthRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_first_student_membership(
+        self, student_id: UUID
+    ) -> tuple[StudentMembership, Tenant] | None:
+        result = await self.session.execute(
+            select(StudentMembership, Tenant)
+            .join(Tenant, StudentMembership.tenant_id == Tenant.id)
+            .where(
+                StudentMembership.student_id == student_id,
+                StudentMembership.is_active == True,
+                Tenant.is_active == True,
+            )
+            .order_by(StudentMembership.enrolled_at)
+            .limit(1)
+        )
+        return result.first()
+
     async def get_tenant_by_id(self, tenant_id: UUID) -> Tenant | None:
         result = await self.session.execute(
             select(Tenant).where(Tenant.id == tenant_id, Tenant.is_active == True)

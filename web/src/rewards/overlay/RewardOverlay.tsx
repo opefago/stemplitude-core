@@ -30,6 +30,8 @@ export function RewardOverlay() {
   const content = useMemo(() => {
     if (!active) return null;
     const isBigWin = Boolean(active.metadata?.bigWin);
+    // Classroom already shows a dedicated top toast; suppress center announcement there.
+    const showAnnouncement = !active.metadata?.classroomId;
     const themeClass =
       active.metadata?.theme === "celebration"
         ? "reward-overlay--celebration"
@@ -41,12 +43,14 @@ export function RewardOverlay() {
         aria-atomic="true"
       >
         <RewardRenderer animation={active} />
-        <div className="reward-overlay__announcement">
-          <strong>{buildAnnouncement(active)}</strong>
-          {active.metadata?.message ? (
-            <span>{active.metadata.message}</span>
-          ) : null}
-        </div>
+        {showAnnouncement ? (
+          <div className="reward-overlay__announcement">
+            <strong>{buildAnnouncement(active)}</strong>
+            {active.metadata?.message ? (
+              <span>{active.metadata.message}</span>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     );
   }, [active]);

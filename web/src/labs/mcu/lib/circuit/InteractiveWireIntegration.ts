@@ -13,6 +13,7 @@ import {
 } from "./InteractiveWireSystem";
 import { CircuitComponent } from "./CircuitComponent";
 import { GridCanvas } from "./GridCanvas";
+import { emitLabEventThrottled } from "../../../../lib/api/gamification";
 
 export interface WireEditMode {
   enabled: boolean;
@@ -143,6 +144,61 @@ export class InteractiveWireIntegration {
   /**
    * Create a wire with interactive capabilities
    */
+  private getCircuitComponent(componentName: string): CircuitComponent | null {
+    const obj = this.circuitScene.getGameObject(componentName);
+    return obj instanceof CircuitComponent ? obj : null;
+  }
+
+  private buildConnectionContext(
+    wireId: string,
+    startComponent: string,
+    startNode: string,
+    endComponent: string,
+    endNode: string
+  ): Record<string, unknown> {
+    const fromComp = this.getCircuitComponent(startComponent);
+    const toComp = this.getCircuitComponent(endComponent);
+
+    const fromType = fromComp?.getComponentType() ?? "unknown";
+    const toType = toComp?.getComponentType() ?? "unknown";
+    const fromGrid = fromComp?.getGridPosition();
+    const toGrid = toComp?.getGridPosition();
+
+    const connectedComponents = [
+      {
+        role: "from",
+        id: startComponent,
+        type: fromType,
+        node: startNode,
+        grid: fromGrid ?? null,
+      },
+      {
+        role: "to",
+        id: endComponent,
+        type: toType,
+        node: endNode,
+        grid: toGrid ?? null,
+      },
+    ];
+
+    return {
+      wire_id: wireId,
+      connection_kind: "component_to_component",
+      from_component: startComponent,
+      from_component_type: fromType,
+      from_node: startNode,
+      to_component: endComponent,
+      to_component_type: toType,
+      to_node: endNode,
+      component_ids: [startComponent, endComponent],
+      component_types: [fromType, toType],
+      connected_components: connectedComponents,
+      connected_component_count: connectedComponents.length,
+      connection_signature: `${fromType}:${startNode}->${toType}:${endNode}`,
+      wire_count: this.wireSystem.getWires().size,
+    };
+  }
+
   public createWire(
     wireId: string,
     startComponent: string,
@@ -160,6 +216,18 @@ export class InteractiveWireIntegration {
 
     if (success) {
       console.log(`🔌 Created interactive wire ${wireId}`);
+      emitLabEventThrottled({
+        lab_id: "circuit-maker",
+        lab_type: "circuit-maker",
+        event_type: "OBJECT_CONNECTED",
+        context: this.buildConnectionContext(
+          wireId,
+          startComponent,
+          startNode,
+          endComponent,
+          endNode
+        ),
+      }, 600);
 
       // Get routing statistics
       const stats = this.getRoutingStats();

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,6 +26,16 @@ from .schemas import (
 from .service import AuthError, AuthService
 
 router = APIRouter()
+
+
+def _client_ip(request: Request) -> str | None:
+    xff = request.headers.get("x-forwarded-for") or request.headers.get("X-Forwarded-For")
+    if xff:
+        first = xff.split(",")[0].strip()
+        return first[:64] if first else None
+    if request.client:
+        return (request.client.host or "")[:64] or None
+    return None
 
 
 def get_auth_service(db: AsyncSession = Depends(get_db)) -> AuthService:
@@ -84,10 +94,20 @@ async def check_email(
         return AvailabilityResponse(
             value=email, available=False, message="Invalid email format"
         )
-    exists = await service.repo.get_user_by_email(email)
+    from app.config import settings
+    from app.trials.guardrails import normalize_email, trial_email_already_used
+
+    norm = normalize_email(email)
+    exists = await service.repo.get_user_by_email(norm)
     if exists:
         return AvailabilityResponse(
             value=email, available=False, message="Email is already registered"
+        )
+    if settings.TRIAL_ENABLED and await trial_email_already_used(service.db, norm):
+        return AvailabilityResponse(
+            value=email,
+            available=False,
+            message="A free trial has already been used with this email address",
         )
     return AvailabilityResponse(value=email, available=True)
 
@@ -123,6 +143,7 @@ async def check_slug(
 @router.post("/onboard", response_model=OnboardResponse, status_code=201)
 async def onboard(
     data: OnboardRequest,
+    request: Request,
     service: AuthService = Depends(get_auth_service),
 ):
     """Create a new user account and organization in one step.
@@ -134,7 +155,7 @@ async def onboard(
     user can start using the app immediately.
     """
     try:
-        return await service.onboard(data)
+        return await service.onboard(data, client_ip=_client_ip(request))
     except AuthError as e:
         raise HTTPException(status_code=e.status_code, detail=e.message)
 
@@ -181,13 +202,23 @@ async def logout_all_devices(
 
 @router.get("/me", response_model=UserProfile | StudentProfile)
 async def get_me(
+    request: Request,
     identity: CurrentIdentity = Depends(get_current_identity),
     service: AuthService = Depends(get_auth_service),
 ):
-    """Get current user or student profile."""
+    """Get current user or student profile.
+
+    When ``X-Tenant-ID`` is present, resolve role and tenant fields for that
+    workspace (must match :class:`TenantMiddleware`). Otherwise fall back to the
+    tenant embedded in the access token.
+    """
     try:
+        tenant_ctx = getattr(request.state, "tenant", None)
+        effective_tenant_id = (
+            tenant_ctx.tenant_id if tenant_ctx is not None else identity.tenant_id
+        )
         return await service.get_profile(
-            identity.id, identity.sub_type, tenant_id=identity.tenant_id
+            identity.id, identity.sub_type, tenant_id=effective_tenant_id
         )
     except AuthError as e:
         raise HTTPException(status_code=e.status_code, detail=e.message)

@@ -662,6 +662,13 @@
 }
 
 /* Shared app tooltip (Tippy.js theme wrapper) */
+.ui-tooltip__ref-anchor {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 100%;
+}
+
 .ui-tooltip__content {
   display: grid;
   gap: 6px;

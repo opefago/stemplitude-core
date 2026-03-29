@@ -215,8 +215,11 @@ class TestAuthenticateStudentGlobal:
 
 
 class TestOnboard:
-    async def test_success(self, service, mock_repo, mock_db, fake_redis):
+    async def test_success(self, service, mock_repo, mock_db, fake_redis, monkeypatch):
         from app.auth.schemas import OnboardRequest, OnboardOrganization
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "TRIAL_ENABLED", False)
 
         mock_repo.get_user_by_email.return_value = None
 
@@ -264,8 +267,11 @@ class TestOnboard:
         assert result.tenant_id == tenant_id
         mock_repo.create_user.assert_awaited_once()
 
-    async def test_duplicate_email_rejected(self, service, mock_repo):
+    async def test_duplicate_email_rejected(self, service, mock_repo, monkeypatch):
         from app.auth.schemas import OnboardRequest, OnboardOrganization
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "TRIAL_ENABLED", False)
 
         mock_repo.get_user_by_email.return_value = MagicMock()
 
@@ -284,8 +290,11 @@ class TestOnboard:
                 )
             )
 
-    async def test_duplicate_slug_rejected(self, service, mock_repo, mock_db):
+    async def test_duplicate_slug_rejected(self, service, mock_repo, mock_db, monkeypatch):
         from app.auth.schemas import OnboardRequest, OnboardOrganization
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "TRIAL_ENABLED", False)
 
         mock_repo.get_user_by_email.return_value = None
 

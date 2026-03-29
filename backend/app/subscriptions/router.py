@@ -1,27 +1,33 @@
 """Subscription router."""
 
 import hashlib
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.database import get_db
+from app.schemas.pagination import Paginated
+from app.trials.cleanup import cancel_local_trial_subscriptions_for_tenant
 from app.dependencies import get_current_identity, get_tenant_context, require_identity, CurrentIdentity, TenantContext
-from app.licenses.models import License, LicenseFeature, LicenseLimit, SeatUsage
-from app.plans.models import Plan
 from app.subscriptions.models import BillingWebhookEvent, Invoice, Subscription
 
-from .schemas import CheckoutRequest, CheckoutResponse, InvoiceResponse, SubscriptionListResponse, SubscriptionResponse
+from .license_sync import sync_license_from_subscription
+from .provider_catalog import list_billing_provider_options
+from .schemas import (
+    BillingProviderOptionResponse,
+    CheckoutRequest,
+    CheckoutResponse,
+    InvoiceResponse,
+    SubscriptionListResponse,
+    SubscriptionResponse,
+)
 from .service import SubscriptionService
 
 router = APIRouter()
-
-ACTIVE_SUB_STATUSES = {"active", "trialing", "past_due"}
 
 
 def _normalize_code(value: str | None) -> str | None:
@@ -29,96 +35,6 @@ def _normalize_code(value: str | None) -> str | None:
         return None
     normalized = value.strip().upper()
     return normalized or None
-
-
-def _license_status_for_subscription(subscription_status: str) -> str:
-    return "active" if subscription_status in ACTIVE_SUB_STATUSES else "inactive"
-
-
-def _seat_limits_from_plan(plan: Plan) -> dict[str, int]:
-    limits = {row.limit_key: int(row.limit_value) for row in plan.limits}
-    seat_limits: dict[str, int] = {}
-    if "max_students" in limits:
-        seat_limits["student"] = limits["max_students"]
-    if "max_instructors" in limits:
-        seat_limits["instructor"] = limits["max_instructors"]
-    return seat_limits
-
-
-async def _sync_license_from_subscription(db: AsyncSession, subscription: Subscription) -> None:
-    plan_result = await db.execute(
-        select(Plan)
-        .where(Plan.id == subscription.plan_id)
-        .options(
-            selectinload(Plan.features),
-            selectinload(Plan.limits),
-        )
-    )
-    plan = plan_result.scalar_one_or_none()
-    if not plan:
-        return
-
-    license_result = await db.execute(
-        select(License).where(License.subscription_id == subscription.id)
-    )
-    license_ = license_result.scalar_one_or_none()
-    valid_until = subscription.current_period_end.date() if subscription.current_period_end else None
-    next_status = _license_status_for_subscription(subscription.status)
-
-    if not license_:
-        license_ = License(
-            subscription_id=subscription.id,
-            tenant_id=subscription.tenant_id,
-            user_id=subscription.user_id,
-            status=next_status,
-            valid_from=date.today(),
-            valid_until=valid_until,
-        )
-        db.add(license_)
-        await db.flush()
-    else:
-        license_.tenant_id = subscription.tenant_id
-        license_.user_id = subscription.user_id
-        license_.status = next_status
-        if valid_until:
-            license_.valid_until = valid_until
-
-    await db.execute(
-        LicenseFeature.__table__.delete().where(LicenseFeature.license_id == license_.id)
-    )
-    await db.execute(
-        LicenseLimit.__table__.delete().where(LicenseLimit.license_id == license_.id)
-    )
-    await db.execute(
-        SeatUsage.__table__.delete().where(SeatUsage.license_id == license_.id)
-    )
-
-    for feature in plan.features:
-        db.add(
-            LicenseFeature(
-                license_id=license_.id,
-                feature_key=feature.feature_key,
-                enabled=bool(feature.enabled),
-            )
-        )
-    for limit in plan.limits:
-        db.add(
-            LicenseLimit(
-                license_id=license_.id,
-                limit_key=limit.limit_key,
-                limit_value=int(limit.limit_value),
-            )
-        )
-    for seat_type, max_count in _seat_limits_from_plan(plan).items():
-        db.add(
-            SeatUsage(
-                license_id=license_.id,
-                tenant_id=subscription.tenant_id,
-                seat_type=seat_type,
-                current_count=0,
-                max_count=max_count,
-            )
-        )
 
 
 def _get_identity(request: Request) -> CurrentIdentity:
@@ -145,13 +61,25 @@ async def create_checkout(
             detail="Tenant context required. Provide X-Tenant-ID header.",
         )
     service = SubscriptionService(db)
-    result = await service.create_checkout(identity, tenant_ctx, data)
-    if not result:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Could not create checkout session. Check plan and Stripe configuration.",
-        )
+    result, err_detail, err_status = await service.create_checkout(identity, tenant_ctx, data)
+    if err_detail:
+        raise HTTPException(status_code=err_status or status.HTTP_400_BAD_REQUEST, detail=err_detail)
     return result
+
+
+@router.get("/billing-providers", response_model=list[BillingProviderOptionResponse])
+async def list_billing_providers():
+    """Known payment providers and whether each can start subscription checkout."""
+    return [
+        BillingProviderOptionResponse(
+            key=o.key,
+            label=o.label,
+            description=o.description,
+            configured=o.configured,
+            available_for_checkout=o.available_for_checkout,
+        )
+        for o in list_billing_provider_options()
+    ]
 
 
 @router.get("/", response_model=SubscriptionListResponse)
@@ -265,6 +193,25 @@ async def stripe_webhook(
     if existing_event.scalar_one_or_none():
         return {"received": True, "duplicate": True}
 
+    # Stripe Connect: events include ``account`` (connected account id)
+    if getattr(event, "account", None):
+        from app.member_billing.webhooks import handle_member_billing_stripe_event
+
+        await handle_member_billing_stripe_event(db, event)
+        try:
+            db.add(
+                BillingWebhookEvent(
+                    provider="stripe",
+                    event_id=event_id,
+                    event_type=event.type,
+                )
+            )
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+            return {"received": True, "duplicate": True}
+        return {"received": True, "connect": True}
+
     if event.type == "checkout.session.completed":
         session = event.data.object
         metadata = getattr(session, "metadata", None) or {}
@@ -312,6 +259,7 @@ async def stripe_webhook(
                 sub.provider_subscription_id = subscription_id
                 sub.provider_customer_id = getattr(session, "customer", None)
                 sub.provider_checkout_session_id = getattr(session, "id", None)
+                sub.stripe_subscription_id = subscription_id
                 sub.stripe_customer_id = getattr(session, "customer", None)
                 sub.promo_code = promo_code
                 sub.affiliate_code = affiliate_code
@@ -333,7 +281,8 @@ async def stripe_webhook(
                     else sub.trial_end
                 )
                 await db.flush()
-            await _sync_license_from_subscription(db, sub)
+            await sync_license_from_subscription(db, sub)
+            await cancel_local_trial_subscriptions_for_tenant(db, UUID(tenant_id))
 
     elif event.type in ("customer.subscription.updated", "customer.subscription.deleted"):
         stripe_sub = event.data.object
@@ -361,7 +310,7 @@ async def stripe_webhook(
             if stripe_sub.canceled_at:
                 sub.canceled_at = datetime.fromtimestamp(stripe_sub.canceled_at, tz=timezone.utc)
             await db.flush()
-            await _sync_license_from_subscription(db, sub)
+            await sync_license_from_subscription(db, sub)
 
     elif event.type == "invoice.paid":
         stripe_invoice = event.data.object
@@ -416,7 +365,7 @@ async def stripe_webhook(
                     affiliate_code=affiliate_code,
                     paid_at_iso=inv.paid_at.isoformat() if inv.paid_at else None,
                 )
-                await _sync_license_from_subscription(db, sub)
+                await sync_license_from_subscription(db, sub)
 
     try:
         db.add(
@@ -487,19 +436,19 @@ async def reconcile_stripe_subscriptions(
         )
         if getattr(stripe_sub, "canceled_at", None):
             sub.canceled_at = datetime.fromtimestamp(stripe_sub.canceled_at, tz=timezone.utc)
-        await _sync_license_from_subscription(db, sub)
+        await sync_license_from_subscription(db, sub)
         updated += 1
     await db.flush()
     return {"updated": updated, "skipped": skipped, "total": len(subs)}
 
 
-@router.get("/{id}/invoices", response_model=list[InvoiceResponse])
+@router.get("/{id}/invoices", response_model=Paginated[InvoiceResponse])
 async def list_invoices(
     id: UUID,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    skip: int = 0,
-    limit: int = 50,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
     identity: CurrentIdentity = Depends(get_current_identity),
 ):
     """List invoices for a subscription."""
@@ -510,5 +459,9 @@ async def list_invoices(
             detail="Tenant context required. Provide X-Tenant-ID header.",
         )
     service = SubscriptionService(db)
-    items, _ = await service.list_invoices(id, identity, tenant_ctx, skip=skip, limit=limit)
-    return items
+    items, total = await service.list_invoices(
+        id, identity, tenant_ctx, skip=skip, limit=limit
+    )
+    return Paginated[InvoiceResponse](
+        items=items, total=total, skip=skip, limit=limit
+    )

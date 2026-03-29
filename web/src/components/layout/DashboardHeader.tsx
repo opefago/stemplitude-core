@@ -11,6 +11,11 @@ import {
   X,
 } from "lucide-react";
 import { useAuth } from "../../providers/AuthProvider";
+import { useGuardianLearner } from "../../providers/GuardianLearnerProvider";
+import {
+  studentProfileDisplayName,
+  studentProfileInitials,
+} from "../../lib/studentDisplayName";
 import { useUIMode } from "../../providers/UIModeProvider";
 import { useWorkspace } from "../../providers/WorkspaceProvider";
 import { useSidebarOptional } from "../../contexts/SidebarContext";
@@ -126,6 +131,7 @@ function getEnvironmentTone(
 
 export function DashboardHeader({ variant = "default" }: DashboardHeaderProps) {
   const { user, logout, role, isSuperAdmin, hasGlobalPermission } = useAuth();
+  const guardianLearner = useGuardianLearner();
   const { isPlatformView } = useWorkspace();
   const location = useLocation();
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -223,6 +229,20 @@ export function DashboardHeader({ variant = "default" }: DashboardHeaderProps) {
   const isAdminView = isSuperAdmin || role === "admin" || role === "owner";
   const environmentLabel = resolveEnvironmentLabel();
   const environmentTone = getEnvironmentTone(environmentLabel);
+
+  const showHeaderAsLearner =
+    guardianLearner.isGuardianLearner &&
+    guardianLearner.activeLearnerProfile != null;
+  const headerDisplayName = showHeaderAsLearner
+    ? studentProfileDisplayName(guardianLearner.activeLearnerProfile)
+    : user
+      ? getDisplayName(user.firstName, user.lastName, user.email)
+      : "User";
+  const headerInitials = showHeaderAsLearner
+    ? studentProfileInitials(guardianLearner.activeLearnerProfile)
+    : user
+      ? getInitials(user.firstName, user.lastName, user.email)
+      : "?";
 
   return (
     <header className="dash-header">
@@ -351,13 +371,16 @@ export function DashboardHeader({ variant = "default" }: DashboardHeaderProps) {
         {variant === "platform" && (
           <div className="dash-header__identity">
             <span className="dash-header__identity-name">
-              {user
-                ? getDisplayName(user.firstName, user.lastName, user.email)
-                : "User"}
+              {headerDisplayName}
             </span>
-            {user?.email && (
+            {showHeaderAsLearner && user?.email ? (
+              <span className="dash-header__identity-role">
+                Guardian session · {user.email}
+              </span>
+            ) : null}
+            {!showHeaderAsLearner && user?.email ? (
               <span className="dash-header__identity-role">{user.email}</span>
-            )}
+            ) : null}
           </div>
         )}
 
@@ -372,9 +395,7 @@ export function DashboardHeader({ variant = "default" }: DashboardHeaderProps) {
               aria-haspopup="menu"
             >
               <div className="dash-header__avatar">
-                {user
-                  ? getInitials(user.firstName, user.lastName, user.email)
-                  : "?"}
+                {headerInitials}
               </div>
               <ChevronDown size={14} className="dash-header__caret" />
             </button>
@@ -383,25 +404,22 @@ export function DashboardHeader({ variant = "default" }: DashboardHeaderProps) {
               <div className="dash-header__dropdown" role="menu">
                 <div className="dash-header__dropdown-user">
                   <div className="dash-header__dropdown-avatar">
-                    {user
-                      ? getInitials(user.firstName, user.lastName, user.email)
-                      : "?"}
+                    {headerInitials}
                   </div>
                   <div className="dash-header__dropdown-info">
                     <span className="dash-header__dropdown-name">
-                      {user
-                        ? getDisplayName(
-                            user.firstName,
-                            user.lastName,
-                            user.email,
-                          )
-                        : "User"}
+                      {headerDisplayName}
                     </span>
-                    {user?.email && (
+                    {showHeaderAsLearner && user?.email ? (
+                      <span className="dash-header__dropdown-email">
+                        Guardian · {user.email}
+                      </span>
+                    ) : null}
+                    {!showHeaderAsLearner && user?.email ? (
                       <span className="dash-header__dropdown-email">
                         {user.email}
                       </span>
-                    )}
+                    ) : null}
                   </div>
                 </div>
 

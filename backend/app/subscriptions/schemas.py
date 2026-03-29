@@ -38,6 +38,11 @@ class CheckoutRequest(BaseModel):
         max_length=64,
         description="Optional affiliate/referral code used for attribution.",
     )
+    payment_provider: str = Field(
+        default="stripe",
+        max_length=32,
+        description="Billing provider key from GET /subscriptions/billing-providers (e.g. stripe, paypal).",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -47,6 +52,7 @@ class CheckoutRequest(BaseModel):
                     "success_url": "https://app.stemplitude.com/billing/success",
                     "cancel_url": "https://app.stemplitude.com/billing/cancel",
                     "billing_cycle": "monthly",
+                    "payment_provider": "stripe",
                 },
             ]
         }
@@ -63,6 +69,26 @@ class CheckoutResponse(BaseModel):
     url: str | None = Field(
         None,
         description="URL to redirect the user to complete payment.",
+    )
+    payment_provider: str = Field(
+        default="stripe",
+        description="Provider that created this session (e.g. stripe, paypal).",
+    )
+
+
+class BillingProviderOptionResponse(BaseModel):
+    """One payment option for subscription checkout."""
+
+    key: str = Field(..., description="Provider key sent as payment_provider on checkout.")
+    label: str = Field(..., description="Short display name.")
+    description: str = Field(default="", description="Optional subtitle for the UI.")
+    configured: bool = Field(
+        ...,
+        description="Whether required API credentials are present on the server.",
+    )
+    available_for_checkout: bool = Field(
+        ...,
+        description="Whether this provider can start subscription checkout now.",
     )
 
 

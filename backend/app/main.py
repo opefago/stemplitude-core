@@ -1,12 +1,14 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+from app.core.calendar_tz import streak_calendar_tz_dependency
 from app.core.logging import setup_logging
 from app.core.redis import close_redis, get_redis
+from app.middleware.calendar_tz_asgi import StreakCalendarTzASGIMiddleware
 from app.middleware.tenant import TenantMiddleware
 from app.middleware.request_context import RequestContextMiddleware
 
@@ -33,7 +35,9 @@ app = FastAPI(
     openapi_url="/api/openapi.json",
     docs_url="/api/docs" if settings.is_development else None,
     redoc_url="/api/redoc" if settings.is_development else None,
+    dependencies=[Depends(streak_calendar_tz_dependency)],
 )
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -45,6 +49,8 @@ app.add_middleware(
 
 app.add_middleware(TenantMiddleware)
 app.add_middleware(RequestContextMiddleware)
+# Pure ASGI: must run before BaseHTTPMiddleware inner tasks so streak code sees X-Calendar-TZ.
+app.add_middleware(StreakCalendarTzASGIMiddleware)
 
 
 # --- Routers ---
@@ -68,6 +74,8 @@ from app.messaging.conversations_router import router as conversations_router  #
 from app.notifications.router import router as notifications_router  # noqa: E402
 from app.admin.router import router as admin_router  # noqa: E402
 from app.email.router import router as email_router  # noqa: E402
+from app.email.public_router import router as public_email_router  # noqa: E402
+from app.email.webhooks_router import router as email_webhooks_router  # noqa: E402
 from app.integrations.router import router as integrations_router  # noqa: E402
 from app.audit.router import router as audit_router  # noqa: E402
 from app.platform.router import router as platform_router  # noqa: E402
@@ -75,6 +83,7 @@ from app.gamification.router import router as gamification_router  # noqa: E402
 from app.realtime.router import router as realtime_router  # noqa: E402
 from app.invitations.router import router as invitations_router  # noqa: E402
 from app.growth.router import router as growth_router  # noqa: E402
+from app.member_billing.router import router as member_billing_router  # noqa: E402
 
 prefix = settings.API_V1_PREFIX
 
@@ -98,6 +107,8 @@ app.include_router(conversations_router, prefix=f"{prefix}/conversations", tags=
 app.include_router(notifications_router, prefix=f"{prefix}/notifications", tags=["Notifications"])
 app.include_router(admin_router, prefix=f"{prefix}/admin", tags=["Admin"])
 app.include_router(email_router, prefix=f"{prefix}/email", tags=["Email"])
+app.include_router(public_email_router, prefix=f"{prefix}/public/email", tags=["Public email"])
+app.include_router(email_webhooks_router, prefix=f"{prefix}/webhooks/email", tags=["Email webhooks"])
 app.include_router(integrations_router, prefix=f"{prefix}/integrations", tags=["Integrations"])
 app.include_router(audit_router, prefix=f"{prefix}/audit", tags=["Audit"])
 app.include_router(platform_router, prefix=f"{prefix}/platform", tags=["Platform"])
@@ -105,6 +116,7 @@ app.include_router(gamification_router, prefix=f"{prefix}/gamification", tags=["
 app.include_router(realtime_router, prefix=f"{prefix}/realtime", tags=["Realtime"])
 app.include_router(invitations_router, prefix=f"{prefix}/invitations", tags=["Invitations"])
 app.include_router(growth_router, prefix=f"{prefix}/growth", tags=["Growth"])
+app.include_router(member_billing_router, prefix=f"{prefix}/member-billing", tags=["Member billing"])
 
 
 @app.get("/health")
