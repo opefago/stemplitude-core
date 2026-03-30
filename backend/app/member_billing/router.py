@@ -19,12 +19,15 @@ from .schemas import (
     CheckoutRequest,
     CheckoutResponse,
     ConnectStatusResponse,
+    GuardianMemberStatusOut,
     MemberBillingIntegrationsSummary,
     MemberBillingSettingsUpdate,
     MemberInvoiceOut,
     MemberProductCreate,
     MemberProductOut,
+    MemberProductUpdate,
     MemberPurchaseOut,
+    MemberSubscriptionCancelRequest,
     MemberSubscriptionOut,
 )
 from .providers import PayPalMemberMarketplaceProvider
@@ -105,6 +108,17 @@ async def list_products_admin(
     return await MemberBillingService(db).list_products(_tenant(request))
 
 
+@router.patch("/products/{product_id}", response_model=MemberProductOut)
+async def update_product(
+    product_id: uuid.UUID,
+    data: MemberProductUpdate,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _: None = require_permission("member_billing", "manage"),
+):
+    return await MemberBillingService(db).update_product(_tenant(request), product_id, data)
+
+
 @router.get("/pay/catalog", response_model=list[MemberProductOut])
 async def pay_catalog(
     request: Request,
@@ -151,6 +165,22 @@ async def list_subscriptions(
     return [MemberSubscriptionOut.model_validate(x) for x in rows]
 
 
+@router.post(
+    "/subscriptions/{subscription_id}/cancel",
+    response_model=MemberSubscriptionOut,
+)
+async def cancel_subscription(
+    subscription_id: uuid.UUID,
+    body: MemberSubscriptionCancelRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _: None = require_permission("member_billing", "manage"),
+):
+    return await MemberBillingService(db).cancel_subscription(
+        _tenant(request), subscription_id, body
+    )
+
+
 @router.get("/invoices", response_model=list[MemberInvoiceOut])
 async def list_invoices_admin(
     request: Request,
@@ -183,6 +213,16 @@ async def my_invoices(
     tenant = _tenant(request)
     rows = await MemberBillingRepository(db).list_invoices_for_payer(tenant.tenant_id, identity.id)
     return [MemberInvoiceOut.model_validate(x) for x in rows]
+
+
+@router.get("/me/guardian-status", response_model=GuardianMemberStatusOut)
+async def guardian_member_status(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    identity: CurrentIdentity = Depends(get_current_identity),
+):
+    """Stripe membership state per linked child; for parent sidebar / pay CTA logic."""
+    return await MemberBillingService(db).guardian_member_status(_tenant(request), identity)
 
 
 @router.get("/me/purchases", response_model=list[MemberPurchaseOut])

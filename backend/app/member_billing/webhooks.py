@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import uuid
 from datetime import datetime, timezone
 from typing import Any
 
@@ -14,7 +13,8 @@ from app.notifications.models import Notification
 from app.tenants.models import Tenant
 from app.users.models import User
 
-from .models import MemberInvoice, MemberPurchase, MemberSubscription
+from .checkout_completion import apply_member_checkout_session_completion, meta_dict
+from .models import MemberInvoice
 from .repository import MemberBillingRepository
 from .stripe_connect import retrieve_account, retrieve_subscription
 
@@ -28,15 +28,6 @@ def _ts(v: Any) -> datetime | None:
         return datetime.fromtimestamp(int(v), tz=timezone.utc)
     except (TypeError, ValueError):
         return None
-
-
-def _meta_dict(session_obj: Any) -> dict[str, str]:
-    m = getattr(session_obj, "metadata", None) or {}
-    if hasattr(m, "to_dict"):
-        return dict(m.to_dict())
-    if isinstance(m, dict):
-        return {str(k): str(v) for k, v in m.items()}
-    return {}
 
 
 async def handle_member_billing_stripe_event(db: AsyncSession, event: Any) -> bool:
@@ -64,73 +55,11 @@ async def handle_member_billing_stripe_event(db: AsyncSession, event: Any) -> bo
 
     if etype == "checkout.session.completed":
         session = event.data.object
-        md = _meta_dict(session)
-        if md.get("member_billing") != "1":
+        if meta_dict(session).get("member_billing") != "1":
             return True
-        tenant_id = uuid.UUID(md["tenant_id"])
-        student_id = uuid.UUID(md["student_id"])
-        product_id = uuid.UUID(md["product_id"])
-        payer_raw = (md.get("payer_user_id") or "").strip()
-        payer_user_id = uuid.UUID(payer_raw) if payer_raw else None
-        mode = getattr(session, "mode", None) or md.get("mode")
-        session_id = getattr(session, "id", None)
-        customer = getattr(session, "customer", None)
-
-        if mode == "subscription":
-            sub_id = getattr(session, "subscription", None)
-            q = await db.execute(
-                select(MemberSubscription).where(
-                    MemberSubscription.stripe_checkout_session_id == session_id,
-                    MemberSubscription.tenant_id == tenant_id,
-                )
-            )
-            ms = q.scalar_one_or_none()
-            if not ms:
-                ms = MemberSubscription(
-                    tenant_id=tenant_id,
-                    product_id=product_id,
-                    student_id=student_id,
-                    payer_user_id=payer_user_id,
-                    status="incomplete",
-                    stripe_checkout_session_id=session_id,
-                )
-                db.add(ms)
-                await db.flush()
-            ms.stripe_customer_id = customer
-            ms.stripe_subscription_id = sub_id
-            ms.status = "active"
-            if sub_id:
-                stripe_sub = retrieve_subscription(str(sub_id), connected_account_id=str(acct))
-                if stripe_sub:
-                    ms.status = getattr(stripe_sub, "status", "active") or "active"
-                    ms.current_period_start = _ts(getattr(stripe_sub, "current_period_start", None))
-                    ms.current_period_end = _ts(getattr(stripe_sub, "current_period_end", None))
-            await db.flush()
-        else:
-            q = await db.execute(
-                select(MemberPurchase).where(
-                    MemberPurchase.stripe_checkout_session_id == session_id,
-                    MemberPurchase.tenant_id == tenant_id,
-                )
-            )
-            mp = q.scalar_one_or_none()
-            if not mp:
-                p = await repo.get_product(product_id, tenant_id)
-                amt = p.amount_cents if p else int(getattr(session, "amount_total", 0) or 0)
-                cur = p.currency if p else (getattr(session, "currency", None) or "usd")
-                mp = MemberPurchase(
-                    tenant_id=tenant_id,
-                    product_id=product_id,
-                    student_id=student_id,
-                    payer_user_id=payer_user_id,
-                    stripe_checkout_session_id=session_id,
-                    amount_cents=amt,
-                    currency=str(cur).lower(),
-                )
-                db.add(mp)
-                await db.flush()
-            mp.paid_at = datetime.now(timezone.utc)
-            await db.flush()
+        await apply_member_checkout_session_completion(
+            db, session=session, connected_account_id=str(acct)
+        )
         return True
 
     if etype in ("customer.subscription.updated", "customer.subscription.deleted"):
@@ -154,22 +83,66 @@ async def handle_member_billing_stripe_event(db: AsyncSession, event: Any) -> bo
 
     if etype == "invoice.paid":
         inv = event.data.object
-        sub_id = getattr(inv, "subscription", None)
         stripe_invoice_id = getattr(inv, "id", None)
-        if not sub_id or not stripe_invoice_id:
+        if not stripe_invoice_id:
             return True
-        ms = await repo.get_subscription_by_stripe_id(str(sub_id))
-        if not ms:
+        sid = str(stripe_invoice_id)
+        if await repo.get_invoice_by_stripe_id(sid):
             return True
-        existing = await repo.get_invoice_by_stripe_id(str(stripe_invoice_id))
-        if existing:
+        sub_id = getattr(inv, "subscription", None)
+        if sub_id:
+            ms = await repo.get_subscription_by_stripe_id(str(sub_id))
+            if not ms:
+                return True
+            hosted = getattr(inv, "hosted_invoice_url", None)
+            pdf = getattr(inv, "invoice_pdf", None)
+            m_inv = MemberInvoice(
+                tenant_id=ms.tenant_id,
+                member_subscription_id=ms.id,
+                stripe_invoice_id=sid,
+                amount_cents=int(getattr(inv, "amount_paid", 0) or 0),
+                currency=str(getattr(inv, "currency", "usd") or "usd").lower(),
+                status="paid",
+                hosted_invoice_url=hosted,
+                invoice_pdf=pdf,
+                period_start=_ts(getattr(inv, "period_start", None)),
+                period_end=_ts(getattr(inv, "period_end", None)),
+                paid_at=datetime.now(timezone.utc),
+            )
+            db.add(m_inv)
+            await db.flush()
             return True
+        pi_raw = getattr(inv, "payment_intent", None)
+        pi_id = pi_raw if isinstance(pi_raw, str) else getattr(pi_raw, "id", None)
+        if not pi_id:
+            return True
+        mp = await repo.get_purchase_by_stripe_payment_intent(str(pi_id))
+        if not mp or mp.paid_at is None:
+            return True
+        st = getattr(inv, "status_transitions", None)
+        paid_unix = getattr(st, "paid_at", None) if st is not None else None
+        paid_at = _ts(paid_unix)
+        if paid_at is None:
+            paid_at = datetime.now(timezone.utc)
+        existing_p = await repo.get_invoice_by_member_purchase_id(mp.id)
         hosted = getattr(inv, "hosted_invoice_url", None)
         pdf = getattr(inv, "invoice_pdf", None)
+        if existing_p:
+            existing_p.stripe_invoice_id = sid
+            if hosted and not (existing_p.hosted_invoice_url or "").strip():
+                existing_p.hosted_invoice_url = hosted
+            if pdf and not (existing_p.invoice_pdf or "").strip():
+                existing_p.invoice_pdf = pdf
+            existing_p.amount_cents = int(getattr(inv, "amount_paid", 0) or existing_p.amount_cents)
+            existing_p.currency = str(getattr(inv, "currency", existing_p.currency) or "usd").lower()
+            existing_p.paid_at = paid_at
+            await db.flush()
+            return True
         m_inv = MemberInvoice(
-            tenant_id=ms.tenant_id,
-            member_subscription_id=ms.id,
-            stripe_invoice_id=str(stripe_invoice_id),
+            tenant_id=mp.tenant_id,
+            member_subscription_id=None,
+            member_purchase_id=mp.id,
+            stripe_invoice_id=sid,
             amount_cents=int(getattr(inv, "amount_paid", 0) or 0),
             currency=str(getattr(inv, "currency", "usd") or "usd").lower(),
             status="paid",
@@ -177,7 +150,7 @@ async def handle_member_billing_stripe_event(db: AsyncSession, event: Any) -> bo
             invoice_pdf=pdf,
             period_start=_ts(getattr(inv, "period_start", None)),
             period_end=_ts(getattr(inv, "period_end", None)),
-            paid_at=datetime.now(timezone.utc),
+            paid_at=paid_at,
         )
         db.add(m_inv)
         await db.flush()

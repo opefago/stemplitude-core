@@ -70,7 +70,12 @@ async def create_classroom(
 ):
     """Create a classroom."""
     service = ClassroomService(db)
-    return await service.create(data, tenant.tenant_id)
+    return await service.create(
+        data,
+        tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
 
 
 @router.get(
@@ -162,6 +167,8 @@ async def bulk_assign_curriculum(
         tenant_id=tenant.tenant_id,
         classroom_ids=data.classroom_ids,
         curriculum_id=data.curriculum_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
     )
     return ClassroomBulkAssignCurriculumResponse(updated_count=updated_count)
 
@@ -194,7 +201,13 @@ async def update_classroom(
 ):
     """Update a classroom."""
     service = ClassroomService(db)
-    return await service.update(id, data, tenant.tenant_id)
+    return await service.update(
+        id,
+        data,
+        tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
 
 
 @router.delete(

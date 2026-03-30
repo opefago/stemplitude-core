@@ -57,7 +57,12 @@ import {
   ChildrenPage,
   AdminDashboard,
 } from "./features/dashboard";
-import { ChildModePage, MessagingHub, ParentActivityPage } from "./features/parent";
+import {
+  ChildModePage,
+  MessagingHub,
+  ParentActivityPage,
+  ParentChildControlsPage,
+} from "./features/parent";
 import { useChildContextStudentId } from "./lib/childContext";
 import { TenantSettings, BillingPage, RolesManager } from "./features/settings";
 import {
@@ -199,6 +204,7 @@ function DashboardRouter() {
 
       {/* Parent / guardian */}
       <Route path="/children" element={<ChildrenPage />} />
+      <Route path="/children/settings" element={<ParentChildControlsPage />} />
       <Route path="/activity" element={<ParentActivityPage />} />
 
       {/* Instructor */}

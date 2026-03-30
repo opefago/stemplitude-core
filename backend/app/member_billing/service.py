@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,19 +22,48 @@ from .schemas import (
     CheckoutRequest,
     CheckoutResponse,
     ConnectStatusResponse,
+    GuardianChildMembershipOut,
+    GuardianMemberStatusOut,
     MemberBillingIntegrationsSummary,
     MemberBillingSettingsUpdate,
     MemberProductCreate,
     MemberProductOut,
+    MemberProductUpdate,
+    MemberSubscriptionCancelRequest,
+    MemberSubscriptionOut,
 )
 from .platform_fee import resolve_effective_member_billing_application_fee_bps
 from .stripe_connect import (
+    archive_connected_price,
+    cancel_connected_subscription,
     create_account_link,
     create_express_connected_account,
     create_member_checkout_session,
+    create_price_on_connected_product,
     ensure_stripe_product_price,
+    modify_connected_product,
     retrieve_account,
 )
+
+
+def _stripe_ts(v: Any) -> datetime | None:
+    if v is None:
+        return None
+    try:
+        return datetime.fromtimestamp(int(v), tz=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def _apply_stripe_subscription_to_row(ms: MemberSubscription, stripe_sub: Any) -> None:
+    st = getattr(stripe_sub, "status", None)
+    if st:
+        ms.status = str(st)
+    ms.current_period_start = _stripe_ts(getattr(stripe_sub, "current_period_start", None))
+    ms.current_period_end = _stripe_ts(getattr(stripe_sub, "current_period_end", None))
+    ca = getattr(stripe_sub, "canceled_at", None)
+    if ca:
+        ms.canceled_at = _stripe_ts(ca)
 
 
 class MemberBillingService:
@@ -156,6 +186,82 @@ class MemberBillingService:
         await self.db.refresh(p)
         return MemberProductOut.model_validate(p)
 
+    async def update_product(
+        self, tenant: TenantContext, product_id: uuid.UUID, data: MemberProductUpdate
+    ) -> MemberProductOut:
+        if not data.model_fields_set:
+            raise HTTPException(status_code=400, detail="No fields to update.")
+        p = await self.repo.get_product(product_id, tenant.tenant_id)
+        if not p:
+            raise HTTPException(status_code=404, detail="Product not found")
+        t = await self.repo.get_tenant(tenant.tenant_id)
+        if not t or not t.stripe_connect_account_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Stripe Connect is not set up for this organization.",
+            )
+        if not t.stripe_connect_charges_enabled:
+            raise HTTPException(status_code=400, detail="Connected account cannot charge yet.")
+        if not p.stripe_product_id:
+            raise HTTPException(status_code=400, detail="Product is missing Stripe data; recreate it.")
+
+        fs = data.model_fields_set
+        meta_fs = fs.intersection({"name", "description", "active"})
+        if meta_fs:
+            stripe_name = data.name if "name" in fs else None
+            stripe_active = data.active if "active" in fs else None
+            if not modify_connected_product(
+                connected_account_id=t.stripe_connect_account_id,
+                stripe_product_id=p.stripe_product_id,
+                name=stripe_name,
+                description=data.description if "description" in fs else None,
+                description_set="description" in fs,
+                active=stripe_active,
+            ):
+                raise HTTPException(status_code=502, detail="Could not update product in Stripe")
+
+        if "amount_cents" in fs:
+            if data.amount_cents is None or not data.currency or data.billing_type is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Pricing update requires amount_cents, currency, and billing_type.",
+                )
+            interval_val: str | None = (
+                None if data.billing_type == "one_time" else data.interval
+            )
+            new_price_id = create_price_on_connected_product(
+                connected_account_id=t.stripe_connect_account_id,
+                stripe_product_id=p.stripe_product_id,
+                amount_cents=data.amount_cents,
+                currency=data.currency,
+                billing_type=data.billing_type,
+                interval=interval_val,
+            )
+            if not new_price_id:
+                raise HTTPException(status_code=502, detail="Could not create new price in Stripe")
+            old_price = p.stripe_price_id
+            p.amount_cents = data.amount_cents
+            p.currency = data.currency.lower()
+            p.billing_type = data.billing_type
+            p.interval = interval_val
+            p.stripe_price_id = new_price_id
+            if old_price and old_price != new_price_id:
+                archive_connected_price(
+                    connected_account_id=t.stripe_connect_account_id,
+                    price_id=old_price,
+                )
+
+        if "name" in fs and data.name is not None:
+            p.name = data.name
+        if "description" in fs:
+            p.description = data.description
+        if "active" in fs and data.active is not None:
+            p.active = data.active
+
+        await self.db.commit()
+        await self.db.refresh(p)
+        return MemberProductOut.model_validate(p)
+
     async def list_products(self, tenant: TenantContext) -> list[MemberProductOut]:
         rows = await self.repo.list_products(tenant.tenant_id)
         return [MemberProductOut.model_validate(x) for x in rows]
@@ -237,15 +343,35 @@ class MemberBillingService:
     ) -> CheckoutResponse:
         mode = "subscription" if product.billing_type == "recurring" else "payment"
         if mode == "subscription":
-            ms = MemberSubscription(
-                tenant_id=tenant_id,
-                product_id=product.id,
-                student_id=student_id,
-                payer_user_id=payer_user_id,
-                status="incomplete",
-                stripe_checkout_session_id=getattr(session, "id", None),
+            if await self.repo.has_blocking_subscription_for_student_product(
+                tenant_id, student_id, product.id
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        "This learner already has an active membership for this product. "
+                        "Use the existing subscription or cancel it in Stripe before starting a new checkout."
+                    ),
+                )
+            ms = await self.repo.get_incomplete_subscription_for_student_product(
+                tenant_id, student_id, product.id
             )
-            self.db.add(ms)
+            sid = getattr(session, "id", None)
+            if ms:
+                if payer_user_id is not None:
+                    ms.payer_user_id = payer_user_id
+                ms.stripe_checkout_session_id = sid
+            else:
+                self.db.add(
+                    MemberSubscription(
+                        tenant_id=tenant_id,
+                        product_id=product.id,
+                        student_id=student_id,
+                        payer_user_id=payer_user_id,
+                        status="incomplete",
+                        stripe_checkout_session_id=sid,
+                    )
+                )
         else:
             mp = MemberPurchase(
                 tenant_id=tenant_id,
@@ -396,4 +522,86 @@ class MemberBillingService:
             revenue_cents=rev,
             paid_invoices_count=inv_n,
             mrr_cents_approx=mrr,
+        )
+
+    async def cancel_subscription(
+        self,
+        tenant: TenantContext,
+        subscription_id: uuid.UUID,
+        body: MemberSubscriptionCancelRequest,
+    ) -> MemberSubscriptionOut:
+        t = await self.repo.get_tenant(tenant.tenant_id)
+        if not t or not t.stripe_connect_account_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Stripe Connect is not set up for this organization.",
+            )
+        ms = await self.repo.get_subscription(subscription_id, tenant.tenant_id)
+        if not ms:
+            raise HTTPException(status_code=404, detail="Subscription not found")
+        if not ms.stripe_subscription_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Subscription is not linked to Stripe yet (still in checkout).",
+            )
+        terminal = ("canceled", "incomplete_expired")
+        if ms.status in terminal:
+            raise HTTPException(
+                status_code=409,
+                detail="Subscription is already ended or expired.",
+            )
+        stripe_sub = cancel_connected_subscription(
+            connected_account_id=t.stripe_connect_account_id,
+            stripe_subscription_id=ms.stripe_subscription_id,
+            immediately=body.immediate,
+        )
+        if stripe_sub is None:
+            raise HTTPException(
+                status_code=502,
+                detail="Stripe could not cancel this subscription. Try again or use the Stripe Dashboard.",
+            )
+        _apply_stripe_subscription_to_row(ms, stripe_sub)
+        if body.immediate and ms.status != "canceled":
+            ms.status = "canceled"
+            ms.canceled_at = ms.canceled_at or datetime.now(timezone.utc)
+        await self.db.commit()
+        await self.db.refresh(ms)
+        return MemberSubscriptionOut.model_validate(ms)
+
+    async def guardian_member_status(
+        self, tenant: TenantContext, identity: CurrentIdentity
+    ) -> GuardianMemberStatusOut:
+        from app.students.service import StudentService
+
+        role = (identity.role or "").strip().lower()
+        if identity.sub_type != "user":
+            raise HTTPException(status_code=403, detail="User session required")
+        if role not in ("parent", "homeschool_parent"):
+            raise HTTPException(
+                status_code=403,
+                detail="Parent or homeschool parent role required",
+            )
+        t = await self.repo.get_tenant(tenant.tenant_id)
+        if not t:
+            raise HTTPException(status_code=404, detail="Tenant not found")
+        students = await StudentService(self.db).list_guardian_children(
+            guardian_user_id=identity.id,
+            tenant_id=tenant.tenant_id,
+            role_slug=role,
+        )
+        rows: list[GuardianChildMembershipOut] = []
+        for s in students:
+            has = await self.repo.student_has_active_entitlement(
+                tenant.tenant_id, s.id
+            )
+            rows.append(
+                GuardianChildMembershipOut(
+                    student_id=s.id,
+                    has_active_membership=has,
+                )
+            )
+        return GuardianMemberStatusOut(
+            member_billing_enabled=bool(t.member_billing_enabled),
+            require_member_billing_for_access=bool(t.require_member_billing_for_access),
+            children=rows,
         )

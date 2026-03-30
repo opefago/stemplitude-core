@@ -18,6 +18,7 @@ from app.programs.models import Program
 from app.tenants.models import Tenant
 from app.curriculum.models import Course
 from app.dependencies import CurrentIdentity, TenantContext
+from app.tenants.franchise_governance import curriculum_read_tenant_ids
 from app.notifications.models import Notification
 from app.progress.models import Attendance
 from app.students.models import ParentStudent, Student
@@ -40,6 +41,28 @@ from app.email.presets import (
 from app.gamification.streak_side_effects import bump_student_streak, bump_students_streak
 
 from .repository import ClassroomRepository
+
+
+async def _assignable_course_or_404(
+    session: AsyncSession,
+    curriculum_id: UUID,
+    *,
+    workspace_tenant_id: UUID,
+    parent_tenant_id: UUID | None = None,
+    governance_mode: str | None = None,
+) -> Course:
+    read_ids = curriculum_read_tenant_ids(
+        child_tenant_id=workspace_tenant_id,
+        parent_tenant_id=parent_tenant_id,
+        governance_mode=governance_mode,
+    )
+    course = await session.get(Course, curriculum_id)
+    if not course or course.tenant_id not in read_ids:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Curriculum not found",
+        )
+    return course
 from .schemas import (
     AttendanceResponse,
     ClassroomCreate,
@@ -516,8 +539,23 @@ class ClassroomService:
             metadata_=metadata,
         )
 
-    async def create(self, data: ClassroomCreate, tenant_id: UUID) -> ClassroomResponse:
+    async def create(
+        self,
+        data: ClassroomCreate,
+        tenant_id: UUID,
+        *,
+        parent_tenant_id: UUID | None = None,
+        governance_mode: str | None = None,
+    ) -> ClassroomResponse:
         """Create a classroom with generated join_code."""
+        if data.curriculum_id is not None:
+            await _assignable_course_or_404(
+                self.session,
+                data.curriculum_id,
+                workspace_tenant_id=tenant_id,
+                parent_tenant_id=parent_tenant_id,
+                governance_mode=governance_mode,
+            )
         join_code = await self.repo.generate_unique_join_code()
         classroom = Classroom(
             tenant_id=tenant_id,
@@ -614,6 +652,9 @@ class ClassroomService:
         classroom_id: UUID,
         data: ClassroomUpdate,
         tenant_id: UUID,
+        *,
+        parent_tenant_id: UUID | None = None,
+        governance_mode: str | None = None,
     ) -> ClassroomResponse:
         """Update a classroom."""
         classroom = await self.repo.get_by_id(classroom_id, tenant_id)
@@ -624,6 +665,15 @@ class ClassroomService:
                 detail="Classroom not found",
             )
         update_data = data.model_dump(exclude_unset=True)
+
+        if "curriculum_id" in update_data and update_data["curriculum_id"] is not None:
+            await _assignable_course_or_404(
+                self.session,
+                update_data["curriculum_id"],
+                workspace_tenant_id=tenant_id,
+                parent_tenant_id=parent_tenant_id,
+                governance_mode=governance_mode,
+            )
 
         if "instructor_id" in update_data and update_data["instructor_id"] is not None:
             membership_repo = MembershipRepository(self.session)
@@ -697,13 +747,19 @@ class ClassroomService:
         tenant_id: UUID,
         classroom_ids: list[UUID],
         curriculum_id: UUID | None,
+        parent_tenant_id: UUID | None = None,
+        governance_mode: str | None = None,
     ) -> int:
         """Bulk assign/unassign curriculum to classes with optional program derivation."""
         derived_program_id: UUID | None = None
         if curriculum_id is not None:
-            course = await self.session.get(Course, curriculum_id)
-            if not course or course.tenant_id != tenant_id:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Curriculum not found")
+            course = await _assignable_course_or_404(
+                self.session,
+                curriculum_id,
+                workspace_tenant_id=tenant_id,
+                parent_tenant_id=parent_tenant_id,
+                governance_mode=governance_mode,
+            )
             derived_program_id = course.program_id
         updated = await self.repo.bulk_assign_curriculum(
             tenant_id=tenant_id,

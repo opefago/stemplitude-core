@@ -212,6 +212,26 @@
       "dedup_ttl_seconds": 3600,
       "description": "Send membership renewal reminder emails for Stripe Connect member subscriptions",
       "schedule": { "type": "crontab", "hour": "10", "minute": "0" }
+    },
+    "cron.member_billing_reconcile_checkouts": {
+      "task_path": "workers.tasks.member_billing_tasks.member_billing_reconcile_checkout_sessions",
+      "queue": "default",
+      "runtime": "python",
+      "max_retries": 0,
+      "retry_delay_seconds": 0,
+      "dedup_ttl_seconds": 300,
+      "description": "Poll Stripe for completed Checkout Sessions still incomplete locally (webhook safety net)",
+      "schedule": { "type": "crontab", "minute": "*/10" }
+    },
+    "cron.class_session_reminders": {
+      "task_path": "workers.tasks.class_session_reminder_tasks.class_session_reminders_tick",
+      "queue": "default",
+      "runtime": "python",
+      "max_retries": 0,
+      "retry_delay_seconds": 0,
+      "dedup_ttl_seconds": 120,
+      "description": "In-app class session reminders for linked parents; tenants enable via settings.class_session_reminders (persisted sessions only)",
+      "schedule": { "type": "interval", "every": 10, "period": "minutes" }
     }
   }
 }

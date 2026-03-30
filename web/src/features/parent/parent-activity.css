@@ -111,6 +111,55 @@
   color: var(--color-text, #1e293b);
 }
 
+.parent-activity-page__date-input {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 2px solid var(--color-border, #e5e5e5);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  background: var(--color-surface, #fff);
+  color: var(--color-text, #1e293b);
+  min-height: 44px;
+}
+
+.parent-activity-page__pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 12px 20px;
+  margin-top: var(--spacing-md, 16px);
+  padding: 12px 0;
+}
+
+.parent-activity-page__pager-btn {
+  padding: 8px 18px;
+  border-radius: 999px;
+  border: 2px solid var(--color-border, #e5e5e5);
+  background: var(--color-surface, #fff);
+  font-weight: 700;
+  font-size: 0.9375rem;
+  color: var(--color-text, #1e293b);
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease;
+}
+
+.parent-activity-page__pager-btn:hover:not(:disabled) {
+  border-color: #ff9600;
+  color: #ff9600;
+}
+
+.parent-activity-page__pager-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.parent-activity-page__pager-meta {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--color-text-secondary, #64748b);
+}
+
 .parent-activity-page__list {
   list-style: none;
   margin: 0;

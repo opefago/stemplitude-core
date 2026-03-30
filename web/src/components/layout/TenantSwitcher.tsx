@@ -13,33 +13,12 @@ import {
 import { useAuth } from "../../providers/AuthProvider";
 import { useTenant } from "../../providers/TenantProvider";
 import { useWorkspace } from "../../providers/WorkspaceProvider";
-import {
-  listUserTenants,
-  getTenantById,
-  createTenant,
-} from "../../lib/api/tenants";
+import { listUserTenants, getTenantById } from "../../lib/api/tenants";
 import type { TenantInfo } from "../../providers/TenantProvider";
 import { useChildContextStudentId } from "../../lib/childContext";
 import { TenantInviteMembersModal } from "./TenantInviteMembersModal";
+import { TenantCreateOrganizationModal } from "./TenantCreateOrganizationModal";
 import "./tenant-switcher.css";
-
-function slugFromName(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, "")
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "");
-}
-
-function randomOrgCode(): string {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let s = "";
-  for (let i = 0; i < 6; i++) {
-    s += chars[Math.floor(Math.random() * chars.length)];
-  }
-  return s;
-}
 
 export function TenantSwitcher() {
   const { user, isSuperAdmin, refreshProfile } = useAuth();
@@ -55,13 +34,7 @@ export function TenantSwitcher() {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const [createExpanded, setCreateExpanded] = useState(false);
-  const [newOrgName, setNewOrgName] = useState("");
-  const [newOrgSlug, setNewOrgSlug] = useState("");
-  const [newOrgCode, setNewOrgCode] = useState("");
-  const [slugTouched, setSlugTouched] = useState(false);
-  const [createBusy, setCreateBusy] = useState(false);
-  const [createErr, setCreateErr] = useState<string | null>(null);
+  const [createOrgModalOpen, setCreateOrgModalOpen] = useState(false);
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
 
   const isAdmin = isSuperAdmin || user?.role === "admin" || user?.role === "owner";
@@ -69,7 +42,8 @@ export function TenantSwitcher() {
     user?.role === "parent" || user?.role === "homeschool_parent";
   const isInstructor = user?.role === "instructor";
   const showSwitcher = isAdmin || isParentLike || isInstructor;
-  const showInlineCreate = isParentLike && !isSuperAdmin;
+  /** Parents (tenant context): inline create. Super admins: always — avoids sending “Add organization” to /app/settings. */
+  const showInlineCreate = (isParentLike && !isPlatformView) || isSuperAdmin;
 
   useEffect(() => {
     if (!open || !showSwitcher) return;
@@ -83,26 +57,6 @@ export function TenantSwitcher() {
       .catch(() => setTenants([]))
       .finally(() => setLoading(false));
   }, [open, showSwitcher]);
-
-  useEffect(() => {
-    if (!open) {
-      setCreateExpanded(false);
-      setCreateErr(null);
-    }
-  }, [open]);
-
-  useEffect(() => {
-    if (!createExpanded) return;
-    if (!slugTouched && newOrgName) {
-      setNewOrgSlug(slugFromName(newOrgName));
-    }
-  }, [newOrgName, createExpanded, slugTouched]);
-
-  useEffect(() => {
-    if (createExpanded && !newOrgCode) {
-      setNewOrgCode(randomOrgCode());
-    }
-  }, [createExpanded, newOrgCode]);
 
   useEffect(() => {
     if (!open || !triggerRef.current) return;
@@ -159,56 +113,14 @@ export function TenantSwitcher() {
     }
   };
 
-  const handleCreateOrganization = async () => {
-    const name = newOrgName.trim();
-    const slug = newOrgSlug.trim().toLowerCase();
-    const code = newOrgCode.trim().toUpperCase();
-    if (name.length < 2) {
-      setCreateErr("Enter an organization name.");
-      return;
-    }
-    if (slug.length < 2) {
-      setCreateErr("Enter a URL slug (letters, numbers, hyphens).");
-      return;
-    }
-    if (code.length < 4) {
-      setCreateErr("Join code must be at least 4 characters.");
-      return;
-    }
-    setCreateBusy(true);
-    setCreateErr(null);
-    try {
-      const created = await createTenant({
-        name,
-        slug,
-        code,
-        type: user?.role === "homeschool_parent" ? "parent" : "center",
-      });
-      const tenantInfo: TenantInfo = {
-        id: created.id,
-        name: created.name,
-        slug: created.slug,
-        code: created.code,
-        type: created.type,
-        logoUrl: created.logoUrl,
-        settings: created.settings,
-      };
-      setTenant(tenantInfo);
-      setWorkspaceMode(created.id);
-      setOpen(false);
-      setNewOrgName("");
-      setNewOrgSlug("");
-      setNewOrgCode("");
-      setSlugTouched(false);
-      setCreateExpanded(false);
-      await refreshProfile();
-      navigate("/app");
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Could not create organization.";
-      setCreateErr(msg);
-    } finally {
-      setCreateBusy(false);
-    }
+  const createOrgTenantType =
+    user?.role === "homeschool_parent" ? "parent" : "center";
+
+  const handleCreateOrgSuccess = async (info: TenantInfo) => {
+    setTenant(info);
+    setWorkspaceMode(info.id);
+    await refreshProfile();
+    navigate("/app");
   };
 
   const displayName = isPlatformView
@@ -276,11 +188,18 @@ export function TenantSwitcher() {
         />
       ) : null}
 
+      <TenantCreateOrganizationModal
+        isOpen={createOrgModalOpen}
+        onClose={() => setCreateOrgModalOpen(false)}
+        tenantType={createOrgTenantType}
+        onCreated={handleCreateOrgSuccess}
+      />
+
       {open &&
         createPortal(
           <div
             ref={dropdownRef}
-            className={`tenant-switcher__dropdown${createExpanded ? " tenant-switcher__dropdown--expanded" : ""}`}
+            className="tenant-switcher__dropdown"
             role="listbox"
             aria-label="Organizations"
             style={{
@@ -412,106 +331,16 @@ export function TenantSwitcher() {
             {showInlineCreate && (
               <>
                 <div className="tenant-switcher__divider" />
-                {!createExpanded ? (
-                  <button
-                    type="button"
-                    className="tenant-switcher__add"
-                    onClick={() => setCreateExpanded(true)}
-                  >
-                    <Plus size={14} aria-hidden />
-                    Create new organization
-                  </button>
-                ) : (
-                  <div className="tenant-switcher__create">
-                    <div className="tenant-switcher__create-title">New organization</div>
-                    <label className="tenant-switcher__create-label">
-                      Name
-                      <input
-                        type="text"
-                        className="tenant-switcher__create-input"
-                        value={newOrgName}
-                        onChange={(e) => setNewOrgName(e.target.value)}
-                        placeholder="e.g. Smith Homeschool"
-                        autoComplete="organization"
-                      />
-                    </label>
-                    <label className="tenant-switcher__create-label">
-                      URL slug
-                      <input
-                        type="text"
-                        className="tenant-switcher__create-input"
-                        value={newOrgSlug}
-                        onChange={(e) => {
-                          setSlugTouched(true);
-                          setNewOrgSlug(e.target.value);
-                        }}
-                        placeholder="smith-homeschool"
-                        autoComplete="off"
-                      />
-                    </label>
-                    <label className="tenant-switcher__create-label">
-                      Student join code
-                      <input
-                        type="text"
-                        className="tenant-switcher__create-input"
-                        value={newOrgCode}
-                        onChange={(e) => setNewOrgCode(e.target.value.toUpperCase())}
-                        placeholder="ABCD12"
-                        maxLength={20}
-                        autoComplete="off"
-                      />
-                    </label>
-                    {createErr ? (
-                      <p className="tenant-switcher__create-error" role="alert">
-                        {createErr}
-                      </p>
-                    ) : null}
-                    <div className="tenant-switcher__create-actions">
-                      <button
-                        type="button"
-                        className="tenant-switcher__create-cancel"
-                        onClick={() => {
-                          setCreateExpanded(false);
-                          setCreateErr(null);
-                        }}
-                        disabled={createBusy}
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="button"
-                        className="tenant-switcher__create-submit"
-                        onClick={() => void handleCreateOrganization()}
-                        disabled={createBusy}
-                      >
-                        {createBusy ? (
-                          <>
-                            <Loader2 size={14} className="tenant-switcher__spinner" aria-hidden />
-                            Creating…
-                          </>
-                        ) : (
-                          "Create & switch"
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-
-            {isSuperAdmin && (
-              <>
-                <div className="tenant-switcher__divider" />
                 <button
                   type="button"
                   className="tenant-switcher__add"
                   onClick={() => {
                     setOpen(false);
-                    navigate("/app/settings");
+                    setCreateOrgModalOpen(true);
                   }}
                 >
                   <Plus size={14} aria-hidden />
-                  Add organization
+                  Create new organization
                 </button>
               </>
             )}

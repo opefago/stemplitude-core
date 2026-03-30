@@ -39,6 +39,17 @@ export interface MemberProductCreatePayload {
   interval?: "month" | "quarter" | "year" | null;
 }
 
+/** PATCH body: include only fields to change. Pricing requires amount_cents, currency, and billing_type together. */
+export interface MemberProductUpdatePayload {
+  name?: string;
+  description?: string | null;
+  active?: boolean;
+  amount_cents?: number;
+  currency?: string;
+  billing_type?: "one_time" | "recurring";
+  interval?: "month" | "quarter" | "year" | null;
+}
+
 export interface MemberSubscription {
   id: string;
   tenant_id: string;
@@ -46,6 +57,7 @@ export interface MemberSubscription {
   student_id: string;
   payer_user_id: string | null;
   status: string;
+  stripe_subscription_id?: string | null;
   current_period_start: string | null;
   current_period_end: string | null;
   canceled_at: string | null;
@@ -56,6 +68,7 @@ export interface MemberInvoice {
   id: string;
   tenant_id: string;
   member_subscription_id: string | null;
+  member_purchase_id?: string | null;
   stripe_invoice_id: string | null;
   amount_cents: number;
   currency: string;
@@ -101,6 +114,17 @@ export interface MemberBillingIntegrationsSummary {
   details_submitted: boolean;
 }
 
+export interface GuardianChildMembership {
+  student_id: string;
+  has_active_membership: boolean;
+}
+
+export interface GuardianMemberStatus {
+  member_billing_enabled: boolean;
+  require_member_billing_for_access: boolean;
+  children: GuardianChildMembership[];
+}
+
 export interface AdminMemberPaymentLinkPayload {
   student_id: string;
   product_id: string;
@@ -143,6 +167,29 @@ export async function createMemberProduct(
     method: "POST",
     body,
   });
+}
+
+export async function patchMemberProduct(
+  productId: string,
+  body: MemberProductUpdatePayload,
+): Promise<MemberProduct> {
+  return apiFetch<MemberProduct>(`/member-billing/products/${encodeURIComponent(productId)}`, {
+    method: "PATCH",
+    body,
+  });
+}
+
+export async function cancelMemberSubscription(
+  subscriptionId: string,
+  options: { immediate?: boolean } = {},
+): Promise<MemberSubscription> {
+  return apiFetch<MemberSubscription>(
+    `/member-billing/subscriptions/${encodeURIComponent(subscriptionId)}/cancel`,
+    {
+      method: "POST",
+      body: { immediate: Boolean(options.immediate) },
+    },
+  );
 }
 
 export async function listMemberProductsAdmin(): Promise<MemberProduct[]> {
@@ -191,4 +238,8 @@ export async function getMemberBillingAnalytics(
 
 export async function listMyMemberInvoices(): Promise<MemberInvoice[]> {
   return apiFetch<MemberInvoice[]>("/member-billing/me/invoices");
+}
+
+export async function getGuardianMemberStatus(): Promise<GuardianMemberStatus> {
+  return apiFetch<GuardianMemberStatus>("/member-billing/me/guardian-status");
 }

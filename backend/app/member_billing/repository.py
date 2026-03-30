@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.tenants.models import Tenant
@@ -47,9 +47,67 @@ class MemberBillingRepository:
         )
         return r.scalar_one_or_none()
 
+    async def get_subscription(
+        self, subscription_id: uuid.UUID, tenant_id: uuid.UUID
+    ) -> MemberSubscription | None:
+        row = await self.db.get(MemberSubscription, subscription_id)
+        if row is None or row.tenant_id != tenant_id:
+            return None
+        return row
+
+    async def get_incomplete_subscription_for_student_product(
+        self,
+        tenant_id: uuid.UUID,
+        student_id: uuid.UUID,
+        product_id: uuid.UUID,
+    ) -> MemberSubscription | None:
+        r = await self.db.execute(
+            select(MemberSubscription).where(
+                MemberSubscription.tenant_id == tenant_id,
+                MemberSubscription.student_id == student_id,
+                MemberSubscription.product_id == product_id,
+                MemberSubscription.status == "incomplete",
+            )
+        )
+        return r.scalar_one_or_none()
+
+    async def has_blocking_subscription_for_student_product(
+        self,
+        tenant_id: uuid.UUID,
+        student_id: uuid.UUID,
+        product_id: uuid.UUID,
+    ) -> bool:
+        r = await self.db.execute(
+            select(func.count(MemberSubscription.id)).where(
+                MemberSubscription.tenant_id == tenant_id,
+                MemberSubscription.student_id == student_id,
+                MemberSubscription.product_id == product_id,
+                MemberSubscription.status.in_(("active", "trialing", "past_due")),
+            )
+        )
+        return int(r.scalar() or 0) > 0
+
     async def get_invoice_by_stripe_id(self, stripe_invoice_id: str) -> MemberInvoice | None:
         r = await self.db.execute(
             select(MemberInvoice).where(MemberInvoice.stripe_invoice_id == stripe_invoice_id)
+        )
+        return r.scalar_one_or_none()
+
+    async def get_invoice_by_member_purchase_id(
+        self, purchase_id: uuid.UUID
+    ) -> MemberInvoice | None:
+        r = await self.db.execute(
+            select(MemberInvoice).where(MemberInvoice.member_purchase_id == purchase_id)
+        )
+        return r.scalar_one_or_none()
+
+    async def get_purchase_by_stripe_payment_intent(
+        self, payment_intent_id: str
+    ) -> MemberPurchase | None:
+        r = await self.db.execute(
+            select(MemberPurchase).where(
+                MemberPurchase.stripe_payment_intent_id == payment_intent_id
+            )
         )
         return r.scalar_one_or_none()
 
@@ -76,7 +134,7 @@ class MemberBillingRepository:
     async def list_invoices_for_payer(
         self, tenant_id: uuid.UUID, payer_user_id: uuid.UUID, limit: int = 100
     ) -> list[MemberInvoice]:
-        subq = (
+        subq_sub = (
             select(MemberSubscription.id)
             .where(
                 MemberSubscription.tenant_id == tenant_id,
@@ -84,11 +142,22 @@ class MemberBillingRepository:
             )
             .scalar_subquery()
         )
+        subq_pur = (
+            select(MemberPurchase.id)
+            .where(
+                MemberPurchase.tenant_id == tenant_id,
+                MemberPurchase.payer_user_id == payer_user_id,
+            )
+            .scalar_subquery()
+        )
         r = await self.db.execute(
             select(MemberInvoice)
             .where(
                 MemberInvoice.tenant_id == tenant_id,
-                MemberInvoice.member_subscription_id.in_(subq),
+                or_(
+                    MemberInvoice.member_subscription_id.in_(subq_sub),
+                    MemberInvoice.member_purchase_id.in_(subq_pur),
+                ),
             )
             .order_by(MemberInvoice.created_at.desc())
             .limit(limit)
@@ -189,6 +258,50 @@ class MemberBillingRepository:
         )
         row = r.one()
         return int(row[0] or 0), int(row[1] or 0)
+
+    async def list_incomplete_subscriptions_for_checkout_reconcile(
+        self,
+        *,
+        created_after: datetime,
+        created_before: datetime,
+        limit: int,
+    ) -> list[MemberSubscription]:
+        r = await self.db.execute(
+            select(MemberSubscription)
+            .where(
+                and_(
+                    MemberSubscription.status == "incomplete",
+                    MemberSubscription.stripe_checkout_session_id.is_not(None),
+                    MemberSubscription.created_at >= created_after,
+                    MemberSubscription.created_at <= created_before,
+                )
+            )
+            .order_by(MemberSubscription.created_at.asc())
+            .limit(limit)
+        )
+        return list(r.scalars().all())
+
+    async def list_unpaid_purchases_for_checkout_reconcile(
+        self,
+        *,
+        created_after: datetime,
+        created_before: datetime,
+        limit: int,
+    ) -> list[MemberPurchase]:
+        r = await self.db.execute(
+            select(MemberPurchase)
+            .where(
+                and_(
+                    MemberPurchase.paid_at.is_(None),
+                    MemberPurchase.stripe_checkout_session_id.is_not(None),
+                    MemberPurchase.created_at >= created_after,
+                    MemberPurchase.created_at <= created_before,
+                )
+            )
+            .order_by(MemberPurchase.created_at.asc())
+            .limit(limit)
+        )
+        return list(r.scalars().all())
 
     async def mrr_approx_cents(self, tenant_id: uuid.UUID) -> int:
         """Sum active recurring subs: normalize to monthly cents using product interval."""

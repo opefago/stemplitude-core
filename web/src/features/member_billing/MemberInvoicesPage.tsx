@@ -5,13 +5,7 @@ import { ApiHttpError } from "../../lib/api/client";
 import "../../components/ui/ui.css";
 import "../settings/settings.css";
 import "./member-billing.css";
-
-function formatMoney(amountCents: number, currency: string): string {
-  return new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency: (currency || "USD").toUpperCase(),
-  }).format(amountCents / 100);
-}
+import { formatStripeCurrency } from "./stripeCurrency";
 
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -98,7 +92,7 @@ export function MemberInvoicesPage() {
                   rows.map((inv) => (
                     <tr key={inv.id}>
                       <td>{inv.status}</td>
-                      <td>{formatMoney(inv.amount_cents, inv.currency)}</td>
+                      <td>{formatStripeCurrency(inv.amount_cents, inv.currency)}</td>
                       <td>{formatDate(inv.created_at)}</td>
                       <td>{formatDate(inv.paid_at)}</td>
                       <td>

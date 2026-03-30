@@ -109,6 +109,18 @@ class AuthRepository:
         if tenant:
             return tenant
 
+        key = (identifier or "").strip().lower()
+        if key:
+            result = await self.session.execute(
+                select(Tenant).where(
+                    Tenant.public_host_subdomain == key,
+                    Tenant.is_active == True,  # noqa: E712
+                )
+            )
+            tenant = result.scalar_one_or_none()
+            if tenant:
+                return tenant
+
         result = await self.session.execute(
             select(Tenant).where(
                 Tenant.code == identifier, Tenant.is_active == True

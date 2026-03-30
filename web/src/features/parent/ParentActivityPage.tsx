@@ -7,9 +7,12 @@ import {
   getParentChildren,
   type ParentActivityItem,
   type ParentActivityKind,
+  type ParentChildActivity,
   type StudentProfile,
 } from "../../lib/api/students";
 import "./parent-activity.css";
+
+const PAGE_SIZE = 40;
 
 const KIND_OPTIONS: { value: "all" | ParentActivityKind; label: string }[] = [
   { value: "all", label: "All types" },
@@ -42,6 +45,27 @@ function formatWhen(iso: string): string {
   }
 }
 
+function utcDayStart(isoDate: string): string {
+  return `${isoDate}T00:00:00.000Z`;
+}
+
+function utcDayEnd(isoDate: string): string {
+  return `${isoDate}T23:59:59.999Z`;
+}
+
+function classFilterFromSearchParam(raw: string | null): string {
+  const v = (raw ?? "").trim();
+  if (!v || v === "all") return "all";
+  if (v === "general") return "__general";
+  return v;
+}
+
+function classSearchParamFromFilter(classFilter: string): string | null {
+  if (classFilter === "all") return null;
+  if (classFilter === "__general") return "general";
+  return classFilter;
+}
+
 export function ParentActivityPage() {
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -52,11 +76,31 @@ export function ParentActivityPage() {
 
   const [children, setChildren] = useState<StudentProfile[]>([]);
   const [loadingChildren, setLoadingChildren] = useState(true);
-  const [items, setItems] = useState<ParentActivityItem[]>([]);
-  const [digestLoading, setDigestLoading] = useState(false);
+  const [payload, setPayload] = useState<ParentChildActivity | null>(null);
+  const [listLoading, setListLoading] = useState(false);
+  const [listError, setListError] = useState<string | null>(null);
 
-  const [classFilter, setClassFilter] = useState<string>("all");
-  const [kindFilter, setKindFilter] = useState<"all" | ParentActivityKind>("all");
+  const page = useMemo(() => {
+    const n = Number(searchParams.get("page") || "1");
+    return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1;
+  }, [searchParams]);
+
+  const dateFrom = (searchParams.get("from") ?? "").trim();
+  const dateTo = (searchParams.get("to") ?? "").trim();
+  const kindFilter = useMemo((): "all" | ParentActivityKind => {
+    const k = (searchParams.get("kind") ?? "").trim();
+    const allowedKinds = new Set(
+      KIND_OPTIONS.filter((o) => o.value !== "all").map((o) => o.value),
+    );
+    if (k && allowedKinds.has(k as ParentActivityKind))
+      return k as ParentActivityKind;
+    return "all";
+  }, [searchParams]);
+
+  const classFilter = useMemo(
+    () => classFilterFromSearchParam(searchParams.get("class")),
+    [searchParams],
+  );
 
   useEffect(() => {
     if (!allowed) return;
@@ -83,72 +127,102 @@ export function ParentActivityPage() {
     return children[0]?.id ?? "";
   }, [studentIdParam, children]);
 
+  const patchParams = useCallback(
+    (patch: Record<string, string | null | undefined>, options?: { resetPage?: boolean }) => {
+      const next = new URLSearchParams(searchParams);
+      for (const [key, val] of Object.entries(patch)) {
+        if (val === null || val === undefined || val === "")
+          next.delete(key);
+        else next.set(key, val);
+      }
+      if (options?.resetPage) next.delete("page");
+      setSearchParams(next, { replace: true });
+    },
+    [searchParams, setSearchParams],
+  );
+
   useEffect(() => {
     if (!allowed || !activeStudentId) {
-      setItems([]);
+      setPayload(null);
+      setListError(null);
       return;
     }
     let cancelled = false;
     (async () => {
-      setDigestLoading(true);
+      setListLoading(true);
+      setListError(null);
       try {
-        const limit = 40;
-        let skip = 0;
-        const merged: ParentActivityItem[] = [];
-        let total = 0;
-        for (;;) {
-          const page = await getParentChildActivity(activeStudentId, {
-            skip,
-            limit,
-          });
-          merged.push(...(page.items ?? []));
-          total = page.total;
-          if (page.items.length < limit || merged.length >= total) break;
-          skip += limit;
+        const skip = (page - 1) * PAGE_SIZE;
+        const req: Parameters<typeof getParentChildActivity>[1] = {
+          skip,
+          limit: PAGE_SIZE,
+        };
+        if (dateFrom) req.occurred_after = utcDayStart(dateFrom);
+        if (dateTo) req.occurred_before = utcDayEnd(dateTo);
+        if (kindFilter !== "all") req.activity_kind = kindFilter;
+        if (classFilter === "__general") req.without_classroom = true;
+        else if (classFilter !== "all") req.classroom_id = classFilter;
+
+        const data = await getParentChildActivity(activeStudentId, req);
+        if (!cancelled) setPayload(data);
+      } catch (e) {
+        if (!cancelled) {
+          setPayload(null);
+          setListError(
+            e instanceof Error ? e.message : "Could not load activity",
+          );
         }
-        if (!cancelled) setItems(merged);
-      } catch {
-        if (!cancelled) setItems([]);
       } finally {
-        if (!cancelled) setDigestLoading(false);
+        if (!cancelled) setListLoading(false);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [allowed, activeStudentId]);
+  }, [
+    allowed,
+    activeStudentId,
+    page,
+    dateFrom,
+    dateTo,
+    kindFilter,
+    classFilter,
+  ]);
 
-  const classOptions = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const it of items) {
-      const id = it.classroom_id?.trim();
-      const name = (it.class_name ?? "").trim();
-      if (id && name) map.set(id, name);
+  useEffect(() => {
+    if (!payload || listLoading) return;
+    const lim = payload.limit || PAGE_SIZE;
+    const tp = Math.max(1, Math.ceil(payload.total / lim));
+    if (page > tp) {
+      if (tp <= 1) patchParams({ page: null });
+      else patchParams({ page: String(tp) });
     }
-    return [...map.entries()]
-      .map(([id, name]) => ({ id, name }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [items]);
+  }, [payload, listLoading, page, patchParams]);
 
-  const filtered = useMemo(() => {
-    return items.filter((it) => {
-      if (kindFilter !== "all" && it.kind !== kindFilter) return false;
-      if (classFilter === "all") return true;
-      if (!it.classroom_id) {
-        return classFilter === "__general";
-      }
-      return it.classroom_id === classFilter;
-    });
-  }, [items, kindFilter, classFilter]);
+  const items: ParentActivityItem[] = payload?.items ?? [];
+  const total = payload?.total ?? 0;
+  const limit = payload?.limit ?? PAGE_SIZE;
+  const totalPages = Math.max(1, Math.ceil(total / limit));
+  const classOptions = payload?.enrolled_classrooms ?? [];
 
   const setStudentInUrl = useCallback(
     (id: string) => {
       const next = new URLSearchParams(searchParams);
       if (id) next.set("studentId", id);
       else next.delete("studentId");
+      next.delete("page");
       setSearchParams(next, { replace: true });
     },
     [searchParams, setSearchParams],
+  );
+
+  const goPage = useCallback(
+    (nextPage: number) => {
+      const p = Math.max(1, nextPage);
+      if (p <= 1) patchParams({ page: null });
+      else patchParams({ page: String(p) });
+    },
+    [patchParams],
   );
 
   if (!allowed) {
@@ -172,7 +246,8 @@ export function ParentActivityPage() {
         </Link>
         <h1 className="parent-activity-page__title">Activity</h1>
         <p className="parent-activity-page__subtitle">
-          Full timeline for the selected learner. Filter by class or activity type.
+          Timeline for the selected learner. Use dates to bound what loads; results are
+          paged. Leaving dates empty uses the last 90 days through today (UTC).
         </p>
       </header>
 
@@ -203,10 +278,36 @@ export function ParentActivityPage() {
 
           <div className="parent-activity-page__filters">
             <label className="parent-activity-page__filter">
+              <span className="parent-activity-page__filter-label">From (UTC date)</span>
+              <input
+                type="date"
+                className="parent-activity-page__date-input"
+                value={dateFrom}
+                onChange={(e) =>
+                  patchParams({ from: e.target.value || null }, { resetPage: true })
+                }
+              />
+            </label>
+            <label className="parent-activity-page__filter">
+              <span className="parent-activity-page__filter-label">Through (UTC date)</span>
+              <input
+                type="date"
+                className="parent-activity-page__date-input"
+                value={dateTo}
+                onChange={(e) =>
+                  patchParams({ to: e.target.value || null }, { resetPage: true })
+                }
+              />
+            </label>
+            <label className="parent-activity-page__filter">
               <span className="parent-activity-page__filter-label">Class</span>
               <select
                 value={classFilter}
-                onChange={(e) => setClassFilter(e.target.value)}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  const param = classSearchParamFromFilter(v);
+                  patchParams({ class: param }, { resetPage: true });
+                }}
                 className="parent-activity-page__select"
               >
                 <option value="all">All classes</option>
@@ -222,9 +323,13 @@ export function ParentActivityPage() {
               <span className="parent-activity-page__filter-label">Type</span>
               <select
                 value={kindFilter}
-                onChange={(e) =>
-                  setKindFilter(e.target.value as "all" | ParentActivityKind)
-                }
+                onChange={(e) => {
+                  const v = e.target.value as "all" | ParentActivityKind;
+                  patchParams(
+                    { kind: v === "all" ? null : v },
+                    { resetPage: true },
+                  );
+                }}
                 className="parent-activity-page__select"
               >
                 {KIND_OPTIONS.map((o) => (
@@ -236,36 +341,67 @@ export function ParentActivityPage() {
             </label>
           </div>
 
-          {digestLoading ? (
+          {listError ? (
+            <p className="parent-activity-page__muted" role="alert">
+              {listError}
+            </p>
+          ) : listLoading ? (
             <p className="parent-activity-page__muted">Loading activity…</p>
-          ) : filtered.length === 0 ? (
+          ) : items.length === 0 ? (
             <p className="parent-activity-page__muted">
-              No activity matches these filters.
+              No activity in this range and filters.
             </p>
           ) : (
-            <ul className="parent-activity-page__list" role="list">
-              {filtered.map((item) => (
-                <li key={`${item.kind}-${item.ref_id ?? item.occurred_at}`} role="listitem">
-                  <div className="parent-activity-page__row">
-                    <div className="parent-activity-page__row-main">
-                      <strong className="parent-activity-page__row-title">{item.title}</strong>
-                      {item.detail ? (
-                        <span className="parent-activity-page__row-detail">{item.detail}</span>
-                      ) : null}
-                      {item.class_name ? (
-                        <span className="parent-activity-page__row-class">{item.class_name}</span>
-                      ) : null}
+            <>
+              <ul className="parent-activity-page__list" role="list">
+                {items.map((item) => (
+                  <li key={`${item.kind}-${item.ref_id ?? item.occurred_at}`} role="listitem">
+                    <div className="parent-activity-page__row">
+                      <div className="parent-activity-page__row-main">
+                        <strong className="parent-activity-page__row-title">{item.title}</strong>
+                        {item.detail ? (
+                          <span className="parent-activity-page__row-detail">{item.detail}</span>
+                        ) : null}
+                        {item.class_name ? (
+                          <span className="parent-activity-page__row-class">{item.class_name}</span>
+                        ) : null}
+                      </div>
+                      <time
+                        className="parent-activity-page__row-time"
+                        dateTime={item.occurred_at}
+                      >
+                        {formatWhen(item.occurred_at)}
+                      </time>
                     </div>
-                    <time
-                      className="parent-activity-page__row-time"
-                      dateTime={item.occurred_at}
-                    >
-                      {formatWhen(item.occurred_at)}
-                    </time>
-                  </div>
-                </li>
-              ))}
-            </ul>
+                  </li>
+                ))}
+              </ul>
+              <nav
+                className="parent-activity-page__pager"
+                aria-label="Activity pages"
+              >
+                <button
+                  type="button"
+                  className="parent-activity-page__pager-btn"
+                  disabled={page <= 1 || listLoading}
+                  onClick={() => goPage(page - 1)}
+                >
+                  Previous
+                </button>
+                <span className="parent-activity-page__pager-meta">
+                  Page {page} of {totalPages}
+                  {total > 0 ? ` · ${total} events` : null}
+                </span>
+                <button
+                  type="button"
+                  className="parent-activity-page__pager-btn"
+                  disabled={page >= totalPages || listLoading}
+                  onClick={() => goPage(page + 1)}
+                >
+                  Next
+                </button>
+              </nav>
+            </>
           )}
         </>
       )}

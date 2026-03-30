@@ -138,8 +138,10 @@ def create_member_checkout_session(
         if application_fee_percent is not None and application_fee_percent > 0:
             params["subscription_data"]["application_fee_percent"] = round(application_fee_percent, 2)
     elif mode == "payment":
+        pid: dict[str, Any] = {"metadata": metadata}
         if application_fee_amount_cents is not None and application_fee_amount_cents > 0:
-            params["payment_intent_data"] = {"application_fee_amount": application_fee_amount_cents}
+            pid["application_fee_amount"] = application_fee_amount_cents
+        params["payment_intent_data"] = pid
     try:
         return stripe.checkout.Session.create(**params)
     except stripe.StripeError as e:
@@ -157,6 +159,16 @@ def retrieve_checkout_session(session_id: str, *, connected_account_id: str) -> 
         return None
 
 
+def retrieve_invoice(invoice_id: str, *, connected_account_id: str) -> Any | None:
+    if not _configure():
+        return None
+    try:
+        return stripe.Invoice.retrieve(invoice_id, stripe_account=connected_account_id)
+    except stripe.StripeError as e:
+        logger.warning("retrieve_invoice failed: %s", e)
+        return None
+
+
 def retrieve_subscription(subscription_id: str, *, connected_account_id: str) -> Any | None:
     if not _configure():
         return None
@@ -165,3 +177,104 @@ def retrieve_subscription(subscription_id: str, *, connected_account_id: str) ->
     except stripe.StripeError as e:
         logger.warning("retrieve_subscription failed: %s", e)
         return None
+
+
+def cancel_connected_subscription(
+    *,
+    connected_account_id: str,
+    stripe_subscription_id: str,
+    immediately: bool,
+) -> Any | None:
+    """Returns updated Subscription object from Stripe, or None on failure."""
+    if not _configure():
+        return None
+    try:
+        if immediately:
+            return stripe.Subscription.delete(
+                stripe_subscription_id, stripe_account=connected_account_id
+            )
+        return stripe.Subscription.modify(
+            stripe_subscription_id,
+            cancel_at_period_end=True,
+            stripe_account=connected_account_id,
+        )
+    except stripe.StripeError as e:
+        logger.warning("cancel_connected_subscription failed: %s", e)
+        return None
+
+
+def modify_connected_product(
+    *,
+    connected_account_id: str,
+    stripe_product_id: str,
+    name: str | None = None,
+    description: str | None = None,
+    description_set: bool = False,
+    active: bool | None = None,
+) -> bool:
+    if not _configure():
+        return False
+    kwargs: dict[str, Any] = {}
+    if name is not None:
+        kwargs["name"] = name[:200]
+    if description_set:
+        kwargs["description"] = (description or "")[:5000]
+    if active is not None:
+        kwargs["active"] = active
+    if not kwargs:
+        return True
+    try:
+        stripe.Product.modify(stripe_product_id, stripe_account=connected_account_id, **kwargs)
+        return True
+    except stripe.StripeError as e:
+        logger.warning("modify_connected_product failed: %s", e)
+        return False
+
+
+def create_price_on_connected_product(
+    *,
+    connected_account_id: str,
+    stripe_product_id: str,
+    amount_cents: int,
+    currency: str,
+    billing_type: str,
+    interval: str | None,
+) -> str | None:
+    """Create a new Price on an existing Product (Stripe prices are immutable)."""
+    if not _configure():
+        return None
+    recurring: dict[str, Any] | None = None
+    if billing_type == "recurring" and interval:
+        if interval == "month":
+            recurring = {"interval": "month", "interval_count": 1}
+        elif interval == "quarter":
+            recurring = {"interval": "month", "interval_count": 3}
+        elif interval == "year":
+            recurring = {"interval": "year", "interval_count": 1}
+        else:
+            recurring = {"interval": "month", "interval_count": 1}
+    price_params: dict[str, Any] = {
+        "product": stripe_product_id,
+        "unit_amount": amount_cents,
+        "currency": currency.lower(),
+        "stripe_account": connected_account_id,
+    }
+    if recurring:
+        price_params["recurring"] = recurring
+    try:
+        price = stripe.Price.create(**price_params)
+        return price.id
+    except stripe.StripeError as e:
+        logger.warning("create_price_on_connected_product failed: %s", e)
+        return None
+
+
+def archive_connected_price(*, connected_account_id: str, price_id: str) -> bool:
+    if not _configure():
+        return False
+    try:
+        stripe.Price.modify(price_id, active=False, stripe_account=connected_account_id)
+        return True
+    except stripe.StripeError as e:
+        logger.warning("archive_connected_price failed: %s", e)
+        return False

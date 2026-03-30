@@ -57,3 +57,24 @@ def member_billing_renewal_reminders():
     except Exception as exc:
         logger.error("member_billing_renewal_reminders failed: %s", exc)
         raise
+
+
+@celery_app.task
+def member_billing_reconcile_checkout_sessions():
+    """Backfill member billing rows if Connect ``checkout.session.completed`` webhooks were missed."""
+    logger.info("member_billing_reconcile_checkout_sessions started")
+
+    async def _run():
+        import app.database as db_mod
+
+        from app.member_billing.checkout_completion import reconcile_stale_member_checkouts
+
+        async with db_mod.async_session_factory() as db:
+            summary = await reconcile_stale_member_checkouts(db)
+            logger.info("member_billing_reconcile_checkout_sessions %s", summary)
+
+    try:
+        run_async_db(_run)
+    except Exception as exc:
+        logger.error("member_billing_reconcile_checkout_sessions failed: %s", exc)
+        raise

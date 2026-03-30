@@ -1,12 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, CreditCard, LayoutDashboard, Settings } from "lucide-react";
 import {
   getParentChildren,
   type StudentProfile,
 } from "../../lib/api/students";
+import { useTenant } from "../../providers/TenantProvider";
+import { useGuardianMemberBillingSummary } from "../../hooks/useGuardianMemberBillingSummary";
 import "./dashboard-bento.css";
-import "./parent-dashboard.css";
+import "./children-page.css";
 
 function childLabel(s: StudentProfile): string {
   const dn = (s.display_name ?? "").trim();
@@ -14,10 +16,34 @@ function childLabel(s: StudentProfile): string {
   return [s.first_name, s.last_name].filter(Boolean).join(" ").trim() || "Student";
 }
 
+function childInitials(s: StudentProfile): string {
+  const f = (s.first_name ?? "").trim().charAt(0);
+  const l = (s.last_name ?? "").trim().charAt(0);
+  if (f || l) return (f + l).toUpperCase();
+  const d = (s.display_name ?? "").trim();
+  if (d.length >= 2) return d.slice(0, 2).toUpperCase();
+  return "?";
+}
+
 export function ChildrenPage() {
+  const { tenant } = useTenant();
+  const guardianBilling = useGuardianMemberBillingSummary();
   const [children, setChildren] = useState<StudentProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const childMembershipMap = useMemo(() => {
+    const m = new Map<string, boolean>();
+    for (const row of guardianBilling.status?.children ?? []) {
+      m.set(row.student_id, row.has_active_membership);
+    }
+    return m;
+  }, [guardianBilling.status?.children]);
+
+  const showPayForChild = (studentId: string) =>
+    !guardianBilling.loading &&
+    Boolean(guardianBilling.status?.member_billing_enabled) &&
+    !childMembershipMap.get(studentId);
 
   useEffect(() => {
     let cancelled = false;
@@ -41,73 +67,110 @@ export function ChildrenPage() {
     };
   }, []);
 
+  const tenantName = tenant?.name?.trim() || "this workspace";
+
   return (
-    <div
-      className="dashboard-bento parent-dashboard"
-      style={{ maxWidth: 720, margin: "0 auto", padding: "var(--spacing-lg)" }}
-      role="main"
-      aria-label="My children"
-    >
-      <header className="dashboard-bento__header">
-        <h1 className="dashboard-bento__greeting" style={{ fontSize: "1.5rem" }}>
-          My children
-        </h1>
-        <p className="dashboard-bento__subtitle">
-          Learners linked to you in this workspace. Use Home to see progress and upcoming
-          classes.
-        </p>
+    <div className="children-page" role="main" aria-label="My children">
+      <header className="children-page__header">
+        <div className="children-page__header-icon" aria-hidden>
+          <img src="/assets/cartoon-icons/Players.png" alt="" />
+        </div>
+        <div className="children-page__header-text">
+          <h1 className="children-page__title">My children</h1>
+          <p className="children-page__subtitle">
+            Learners linked to you in <strong>{tenantName}</strong>. Open{" "}
+            <strong>Parent &amp; learner settings</strong> for messaging rules, grade level, and
+            removing your guardian link.
+          </p>
+          <p className="children-page__hint">
+            <span>Tip: use</span>
+            <span className="children-page__hint-kbd">Children</span>
+            <span>in the left sidebar anytime.</span>
+          </p>
+        </div>
       </header>
 
       {loading ? (
-        <p className="parent-dashboard__message-text">Loading…</p>
+        <div className="children-page__grid" aria-busy="true" aria-label="Loading">
+          <div className="children-page__skeleton" />
+          <div className="children-page__skeleton" />
+        </div>
       ) : error ? (
-        <p className="parent-dashboard__message-text" role="alert">
+        <div className="children-page__error" role="alert">
           {error}
-        </p>
+        </div>
       ) : children.length === 0 ? (
-        <p className="parent-dashboard__message-text">
-          No students are linked yet. If you use a school account, ask your organization to
-          connect you as a guardian.
-        </p>
+        <div className="children-page__empty">
+          <div className="children-page__empty-icon" aria-hidden>
+            <img src="/assets/cartoon-icons/Players.png" alt="" />
+          </div>
+          <h2 className="children-page__empty-title">No learners linked yet</h2>
+          <p className="children-page__empty-copy">
+            If you use a school account, ask your organization to connect you as a guardian. Home
+            workspace operators can add students from the Students area.
+          </p>
+          <Link to="/app" className="children-page__empty-cta">
+            Back to home
+            <ChevronRight size={18} aria-hidden />
+          </Link>
+        </div>
       ) : (
-        <ul className="dashboard-bento__activity-list" role="list">
+        <div className="children-page__grid">
           {children.map((c) => (
-            <li
-              key={c.id}
-              className="dashboard-bento__activity-item"
-              role="listitem"
-              style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1rem" }}
-            >
-              <div>
-                <span className="dashboard-bento__activity-text">{childLabel(c)}</span>
-                {c.email ? (
-                  <span
-                    className="dashboard-bento__activity-time"
-                    style={{ display: "block", marginTop: "0.25rem" }}
+            <article key={c.id} className="children-page__card">
+              <div className="children-page__card-top">
+                <div className="children-page__avatar" aria-hidden>
+                  {c.avatar_url ? (
+                    <img src={c.avatar_url} alt="" />
+                  ) : (
+                    childInitials(c)
+                  )}
+                </div>
+                <div className="children-page__card-body">
+                  <h2 className="children-page__name">{childLabel(c)}</h2>
+                  {c.email ? (
+                    <p className="children-page__meta">{c.email}</p>
+                  ) : (
+                    <p className="children-page__meta">No email on file</p>
+                  )}
+                  <div className="children-page__pills">
+                    {c.grade_level ? (
+                      <span className="children-page__pill">Grade {c.grade_level}</span>
+                    ) : (
+                      <span className="children-page__pill" style={{ opacity: 0.75 }}>
+                        Grade not set
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className="children-page__actions">
+                <Link
+                  to={`/app/children/settings?student=${encodeURIComponent(c.id)}`}
+                  className="children-page__action children-page__action--primary"
+                >
+                  <Settings size={17} strokeWidth={2.25} aria-hidden />
+                  Parent &amp; learner settings
+                </Link>
+                {showPayForChild(c.id) ? (
+                  <Link
+                    to={`/app/member-billing/pay?student=${encodeURIComponent(c.id)}`}
+                    className="children-page__action"
                   >
-                    {c.email}
-                  </span>
+                    <CreditCard size={17} strokeWidth={2.25} aria-hidden />
+                    Pay membership
+                    <ChevronRight size={16} aria-hidden />
+                  </Link>
                 ) : null}
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "0.35rem" }}>
-                <Link
-                  to={`/app/member-billing/pay?student=${encodeURIComponent(c.id)}`}
-                  className="dashboard-bento__card-action"
-                  style={{ flexShrink: 0 }}
-                >
-                  Pay membership <ChevronRight size={14} aria-hidden />
-                </Link>
-                <Link
-                  to="/app"
-                  className="dashboard-bento__card-action"
-                  style={{ flexShrink: 0 }}
-                >
-                  Dashboard <ChevronRight size={14} aria-hidden />
+                <Link to="/app" className="children-page__action children-page__action--ghost">
+                  <LayoutDashboard size={17} strokeWidth={2.25} aria-hidden />
+                  View on home dashboard
+                  <ChevronRight size={16} aria-hidden />
                 </Link>
               </div>
-            </li>
+            </article>
           ))}
-        </ul>
+        </div>
       )}
     </div>
   );

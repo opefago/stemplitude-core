@@ -2,15 +2,25 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.dependencies import get_current_identity, require_identity, CurrentIdentity, TenantContext
+from app.dependencies import (
+    CurrentIdentity,
+    TenantContext,
+    get_current_identity,
+    require_identity,
+)
 from app.core.permissions import require_permission
 
 from .schemas import (
+    ChildOrganizationRollupResponse,
     ChildTenantCreate,
+    FranchiseJoinDecision,
+    FranchiseJoinRequestCreate,
+    FranchiseJoinRequestListResponse,
+    FranchiseJoinRequestResponse,
     HierarchyListResponse,
     HierarchyResponse,
     HierarchyUpdate,
@@ -20,13 +30,14 @@ from .schemas import (
     MemberAdd,
     MemberRoleUpdate,
     MemberWithUserResponse,
+    PublicTenantByHostResponse,
     SeatMonitorResponse,
     StudentPolicies,
     StudentPoliciesUpdate,
     SupportAccessGrantCreate,
-    SupportAccessOptionsResponse,
-    SupportAccessGrantResponse,
     SupportAccessListResponse,
+    SupportAccessGrantResponse,
+    SupportAccessOptionsResponse,
     TenantCreate,
     TenantListResponse,
     TenantResponse,
@@ -90,6 +101,50 @@ async def list_tenants(
     )
 
 
+@router.get("/public/by-host/{label}", response_model=PublicTenantByHostResponse)
+async def public_tenant_by_host(label: str, db: AsyncSession = Depends(get_db)):
+    """Resolve an active tenant by its public DNS label (no auth). Used by SPA on tenant subdomains."""
+    service = TenantService(db)
+    tenant = await service.get_public_tenant_by_host_label(label)
+    if not tenant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown host label")
+    return PublicTenantByHostResponse(
+        id=tenant.id,
+        name=tenant.name,
+        slug=tenant.slug,
+        public_host_subdomain=tenant.public_host_subdomain,
+    )
+
+
+@router.post(
+    "/hierarchy-requests",
+    response_model=FranchiseJoinRequestResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def submit_franchise_join_request(
+    data: FranchiseJoinRequestCreate,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _: None = require_permission("tenants", "update"),
+):
+    """Child org admin: request to link this workspace under a parent (district / franchisor)."""
+    ctx = getattr(request.state, "tenant", None)
+    if ctx is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tenant context required: set X-Tenant-ID to the requesting (child) organization.",
+        )
+    identity = require_identity(request)
+    if identity.sub_type != "user":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Users only")
+    service = TenantService(db)
+    try:
+        row = await service.submit_franchise_join_request(ctx.tenant_id, identity.id, data)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    return FranchiseJoinRequestResponse.model_validate(row)
+
+
 @router.get("/{id}", response_model=TenantResponse)
 async def get_tenant(
     id: UUID,
@@ -135,7 +190,10 @@ async def update_tenant(
     """Update tenant."""
     _require_tenant_match(id, request)
     service = TenantService(db)
-    tenant = await service.update_tenant(id, data)
+    try:
+        tenant = await service.update_tenant(id, data)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     if not tenant:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")
     return TenantResponse.model_validate(tenant)
@@ -459,6 +517,72 @@ async def remove_child_tenant(
     if not ok:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Child tenant link not found")
     return {"status": "removed"}
+
+
+@router.get("/{id}/hierarchy-requests", response_model=FranchiseJoinRequestListResponse)
+async def list_franchise_join_requests(
+    id: UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    status_filter: str | None = Query("pending", alias="status"),
+    _: None = require_permission("tenants", "view"),
+):
+    """Parent org: list franchise join requests (default: pending only). Use status=all for every status."""
+    _require_tenant_match(id, request)
+    service = TenantService(db)
+    st = None if (status_filter or "").lower() == "all" else status_filter
+    items = await service.list_franchise_join_requests(id, st)
+    return FranchiseJoinRequestListResponse(
+        items=[FranchiseJoinRequestResponse.model_validate(r) for r in items],
+        total=len(items),
+    )
+
+
+@router.post(
+    "/{id}/hierarchy-requests/{request_id}/decision",
+    response_model=FranchiseJoinRequestResponse,
+)
+async def decide_franchise_join_request(
+    id: UUID,
+    request_id: UUID,
+    data: FranchiseJoinDecision,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _: None = require_permission("tenants", "update"),
+):
+    """Parent org admin: approve (creates hierarchy link + governance) or reject a join request."""
+    _require_tenant_match(id, request)
+    identity = require_identity(request)
+    if identity.sub_type != "user":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Users only")
+    service = TenantService(db)
+    try:
+        row = await service.decide_franchise_join_request(
+            id, request_id, identity.id, data
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    return FranchiseJoinRequestResponse.model_validate(row)
+
+
+@router.get("/{id}/children/{child_id}/rollup", response_model=ChildOrganizationRollupResponse)
+async def child_organization_rollup(
+    id: UUID,
+    child_id: UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _: None = require_permission("tenants", "view"),
+):
+    """Aggregated activity for a linked child org (no per-learner data). Respects governance.parent_analytics_rollups."""
+    _require_tenant_match(id, request)
+    service = TenantService(db)
+    rollup = await service.get_child_organization_rollup(id, child_id)
+    if rollup is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active franchise link or rollups disabled for this child",
+        )
+    return rollup
 
 
 @router.get("/{id}/children/seats/monitor", response_model=SeatMonitorResponse)

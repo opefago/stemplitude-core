@@ -61,6 +61,7 @@ typer>=0.15.0
 
 # Utilities
 python-dotenv>=1.0.1
+python-dateutil>=2.9.0
 
 # Yjs collaborative sync
 pycrdt>=0.12.0

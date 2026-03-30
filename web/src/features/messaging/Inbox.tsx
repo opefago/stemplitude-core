@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { Link, Outlet, useParams } from "react-router-dom";
+import { useCallback, useEffect, useLayoutEffect, useState } from "react";
+import { Link, Outlet, useParams, useSearchParams } from "react-router-dom";
 import { Hash, MessageSquarePlus, Search, Users } from "lucide-react";
 import { useAuth } from "../../providers/AuthProvider";
 import {
@@ -11,10 +11,22 @@ import {
   type NotificationRecord,
 } from "../../lib/api/notifications";
 import { ComposeModal } from "./ComposeModal";
+import { ParentEventsHub, useParentEventsWeekIndicator } from "./ParentEventsHub";
 import { subscribeMessagesInvalidate } from "../../lib/messagesInvalidate";
 import "./messaging.css";
 
 type HubTab = "updates" | "messages" | "events" | "attendance";
+
+const PARENT_HUB_TABS: readonly HubTab[] = [
+  "updates",
+  "messages",
+  "events",
+  "attendance",
+] as const;
+
+function isParentHubTab(value: string | null): value is HubTab {
+  return value != null && (PARENT_HUB_TABS as readonly string[]).includes(value);
+}
 
 function timeAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -117,6 +129,7 @@ function ConvItem({ conv, active }: ConvItemProps) {
 
 export function Inbox({ variant = "default" }: { variant?: "default" | "parent" }) {
   const { id: activeId } = useParams<{ id: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [search, setSearch] = useState("");
@@ -147,8 +160,40 @@ export function Inbox({ variant = "default" }: { variant?: "default" | "parent" 
   }, []);
 
   useEffect(() => {
-    if (variant === "parent" && activeId) setHubTab("messages");
-  }, [variant, activeId]);
+    if (variant !== "parent" || !activeId) return;
+    setHubTab("messages");
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("hub");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [variant, activeId, setSearchParams]);
+
+  useLayoutEffect(() => {
+    if (variant !== "parent" || activeId) return;
+    const raw = searchParams.get("hub");
+    if (isParentHubTab(raw)) setHubTab(raw);
+    else setHubTab("messages");
+  }, [variant, activeId, searchParams]);
+
+  const selectParentHubTab = useCallback(
+    (key: HubTab) => {
+      setHubTab(key);
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (key === "messages") next.delete("hub");
+          else next.set("hub", key);
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
 
   useEffect(() => {
     void loadConversations();
@@ -188,6 +233,7 @@ export function Inbox({ variant = "default" }: { variant?: "default" | "parent" 
 
   const hasConversation = !!activeId;
   const isParentHub = variant === "parent";
+  const eventsWeekIndicator = useParentEventsWeekIndicator(isParentHub);
 
   return (
     <div
@@ -211,9 +257,17 @@ export function Inbox({ variant = "default" }: { variant?: "default" | "parent" 
               role="tab"
               aria-selected={hubTab === key}
               className={`msg-hub-tabs__btn${hubTab === key ? " msg-hub-tabs__btn--active" : ""}`}
-              onClick={() => setHubTab(key)}
+              onClick={() => selectParentHubTab(key)}
             >
-              {label}
+              <span className="msg-hub-tabs__btn-inner">
+                {label}
+                {key === "events" && eventsWeekIndicator ? (
+                  <span
+                    className="msg-hub-tabs__events-dot"
+                    aria-label="Class session scheduled this week"
+                  />
+                ) : null}
+              </span>
             </button>
           ))}
         </div>
@@ -251,18 +305,7 @@ export function Inbox({ variant = "default" }: { variant?: "default" | "parent" 
         </main>
       ) : null}
 
-      {isParentHub && hubTab === "events" ? (
-        <main className="msg-hub-panel" aria-label="Events">
-          <h2 className="msg-hub-panel__title">Events</h2>
-          <p className="msg-hub-panel__desc">
-            A calendar view and ICS hooks are planned. For now, see upcoming class sessions
-            on Home or under Classes.
-          </p>
-          <Link to="/app/classrooms" className="msg-hub-panel__link">
-            Go to classes
-          </Link>
-        </main>
-      ) : null}
+      {isParentHub && hubTab === "events" ? <ParentEventsHub /> : null}
 
       {isParentHub && hubTab === "attendance" ? (
         <main className="msg-hub-panel" aria-label="Attendance">

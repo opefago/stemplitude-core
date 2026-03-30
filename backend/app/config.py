@@ -185,6 +185,9 @@ class Settings(BaseSettings):
 
     # Frontend URL (used for building invitation links)
     FRONTEND_URL: str = "http://localhost:5173"
+    # Apex host for tenant subdomains (e.g. ``stemplitude.com``). When set, ``TenantMiddleware`` can resolve
+    # ``X-Tenant-ID`` from ``Host: {public_host_subdomain}.{PUBLIC_HOST_BASE_DOMAIN}``. Empty disables this.
+    PUBLIC_HOST_BASE_DOMAIN: str = ""
 
     # Super Admin bootstrap (only needed for initial setup)
     SUPERADMIN_EMAIL: str | None = None

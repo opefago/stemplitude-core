@@ -513,6 +513,10 @@ class SessionResponse(BaseModel):
         None,
         description="When the session was canceled, if applicable.",
     )
+    classroom_name: str | None = Field(
+        None,
+        description="Class display name when the list endpoint joins classroom metadata.",
+    )
 
 
 class SessionPresenceHeartbeatRequest(BaseModel):

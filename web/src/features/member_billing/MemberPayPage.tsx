@@ -1,28 +1,25 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { KidDropdown } from "../../components/ui";
 import { useAuth } from "../../providers/AuthProvider";
 import { getParentChildren, type StudentProfile } from "../../lib/api/students";
 import {
   createMemberCheckout,
+  getGuardianMemberStatus,
   getMemberPayCatalog,
+  type GuardianMemberStatus,
   type MemberProduct,
 } from "../../lib/api/memberBilling";
 import { ApiHttpError } from "../../lib/api/client";
 import "../../components/ui/ui.css";
 import "../settings/settings.css";
 import "./member-billing.css";
+import { formatStripeCurrency } from "./stripeCurrency";
 
 function childLabel(s: StudentProfile): string {
   const dn = (s.display_name ?? "").trim();
   if (dn) return dn;
   return [s.first_name, s.last_name].filter(Boolean).join(" ").trim() || "Student";
-}
-
-function formatMoney(amountCents: number, currency: string): string {
-  return new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency: (currency || "USD").toUpperCase(),
-  }).format(amountCents / 100);
 }
 
 export function MemberPayPage() {
@@ -37,6 +34,9 @@ export function MemberPayPage() {
   const [loading, setLoading] = useState(true);
   const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [guardianStatus, setGuardianStatus] = useState<GuardianMemberStatus | null>(
+    null,
+  );
 
   const isStudentSession = subType === "student";
 
@@ -48,10 +48,16 @@ export function MemberPayPage() {
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setGuardianStatus(null);
     try {
-      const products = await getMemberPayCatalog();
-      setCatalog(products);
       if (!isStudentSession) {
+        let gs: GuardianMemberStatus | null = null;
+        try {
+          gs = await getGuardianMemberStatus();
+        } catch {
+          gs = null;
+        }
+        setGuardianStatus(gs);
         const rows = await getParentChildren();
         setChildren(rows);
         const initial =
@@ -59,7 +65,16 @@ export function MemberPayPage() {
             ? paramStudent
             : rows[0]?.id ?? "";
         setSelectedStudent(initial);
+        if (gs && !gs.member_billing_enabled) {
+          setCatalog([]);
+          setSelectedProduct("");
+          return;
+        }
+      } else {
+        setGuardianStatus(null);
       }
+      const products = await getMemberPayCatalog();
+      setCatalog(products);
       if (products[0]) setSelectedProduct(products[0].id);
     } catch (e) {
       const msg =
@@ -78,6 +93,25 @@ export function MemberPayPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const studentPayOptions = useMemo(() => {
+    if (children.length === 0) {
+      return [{ value: "", label: "No linked learners", disabled: true }];
+    }
+    return children.map((c) => ({ value: c.id, label: childLabel(c) }));
+  }, [children]);
+
+  const productPayOptions = useMemo(() => {
+    if (catalog.length === 0) {
+      return [{ value: "", label: "No products available", disabled: true }];
+    }
+    return catalog.map((p) => ({
+      value: p.id,
+      label: `${p.name} — ${formatStripeCurrency(p.amount_cents, p.currency)}${
+        p.billing_type === "recurring" && p.interval ? ` / ${p.interval}` : ""
+      }`,
+    }));
+  }, [catalog]);
 
   const onPay = async () => {
     if (!resolvedStudentId || !selectedProduct) {
@@ -98,13 +132,27 @@ export function MemberPayPage() {
     }
   };
 
+  const billingOffForGuardian =
+    !isStudentSession && guardianStatus && !guardianStatus.member_billing_enabled;
+
   return (
     <div className="mb-page" role="main">
       <header className="mb-page__header">
-        <h1 className="mb-page__title">Pay membership</h1>
+        <h1 className="mb-page__title">
+          {billingOffForGuardian ? "Membership" : "Pay membership"}
+        </h1>
         <p className="mb-page__subtitle">
-          Complete checkout on Stripe. You will receive receipts and invoices from your organization&apos;s
-          connected account.
+          {billingOffForGuardian ? (
+            <>
+              This organization is not collecting paid memberships through STEMplitude. Your
+              learners&apos; access is included with the program—there is nothing to pay here.
+            </>
+          ) : (
+            <>
+              Complete checkout on Stripe. You will receive receipts and invoices from your
+              organization&apos;s connected account.
+            </>
+          )}
         </p>
       </header>
       <p className="mb-muted">
@@ -121,52 +169,45 @@ export function MemberPayPage() {
 
       {loading ? (
         <p className="mb-muted">Loading…</p>
+      ) : billingOffForGuardian ? (
+        <section className="mb-section mb-included-card" aria-label="Membership status">
+          <p className="mb-included-card__title">Paid membership not required</p>
+          <p className="mb-muted">
+            If your school adds optional paid plans later, checkout will appear here. You can still
+            open invoices from past purchases below.
+          </p>
+        </section>
       ) : (
         <section className="mb-section">
           {!isStudentSession ? (
             <div className="mb-form-row" style={{ flexDirection: "column", alignItems: "stretch" }}>
-              <label htmlFor="mb-pay-student">
+              <label>
                 Learner
-                <select
-                  id="mb-pay-student"
+                <KidDropdown
                   value={selectedStudent}
-                  onChange={(ev) => setSelectedStudent(ev.target.value)}
+                  onChange={setSelectedStudent}
+                  ariaLabel="Select learner"
+                  placeholder="Select learner"
+                  fullWidth
                   disabled={checkoutBusy}
-                >
-                  {children.length === 0 ? (
-                    <option value="">No linked learners</option>
-                  ) : (
-                    children.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {childLabel(c)}
-                      </option>
-                    ))
-                  )}
-                </select>
+                  options={studentPayOptions}
+                />
               </label>
             </div>
           ) : null}
 
           <div className="mb-form-row" style={{ flexDirection: "column", alignItems: "stretch" }}>
-            <label htmlFor="mb-pay-product">
+            <label>
               Product
-              <select
-                id="mb-pay-product"
+              <KidDropdown
                 value={selectedProduct}
-                onChange={(ev) => setSelectedProduct(ev.target.value)}
+                onChange={setSelectedProduct}
+                ariaLabel="Select product"
+                placeholder="Select product"
+                fullWidth
                 disabled={checkoutBusy || catalog.length === 0}
-              >
-                {catalog.length === 0 ? (
-                  <option value="">No products available</option>
-                ) : (
-                  catalog.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} — {formatMoney(p.amount_cents, p.currency)}
-                      {p.billing_type === "recurring" && p.interval ? ` / ${p.interval}` : ""}
-                    </option>
-                  ))
-                )}
-              </select>
+                options={productPayOptions}
+              />
             </label>
           </div>
 

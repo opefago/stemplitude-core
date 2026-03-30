@@ -76,3 +76,5 @@ class ParentStudent(Base):
     )
     relationship: Mapped[str] = mapped_column(String(50), default="parent")
     is_primary_contact: Mapped[bool] = mapped_column(Boolean, default=False)
+    messaging_scope: Mapped[str] = mapped_column(String(32), default="classmates")
+    allow_public_game_publishing: Mapped[bool] = mapped_column(Boolean, default=True)

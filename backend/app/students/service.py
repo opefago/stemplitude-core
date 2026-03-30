@@ -9,7 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.security import hash_password
 from app.students.models import ParentStudent, Student, StudentMembership
 from app.students.repository import StudentRepository
+from app.students.parent_access import ensure_can_view_student_as_guardian
 from app.students.schemas import (
+    GuardianChildControlsPatch,
+    GuardianChildControlsResponse,
     ParentLinkRequest,
     ResetPasswordRequest,
     StudentCreate,
@@ -17,10 +20,49 @@ from app.students.schemas import (
     StudentSelfRegister,
     StudentUpdate,
 )
+from app.dependencies import CurrentIdentity
 from app.tenants.models import Tenant
 from app.classrooms.models import Classroom, ClassroomSession
+from app.classrooms.schemas import SessionResponse
+from app.classrooms.schedule_occurrences import merge_db_and_scheduled_upcoming
 
 logger = logging.getLogger(__name__)
+
+_GUARDIAN_MESSAGING_SCOPES = frozenset({"instructors_only", "classmates", "disabled"})
+
+# When merging DB sessions with schedule-derived occurrences, fetch extra DB rows
+# so the merged top-N is not mostly synthetic while real rows exist further out.
+_UPCOMING_DB_FETCH_FACTOR = 5
+_UPCOMING_DB_FETCH_CAP = 400
+# Parent Events hub: month-scoped responses need a high merge cap so "later this month"
+# is not empty when many occurrences fall in the next 7 days (sorted list filled early).
+# Wider when session_start_before spans two calendar months (parent Events hub).
+_UPCOMING_MONTH_AGGREGATE_MERGE_CAP = 2600
+_UPCOMING_MONTH_AGGREGATE_DB_CAP = 1400
+
+
+def _sessions_with_classroom_names(
+    sessions: list[SessionResponse],
+    classrooms: list[Classroom],
+) -> list[SessionResponse]:
+    names = {c.id: c.name for c in classrooms}
+    return [s.model_copy(update={"classroom_name": names.get(s.classroom_id)}) for s in sessions]
+
+
+def _past_sessions_with_classroom_names(
+    rows: list[ClassroomSession],
+    classrooms: list[Classroom],
+) -> list[SessionResponse]:
+    names = {c.id: c.name for c in classrooms}
+    return [
+        SessionResponse.model_validate(r).model_copy(update={"classroom_name": names.get(r.classroom_id)})
+        for r in rows
+    ]
+
+
+def _normalize_messaging_scope(raw: str | None) -> str:
+    s = (raw or "").strip()
+    return s if s in _GUARDIAN_MESSAGING_SCOPES else "classmates"
 
 
 class StudentService:
@@ -281,14 +323,23 @@ class StudentService:
 
     async def list_my_upcoming_sessions(
         self, *, student_id: UUID, tenant_id: UUID, limit: int
-    ) -> list[ClassroomSession]:
+    ) -> list[SessionResponse]:
         now = datetime.now(timezone.utc)
-        return await self.repo.list_upcoming_sessions_for_student(
+        db_cap = min(max(limit * _UPCOMING_DB_FETCH_FACTOR, limit), _UPCOMING_DB_FETCH_CAP)
+        db_rows = await self.repo.list_upcoming_sessions_for_student(
             student_id=student_id,
             tenant_id=tenant_id,
             now=now,
-            limit=limit,
+            limit=db_cap,
         )
+        classrooms = await self.repo.list_classrooms_for_student(
+            student_id=student_id,
+            tenant_id=tenant_id,
+        )
+        merged = merge_db_and_scheduled_upcoming(
+            db_rows, classrooms, now=now, limit=limit
+        )
+        return _sessions_with_classroom_names(merged, classrooms)
 
     async def list_my_active_sessions(
         self, *, student_id: UUID, tenant_id: UUID, limit: int
@@ -305,6 +356,23 @@ class StudentService:
         return await self.repo.list_classrooms_for_student(
             student_id=student_id,
             tenant_id=tenant_id,
+        )
+
+    async def list_guardian_linked_classrooms(
+        self,
+        *,
+        guardian_user_id: UUID,
+        tenant_id: UUID,
+        role_slug: str,
+    ) -> list[Classroom]:
+        students = await self.list_guardian_children(
+            guardian_user_id=guardian_user_id,
+            tenant_id=tenant_id,
+            role_slug=role_slug,
+        )
+        return await self.repo.list_classrooms_for_student_ids(
+            [s.id for s in students],
+            tenant_id,
         )
 
     async def get_my_classroom(
@@ -375,29 +443,138 @@ class StudentService:
         limit: int,
         guardian_role_slug: str | None = None,
         student_id: UUID | None = None,
-    ) -> list[ClassroomSession]:
+        session_start_before: datetime | None = None,
+        expand_month_sessions: bool = False,
+    ) -> list[SessionResponse]:
         now = datetime.now(timezone.utc)
+        month_aggregate = session_start_before is not None and expand_month_sessions
+        if month_aggregate:
+            merge_limit = _UPCOMING_MONTH_AGGREGATE_MERGE_CAP
+            db_cap = _UPCOMING_MONTH_AGGREGATE_DB_CAP
+        else:
+            merge_limit = limit
+            db_cap = min(max(limit * _UPCOMING_DB_FETCH_FACTOR, limit), _UPCOMING_DB_FETCH_CAP)
         role = (guardian_role_slug or "").strip().lower()
         if student_id is not None:
-            return await self.repo.list_upcoming_sessions_for_student(
-                student_id, tenant_id, now, limit
+            db_rows = await self.repo.list_upcoming_sessions_for_student(
+                student_id,
+                tenant_id,
+                now,
+                db_cap,
+                session_start_before=session_start_before,
             )
+            classrooms = await self.repo.list_classrooms_for_student(
+                student_id, tenant_id,
+            )
+            merged = merge_db_and_scheduled_upcoming(
+                db_rows,
+                classrooms,
+                now=now,
+                limit=merge_limit,
+                session_start_before=session_start_before,
+            )
+            out = _sessions_with_classroom_names(merged, classrooms)
+            if month_aggregate:
+                return out
+            return out[:limit]
         if role == "homeschool_parent":
             students = await self.repo.list_by_tenant(
                 tenant_id, skip=0, limit=500, is_active=True
             )
-            return await self.repo.list_upcoming_sessions_for_student_ids(
-                student_ids=[s.id for s in students],
+            ids = [s.id for s in students]
+            db_rows = await self.repo.list_upcoming_sessions_for_student_ids(
+                student_ids=ids,
+                tenant_id=tenant_id,
+                now=now,
+                limit=db_cap,
+                session_start_before=session_start_before,
+            )
+            classrooms = await self.repo.list_classrooms_for_student_ids(ids, tenant_id)
+            merged = merge_db_and_scheduled_upcoming(
+                db_rows,
+                classrooms,
+                now=now,
+                limit=merge_limit,
+                session_start_before=session_start_before,
+            )
+            out = _sessions_with_classroom_names(merged, classrooms)
+            if month_aggregate:
+                return out
+            return out[:limit]
+        db_rows = await self.repo.list_upcoming_sessions_for_parent_children(
+            parent_user_id=parent_user_id,
+            tenant_id=tenant_id,
+            now=now,
+            limit=db_cap,
+            session_start_before=session_start_before,
+        )
+        children = await self.repo.list_students_for_parent_user(
+            parent_user_id=parent_user_id,
+            tenant_id=tenant_id,
+        )
+        classrooms = await self.repo.list_classrooms_for_student_ids(
+            [c.id for c in children],
+            tenant_id,
+        )
+        merged = merge_db_and_scheduled_upcoming(
+            db_rows,
+            classrooms,
+            now=now,
+            limit=merge_limit,
+            session_start_before=session_start_before,
+        )
+        out = _sessions_with_classroom_names(merged, classrooms)
+        if month_aggregate:
+            return out
+        return out[:limit]
+
+    async def list_parent_children_past_sessions(
+        self,
+        *,
+        parent_user_id: UUID,
+        tenant_id: UUID,
+        limit: int,
+        guardian_role_slug: str | None = None,
+        student_id: UUID | None = None,
+    ) -> list[SessionResponse]:
+        now = datetime.now(timezone.utc)
+        role = (guardian_role_slug or "").strip().lower()
+        if student_id is not None:
+            rows = await self.repo.list_past_sessions_for_student(
+                student_id, tenant_id, now, limit
+            )
+            classrooms = await self.repo.list_classrooms_for_student(
+                student_id, tenant_id,
+            )
+            return _past_sessions_with_classroom_names(rows, classrooms)
+        if role == "homeschool_parent":
+            students = await self.repo.list_by_tenant(
+                tenant_id, skip=0, limit=500, is_active=True
+            )
+            ids = [s.id for s in students]
+            rows = await self.repo.list_past_sessions_for_student_ids(
+                student_ids=ids,
                 tenant_id=tenant_id,
                 now=now,
                 limit=limit,
             )
-        return await self.repo.list_upcoming_sessions_for_parent_children(
+            classrooms = await self.repo.list_classrooms_for_student_ids(ids, tenant_id)
+            return _past_sessions_with_classroom_names(rows, classrooms)
+        rows = await self.repo.list_past_sessions_for_parent_children(
             parent_user_id=parent_user_id,
             tenant_id=tenant_id,
             now=now,
             limit=limit,
         )
+        children = await self.repo.list_students_for_parent_user(
+            parent_user_id=parent_user_id,
+            tenant_id=tenant_id,
+        )
+        classrooms = await self.repo.list_classrooms_for_student_ids(
+            [c.id for c in children],
+            tenant_id,
+        )
+        return _past_sessions_with_classroom_names(rows, classrooms)
 
     async def list_my_assignments(
         self, *, student_id: UUID, tenant_id: UUID, limit: int
@@ -467,3 +644,120 @@ class StudentService:
             )
         )
         return assignments
+
+    async def get_guardian_child_controls(
+        self,
+        student_id: UUID,
+        tenant_id: UUID,
+        identity: CurrentIdentity,
+    ) -> GuardianChildControlsResponse:
+        await ensure_can_view_student_as_guardian(
+            self.session,
+            identity=identity,
+            student_id=student_id,
+            tenant_id=tenant_id,
+        )
+        mem = await self.repo.get_membership(student_id, tenant_id)
+        grade = mem.grade_level if mem else None
+        link = await self.repo.get_parent_link(identity.id, student_id)
+        if link:
+            scope = _normalize_messaging_scope(link.messaging_scope)
+            pub = bool(link.allow_public_game_publishing)
+            has_link = True
+        else:
+            scope = "classmates"
+            pub = True
+            has_link = False
+        return GuardianChildControlsResponse(
+            student_id=student_id,
+            messaging_scope=scope,  # type: ignore[arg-type]
+            allow_public_game_publishing=pub,
+            grade_level=grade,
+            has_parent_link=has_link,
+        )
+
+    async def patch_guardian_child_controls(
+        self,
+        student_id: UUID,
+        tenant_id: UUID,
+        identity: CurrentIdentity,
+        data: GuardianChildControlsPatch,
+    ) -> GuardianChildControlsResponse:
+        if (
+            data.messaging_scope is None
+            and data.allow_public_game_publishing is None
+            and data.grade_level is None
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No fields to update",
+            )
+        await ensure_can_view_student_as_guardian(
+            self.session,
+            identity=identity,
+            student_id=student_id,
+            tenant_id=tenant_id,
+        )
+        role = (identity.role or "").strip().lower()
+        link = await self.repo.get_parent_link(identity.id, student_id)
+
+        if data.messaging_scope is not None or data.allow_public_game_publishing is not None:
+            if link is None:
+                if role != "homeschool_parent":
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="No guardian link exists for this learner. Ask your school to adjust settings.",
+                    )
+                link = ParentStudent(
+                    user_id=identity.id,
+                    student_id=student_id,
+                    relationship="guardian",
+                    is_primary_contact=False,
+                )
+                self.session.add(link)
+                await self.session.flush()
+            if data.messaging_scope is not None:
+                link.messaging_scope = data.messaging_scope
+            if data.allow_public_game_publishing is not None:
+                link.allow_public_game_publishing = data.allow_public_game_publishing
+
+        if data.grade_level is not None:
+            mem = await self.repo.get_membership(student_id, tenant_id)
+            if mem is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Student not found in this workspace",
+                )
+            mem.grade_level = data.grade_level or None
+
+        await self.session.commit()
+        return await self.get_guardian_child_controls(student_id, tenant_id, identity)
+
+    async def unlink_guardian_from_student(
+        self,
+        student_id: UUID,
+        tenant_id: UUID,
+        identity: CurrentIdentity,
+    ) -> None:
+        await ensure_can_view_student_as_guardian(
+            self.session,
+            identity=identity,
+            student_id=student_id,
+            tenant_id=tenant_id,
+        )
+        role = (identity.role or "").strip().lower()
+        deleted = await self.repo.delete_parent_link(identity.id, student_id)
+        if not deleted:
+            if role == "homeschool_parent":
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        "There is no guardian link to remove. To remove this learner from your "
+                        "organization, use the Students page (workspace admin)."
+                    ),
+                )
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Guardian link not found",
+            )
+        await self.session.commit()

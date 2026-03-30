@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../../providers/AuthProvider";
-import { KidSwitch } from "../../components/ui";
+import { KidDropdown, KidSwitch } from "../../components/ui";
 import {
+  cancelMemberSubscription,
   createAdminMemberPaymentLink,
   createMemberProduct,
   getMemberBillingAnalytics,
@@ -11,6 +12,7 @@ import {
   listMemberProductsAdmin,
   listMemberSubscriptionsAdmin,
   patchMemberBillingSettings,
+  patchMemberProduct,
   startMemberBillingOnboarding,
   syncMemberBillingConnect,
   type MemberBillingAnalytics,
@@ -18,6 +20,7 @@ import {
   type MemberInvoice,
   type MemberProduct,
   type MemberProductCreatePayload,
+  type MemberProductUpdatePayload,
   type MemberSubscription,
 } from "../../lib/api/memberBilling";
 import {
@@ -30,19 +33,59 @@ import { ApiHttpError } from "../../lib/api/client";
 import "../../components/ui/ui.css";
 import "../settings/settings.css";
 import "./member-billing.css";
-
-function formatMoney(amountCents: number, currency: string): string {
-  return new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency: (currency || "USD").toUpperCase(),
-  }).format(amountCents / 100);
-}
+import {
+  currencyCodeToDropdownValue,
+  formatStripeCurrency,
+  majorUnitsToStripeUnitAmount,
+  MEMBER_BILLING_CURRENCY_OPTIONS,
+  isStripeZeroDecimalCurrency,
+  stripeUnitAmountToMajorString,
+} from "./stripeCurrency";
 
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return "—";
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString();
 }
+
+function validateMajorAmountForStripe(
+  amountMajorStr: string,
+  currencyCode: string,
+): { ok: true; amount_cents: number } | { ok: false; error: string } {
+  const major = Number.parseFloat(amountMajorStr);
+  if (Number.isNaN(major)) {
+    return { ok: false, error: "Enter a valid amount." };
+  }
+  if (!isStripeZeroDecimalCurrency(currencyCode) && major < 0.5) {
+    return { ok: false, error: "For this currency, enter at least 0.50 in major units (e.g. $0.50)." };
+  }
+  if (isStripeZeroDecimalCurrency(currencyCode) && major < 50) {
+    return { ok: false, error: "For this currency, enter at least 50 in whole units (Stripe minimum)." };
+  }
+  const amount_cents = majorUnitsToStripeUnitAmount(major, currencyCode);
+  if (amount_cents < 50) {
+    return { ok: false, error: "Amount is below Stripe’s usual minimum for this currency." };
+  }
+  return { ok: true, amount_cents };
+}
+
+function subscriptionCanCancelInApp(s: MemberSubscription): boolean {
+  const st = (s.status || "").toLowerCase();
+  if (!s.stripe_subscription_id) return false;
+  if (st === "canceled" || st === "incomplete_expired") return false;
+  return true;
+}
+
+/**
+ * Modal overlay `data-testid` values for E2E (e.g. Playwright).
+ * Escape-to-close is implemented in `MemberBillingAdminPage` via a document `keydown` listener (not on these nodes).
+ *
+ * Example (later): `await page.getByTestId(MEMBER_BILLING_MODAL_TEST_IDS.editProduct).waitFor(); await page.keyboard.press('Escape');`
+ */
+export const MEMBER_BILLING_MODAL_TEST_IDS = {
+  editProduct: "member-billing-edit-product-modal",
+  cancelSubscription: "member-billing-cancel-subscription-modal",
+} as const;
 
 function roleCanManageMemberBilling(role: string | null): boolean {
   const r = (role ?? "").toLowerCase();
@@ -72,7 +115,9 @@ export function MemberBillingAdminPage() {
 
   const [productName, setProductName] = useState("");
   const [productDesc, setProductDesc] = useState("");
-  const [amountDollars, setAmountDollars] = useState("25");
+  const [amountMajor, setAmountMajor] = useState("25");
+  const [productCurrencySelect, setProductCurrencySelect] = useState("usd");
+  const [productCurrencyOther, setProductCurrencyOther] = useState("");
   const [billingType, setBillingType] = useState<"one_time" | "recurring">("recurring");
   const [interval, setInterval] = useState<"month" | "quarter" | "year">("month");
   const [productError, setProductError] = useState<string | null>(null);
@@ -86,6 +131,64 @@ export function MemberBillingAdminPage() {
   const [payLinkBusy, setPayLinkBusy] = useState(false);
   const [payLinkError, setPayLinkError] = useState<string | null>(null);
   const [payLinkCopied, setPayLinkCopied] = useState(false);
+
+  const [editingProduct, setEditingProduct] = useState<MemberProduct | null>(null);
+  const [eName, setEName] = useState("");
+  const [eDesc, setEDesc] = useState("");
+  const [eAmountMajor, setEAmountMajor] = useState("");
+  const [eCurrencySelect, setECurrencySelect] = useState("usd");
+  const [eCurrencyOther, setECurrencyOther] = useState("");
+  const [eBillingType, setEBillingType] = useState<"one_time" | "recurring">("recurring");
+  const [eInterval, setEInterval] = useState<"month" | "quarter" | "year">("month");
+  const [eActive, setEActive] = useState(true);
+  const [eError, setEError] = useState<string | null>(null);
+  const [eSaving, setESaving] = useState(false);
+
+  const [cancelTarget, setCancelTarget] = useState<MemberSubscription | null>(null);
+  const [cancelImmediate, setCancelImmediate] = useState(false);
+  const [cancelBusy, setCancelBusy] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+
+  const payStudentOptions = useMemo(
+    () => [
+      { value: "", label: "Select…" },
+      ...payStudents.map((s) => ({
+        value: s.id,
+        label: [s.first_name, s.last_name].filter(Boolean).join(" ") || s.id,
+      })),
+    ],
+    [payStudents],
+  );
+
+  const payPayerOptions = useMemo(() => {
+    const rows = payParents
+      .filter((p) => (p.user_email ?? "").trim())
+      .map((p) => ({
+        value: p.user_id,
+        label: `${(p.user_email ?? "").trim()} (${p.relationship})`,
+      }));
+    return [{ value: "", label: "Default (guardian email, else learner)" }, ...rows];
+  }, [payParents]);
+
+  const payProductOptions = useMemo(
+    () => [
+      { value: "", label: "Select…" },
+      ...products.map((p) => ({
+        value: p.id,
+        label: `${p.name}${!p.active ? " (inactive)" : ""}`,
+        disabled: !p.active,
+      })),
+    ],
+    [products],
+  );
+
+  const productNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const p of products) {
+      m.set(p.id, p.name);
+    }
+    return m;
+  }, [products]);
 
   const refresh = useCallback(async () => {
     if (!canView) return;
@@ -230,17 +333,27 @@ export function MemberBillingAdminPage() {
   const onCreateProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     setProductError(null);
-    const dollars = Number.parseFloat(amountDollars);
-    if (Number.isNaN(dollars) || dollars < 0.5) {
-      setProductError("Enter a valid amount (minimum $0.50).");
+    const currencyCode =
+      productCurrencySelect === "other"
+        ? productCurrencyOther.trim().toLowerCase()
+        : productCurrencySelect;
+    if (productCurrencySelect === "other") {
+      if (currencyCode.length !== 3 || !/^[a-z]{3}$/i.test(productCurrencyOther.trim())) {
+        setProductError("Enter a 3-letter currency code (e.g. mad, huf).");
+        return;
+      }
+    }
+    const validated = validateMajorAmountForStripe(amountMajor, currencyCode);
+    if (!validated.ok) {
+      setProductError(validated.error);
       return;
     }
-    const amount_cents = Math.round(dollars * 100);
+    const { amount_cents } = validated;
     const payload: MemberProductCreatePayload = {
       name: productName.trim(),
       description: productDesc.trim() || null,
       amount_cents,
-      currency: "usd",
+      currency: currencyCode,
       billing_type: billingType,
       interval: billingType === "recurring" ? interval : null,
     };
@@ -301,6 +414,134 @@ export function MemberBillingAdminPage() {
       setPayLinkError("Could not copy to clipboard.");
     }
   };
+
+  const openEditProduct = (p: MemberProduct) => {
+    const { select, other } = currencyCodeToDropdownValue(p.currency);
+    setEditingProduct(p);
+    setEName(p.name);
+    setEDesc(p.description ?? "");
+    setEAmountMajor(stripeUnitAmountToMajorString(p.amount_cents, p.currency));
+    setECurrencySelect(select);
+    setECurrencyOther(other);
+    setEBillingType(p.billing_type === "one_time" ? "one_time" : "recurring");
+    setEInterval(
+      p.interval === "quarter" || p.interval === "year" || p.interval === "month"
+        ? p.interval
+        : "month",
+    );
+    setEActive(p.active);
+    setEError(null);
+  };
+
+  const closeEditProduct = () => {
+    setEditingProduct(null);
+    setEError(null);
+    setESaving(false);
+  };
+
+  const onSaveEditProduct = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingProduct) return;
+    setEError(null);
+    const currencyCode =
+      eCurrencySelect === "other" ? eCurrencyOther.trim().toLowerCase() : eCurrencySelect;
+    if (eCurrencySelect === "other") {
+      if (currencyCode.length !== 3 || !/^[a-z]{3}$/i.test(eCurrencyOther.trim())) {
+        setEError("Enter a 3-letter currency code (e.g. mad, huf).");
+        return;
+      }
+    }
+    const validated = validateMajorAmountForStripe(eAmountMajor, currencyCode);
+    if (!validated.ok) {
+      setEError(validated.error);
+      return;
+    }
+    if (!eName.trim()) {
+      setEError("Name is required.");
+      return;
+    }
+    setESaving(true);
+    try {
+      const body: MemberProductUpdatePayload = {
+        name: eName.trim(),
+        description: eDesc.trim() || null,
+        active: eActive,
+      };
+      const pricingChanged =
+        validated.amount_cents !== editingProduct.amount_cents ||
+        currencyCode !== editingProduct.currency.toLowerCase() ||
+        eBillingType !== editingProduct.billing_type ||
+        (eBillingType === "recurring" && eInterval !== (editingProduct.interval ?? "")) ||
+        (eBillingType === "one_time" && Boolean(editingProduct.interval));
+      if (pricingChanged) {
+        body.amount_cents = validated.amount_cents;
+        body.currency = currencyCode;
+        body.billing_type = eBillingType;
+        body.interval = eBillingType === "recurring" ? eInterval : null;
+      }
+      await patchMemberProduct(editingProduct.id, body);
+      closeEditProduct();
+      await refresh();
+    } catch (err) {
+      setEError(
+        err instanceof ApiHttpError
+          ? String(err.message)
+          : err instanceof Error
+            ? err.message
+            : "Could not update product",
+      );
+    } finally {
+      setESaving(false);
+    }
+  };
+
+  const onConfirmCancelSubscription = async () => {
+    if (!cancelTarget) return;
+    setCancelError(null);
+    setCancelBusy(true);
+    try {
+      await cancelMemberSubscription(cancelTarget.id, { immediate: cancelImmediate });
+      setCancelTarget(null);
+      setCancelImmediate(false);
+      await refresh();
+    } catch (err) {
+      setCancelError(
+        err instanceof ApiHttpError
+          ? String(err.message)
+          : err instanceof Error
+            ? err.message
+            : "Could not cancel subscription",
+      );
+    } finally {
+      setCancelBusy(false);
+    }
+  };
+
+  /**
+   * Dismiss modals with Escape (and block while save/cancel API in flight).
+   * E2E: use {@link MEMBER_BILLING_MODAL_TEST_IDS} on the overlay + `page.keyboard.press('Escape')`.
+   */
+  useEffect(() => {
+    if (!editingProduct && !cancelTarget) return;
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (eSaving || cancelBusy) return;
+      e.preventDefault();
+      if (cancelTarget) {
+        setCancelTarget(null);
+        setCancelError(null);
+        setCancelImmediate(false);
+      } else {
+        setEditingProduct(null);
+        setEError(null);
+        setESaving(false);
+      }
+    };
+
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [editingProduct, cancelTarget, eSaving, cancelBusy]);
 
   if (!canView) {
     return (
@@ -451,43 +692,79 @@ export function MemberBillingAdminPage() {
                   disabled={busy}
                 />
               </label>
-              <label htmlFor="mb-p-amt">
-                Amount (USD)
+              <label
+                htmlFor="mb-p-amt"
+                style={{ display: "flex", flexDirection: "column", gap: "0.25rem", alignItems: "stretch" }}
+              >
+                <span>Amount</span>
                 <input
                   id="mb-p-amt"
-                  value={amountDollars}
-                  onChange={(ev) => setAmountDollars(ev.target.value)}
+                  value={amountMajor}
+                  onChange={(ev) => setAmountMajor(ev.target.value)}
                   inputMode="decimal"
                   disabled={busy}
+                  aria-describedby="mb-p-amt-hint"
+                />
+                <span id="mb-p-amt-hint" className="mb-muted" style={{ fontSize: "0.8rem", fontWeight: 400 }}>
+                  Major units for most currencies (e.g. 25.99); whole numbers for JPY, KRW, VND, etc.
+                </span>
+              </label>
+              <label>
+                Currency
+                <KidDropdown
+                  value={productCurrencySelect}
+                  onChange={(v) => setProductCurrencySelect(v)}
+                  ariaLabel="Price currency"
+                  minWidth={200}
+                  disabled={busy}
+                  options={MEMBER_BILLING_CURRENCY_OPTIONS}
                 />
               </label>
-              <label htmlFor="mb-p-type">
+              {productCurrencySelect === "other" ? (
+                <label htmlFor="mb-p-ccy-other">
+                  ISO code
+                  <input
+                    id="mb-p-ccy-other"
+                    value={productCurrencyOther}
+                    onChange={(ev) => setProductCurrencyOther(ev.target.value.toUpperCase().slice(0, 3))}
+                    placeholder="e.g. MAD"
+                    maxLength={3}
+                    disabled={busy}
+                    autoComplete="off"
+                  />
+                </label>
+              ) : null}
+              <label>
                 Billing
-                <select
-                  id="mb-p-type"
+                <KidDropdown
                   value={billingType}
-                  onChange={(ev) =>
-                    setBillingType(ev.target.value === "one_time" ? "one_time" : "recurring")
+                  onChange={(v) =>
+                    setBillingType(v === "one_time" ? "one_time" : "recurring")
                   }
+                  ariaLabel="Billing type"
+                  minWidth={180}
                   disabled={busy}
-                >
-                  <option value="recurring">Recurring</option>
-                  <option value="one_time">One-time</option>
-                </select>
+                  options={[
+                    { value: "recurring", label: "Recurring" },
+                    { value: "one_time", label: "One-time" },
+                  ]}
+                />
               </label>
               {billingType === "recurring" ? (
-                <label htmlFor="mb-p-interval">
+                <label>
                   Interval
-                  <select
-                    id="mb-p-interval"
+                  <KidDropdown
                     value={interval}
-                    onChange={(ev) => setInterval(ev.target.value as typeof interval)}
+                    onChange={(v) => setInterval(v as typeof interval)}
+                    ariaLabel="Billing interval"
+                    minWidth={180}
                     disabled={busy}
-                  >
-                    <option value="month">Monthly</option>
-                    <option value="quarter">Quarterly</option>
-                    <option value="year">Yearly</option>
-                  </select>
+                    options={[
+                      { value: "month", label: "Monthly" },
+                      { value: "quarter", label: "Quarterly" },
+                      { value: "year", label: "Yearly" },
+                    ]}
+                  />
                 </label>
               ) : null}
             </div>
@@ -505,6 +782,11 @@ export function MemberBillingAdminPage() {
               Create on Stripe
             </button>
           </form>
+          <p className="mb-muted" style={{ marginTop: "1rem", marginBottom: 0, fontSize: "0.875rem" }}>
+            Editing a product can change its name, description, or catalog visibility. Changing amount, currency, or
+            billing schedule creates a new Stripe price; new checkouts use it, while existing subscriptions keep their
+            current price until updated in Stripe.
+          </p>
           <div className="mb-table-wrap" style={{ marginTop: "1rem" }}>
             <table className="mb-table">
               <thead>
@@ -513,12 +795,13 @@ export function MemberBillingAdminPage() {
                   <th>Price</th>
                   <th>Type</th>
                   <th>Active</th>
+                  {canManage ? <th>Actions</th> : null}
                 </tr>
               </thead>
               <tbody>
                 {products.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="mb-muted">
+                    <td colSpan={canManage ? 5 : 4} className="mb-muted">
                       No products yet.
                     </td>
                   </tr>
@@ -526,12 +809,24 @@ export function MemberBillingAdminPage() {
                   products.map((p) => (
                     <tr key={p.id}>
                       <td>{p.name}</td>
-                      <td>{formatMoney(p.amount_cents, p.currency)}</td>
+                      <td>{formatStripeCurrency(p.amount_cents, p.currency)}</td>
                       <td>
                         {p.billing_type}
                         {p.interval ? ` · ${p.interval}` : ""}
                       </td>
                       <td>{p.active ? "Yes" : "No"}</td>
+                      {canManage ? (
+                        <td>
+                          <button
+                            type="button"
+                            className="mb-btn"
+                            onClick={() => openEditProduct(p)}
+                            disabled={busy || eSaving}
+                          >
+                            Edit
+                          </button>
+                        </td>
+                      ) : null}
                     </tr>
                   ))
                 )}
@@ -562,62 +857,47 @@ export function MemberBillingAdminPage() {
             style={{ flexDirection: "column", alignItems: "stretch", gap: "0.75rem" }}
           >
             <div className="mb-form-row" style={{ flexWrap: "wrap" }}>
-              <label htmlFor="mb-pay-student" style={{ minWidth: "12rem", flex: "1" }}>
+              <label style={{ minWidth: "12rem", flex: "1" }}>
                 Learner
-                <select
-                  id="mb-pay-student"
+                <KidDropdown
                   value={payStudentId}
-                  onChange={(ev) => {
-                    setPayStudentId(ev.target.value);
+                  onChange={(v) => {
+                    setPayStudentId(v);
                     setPayLinkUrl(null);
                   }}
+                  ariaLabel="Learner for payment link"
+                  placeholder="Select…"
+                  fullWidth
                   disabled={payLinkBusy}
-                >
-                  <option value="">Select…</option>
-                  {payStudents.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {[s.first_name, s.last_name].filter(Boolean).join(" ") || s.id}
-                    </option>
-                  ))}
-                </select>
+                  options={payStudentOptions}
+                />
               </label>
-              <label htmlFor="mb-pay-payer" style={{ minWidth: "12rem", flex: "1" }}>
+              <label style={{ minWidth: "12rem", flex: "1" }}>
                 Bill to (optional)
-                <select
-                  id="mb-pay-payer"
+                <KidDropdown
                   value={payPayerUserId}
-                  onChange={(ev) => setPayPayerUserId(ev.target.value)}
+                  onChange={setPayPayerUserId}
+                  ariaLabel="Bill to payer"
+                  placeholder="Default (guardian email, else learner)"
+                  fullWidth
                   disabled={payLinkBusy || !payStudentId}
-                >
-                  <option value="">Default (guardian email, else learner)</option>
-                  {payParents
-                    .filter((p) => (p.user_email ?? "").trim())
-                    .map((p) => (
-                      <option key={p.id} value={p.user_id}>
-                        {(p.user_email ?? "").trim()} ({p.relationship})
-                      </option>
-                    ))}
-                </select>
+                  options={payPayerOptions}
+                />
               </label>
-              <label htmlFor="mb-pay-product" style={{ minWidth: "12rem", flex: "1" }}>
+              <label style={{ minWidth: "12rem", flex: "1" }}>
                 Product
-                <select
-                  id="mb-pay-product"
+                <KidDropdown
                   value={payProductId}
-                  onChange={(ev) => {
-                    setPayProductId(ev.target.value);
+                  onChange={(v) => {
+                    setPayProductId(v);
                     setPayLinkUrl(null);
                   }}
+                  ariaLabel="Product for payment link"
+                  placeholder="Select…"
+                  fullWidth
                   disabled={payLinkBusy}
-                >
-                  <option value="">Select…</option>
-                  {products.map((p) => (
-                    <option key={p.id} value={p.id} disabled={!p.active}>
-                      {p.name}
-                      {!p.active ? " (inactive)" : ""}
-                    </option>
-                  ))}
-                </select>
+                  options={payProductOptions}
+                />
               </label>
             </div>
             {payLinkError ? (
@@ -683,7 +963,7 @@ export function MemberBillingAdminPage() {
             </div>
             <div className="mb-stat">
               <span className="mb-stat__label">Paid revenue</span>
-              <span className="mb-stat__value">{formatMoney(analytics.revenue_cents, "usd")}</span>
+              <span className="mb-stat__value">{formatStripeCurrency(analytics.revenue_cents, "usd")}</span>
             </div>
             <div className="mb-stat">
               <span className="mb-stat__label">Paid invoices</span>
@@ -691,7 +971,7 @@ export function MemberBillingAdminPage() {
             </div>
             <div className="mb-stat">
               <span className="mb-stat__label">MRR (approx.)</span>
-              <span className="mb-stat__value">{formatMoney(analytics.mrr_cents_approx, "usd")}</span>
+              <span className="mb-stat__value">{formatStripeCurrency(analytics.mrr_cents_approx, "usd")}</span>
             </div>
           </div>
         </section>
@@ -701,6 +981,12 @@ export function MemberBillingAdminPage() {
         <h2 id="mb-subs-heading" className="mb-section__title">
           Subscriptions
         </h2>
+        {canManage ? (
+          <p className="mb-muted" style={{ marginTop: 0, fontSize: "0.875rem" }}>
+            Cancel stops billing on the connected Stripe account. Default: access continues until the end of the current
+            period unless you choose immediate cancel.
+          </p>
+        ) : null}
         <div className="mb-table-wrap">
           <table className="mb-table">
             <thead>
@@ -709,12 +995,13 @@ export function MemberBillingAdminPage() {
                 <th>Student</th>
                 <th>Product</th>
                 <th>Period end</th>
+                {canManage ? <th>Actions</th> : null}
               </tr>
             </thead>
             <tbody>
               {subscriptions.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="mb-muted">
+                  <td colSpan={canManage ? 5 : 4} className="mb-muted">
                     No subscriptions yet.
                   </td>
                 </tr>
@@ -725,10 +1012,32 @@ export function MemberBillingAdminPage() {
                     <td>
                       <code style={{ fontSize: "0.8em" }}>{s.student_id}</code>
                     </td>
-                    <td>
-                      <code style={{ fontSize: "0.8em" }}>{s.product_id}</code>
+                    <td title={s.product_id}>
+                      {productNameById.get(s.product_id) ?? (
+                        <code style={{ fontSize: "0.8em" }}>{s.product_id}</code>
+                      )}
                     </td>
                     <td>{formatDate(s.current_period_end)}</td>
+                    {canManage ? (
+                      <td>
+                        {subscriptionCanCancelInApp(s) ? (
+                          <button
+                            type="button"
+                            className="mb-btn"
+                            onClick={() => {
+                              setCancelTarget(s);
+                              setCancelImmediate(false);
+                              setCancelError(null);
+                            }}
+                            disabled={cancelBusy}
+                          >
+                            Cancel
+                          </button>
+                        ) : (
+                          <span className="mb-muted">—</span>
+                        )}
+                      </td>
+                    ) : null}
                   </tr>
                 ))
               )}
@@ -762,7 +1071,7 @@ export function MemberBillingAdminPage() {
                 invoices.map((inv) => (
                   <tr key={inv.id}>
                     <td>{inv.status}</td>
-                    <td>{formatMoney(inv.amount_cents, inv.currency)}</td>
+                    <td>{formatStripeCurrency(inv.amount_cents, inv.currency)}</td>
                     <td>{formatDate(inv.paid_at)}</td>
                     <td>
                       {inv.hosted_invoice_url ? (
@@ -780,6 +1089,216 @@ export function MemberBillingAdminPage() {
           </table>
         </div>
       </section>
+
+      {editingProduct ? (
+        <div
+          className="mb-modal-overlay"
+          data-testid={MEMBER_BILLING_MODAL_TEST_IDS.editProduct}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="mb-edit-product-title"
+          onClick={() => !eSaving && closeEditProduct()}
+        >
+          <div className="mb-modal" onClick={(ev) => ev.stopPropagation()}>
+            <h2 id="mb-edit-product-title" className="mb-modal__title">
+              Edit product
+            </h2>
+            <form
+              className="mb-modal__form"
+              onSubmit={(ev) => void onSaveEditProduct(ev)}
+              style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}
+            >
+              <div
+                className="mb-form-row"
+                style={{
+                  flexDirection: "column",
+                  alignItems: "stretch",
+                  marginBottom: 0,
+                  gap: "0.75rem",
+                  width: "100%",
+                }}
+              >
+                <label htmlFor="mb-e-name">
+                  Name
+                  <input
+                    id="mb-e-name"
+                    value={eName}
+                    onChange={(ev) => setEName(ev.target.value)}
+                    placeholder="Monthly membership"
+                    disabled={eSaving}
+                  />
+                </label>
+                <div className="mb-form-row" style={{ marginBottom: 0, flexWrap: "wrap", width: "100%" }}>
+                  <label
+                    htmlFor="mb-e-amt"
+                    style={{ display: "flex", flexDirection: "column", gap: "0.25rem", alignItems: "stretch" }}
+                  >
+                    <span>Amount</span>
+                    <input
+                      id="mb-e-amt"
+                      value={eAmountMajor}
+                      onChange={(ev) => setEAmountMajor(ev.target.value)}
+                      inputMode="decimal"
+                      disabled={eSaving}
+                    />
+                  </label>
+                  <label>
+                    Currency
+                    <KidDropdown
+                      value={eCurrencySelect}
+                      onChange={(v) => setECurrencySelect(v)}
+                      ariaLabel="Edit price currency"
+                      minWidth={200}
+                      disabled={eSaving}
+                      options={MEMBER_BILLING_CURRENCY_OPTIONS}
+                    />
+                  </label>
+                  {eCurrencySelect === "other" ? (
+                    <label htmlFor="mb-e-ccy">
+                      ISO code
+                      <input
+                        id="mb-e-ccy"
+                        value={eCurrencyOther}
+                        onChange={(ev) => setECurrencyOther(ev.target.value.toUpperCase().slice(0, 3))}
+                        placeholder="e.g. MAD"
+                        maxLength={3}
+                        disabled={eSaving}
+                        autoComplete="off"
+                      />
+                    </label>
+                  ) : null}
+                  <label>
+                    Billing
+                    <KidDropdown
+                      value={eBillingType}
+                      onChange={(v) => setEBillingType(v === "one_time" ? "one_time" : "recurring")}
+                      ariaLabel="Edit billing type"
+                      minWidth={180}
+                      disabled={eSaving}
+                      options={[
+                        { value: "recurring", label: "Recurring" },
+                        { value: "one_time", label: "One-time" },
+                      ]}
+                    />
+                  </label>
+                  {eBillingType === "recurring" ? (
+                    <label>
+                      Interval
+                      <KidDropdown
+                        value={eInterval}
+                        onChange={(v) => setEInterval(v as typeof eInterval)}
+                        ariaLabel="Edit billing interval"
+                        minWidth={180}
+                        disabled={eSaving}
+                        options={[
+                          { value: "month", label: "Monthly" },
+                          { value: "quarter", label: "Quarterly" },
+                          { value: "year", label: "Yearly" },
+                        ]}
+                      />
+                    </label>
+                  ) : null}
+                </div>
+                <label htmlFor="mb-e-desc" style={{ width: "100%" }}>
+                  Description (optional)
+                  <input
+                    id="mb-e-desc"
+                    value={eDesc}
+                    onChange={(ev) => setEDesc(ev.target.value)}
+                    disabled={eSaving}
+                    style={{ width: "100%", minWidth: 0, boxSizing: "border-box" }}
+                  />
+                </label>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                <KidSwitch
+                  checked={eActive}
+                  onChange={setEActive}
+                  disabled={eSaving}
+                  ariaLabel="Product active in catalog"
+                />
+                <span style={{ fontWeight: 600 }}>Offer in checkout catalog</span>
+              </div>
+              {eError ? (
+                <p className="mb-alert" style={{ margin: 0 }} role="alert">
+                  {eError}
+                </p>
+              ) : null}
+              <div className="mb-modal__actions">
+                <button type="submit" className="mb-btn mb-btn--primary" disabled={eSaving}>
+                  {eSaving ? "Saving…" : "Save changes"}
+                </button>
+                <button type="button" className="mb-btn" onClick={closeEditProduct} disabled={eSaving}>
+                  Close
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
+      {cancelTarget ? (
+        <div
+          className="mb-modal-overlay"
+          data-testid={MEMBER_BILLING_MODAL_TEST_IDS.cancelSubscription}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="mb-cancel-sub-title"
+          onClick={() => !cancelBusy && setCancelTarget(null)}
+        >
+          <div className="mb-modal" onClick={(ev) => ev.stopPropagation()}>
+            <h2 id="mb-cancel-sub-title" className="mb-modal__title">
+              Cancel subscription
+            </h2>
+            <p className="mb-muted" style={{ marginTop: 0 }}>
+              Status <strong>{cancelTarget.status}</strong>
+              {cancelTarget.stripe_subscription_id ? (
+                <>
+                  {" "}
+                  · Stripe{" "}
+                  <code style={{ fontSize: "0.85em" }}>{cancelTarget.stripe_subscription_id}</code>
+                </>
+              ) : null}
+            </p>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.75rem" }}>
+              <KidSwitch
+                checked={cancelImmediate}
+                onChange={setCancelImmediate}
+                disabled={cancelBusy}
+                ariaLabel="Cancel immediately"
+              />
+              <span style={{ fontWeight: 600 }}>Cancel immediately (ends access now)</span>
+            </div>
+            <p className="mb-muted" style={{ margin: 0, fontSize: "0.875rem" }}>
+              If this is off, the subscription stays active until the current period ends, then Stripe stops renewing
+              it.
+            </p>
+            {cancelError ? (
+              <p className="mb-alert" style={{ marginTop: "0.75rem" }} role="alert">
+                {cancelError}
+              </p>
+            ) : null}
+            <div className="mb-modal__actions">
+              <button
+                type="button"
+                className="mb-btn mb-btn--primary"
+                disabled={cancelBusy}
+                onClick={() => void onConfirmCancelSubscription()}
+              >
+                {cancelBusy ? "Canceling…" : "Confirm cancel"}
+              </button>
+              <button
+                type="button"
+                className="mb-btn"
+                disabled={cancelBusy}
+                onClick={() => setCancelTarget(null)}
+              >
+                Back
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

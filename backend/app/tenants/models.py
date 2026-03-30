@@ -30,6 +30,8 @@ class Tenant(Base):
     member_billing_application_fee_use_platform_default: Mapped[bool] = mapped_column(
         Boolean, default=False
     )
+    public_host_subdomain: Mapped[str | None] = mapped_column(String(63), unique=True, index=True)
+    custom_domain: Mapped[str | None] = mapped_column(String(253), unique=True, index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
@@ -105,7 +107,44 @@ class TenantHierarchy(Base):
         String(20), nullable=False, default="central"
     )
     seat_allocations: Mapped[dict | None] = mapped_column(JSONB)
+    governance_mode: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="child_managed", index=True
+    )
+    governance: Mapped[dict | None] = mapped_column(JSONB)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
+class TenantHierarchyRequest(Base):
+    """Child tenant requests to link under a parent (franchise / district). Parent admins approve."""
+
+    __tablename__ = "tenant_hierarchy_requests"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    child_tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    parent_tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    message: Mapped[str | None] = mapped_column(String(1000))
+    preferred_billing_mode: Mapped[str | None] = mapped_column(String(20))
+    requested_by_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    decided_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    rejection_reason: Mapped[str | None] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

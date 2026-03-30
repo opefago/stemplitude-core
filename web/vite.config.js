@@ -46,6 +46,12 @@ export default defineConfig({
         target: "http://localhost:8000",
         changeOrigin: true,
         ws: true,
+        configure(proxy) {
+          proxy.on("proxyReq", (proxyReq, req) => {
+            const h = req.headers.host;
+            if (h) proxyReq.setHeader("X-Forwarded-Host", h);
+          });
+        },
       },
     },
   },

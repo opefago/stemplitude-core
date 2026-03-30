@@ -215,6 +215,11 @@ export async function listMyClassrooms(): Promise<ClassroomRecord[]> {
   return apiFetch<ClassroomRecord[]>("/students/me/classrooms");
 }
 
+/** Parent / homeschool: classrooms their linked learners are enrolled in (not `/students/me/*`). */
+export async function listGuardianLinkedClassrooms(): Promise<ClassroomRecord[]> {
+  return apiFetch<ClassroomRecord[]>("/students/parent/linked-classrooms");
+}
+
 export async function checkDuplicateClassroomName(
   name: string,
   excludeClassroomId?: string,

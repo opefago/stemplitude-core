@@ -7,6 +7,7 @@ import { useAuth } from "../../providers/AuthProvider";
 import {
   deleteClassroom,
   listClassrooms,
+  listGuardianLinkedClassrooms,
   listMyClassrooms,
   type ClassroomRecord,
 } from "../../lib/api/classrooms";
@@ -63,6 +64,10 @@ export function ClassroomList() {
 
   const canManageClassrooms =
     isSuperAdmin || role === "admin" || role === "owner" || role === "instructor";
+  const useGuardianClassroomList =
+    !canManageClassrooms &&
+    subType === "user" &&
+    (role === "parent" || role === "homeschool_parent");
   const currentTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   useEffect(() => {
@@ -73,7 +78,9 @@ export function ClassroomList() {
       try {
         const rows = canManageClassrooms
           ? await listClassrooms({ limit: 200 })
-          : await listMyClassrooms();
+          : useGuardianClassroomList
+            ? await listGuardianLinkedClassrooms()
+            : await listMyClassrooms();
         if (!mounted) return;
         setClassrooms(rows);
       } catch (e: unknown) {
@@ -87,7 +94,7 @@ export function ClassroomList() {
     return () => {
       mounted = false;
     };
-  }, [canManageClassrooms]);
+  }, [canManageClassrooms, useGuardianClassroomList]);
 
   useEffect(() => {
     if (!rowActionMenu) return;

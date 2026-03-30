@@ -21,6 +21,8 @@ export type TenantInfo = {
   type: string;
   logoUrl?: string;
   settings?: Record<string, unknown>;
+  publicHostSubdomain?: string;
+  customDomain?: string;
 };
 
 interface TenantContextValue {
@@ -113,6 +115,8 @@ export function TenantProvider({ children }: TenantProviderProps) {
             type: t.type,
             logoUrl: t.logoUrl,
             settings: t.settings,
+            publicHostSubdomain: t.publicHostSubdomain,
+            customDomain: t.customDomain,
           });
         }
       })

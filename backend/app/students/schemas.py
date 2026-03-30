@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
+GuardianMessagingScope = Literal["instructors_only", "classmates", "disabled"]
+
 
 class StudentCreate(BaseModel):
     """Create tenant-scoped student (by parent or instructor)."""
@@ -232,6 +234,29 @@ class StudentProfile(BaseModel):
         ...,
         description="Whether the account is active",
     )
+    grade_level: str | None = Field(
+        None,
+        max_length=20,
+        description="Grade in the current workspace (when listing children in a tenant)",
+    )
+
+
+class GuardianChildControlsResponse(BaseModel):
+    """Guardian-editable preferences for a linked learner (per parent_students row when present)."""
+
+    student_id: UUID
+    messaging_scope: GuardianMessagingScope
+    allow_public_game_publishing: bool
+    grade_level: str | None
+    has_parent_link: bool
+
+
+class GuardianChildControlsPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    messaging_scope: GuardianMessagingScope | None = None
+    allow_public_game_publishing: bool | None = None
+    grade_level: str | None = Field(None, max_length=20)
 
 
 class StudentMembershipCreate(BaseModel):
@@ -414,15 +439,18 @@ class ParentWeeklyDigest(BaseModel):
     assignments_submitted: int = 0
 
 
+ParentActivityKind = Literal[
+    "lesson_completed",
+    "lab_completed",
+    "assignment_submitted",
+    "sticker_earned",
+    "xp_earned",
+    "attendance",
+]
+
+
 class ParentActivityItem(BaseModel):
-    kind: Literal[
-        "lesson_completed",
-        "lab_completed",
-        "assignment_submitted",
-        "sticker_earned",
-        "xp_earned",
-        "attendance",
-    ]
+    kind: ParentActivityKind
     occurred_at: datetime
     title: str
     detail: str | None = None
@@ -431,9 +459,20 @@ class ParentActivityItem(BaseModel):
     class_name: str | None = None
 
 
+class ParentEnrolledClassroomRef(BaseModel):
+    """Classrooms the learner is enrolled in (for guardian activity filters)."""
+
+    id: str
+    name: str
+
+
 class ParentChildActivityResponse(BaseModel):
     items: list[ParentActivityItem]
     weekly_digest: ParentWeeklyDigest
+    enrolled_classrooms: list[ParentEnrolledClassroomRef] = Field(
+        default_factory=list,
+        description="Current enrollments; independent of the activity date window.",
+    )
     total: int = Field(0, ge=0, description="Total activity events in the merged feed")
     skip: int = 0
     limit: int = 40

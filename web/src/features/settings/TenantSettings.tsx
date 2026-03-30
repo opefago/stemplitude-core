@@ -1,16 +1,25 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   AlertTriangle,
+  Building2,
   CircleHelp,
   type LucideIcon,
 } from "lucide-react";
 import { useTenant } from "../../providers/TenantProvider";
 import {
   createSupportAccessGrant,
+  decideFranchiseJoinRequest,
   getSupportAccessOptions,
+  getTenantById,
+  listFranchiseJoinRequests,
   listSupportAccessGrants,
+  patchTenant,
   revokeSupportAccessGrant,
+  submitFranchiseJoinRequest,
   updateTenantSettings,
+  type FranchiseGovernanceMode,
+  type FranchiseJoinRequest,
   type SupportAccessGrant,
   type SupportAccessRoleOption,
   type SupportAccessUserOption,
@@ -255,6 +264,7 @@ function SectionHeading({
 
 type TabId =
   | "general"
+  | "franchise"
   | "labs"
   | "ui"
   | "parent"
@@ -263,8 +273,21 @@ type TabId =
   | "support"
   | "danger";
 
+const VALID_SETTINGS_TAB_PARAMS = new Set<string>([
+  "general",
+  "franchise",
+  "labs",
+  "ui",
+  "parent",
+  "attendance",
+  "rewards",
+  "support",
+  "danger",
+]);
+
 const TABS: { id: TabId; label: string; iconSrc?: string; icon?: LucideIcon }[] = [
   { id: "general", label: "General", iconSrc: "/assets/cartoon-icons/settings.png" },
+  { id: "franchise", label: "Franchise & domain", icon: Building2 },
   { id: "labs", label: "Lab Settings", iconSrc: "/assets/cartoon-icons/telescope.png" },
   { id: "ui", label: "UI Policy", iconSrc: "/assets/cartoon-icons/cursor2.png" },
   { id: "parent", label: "Parent Policies", iconSrc: "/assets/cartoon-icons/Players.png" },
@@ -275,8 +298,16 @@ const TABS: { id: TabId; label: string; iconSrc?: string; icon?: LucideIcon }[] 
 ];
 
 export function TenantSettings() {
+  const [searchParams] = useSearchParams();
+  const tabParam = searchParams.get("tab");
   const { tenant, setTenant } = useTenant();
   const [activeTab, setActiveTab] = useState<TabId>("general");
+
+  useEffect(() => {
+    if (tabParam && VALID_SETTINGS_TAB_PARAMS.has(tabParam)) {
+      setActiveTab(tabParam as TabId);
+    }
+  }, [tabParam]);
   const [labEnabled, setLabEnabled] = useState<Record<string, boolean>>(() =>
     LABS.reduce((acc, lab) => ({ ...acc, [lab.id]: true }), {})
   );
@@ -301,6 +332,21 @@ export function TenantSettings() {
       .toISOString()
       .slice(0, 16);
   });
+
+  const [hostSub, setHostSub] = useState("");
+  const [customDom, setCustomDom] = useState("");
+  const [hostSaving, setHostSaving] = useState(false);
+  const [hostErr, setHostErr] = useState("");
+  const [hostOk, setHostOk] = useState(false);
+  const [parentSlugReq, setParentSlugReq] = useState("");
+  const [prefBill, setPrefBill] = useState<"central" | "independent" | "">("");
+  const [franchiseMsg, setFranchiseMsg] = useState("");
+  const [franchiseBusy, setFranchiseBusy] = useState(false);
+  const [franchiseNote, setFranchiseNote] = useState("");
+  const [incomingFr, setIncomingFr] = useState<FranchiseJoinRequest[]>([]);
+  const [incLoading, setIncLoading] = useState(false);
+  const [approveFranchiseGovernance, setApproveFranchiseGovernance] =
+    useState<FranchiseGovernanceMode>("hybrid");
 
   // Attendance settings
   const [attendanceCfg, setAttendanceCfg] = useState<AttendanceConfig>({
@@ -440,6 +486,101 @@ export function TenantSettings() {
       },
     }));
   }, [tenant?.settings]);
+
+  useEffect(() => {
+    if (activeTab !== "franchise" || !tenant?.id) return;
+    setHostErr("");
+    setHostOk(false);
+    setFranchiseNote("");
+    setIncLoading(true);
+    getTenantById(tenant.id)
+      .then((t) => {
+        setHostSub(t.publicHostSubdomain ?? "");
+        setCustomDom(t.customDomain ?? "");
+      })
+      .catch(() => {});
+    listFranchiseJoinRequests(tenant.id, "pending")
+      .then((r) => setIncomingFr(r.items))
+      .catch(() => setIncomingFr([]))
+      .finally(() => setIncLoading(false));
+  }, [activeTab, tenant?.id]);
+
+  const handleSaveHosts = async () => {
+    if (!tenant?.id) return;
+    setHostSaving(true);
+    setHostErr("");
+    setHostOk(false);
+    try {
+      const updated = await patchTenant(tenant.id, {
+        public_host_subdomain: hostSub.trim() || null,
+        custom_domain: customDom.trim() || null,
+      });
+      setTenant({
+        id: updated.id,
+        name: updated.name,
+        slug: updated.slug,
+        code: updated.code,
+        type: updated.type,
+        logoUrl: updated.logoUrl,
+        settings: updated.settings,
+        publicHostSubdomain: updated.publicHostSubdomain,
+        customDomain: updated.customDomain,
+      });
+      setHostOk(true);
+      setTimeout(() => setHostOk(false), 2500);
+    } catch (e) {
+      setHostErr(e instanceof Error ? e.message : "Could not save host settings.");
+    } finally {
+      setHostSaving(false);
+    }
+  };
+
+  const handleSubmitFranchiseRequest = async () => {
+    if (!tenant?.id || !parentSlugReq.trim()) return;
+    setFranchiseBusy(true);
+    setFranchiseNote("");
+    try {
+      await submitFranchiseJoinRequest({
+        parent_slug: parentSlugReq.trim().toLowerCase(),
+        message: franchiseMsg.trim() || undefined,
+        preferred_billing_mode: prefBill || undefined,
+      });
+      setFranchiseNote(
+        "Request sent. The parent organization can approve it from their Franchise & domain tab.",
+      );
+      setParentSlugReq("");
+      setFranchiseMsg("");
+    } catch (e) {
+      setFranchiseNote(e instanceof Error ? e.message : "Could not submit request.");
+    } finally {
+      setFranchiseBusy(false);
+    }
+  };
+
+  const handleFranchiseDecision = async (
+    requestId: string,
+    approve: boolean,
+    billing?: "central" | "independent",
+  ) => {
+    if (!tenant?.id) return;
+    setIncLoading(true);
+    setFranchiseNote("");
+    try {
+      await decideFranchiseJoinRequest(tenant.id, requestId, {
+        approve,
+        billing_mode: billing,
+        rejection_reason: approve ? undefined : "Declined by administrator",
+        governance_mode: approve ? approveFranchiseGovernance : undefined,
+      });
+      const r = await listFranchiseJoinRequests(tenant.id, "pending");
+      setIncomingFr(r.items);
+      setFranchiseNote(approve ? "Link created." : "Request declined.");
+    } catch (e) {
+      setFranchiseNote(e instanceof Error ? e.message : "Could not update request.");
+    } finally {
+      setIncLoading(false);
+    }
+  };
 
   const handleSaveAttendance = async () => {
     if (!tenant?.id) return;
@@ -814,6 +955,194 @@ export function TenantSettings() {
                   options={TIMEZONES}
                 />
               </div>
+            </div>
+          </section>
+
+          <section
+            id="panel-franchise"
+            role="tabpanel"
+            aria-labelledby="tab-franchise"
+            hidden={activeTab !== "franchise"}
+            className="tenant-settings__panel"
+          >
+            <SectionHeading
+              title="Franchise & domain"
+              description="Map a public subdomain or custom hostname, request to join a parent organization, or approve child sites. Production routing also requires backend PUBLIC_HOST_BASE_DOMAIN and DNS."
+            />
+            <div className="tenant-settings__form">
+              <h3 className="tenant-settings__panel-desc" style={{ marginTop: 0 }}>
+                Public hostname
+              </h3>
+              <p className="tenant-settings__panel-desc">
+                Subdomain label for <code>{`{label}.your-platform-domain`}</code> (set the apex domain on the
+                server). Custom domain: point DNS to your app, then enter the hostname here.
+              </p>
+              <div className="tenant-settings__field">
+                <label htmlFor="host-sub">Public subdomain label</label>
+                <input
+                  id="host-sub"
+                  className="tenant-settings__input"
+                  value={hostSub}
+                  onChange={(e) => setHostSub(e.target.value.toLowerCase())}
+                  placeholder="e.g. oakridge"
+                  autoComplete="off"
+                />
+              </div>
+              <div className="tenant-settings__field">
+                <label htmlFor="custom-dom">Custom domain (optional)</label>
+                <input
+                  id="custom-dom"
+                  className="tenant-settings__input"
+                  value={customDom}
+                  onChange={(e) => setCustomDom(e.target.value.toLowerCase())}
+                  placeholder="learn.oakridge.edu"
+                  autoComplete="off"
+                />
+              </div>
+              {hostErr ? <p className="auth-error">{hostErr}</p> : null}
+              {hostOk ? <p className="auth-success">Saved host mapping.</p> : null}
+              <button
+                type="button"
+                className="tenant-settings__save-btn"
+                onClick={() => void handleSaveHosts()}
+                disabled={hostSaving || !tenant?.id}
+              >
+                {hostSaving ? "Saving…" : "Save hostname settings"}
+              </button>
+
+              <h3 className="tenant-settings__panel-desc" style={{ marginTop: "1.75rem" }}>
+                Request link under a parent org
+              </h3>
+              <p className="tenant-settings__panel-desc">
+                Sends a pending request to the parent workspace. An owner/admin there chooses{" "}
+                <strong>central</strong> (shared billing pool) or <strong>independent</strong> billing, and
+                can set shared curriculum / brand / rollup policies on approval.
+              </p>
+              <div className="tenant-settings__field">
+                <label htmlFor="parent-slug-req">Parent organization slug</label>
+                <input
+                  id="parent-slug-req"
+                  className="tenant-settings__input"
+                  value={parentSlugReq}
+                  onChange={(e) => setParentSlugReq(e.target.value)}
+                  placeholder="district-slug"
+                  autoComplete="off"
+                />
+              </div>
+              <div className="tenant-settings__field">
+                <label htmlFor="pref-bill">Preferred structure (optional hint)</label>
+                <KidDropdown
+                  value={prefBill || "any"}
+                  onChange={(v) =>
+                    setPrefBill(v === "any" ? "" : (v as "central" | "independent"))
+                  }
+                  fullWidth
+                  ariaLabel="Billing preference"
+                  options={[
+                    { value: "any", label: "No preference" },
+                    { value: "central", label: "Central (parent license)" },
+                    { value: "independent", label: "Independent (child billing)" },
+                  ]}
+                />
+              </div>
+              <div className="tenant-settings__field">
+                <label htmlFor="fr-msg">Message to parent (optional)</label>
+                <textarea
+                  id="fr-msg"
+                  className="tenant-settings__input"
+                  rows={3}
+                  value={franchiseMsg}
+                  onChange={(e) => setFranchiseMsg(e.target.value)}
+                />
+              </div>
+              <button
+                type="button"
+                className="tenant-settings__save-btn"
+                onClick={() => void handleSubmitFranchiseRequest()}
+                disabled={franchiseBusy || !parentSlugReq.trim()}
+              >
+                {franchiseBusy ? "Sending…" : "Submit join request"}
+              </button>
+
+              <h3 className="tenant-settings__panel-desc" style={{ marginTop: "1.75rem" }}>
+                Incoming franchise requests
+              </h3>
+              <p className="tenant-settings__panel-desc">
+                Child organizations asking to link under this workspace. Choose how curriculum, shared asset
+                libraries, brand, and parent rollups apply, then approve with central or independent billing.
+              </p>
+              <div className="tenant-settings__field">
+                <label>Policy when approving</label>
+                <KidDropdown
+                  value={approveFranchiseGovernance}
+                  onChange={(v) => setApproveFranchiseGovernance(v as FranchiseGovernanceMode)}
+                  fullWidth
+                  ariaLabel="Franchise governance when approving"
+                  options={[
+                    {
+                      value: "child_managed",
+                      label: "Child-managed — child curriculum & brand only",
+                    },
+                    {
+                      value: "parent_managed",
+                      label: "Parent-managed — parent curriculum, library & brand (read-only for child)",
+                    },
+                    {
+                      value: "hybrid",
+                      label: "Hybrid — child may author; parent catalog & library visible",
+                    },
+                    {
+                      value: "isolated",
+                      label: "Isolated — billing/ops link only; no parent content, brand, or rollups",
+                    },
+                  ]}
+                />
+              </div>
+              {franchiseNote ? <p className="tenant-settings__panel-desc">{franchiseNote}</p> : null}
+              {incLoading ? (
+                <p className="tenant-settings__panel-desc">Loading…</p>
+              ) : incomingFr.length === 0 ? (
+                <p className="tenant-settings__panel-desc">No pending requests.</p>
+              ) : (
+                <ul className="tenant-settings__panel-desc" style={{ listStyle: "none", padding: 0 }}>
+                  {incomingFr.map((r) => (
+                    <li key={r.id} className="tenant-settings__franchise-card">
+                      <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                        Child tenant ID: {r.child_tenant_id}
+                      </div>
+                      {r.message ? <p style={{ margin: "0 0 8px" }}>{r.message}</p> : null}
+                      {r.preferred_billing_mode ? (
+                        <p style={{ margin: "0 0 8px", fontSize: "0.875rem" }}>
+                          Preferred: {r.preferred_billing_mode}
+                        </p>
+                      ) : null}
+                      <div className="tenant-settings__franchise-actions">
+                        <button
+                          type="button"
+                          className="tenant-settings__save-btn"
+                          onClick={() => void handleFranchiseDecision(r.id, true, "central")}
+                        >
+                          Approve (central)
+                        </button>
+                        <button
+                          type="button"
+                          className="tenant-settings__save-btn"
+                          onClick={() => void handleFranchiseDecision(r.id, true, "independent")}
+                        >
+                          Approve (independent)
+                        </button>
+                        <button
+                          type="button"
+                          className="tenant-settings__save-btn tenant-settings__save-btn--secondary"
+                          onClick={() => void handleFranchiseDecision(r.id, false)}
+                        >
+                          Decline
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           </section>
 

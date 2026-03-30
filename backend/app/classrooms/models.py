@@ -164,3 +164,32 @@ class ClassroomSessionState(Base):
         onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
+
+
+class ClassSessionReminderSent(Base):
+    """Dedupe log for tenant-configured class session reminders (linked parents)."""
+
+    __tablename__ = "class_session_reminder_sent"
+    __table_args__ = (
+        UniqueConstraint(
+            "classroom_session_id",
+            "offset_minutes",
+            "recipient_user_id",
+            name="uq_class_session_reminder_recipient",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    classroom_session_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("classroom_sessions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    offset_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    recipient_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )

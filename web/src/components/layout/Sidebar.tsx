@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, type ReactNode } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import {
   PanelLeftClose,
@@ -11,6 +11,7 @@ import { useWorkspace } from "../../providers/WorkspaceProvider";
 import { useSidebar } from "../../contexts/SidebarContext";
 import { useChildContextStudentId } from "../../lib/childContext";
 import { useNavInboxSignals } from "../../hooks/useNavInboxSignals";
+import { useGuardianMemberBillingSummary } from "../../hooks/useGuardianMemberBillingSummary";
 import { TenantSwitcher } from "./TenantSwitcher";
 import "./sidebar.css";
 
@@ -34,15 +35,36 @@ const STUDENT_NAV: NavItem[] = [
 
 const PARENT_NAV: NavItem[] = [
   { path: "/app", label: "Home", iconSrc: "/assets/cartoon-icons/house.png" },
-  { path: "/app/children", label: "Children", iconSrc: "/assets/cartoon-icons/Players.png" },
-  { path: "/app/member-billing/pay", label: "Membership", iconSrc: "/assets/cartoon-icons/coin.png" },
-  { path: "/app/member-billing/invoices", label: "Invoices", iconSrc: "/assets/cartoon-icons/Papyrus.png" },
+  {
+    path: "/app/children",
+    label: "Children",
+    iconSrc: "/assets/cartoon-icons/Players.png",
+    section: "Your family",
+  },
+  {
+    path: "/app/member-billing/pay",
+    label: "Membership",
+    iconSrc: "/assets/cartoon-icons/coin.png",
+    section: "Your family",
+  },
+  {
+    path: "/app/member-billing/invoices",
+    label: "Invoices",
+    iconSrc: "/assets/cartoon-icons/Papyrus.png",
+    section: "Your family",
+  },
   {
     path: "/app/messages",
     label: "Updates & Messages",
     iconSrc: "/assets/cartoon-icons/Information.png",
+    section: "Stay in touch",
   },
-  { path: "/app/notifications", label: "Notifications", iconSrc: "/assets/cartoon-icons/Bell.png" },
+  {
+    path: "/app/notifications",
+    label: "Notifications",
+    iconSrc: "/assets/cartoon-icons/Bell.png",
+    section: "Stay in touch",
+  },
 ];
 
 /** Mini-tenant operator: teach + manage subscription + family overview. */
@@ -52,13 +74,29 @@ const HOMESCHOOL_NAV: NavItem[] = [
   { path: "/app/classrooms", label: "Classrooms", iconSrc: "/assets/cartoon-icons/bag.png" },
   { path: "/app/curriculum", label: "Curriculum", iconSrc: "/assets/cartoon-icons/Books.png" },
   { path: "/app/labs", label: "Labs", iconSrc: "/assets/cartoon-icons/telescope.png" },
-  { path: "/app/children", label: "Children", iconSrc: "/assets/cartoon-icons/Players.png" },
-  { path: "/app/member-billing/pay", label: "Membership", iconSrc: "/assets/cartoon-icons/coin.png" },
-  { path: "/app/member-billing/invoices", label: "Invoices", iconSrc: "/assets/cartoon-icons/Papyrus.png" },
+  {
+    path: "/app/children",
+    label: "Children",
+    iconSrc: "/assets/cartoon-icons/Players.png",
+    section: "Your family",
+  },
+  {
+    path: "/app/member-billing/pay",
+    label: "Membership",
+    iconSrc: "/assets/cartoon-icons/coin.png",
+    section: "Your family",
+  },
+  {
+    path: "/app/member-billing/invoices",
+    label: "Invoices",
+    iconSrc: "/assets/cartoon-icons/Papyrus.png",
+    section: "Your family",
+  },
   {
     path: "/app/messages",
     label: "Updates & Messages",
     iconSrc: "/assets/cartoon-icons/Information.png",
+    section: "Stay in touch",
   },
   { path: "/app/billing", label: "Billing", iconSrc: "/assets/cartoon-icons/coin.png" },
   { path: "/app/settings/member-billing", label: "Membership admin", iconSrc: "/assets/cartoon-icons/Papyrus.png" },
@@ -156,6 +194,51 @@ function getDisplayName(firstName?: string, lastName?: string, email?: string): 
   return "User";
 }
 
+function membershipNavPill(
+  path: string,
+  mb: ReturnType<typeof useGuardianMemberBillingSummary>,
+): ReactNode {
+  if (path !== "/app/member-billing/pay") return null;
+  if (mb.loading) {
+    return (
+      <span className="sidebar__mb-pill sidebar__mb-pill--loading" aria-hidden>
+        ···
+      </span>
+    );
+  }
+  const s = mb.status;
+  if (!s) return null;
+  if (!s.member_billing_enabled) {
+    return (
+      <span className="sidebar__mb-pill sidebar__mb-pill--included" title="No paid membership required">
+        Included
+      </span>
+    );
+  }
+  if (s.children.length > 0 && mb.allChildrenHaveActiveMembership) {
+    return (
+      <span className="sidebar__mb-pill sidebar__mb-pill--active" title="All linked learners are covered">
+        Active
+      </span>
+    );
+  }
+  if (s.children.length > 0 && mb.anyChildNeedsMembership) {
+    return (
+      <span className="sidebar__mb-pill sidebar__mb-pill--due" title="A learner needs membership">
+        Payment
+      </span>
+    );
+  }
+  if (s.member_billing_enabled && s.children.length === 0) {
+    return (
+      <span className="sidebar__mb-pill sidebar__mb-pill--muted" title="Link a learner to pay">
+        Add learner
+      </span>
+    );
+  }
+  return null;
+}
+
 export function Sidebar() {
   const { collapsed, setCollapsed, closed, setClosed } = useSidebar();
   const { user, role, isSuperAdmin, subType } = useAuth();
@@ -177,6 +260,7 @@ export function Sidebar() {
   const showTenantSwitcher = isAdmin || isParentLike || isInstructor;
   const [isMobile, setIsMobile] = useState(false);
   const { unreadChatThreads, unreadNotifications } = useNavInboxSignals();
+  const guardianMemberBilling = useGuardianMemberBillingSummary();
 
   useEffect(() => {
     document.documentElement.dataset.sidebarCollapsed = collapsed ? "true" : "";
@@ -301,8 +385,15 @@ export function Sidebar() {
                 )}
                 <NavLink
                   to={item.path}
-                  className={({ isActive: linkActive }) =>
-                    `sidebar__nav-link ${linkActive ? "active" : ""}`
+                  className={({ isPending, isTransitioning }) =>
+                    [
+                      "sidebar__nav-link",
+                      isActive ? "active" : "",
+                      isPending ? "pending" : "",
+                      isTransitioning ? "transitioning" : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ")
                   }
                   end={item.path === "/app"}
                   aria-current={isActive ? "page" : undefined}
@@ -347,7 +438,14 @@ export function Sidebar() {
                   ) : item.icon ? (
                     <item.icon className="sidebar__nav-icon" aria-hidden />
                   ) : null}
-                  <span>{item.label}</span>
+                  {item.path === "/app/member-billing/pay" ? (
+                    <span className="sidebar__nav-link-label-wrap">
+                      <span>{item.label}</span>
+                      {membershipNavPill(item.path, guardianMemberBilling)}
+                    </span>
+                  ) : (
+                    <span>{item.label}</span>
+                  )}
                 </NavLink>
               </li>
             );

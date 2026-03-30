@@ -5,29 +5,33 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import String, cast, func, literal, null, or_, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.classrooms.models import Classroom, ClassroomSession, ClassroomSessionEvent
+from app.classrooms.models import (
+    Classroom,
+    ClassroomSession,
+    ClassroomSessionEvent,
+    ClassroomStudent,
+)
 from app.curriculum.models import Lab, Lesson
 from app.gamification.models import BadgeDefinition, StudentBadge, XPTransaction
 from app.progress.models import Attendance, LabProgress, LessonProgress
 from app.students.schemas import (
     ParentActivityItem,
     ParentChildActivityResponse,
+    ParentEnrolledClassroomRef,
     ParentWeeklyDigest,
 )
 
 _DIGEST_DAYS = 7
-# Per-source fetch caps before merge (keeps DB + memory bounded).
-_SOURCE_LIMIT_LESSON = 60
-_SOURCE_LIMIT_LAB = 60
-_SOURCE_LIMIT_BADGE = 40
-_SOURCE_LIMIT_XP = 40
-_SOURCE_LIMIT_SUB = 40
-_SOURCE_LIMIT_ATT = 40
 _DEFAULT_ACTIVITY_LIMIT = 40
 _MAX_ACTIVITY_LIMIT = 100
+_DEFAULT_RANGE_DAYS = 90
+_MAX_RANGE_DAYS = 366
+
+_STR = String(500)
+_STR_LONG = String(4000)
 
 
 def _lesson_occurred_at(lp: LessonProgress) -> datetime:
@@ -38,6 +42,10 @@ def _lab_occurred_at(lp: LabProgress) -> datetime:
     return lp.completed_at or lp.updated_at
 
 
+def _na_str():
+    return cast(null(), _STR)
+
+
 async def load_parent_child_activity(
     db: AsyncSession,
     *,
@@ -45,12 +53,47 @@ async def load_parent_child_activity(
     tenant_id: UUID,
     skip: int = 0,
     limit: int = _DEFAULT_ACTIVITY_LIMIT,
+    occurred_after: datetime | None = None,
+    occurred_before: datetime | None = None,
+    activity_kind: str | None = None,
+    without_classroom: bool = False,
+    classroom_id: UUID | None = None,
 ) -> ParentChildActivityResponse:
+    """Paginated activity in [occurred_after, occurred_before], with optional kind / class filters."""
     now = datetime.now(timezone.utc)
     week_start = now - timedelta(days=_DIGEST_DAYS)
 
+    if occurred_before is None:
+        occurred_before = now
+    if occurred_after is None:
+        occurred_after = occurred_before - timedelta(days=_DEFAULT_RANGE_DAYS)
+    if occurred_after > occurred_before:
+        raise ValueError("occurred_after must be before or equal to occurred_before")
+    max_span = timedelta(days=_MAX_RANGE_DAYS)
+    if occurred_before - occurred_after > max_span:
+        occurred_after = occurred_before - max_span
+
+    lim = max(1, min(limit, _MAX_ACTIVITY_LIMIT))
+    sk = max(0, skip)
+
     lp_time = func.coalesce(LessonProgress.completed_at, LessonProgress.updated_at)
     lab_time = func.coalesce(LabProgress.completed_at, LabProgress.updated_at)
+
+    enrolled_rows = (
+        await db.execute(
+            select(Classroom.id, Classroom.name)
+            .join(ClassroomStudent, ClassroomStudent.classroom_id == Classroom.id)
+            .where(
+                ClassroomStudent.student_id == student_id,
+                Classroom.tenant_id == tenant_id,
+                Classroom.deleted_at.is_(None),
+            )
+            .order_by(Classroom.name.asc())
+        )
+    ).all()
+    enrolled_classrooms = [
+        ParentEnrolledClassroomRef(id=str(r.id), name=r.name) for r in enrolled_rows
+    ]
 
     lessons_done = int(
         await db.scalar(
@@ -132,178 +175,219 @@ async def load_parent_child_activity(
         assignments_submitted=assignments_n,
     )
 
-    merged: list[tuple[datetime, ParentActivityItem]] = []
+    def want(k: str) -> bool:
+        return activity_kind is None or activity_kind == k
 
-    lesson_rows = await db.execute(
-        select(LessonProgress, Lesson)
-        .join(Lesson, Lesson.id == LessonProgress.lesson_id)
-        .where(
-            LessonProgress.student_id == student_id,
-            LessonProgress.tenant_id == tenant_id,
-            LessonProgress.status == "completed",
-        )
-        .order_by(lp_time.desc())
-        .limit(_SOURCE_LIMIT_LESSON)
-    )
-    for lp, lesson in lesson_rows.all():
-        at = _lesson_occurred_at(lp)
-        merged.append(
-            (
-                at,
-                ParentActivityItem(
-                    kind="lesson_completed",
-                    occurred_at=at,
-                    title="Lesson completed",
-                    detail=lesson.title,
-                    ref_id=str(lesson.id),
-                ),
+    include_classless = classroom_id is None and not without_classroom
+    include_general_only = without_classroom
+    include_specific_class = classroom_id is not None
+
+    selects: list = []
+
+    if want("lesson_completed") and (include_classless or include_general_only):
+        lesson_sel = (
+            select(
+                lp_time.label("occurred_at"),
+                cast(literal("lesson_completed"), _STR).label("kind"),
+                cast(literal("Lesson completed"), _STR).label("title"),
+                cast(Lesson.title, _STR_LONG).label("detail"),
+                cast(Lesson.id, _STR).label("ref_id"),
+                _na_str().label("classroom_id"),
+                _na_str().label("class_name"),
+            )
+            .select_from(LessonProgress)
+            .join(Lesson, Lesson.id == LessonProgress.lesson_id)
+            .where(
+                LessonProgress.student_id == student_id,
+                LessonProgress.tenant_id == tenant_id,
+                LessonProgress.status == "completed",
+                lp_time >= occurred_after,
+                lp_time <= occurred_before,
             )
         )
+        selects.append(lesson_sel)
 
-    lab_rows = await db.execute(
-        select(LabProgress, Lab)
-        .join(Lab, Lab.id == LabProgress.lab_id)
-        .where(
-            LabProgress.student_id == student_id,
-            LabProgress.tenant_id == tenant_id,
-            LabProgress.status == "completed",
-        )
-        .order_by(lab_time.desc())
-        .limit(18)
-    )
-    for lp, lab in lab_rows.all():
-        at = _lab_occurred_at(lp)
-        merged.append(
-            (
-                at,
-                ParentActivityItem(
-                    kind="lab_completed",
-                    occurred_at=at,
-                    title="Lab completed",
-                    detail=lab.title,
-                    ref_id=str(lab.id),
-                    classroom_id=None,
-                    class_name=None,
-                ),
+    if want("lab_completed") and (include_classless or include_general_only):
+        lab_sel = (
+            select(
+                lab_time.label("occurred_at"),
+                cast(literal("lab_completed"), _STR).label("kind"),
+                cast(literal("Lab completed"), _STR).label("title"),
+                cast(Lab.title, _STR_LONG).label("detail"),
+                cast(Lab.id, _STR).label("ref_id"),
+                _na_str().label("classroom_id"),
+                _na_str().label("class_name"),
+            )
+            .select_from(LabProgress)
+            .join(Lab, Lab.id == LabProgress.lab_id)
+            .where(
+                LabProgress.student_id == student_id,
+                LabProgress.tenant_id == tenant_id,
+                LabProgress.status == "completed",
+                lab_time >= occurred_after,
+                lab_time <= occurred_before,
             )
         )
+        selects.append(lab_sel)
 
-    badge_rows = await db.execute(
-        select(StudentBadge, BadgeDefinition)
-        .join(BadgeDefinition, BadgeDefinition.id == StudentBadge.badge_id)
-        .where(
-            StudentBadge.student_id == student_id,
-            StudentBadge.tenant_id == tenant_id,
-        )
-        .order_by(StudentBadge.awarded_at.desc())
-        .limit(_SOURCE_LIMIT_BADGE)
-    )
-    for sb, bd in badge_rows.all():
-        merged.append(
-            (
-                sb.awarded_at,
-                ParentActivityItem(
-                    kind="sticker_earned",
-                    occurred_at=sb.awarded_at,
-                    title="Badge earned",
-                    detail=bd.name,
-                    ref_id=str(sb.id),
-                ),
+    if want("sticker_earned") and (include_classless or include_general_only):
+        badge_sel = (
+            select(
+                StudentBadge.awarded_at.label("occurred_at"),
+                cast(literal("sticker_earned"), _STR).label("kind"),
+                cast(literal("Badge earned"), _STR).label("title"),
+                cast(BadgeDefinition.name, _STR_LONG).label("detail"),
+                cast(StudentBadge.id, _STR).label("ref_id"),
+                _na_str().label("classroom_id"),
+                _na_str().label("class_name"),
+            )
+            .select_from(StudentBadge)
+            .join(BadgeDefinition, BadgeDefinition.id == StudentBadge.badge_id)
+            .where(
+                StudentBadge.student_id == student_id,
+                StudentBadge.tenant_id == tenant_id,
+                StudentBadge.awarded_at >= occurred_after,
+                StudentBadge.awarded_at <= occurred_before,
             )
         )
+        selects.append(badge_sel)
 
-    xp_rows = await db.execute(
-        select(XPTransaction)
-        .where(
-            XPTransaction.student_id == student_id,
-            XPTransaction.tenant_id == tenant_id,
-            XPTransaction.amount > 0,
+    if want("xp_earned") and (include_classless or include_general_only):
+        xp_title = func.concat(
+            cast(literal("+"), _STR),
+            cast(XPTransaction.amount, _STR),
+            cast(literal(" XP"), _STR),
         )
-        .order_by(XPTransaction.created_at.desc())
-        .limit(_SOURCE_LIMIT_XP)
-    )
-    for tx in xp_rows.scalars().all():
-        merged.append(
-            (
-                tx.created_at,
-                ParentActivityItem(
-                    kind="xp_earned",
-                    occurred_at=tx.created_at,
-                    title=f"+{tx.amount} XP",
-                    detail=tx.reason,
-                    ref_id=str(tx.id),
-                ),
+        xp_sel = (
+            select(
+                XPTransaction.created_at.label("occurred_at"),
+                cast(literal("xp_earned"), _STR).label("kind"),
+                cast(xp_title, _STR_LONG).label("title"),
+                cast(XPTransaction.reason, _STR_LONG).label("detail"),
+                cast(XPTransaction.id, _STR).label("ref_id"),
+                _na_str().label("classroom_id"),
+                _na_str().label("class_name"),
+            )
+            .where(
+                XPTransaction.student_id == student_id,
+                XPTransaction.tenant_id == tenant_id,
+                XPTransaction.amount > 0,
+                XPTransaction.created_at >= occurred_after,
+                XPTransaction.created_at <= occurred_before,
             )
         )
+        selects.append(xp_sel)
 
-    sub_rows = await db.execute(
-        select(ClassroomSessionEvent, ClassroomSession, Classroom)
-        .join(
-            ClassroomSession,
-            ClassroomSession.id == ClassroomSessionEvent.session_id,
-        )
-        .join(Classroom, Classroom.id == ClassroomSessionEvent.classroom_id)
-        .where(
+    if want("assignment_submitted") and not without_classroom:
+        sub_where = [
             ClassroomSessionEvent.tenant_id == tenant_id,
             ClassroomSessionEvent.actor_id == student_id,
             ClassroomSessionEvent.event_type == "student.submission.submitted",
-        )
-        .order_by(ClassroomSessionEvent.created_at.desc())
-        .limit(_SOURCE_LIMIT_SUB)
-    )
-    for ev, sess, room in sub_rows.all():
-        merged.append(
-            (
-                ev.created_at,
-                ParentActivityItem(
-                    kind="assignment_submitted",
-                    occurred_at=ev.created_at,
-                    title="Assignment submitted",
-                    detail=room.name,
-                    ref_id=str(ev.id),
-                    classroom_id=str(room.id),
-                    class_name=room.name,
-                ),
+            ClassroomSessionEvent.created_at >= occurred_after,
+            ClassroomSessionEvent.created_at <= occurred_before,
+        ]
+        if include_specific_class:
+            sub_where.append(Classroom.id == classroom_id)
+        sub_sel = (
+            select(
+                ClassroomSessionEvent.created_at.label("occurred_at"),
+                cast(literal("assignment_submitted"), _STR).label("kind"),
+                cast(literal("Assignment submitted"), _STR).label("title"),
+                cast(Classroom.name, _STR_LONG).label("detail"),
+                cast(ClassroomSessionEvent.id, _STR).label("ref_id"),
+                cast(Classroom.id, _STR).label("classroom_id"),
+                cast(Classroom.name, _STR).label("class_name"),
             )
+            .select_from(ClassroomSessionEvent)
+            .join(ClassroomSession, ClassroomSession.id == ClassroomSessionEvent.session_id)
+            .join(Classroom, Classroom.id == ClassroomSessionEvent.classroom_id)
+            .where(*sub_where)
         )
+        selects.append(sub_sel)
 
-    att_rows = await db.execute(
-        select(Attendance, Classroom, ClassroomSession)
-        .join(Classroom, Classroom.id == Attendance.classroom_id)
-        .join(ClassroomSession, ClassroomSession.id == Attendance.session_id)
-        .where(
+    if want("attendance") and not without_classroom:
+        att_where = [
             Attendance.student_id == student_id,
             Attendance.tenant_id == tenant_id,
-        )
-        .order_by(Attendance.created_at.desc())
-        .limit(_SOURCE_LIMIT_ATT)
-    )
-    for att, classroom, sess in att_rows.all():
-        status_label = att.status.replace("_", " ").title()
-        merged.append(
-            (
-                att.created_at,
-                ParentActivityItem(
-                    kind="attendance",
-                    occurred_at=att.created_at,
-                    title="Class session",
-                    detail=f"{classroom.name} · {status_label}",
-                    ref_id=str(att.id),
-                    classroom_id=str(classroom.id),
-                    class_name=classroom.name,
-                ),
+            Attendance.created_at >= occurred_after,
+            Attendance.created_at <= occurred_before,
+        ]
+        if include_specific_class:
+            att_where.append(Classroom.id == classroom_id)
+        att_where.append(
+            or_(
+                Attendance.status == "present",
+                Attendance.status == "late",
             )
         )
+        status_detail = func.concat(
+            cast(Classroom.name, _STR_LONG),
+            cast(literal(" · "), _STR_LONG),
+            func.initcap(func.replace(Attendance.status, "_", " ")),
+        )
+        att_sel = (
+            select(
+                Attendance.created_at.label("occurred_at"),
+                cast(literal("attendance"), _STR).label("kind"),
+                cast(literal("Class session"), _STR).label("title"),
+                cast(status_detail, _STR_LONG).label("detail"),
+                cast(Attendance.id, _STR).label("ref_id"),
+                cast(Classroom.id, _STR).label("classroom_id"),
+                cast(Classroom.name, _STR).label("class_name"),
+            )
+            .select_from(Attendance)
+            .join(Classroom, Classroom.id == Attendance.classroom_id)
+            .join(ClassroomSession, ClassroomSession.id == Attendance.session_id)
+            .where(*att_where)
+        )
+        selects.append(att_sel)
 
-    merged.sort(key=lambda x: x[0], reverse=True)
-    total = len(merged)
-    slice_pairs = merged[skip : skip + limit]
-    items = [it for _, it in slice_pairs]
+    if not selects:
+        return ParentChildActivityResponse(
+            items=[],
+            weekly_digest=digest,
+            enrolled_classrooms=enrolled_classrooms,
+            total=0,
+            skip=sk,
+            limit=lim,
+        )
+
+    unioned = union_all(*selects).subquery("activity_union")
+    total = int(
+        await db.scalar(select(func.count()).select_from(unioned)) or 0
+    )
+
+    rows = (
+        await db.execute(
+            select(unioned)
+            .order_by(unioned.c.occurred_at.desc())
+            .offset(sk)
+            .limit(lim)
+        )
+    ).all()
+
+    items: list[ParentActivityItem] = []
+    for row in rows:
+        occurred_at = row.occurred_at
+        if occurred_at.tzinfo is None:
+            occurred_at = occurred_at.replace(tzinfo=timezone.utc)
+        items.append(
+            ParentActivityItem(
+                kind=row.kind,
+                occurred_at=occurred_at,
+                title=row.title,
+                detail=row.detail,
+                ref_id=row.ref_id,
+                classroom_id=row.classroom_id,
+                class_name=row.class_name,
+            )
+        )
 
     return ParentChildActivityResponse(
         items=items,
         weekly_digest=digest,
+        enrolled_classrooms=enrolled_classrooms,
         total=total,
-        skip=skip,
-        limit=limit,
+        skip=sk,
+        limit=lim,
     )

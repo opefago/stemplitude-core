@@ -2,6 +2,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -14,7 +15,8 @@ from app.core.security import (
     hash_password,
     verify_password,
 )
-from app.tenants.models import SupportAccessGrant
+from app.tenants.franchise_governance import brand_settings_for_child_ui
+from app.tenants.models import SupportAccessGrant, Tenant, TenantHierarchy
 from app.users.models import User
 
 from app.students.ui_mode import resolve_ui_mode
@@ -37,6 +39,29 @@ from .schemas import (
 logger = logging.getLogger(__name__)
 
 BLACKLIST_PREFIX = "auth:blacklist:jti:"
+
+
+async def merge_franchise_brand_tenant_settings(db: AsyncSession, tenant) -> dict | None:
+    """Apply parent/hybrid UI brand from franchise policy to ``tenant.settings`` for resolution."""
+    raw = tenant.settings if isinstance(tenant.settings, dict) else {}
+    result = await db.execute(
+        select(TenantHierarchy).where(
+            TenantHierarchy.child_tenant_id == tenant.id,
+            TenantHierarchy.is_active == True,
+        )
+    )
+    link = result.scalar_one_or_none()
+    if not link:
+        return raw or None
+    gov_mode = getattr(link, "governance_mode", None) or "child_managed"
+    parent_result = await db.execute(select(Tenant).where(Tenant.id == link.parent_tenant_id))
+    parent = parent_result.scalar_one_or_none()
+    parent_settings = parent.settings if parent and isinstance(parent.settings, dict) else None
+    return brand_settings_for_child_ui(
+        governance_mode=gov_mode,
+        child_settings=raw,
+        parent_settings=parent_settings,
+    )
 SESSIONS_PREFIX = "auth:sessions:"
 
 
@@ -651,7 +676,9 @@ class AuthService:
             if tenant_id:
                 membership = await self.repo.get_student_membership(identity_id, tenant_id)
                 tenant = await self.repo.get_tenant_by_id(tenant_id)
-                tenant_settings = tenant.settings if tenant else None
+                tenant_settings = (
+                    await merge_franchise_brand_tenant_settings(self.db, tenant) if tenant else None
+                )
                 if tenant:
                     resolved_tenant_id = tenant.id
                     resolved_tenant_slug = tenant.slug
@@ -668,10 +695,11 @@ class AuthService:
                     resolved_tenant_id = tenant.id
                     resolved_tenant_slug = tenant.slug
                     resolved_tenant_name = tenant.name
+                    tenant_settings = await merge_franchise_brand_tenant_settings(self.db, tenant)
                     resolved_mode, mode_source = resolve_ui_mode(
                         student_dob=student.date_of_birth,
                         membership_override=membership.ui_mode_override if membership else None,
-                        tenant_settings=tenant.settings if tenant else None,
+                        tenant_settings=tenant_settings,
                     )
 
             return StudentProfile(

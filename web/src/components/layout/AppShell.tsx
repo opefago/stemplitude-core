@@ -20,7 +20,9 @@ export function AppShell({ children }: AppShellProps) {
   const { isImpersonating } = useAuth();
   const isKidsMode = mode === "kids";
   const location = useLocation();
-  const isChildModeRoute = location.pathname.startsWith("/app/child");
+  /** `/app/child` (kid shell) only — not `/app/children` or `/app/children/settings`. */
+  const isChildModeRoute =
+    location.pathname === "/app/child" || location.pathname.startsWith("/app/child/");
   const showSidebar = !isKidsMode && !isChildModeRoute;
 
   return (

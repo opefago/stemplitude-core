@@ -1,5 +1,6 @@
 import json
-from typing import Literal
+from datetime import datetime, timezone
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -13,6 +14,9 @@ from app.students.me_student import require_me_student_id
 from app.students.parent_access import ensure_can_view_student_as_guardian
 from app.students.parent_activity import load_parent_child_activity
 from app.students.schemas import (
+    GuardianChildControlsPatch,
+    GuardianChildControlsResponse,
+    ParentActivityKind,
     ParentChildActivityResponse,
     ParentLinkRequest,
     ParentResponse,
@@ -49,6 +53,14 @@ from app.classrooms.models import ClassroomSession
 from app.classrooms.realtime import emit_presence_updated_for_session
 
 router = APIRouter()
+
+
+def _utc_activity_datetime(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 class StudentSessionSubmissionRequest(BaseModel):
@@ -939,23 +951,35 @@ async def parent_children(
     identity: CurrentIdentity = Depends(get_current_identity),
     tenant: TenantContext = Depends(get_tenant_context),
 ):
-    """Students the current parent or homeschool operator may view in this workspace."""
+    """Learners the current user may manage: linked children for parents, all active students for staff.
+
+    Staff (owner/admin/instructor) see active students in the tenant — same scope as paying membership
+    or acting on behalf of a learner (see ``ensure_can_view_student_as_guardian``).
+    """
     if identity.sub_type != "user":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only workspace users can list children",
         )
     role = (identity.role or "").strip().lower()
-    if role not in ("parent", "homeschool_parent"):
+    service = StudentService(db)
+    if role in ("parent", "homeschool_parent"):
+        students = await service.list_guardian_children(
+            guardian_user_id=identity.id,
+            tenant_id=tenant.tenant_id,
+            role_slug=role,
+        )
+    elif role in ("owner", "admin", "instructor"):
+        students = await service.repo.list_by_tenant(
+            tenant.tenant_id, skip=0, limit=200, is_active=True
+        )
+    else:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Parent or homeschool parent role required",
+            detail="Parent, homeschool parent, or staff (owner / admin / instructor) role required",
         )
-    service = StudentService(db)
-    students = await service.list_guardian_children(
-        guardian_user_id=identity.id,
-        tenant_id=tenant.tenant_id,
-        role_slug=role,
+    grade_map = await service.repo.grade_levels_for_students_in_tenant(
+        [s.id for s in students], tenant.tenant_id
     )
     return [
         StudentProfile(
@@ -968,9 +992,93 @@ async def parent_children(
             avatar_url=s.avatar_url,
             global_account=s.global_account,
             is_active=s.is_active,
+            grade_level=grade_map.get(s.id),
         )
         for s in students
     ]
+
+
+@router.get(
+    "/parent/children/{student_id}/controls",
+    response_model=GuardianChildControlsResponse,
+    dependencies=[_require_tenant(), require_permission("students", "view")],
+)
+async def get_guardian_child_controls(
+    student_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    tenant: TenantContext = Depends(get_tenant_context),
+):
+    if identity.sub_type != "user":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace users can view guardian controls",
+        )
+    role = (identity.role or "").strip().lower()
+    if role not in ("parent", "homeschool_parent"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Parent or homeschool parent role required",
+        )
+    service = StudentService(db)
+    return await service.get_guardian_child_controls(
+        student_id, tenant.tenant_id, identity
+    )
+
+
+@router.patch(
+    "/parent/children/{student_id}/controls",
+    response_model=GuardianChildControlsResponse,
+    dependencies=[_require_tenant(), require_permission("students", "view")],
+)
+async def patch_guardian_child_controls(
+    student_id: UUID,
+    data: GuardianChildControlsPatch,
+    db: AsyncSession = Depends(get_db),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    tenant: TenantContext = Depends(get_tenant_context),
+):
+    if identity.sub_type != "user":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace users can update guardian controls",
+        )
+    role = (identity.role or "").strip().lower()
+    if role not in ("parent", "homeschool_parent"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Parent or homeschool parent role required",
+        )
+    service = StudentService(db)
+    return await service.patch_guardian_child_controls(
+        student_id, tenant.tenant_id, identity, data
+    )
+
+
+@router.delete(
+    "/parent/children/{student_id}/link",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[_require_tenant(), require_permission("students", "view")],
+)
+async def unlink_guardian_from_child(
+    student_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    tenant: TenantContext = Depends(get_tenant_context),
+):
+    if identity.sub_type != "user":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace users can remove a guardian link",
+        )
+    role = (identity.role or "").strip().lower()
+    if role not in ("parent", "homeschool_parent"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Parent or homeschool parent role required",
+        )
+    service = StudentService(db)
+    await service.unlink_guardian_from_student(student_id, tenant.tenant_id, identity)
 
 
 @router.get(
@@ -985,8 +1093,25 @@ async def parent_child_activity(
     tenant: TenantContext = Depends(get_tenant_context),
     skip: int = Query(0, ge=0),
     limit: int = Query(40, ge=1, le=100),
+    occurred_after: datetime | None = Query(
+        None, description="Inclusive lower bound (ISO 8601). Defaults to 90 days before occurred_before."
+    ),
+    occurred_before: datetime | None = Query(
+        None, description="Inclusive upper bound (ISO 8601). Defaults to now (UTC)."
+    ),
+    activity_kind: ParentActivityKind | None = Query(
+        None, description="When set, only this activity type is included."
+    ),
+    without_classroom: bool = Query(
+        False,
+        description="When true, only activity not tied to a class (lessons, labs, badges, XP).",
+    ),
+    classroom_id: UUID | None = Query(
+        None,
+        description="When set, only assignment and attendance rows for this classroom.",
+    ),
 ):
-    """Recent learning events and a rolling weekly digest for one child."""
+    """Paginated learning events in a bounded date range and a rolling weekly digest for one child."""
     if identity.sub_type != "user":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -1004,30 +1129,66 @@ async def parent_child_activity(
         student_id=student_id,
         tenant_id=tenant.tenant_id,
     )
-    return await load_parent_child_activity(
-        db,
-        student_id=student_id,
-        tenant_id=tenant.tenant_id,
-        skip=skip,
-        limit=limit,
-    )
+    if without_classroom and classroom_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Use either without_classroom or classroom_id, not both",
+        )
+    try:
+        return await load_parent_child_activity(
+            db,
+            student_id=student_id,
+            tenant_id=tenant.tenant_id,
+            skip=skip,
+            limit=limit,
+            occurred_after=_utc_activity_datetime(occurred_after),
+            occurred_before=_utc_activity_datetime(occurred_before),
+            activity_kind=activity_kind,
+            without_classroom=without_classroom,
+            classroom_id=classroom_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
 
 
 @router.get(
     "/parent/children-sessions",
     response_model=list,
-    dependencies=[_require_tenant(), require_permission("classrooms", "view")],
+    dependencies=[_require_tenant(), require_permission("students", "view")],
 )
 async def parent_children_sessions(
     db: AsyncSession = Depends(get_db),
     identity: CurrentIdentity = Depends(get_current_identity),
     tenant: TenantContext = Depends(get_tenant_context),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(50, ge=1, le=800),
     student_id: UUID | None = Query(
         None, description="When set, only sessions for this learner (must be your child)."
     ),
+    time_scope: Annotated[
+        Literal["upcoming", "past"],
+        Query(description="upcoming = future sessions; past = ended sessions"),
+    ] = "upcoming",
+    session_start_before: datetime | None = Query(
+        None,
+        description=(
+            "Upcoming only: exclude sessions with start >= this instant (UTC). "
+            "Use local start-of-next-month as ISO8601 to scope to the current calendar month."
+        ),
+    ),
+    expand_month_sessions: bool = Query(
+        False,
+        description=(
+            "Upcoming only, with session_start_before: return a large merged month view "
+            "for the parent Events hub. The response may include up to ~1400 occurrences "
+            "for the month (not capped to `limit`), so “later this month” is populated even "
+            "when many sessions fall in the next 7 days."
+        ),
+    ),
 ):
-    """Upcoming sessions for children linked to the parent, or all tenant students for homeschool."""
+    """Upcoming or past sessions for linked children (or all tenant students for homeschool)."""
     from app.classrooms.schemas import SessionResponse
 
     if identity.sub_type != "user":
@@ -1051,11 +1212,55 @@ async def parent_children_sessions(
         )
 
     service = StudentService(db)
-    sessions = await service.list_parent_children_upcoming_sessions(
-        parent_user_id=identity.id,
-        tenant_id=tenant.tenant_id,
-        limit=limit,
-        guardian_role_slug=role,
-        student_id=student_id,
-    )
+    if time_scope == "past":
+        sessions = await service.list_parent_children_past_sessions(
+            parent_user_id=identity.id,
+            tenant_id=tenant.tenant_id,
+            limit=limit,
+            guardian_role_slug=role,
+            student_id=student_id,
+        )
+    else:
+        sessions = await service.list_parent_children_upcoming_sessions(
+            parent_user_id=identity.id,
+            tenant_id=tenant.tenant_id,
+            limit=limit,
+            guardian_role_slug=role,
+            student_id=student_id,
+            session_start_before=_utc_activity_datetime(session_start_before),
+            expand_month_sessions=expand_month_sessions,
+        )
     return [SessionResponse.model_validate(s) for s in sessions]
+
+
+@router.get(
+    "/parent/linked-classrooms",
+    response_model=list,
+    dependencies=[_require_tenant(), require_permission("students", "view")],
+)
+async def parent_linked_classrooms(
+    db: AsyncSession = Depends(get_db),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    tenant: TenantContext = Depends(get_tenant_context),
+):
+    """Classrooms any of the guardian's linked learners are enrolled in (tenant students for homeschool)."""
+    from app.classrooms.schemas import ClassroomResponse
+
+    if identity.sub_type != "user":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace users can list linked classrooms",
+        )
+    role = (identity.role or "").strip().lower()
+    if role not in ("parent", "homeschool_parent"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Parent or homeschool parent role required",
+        )
+    service = StudentService(db)
+    classrooms = await service.list_guardian_linked_classrooms(
+        guardian_user_id=identity.id,
+        tenant_id=tenant.tenant_id,
+        role_slug=role,
+    )
+    return [ClassroomResponse.model_validate(c) for c in classrooms]

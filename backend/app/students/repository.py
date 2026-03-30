@@ -151,6 +151,35 @@ class StudentRepository:
         return result.scalar_one_or_none()
 
     async def list_upcoming_sessions_for_student(
+        self,
+        student_id: UUID,
+        tenant_id: UUID,
+        now,
+        limit: int,
+        *,
+        session_start_before=None,
+    ) -> list[ClassroomSession]:
+        cond = [
+            ClassroomStudent.student_id == student_id,
+            ClassroomSession.tenant_id == tenant_id,
+            ClassroomSession.session_start > now,
+            ClassroomSession.status != "canceled",
+        ]
+        if session_start_before is not None:
+            cond.append(ClassroomSession.session_start < session_start_before)
+        result = await self.session.execute(
+            select(ClassroomSession)
+            .join(
+                ClassroomStudent,
+                ClassroomSession.classroom_id == ClassroomStudent.classroom_id,
+            )
+            .where(*cond)
+            .order_by(ClassroomSession.session_start.asc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def list_past_sessions_for_student(
         self, student_id: UUID, tenant_id: UUID, now, limit: int
     ) -> list[ClassroomSession]:
         result = await self.session.execute(
@@ -162,10 +191,10 @@ class StudentRepository:
             .where(
                 ClassroomStudent.student_id == student_id,
                 ClassroomSession.tenant_id == tenant_id,
-                ClassroomSession.session_start > now,
+                ClassroomSession.session_end < now,
                 ClassroomSession.status != "canceled",
             )
-            .order_by(ClassroomSession.session_start.asc())
+            .order_by(ClassroomSession.session_start.desc())
             .limit(limit)
         )
         return list(result.scalars().all())
@@ -206,6 +235,32 @@ class StudentRepository:
             .order_by(Classroom.updated_at.desc())
         )
         return list(result.scalars().all())
+
+    async def list_classrooms_for_student_ids(
+        self, student_ids: list[UUID], tenant_id: UUID
+    ) -> list[Classroom]:
+        """Distinct active classrooms any of the given learners is enrolled in."""
+        if not student_ids:
+            return []
+        result = await self.session.execute(
+            select(Classroom)
+            .join(ClassroomStudent, Classroom.id == ClassroomStudent.classroom_id)
+            .where(
+                ClassroomStudent.student_id.in_(student_ids),
+                Classroom.tenant_id == tenant_id,
+                Classroom.is_active == True,
+            )
+            .order_by(Classroom.updated_at.desc())
+        )
+        rows = list(result.scalars().all())
+        seen: set[UUID] = set()
+        out: list[Classroom] = []
+        for c in rows:
+            if c.id in seen:
+                continue
+            seen.add(c.id)
+            out.append(c)
+        return out
 
     async def get_classroom_for_student(
         self, *, classroom_id: UUID, student_id: UUID, tenant_id: UUID
@@ -249,6 +304,40 @@ class StudentRepository:
         return result.scalar_one_or_none()
 
     async def list_upcoming_sessions_for_parent_children(
+        self,
+        *,
+        parent_user_id: UUID,
+        tenant_id: UUID,
+        now,
+        limit: int,
+        session_start_before=None,
+    ) -> list[ClassroomSession]:
+        child_ids_subq = (
+            select(ParentStudent.student_id)
+            .where(ParentStudent.user_id == parent_user_id)
+            .scalar_subquery()
+        )
+        cond = [
+            ClassroomStudent.student_id.in_(child_ids_subq),
+            ClassroomSession.tenant_id == tenant_id,
+            ClassroomSession.session_start > now,
+            ClassroomSession.status != "canceled",
+        ]
+        if session_start_before is not None:
+            cond.append(ClassroomSession.session_start < session_start_before)
+        result = await self.session.execute(
+            select(ClassroomSession)
+            .join(
+                ClassroomStudent,
+                ClassroomSession.classroom_id == ClassroomStudent.classroom_id,
+            )
+            .where(*cond)
+            .order_by(ClassroomSession.session_start.asc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def list_past_sessions_for_parent_children(
         self, *, parent_user_id: UUID, tenant_id: UUID, now, limit: int
     ) -> list[ClassroomSession]:
         child_ids_subq = (
@@ -265,15 +354,15 @@ class StudentRepository:
             .where(
                 ClassroomStudent.student_id.in_(child_ids_subq),
                 ClassroomSession.tenant_id == tenant_id,
-                ClassroomSession.session_start > now,
+                ClassroomSession.session_end < now,
                 ClassroomSession.status != "canceled",
             )
-            .order_by(ClassroomSession.session_start.asc())
+            .order_by(ClassroomSession.session_start.desc())
             .limit(limit)
         )
         return list(result.scalars().all())
 
-    async def list_upcoming_sessions_for_student_ids(
+    async def list_past_sessions_for_student_ids(
         self,
         *,
         student_ids: list[UUID],
@@ -292,9 +381,40 @@ class StudentRepository:
             .where(
                 ClassroomStudent.student_id.in_(student_ids),
                 ClassroomSession.tenant_id == tenant_id,
-                ClassroomSession.session_start > now,
+                ClassroomSession.session_end < now,
                 ClassroomSession.status != "canceled",
             )
+            .order_by(ClassroomSession.session_start.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def list_upcoming_sessions_for_student_ids(
+        self,
+        *,
+        student_ids: list[UUID],
+        tenant_id: UUID,
+        now,
+        limit: int,
+        session_start_before=None,
+    ) -> list[ClassroomSession]:
+        if not student_ids:
+            return []
+        cond = [
+            ClassroomStudent.student_id.in_(student_ids),
+            ClassroomSession.tenant_id == tenant_id,
+            ClassroomSession.session_start > now,
+            ClassroomSession.status != "canceled",
+        ]
+        if session_start_before is not None:
+            cond.append(ClassroomSession.session_start < session_start_before)
+        result = await self.session.execute(
+            select(ClassroomSession)
+            .join(
+                ClassroomStudent,
+                ClassroomSession.classroom_id == ClassroomStudent.classroom_id,
+            )
+            .where(*cond)
             .order_by(ClassroomSession.session_start.asc())
             .limit(limit)
         )
@@ -350,3 +470,24 @@ class StudentRepository:
             .limit(limit)
         )
         return list(result.all())
+
+    async def grade_levels_for_students_in_tenant(
+        self, student_ids: list[UUID], tenant_id: UUID
+    ) -> dict[UUID, str | None]:
+        if not student_ids:
+            return {}
+        result = await self.session.execute(
+            select(StudentMembership.student_id, StudentMembership.grade_level).where(
+                StudentMembership.tenant_id == tenant_id,
+                StudentMembership.student_id.in_(student_ids),
+            )
+        )
+        return {row[0]: row[1] for row in result.all()}
+
+    async def delete_parent_link(self, user_id: UUID, student_id: UUID) -> bool:
+        link = await self.get_parent_link(user_id, student_id)
+        if link is None:
+            return False
+        await self.session.delete(link)
+        await self.session.flush()
+        return True

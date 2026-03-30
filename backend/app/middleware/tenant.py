@@ -19,6 +19,19 @@ from app.roles.models import Role, RolePermission, Permission
 
 logger = logging.getLogger(__name__)
 
+
+def _request_hostname_for_host_routing(request: Request) -> str:
+    """Browser hostname for tenant host mapping.
+
+    Vite's dev proxy uses ``changeOrigin: true``, which rewrites ``Host`` to the API target;
+    the original host is forwarded as ``X-Forwarded-Host`` (see ``web/vite.config.js``).
+    """
+    xfh = (request.headers.get("x-forwarded-host") or "").strip()
+    if xfh:
+        return xfh.split(",")[0].strip().split(":")[0].lower()
+    return (request.headers.get("host") or "").split(":")[0].lower()
+
+
 NOTIFICATION_INBOX_PERMISSIONS = frozenset(
     {"notifications:view", "notifications:update"}
 )
@@ -44,11 +57,14 @@ class TenantMiddleware(BaseHTTPMiddleware):
         if request.url.path in self.SKIP_PATHS:
             return await call_next(request)
 
-        tenant_header = request.headers.get("X-Tenant-ID")
-        if not tenant_header:
-            return await call_next(request)
+        tenant_header = (request.headers.get("X-Tenant-ID") or "").strip()
 
         async with async_session_factory() as session:
+            if not tenant_header:
+                tenant_header = await self._tenant_identifier_from_host(session, request)
+            if not tenant_header:
+                return await call_next(request)
+
             tenant = await self._resolve_tenant(session, tenant_header)
             if not tenant:
                 logger.warning("Tenant not found", extra={"identifier": tenant_header})
@@ -128,9 +144,11 @@ class TenantMiddleware(BaseHTTPMiddleware):
                 )
             )
             hierarchy = hierarchy_result.scalar_one_or_none()
+            governance_mode = None
             if hierarchy:
                 parent_tenant_id = hierarchy.parent_tenant_id
                 billing_mode = hierarchy.billing_mode
+                governance_mode = getattr(hierarchy, "governance_mode", None) or "child_managed"
                 logger.debug("Hierarchy resolved", extra={"parent_tenant_id": str(parent_tenant_id)})
 
             logger.debug("Role and permissions resolved", extra={"role_slug": role_slug, "permission_count": len(permissions)})
@@ -142,9 +160,30 @@ class TenantMiddleware(BaseHTTPMiddleware):
                 permissions=permissions,
                 parent_tenant_id=parent_tenant_id,
                 billing_mode=billing_mode,
+                governance_mode=governance_mode,
             )
 
         return await call_next(request)
+
+    async def _tenant_identifier_from_host(self, session, request: Request) -> str:
+        """When ``PUBLIC_HOST_BASE_DOMAIN`` is set, map Host to tenant id via subdomain or custom domain."""
+        from app.config import settings
+        from app.tenants.repository import TenantRepository
+
+        base = (settings.PUBLIC_HOST_BASE_DOMAIN or "").strip().lower().strip(".")
+        if not base:
+            return ""
+        raw_host = _request_hostname_for_host_routing(request)
+        if not raw_host or raw_host == base or raw_host == f"www.{base}":
+            return ""
+        repo = TenantRepository(session)
+        if raw_host.endswith("." + base):
+            label = raw_host[: -(len(base) + 1)]
+            if label and "." not in label:
+                t = await repo.get_by_public_host_subdomain(label)
+                return str(t.id) if t else ""
+        t2 = await repo.get_by_custom_domain(raw_host)
+        return str(t2.id) if t2 else ""
 
     async def _resolve_tenant(self, session, identifier: str) -> Tenant | None:
         try:

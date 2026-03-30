@@ -4,8 +4,11 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+import re
 
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from app.tenants.franchise_governance import GOVERNANCE_MODES
 
 # --- Tenant ---
 
@@ -56,6 +59,16 @@ class TenantCreate(BaseModel):
         None,
         description="Optional tenant settings (timezone, language, etc.)",
     )
+    public_host_subdomain: str | None = Field(
+        None,
+        max_length=63,
+        description="DNS label for {label}.{PUBLIC_HOST_BASE_DOMAIN} (lowercase, no dots)",
+    )
+    custom_domain: str | None = Field(
+        None,
+        max_length=253,
+        description="Full hostname once DNS points at your app (no https://)",
+    )
     billing_mode: Literal["live", "test", "internal"] = Field(
         "live",
         description="Billing execution mode for this tenant.",
@@ -64,6 +77,28 @@ class TenantCreate(BaseModel):
         True,
         description="Whether billing emails are enabled for this tenant.",
     )
+
+    @field_validator("public_host_subdomain", mode="before")
+    @classmethod
+    def normalize_create_public_subdomain(cls, v: object) -> str | None:
+        if v is None or v == "":
+            return None
+        s = str(v).strip().lower()
+        if not re.fullmatch(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?", s):
+            raise ValueError("Invalid subdomain label (use letters, numbers, hyphens; 1–63 chars)")
+        if s in ("www", "api", "app", "mail", "ftp"):
+            raise ValueError("This subdomain label is reserved")
+        return s
+
+    @field_validator("custom_domain", mode="before")
+    @classmethod
+    def normalize_create_custom_domain(cls, v: object) -> str | None:
+        if v is None or v == "":
+            return None
+        s = str(v).strip().lower().split("/")[0].split(":")[0]
+        if len(s) < 3 or "." not in s:
+            raise ValueError("Enter a valid hostname (e.g. learn.yourschool.org)")
+        return s[:253]
 
 
 class TenantUpdate(BaseModel):
@@ -82,6 +117,38 @@ class TenantUpdate(BaseModel):
         None, description="Whether billing emails are enabled"
     )
     is_active: bool | None = Field(None, description="Whether the tenant is active")
+    public_host_subdomain: str | None = Field(
+        None,
+        max_length=63,
+        description="DNS label for {label}.{PUBLIC_HOST_BASE_DOMAIN} (lowercase, no dots)",
+    )
+    custom_domain: str | None = Field(
+        None,
+        max_length=253,
+        description="Full hostname for this tenant once DNS is pointed at your app (no https://)",
+    )
+
+    @field_validator("public_host_subdomain", mode="before")
+    @classmethod
+    def normalize_public_subdomain(cls, v: object) -> str | None:
+        if v is None or v == "":
+            return None
+        s = str(v).strip().lower()
+        if not re.fullmatch(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?", s):
+            raise ValueError("Invalid subdomain label (use letters, numbers, hyphens; 1–63 chars)")
+        if s in ("www", "api", "app", "mail", "ftp"):
+            raise ValueError("This subdomain label is reserved")
+        return s
+
+    @field_validator("custom_domain", mode="before")
+    @classmethod
+    def normalize_custom_domain(cls, v: object) -> str | None:
+        if v is None or v == "":
+            return None
+        s = str(v).strip().lower().split("/")[0].split(":")[0]
+        if len(s) < 3 or "." not in s:
+            raise ValueError("Enter a valid hostname (e.g. learn.yourschool.org)")
+        return s[:253]
 
 
 class TenantResponse(BaseModel):
@@ -103,6 +170,10 @@ class TenantResponse(BaseModel):
         ..., description="Whether billing emails are enabled"
     )
     is_active: bool = Field(..., description="Whether the tenant is active")
+    public_host_subdomain: str | None = Field(
+        None, description="Public subdomain label when using wildcard DNS on the platform domain"
+    )
+    custom_domain: str | None = Field(None, description="Custom hostname for this tenant")
     created_at: datetime = Field(..., description="Creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
 
@@ -357,6 +428,25 @@ class ChildTenantCreate(BaseModel):
         "If null, the child draws from the parent's total pool.",
         examples=[{"student": 100, "instructor": 5}],
     )
+    governance_mode: str = Field(
+        default="child_managed",
+        description="child_managed | parent_managed | hybrid | isolated — who owns curriculum, shared libraries, brand, rollups",
+        examples=["hybrid"],
+    )
+    governance: dict | None = Field(
+        None,
+        description="Optional overrides for expanded policy flags (merged onto defaults for governance_mode)",
+    )
+
+    @field_validator("governance_mode", mode="before")
+    @classmethod
+    def validate_governance_mode(cls, v: object) -> str:
+        s = (str(v) if v is not None else "child_managed").strip().lower()
+        if s not in GOVERNANCE_MODES:
+            raise ValueError(
+                f"governance_mode must be one of: {', '.join(sorted(GOVERNANCE_MODES))}"
+            )
+        return s
 
 
 class HierarchyUpdate(BaseModel):
@@ -376,6 +466,24 @@ class HierarchyUpdate(BaseModel):
         description="Update seat caps (set to null to remove allocation and use parent's pool)",
     )
     is_active: bool | None = Field(None, description="Deactivate or reactivate the link")
+    governance_mode: str | None = Field(
+        None,
+        description="child_managed | parent_managed | hybrid | isolated",
+    )
+    governance: dict | None = Field(
+        None,
+        description="Optional policy overrides; if governance_mode is set, flags are rebuilt then merged",
+    )
+
+    @field_validator("governance_mode", mode="before")
+    @classmethod
+    def validate_governance_mode_patch(cls, v: object) -> str | None:
+        if v is None or v == "":
+            return None
+        s = str(v).strip().lower()
+        if s not in GOVERNANCE_MODES:
+            raise ValueError(f"governance_mode must be one of: {', '.join(sorted(GOVERNANCE_MODES))}")
+        return s
 
 
 class HierarchyResponse(BaseModel):
@@ -391,6 +499,11 @@ class HierarchyResponse(BaseModel):
         None, description="Per-seat-type caps (null = draws from parent pool)"
     )
     is_active: bool = Field(..., description="Whether the link is active")
+    governance_mode: str = Field(
+        ...,
+        description="Franchise policy preset: child_managed, parent_managed, hybrid, isolated",
+    )
+    governance: dict | None = Field(None, description="Expanded flags plus optional overrides")
     created_at: datetime = Field(..., description="When the link was created")
     updated_at: datetime = Field(..., description="Last update timestamp")
 
@@ -400,6 +513,102 @@ class HierarchyListResponse(BaseModel):
 
     items: list[HierarchyResponse] = Field(..., description="Child tenant links")
     total: int = Field(..., description="Total number of children")
+
+
+# --- Public host + franchise join requests ---
+
+
+class PublicTenantByHostResponse(BaseModel):
+    """Minimal tenant info for hostname-based SPA bootstrap (no auth)."""
+
+    id: UUID
+    name: str
+    slug: str
+    public_host_subdomain: str | None = None
+
+
+class FranchiseJoinRequestCreate(BaseModel):
+    """Child org admin asks to link under a parent (district / franchisor)."""
+
+    parent_slug: str | None = Field(None, max_length=100)
+    parent_tenant_id: UUID | None = None
+    message: str | None = Field(None, max_length=1000)
+    preferred_billing_mode: str | None = Field(
+        None, description="Hint for parent: 'central' or 'independent'"
+    )
+
+    @model_validator(mode="after")
+    def exactly_one_parent(self) -> "FranchiseJoinRequestCreate":
+        has_slug = bool(self.parent_slug and str(self.parent_slug).strip())
+        has_id = self.parent_tenant_id is not None
+        if has_slug == has_id:
+            raise ValueError("Provide exactly one of parent_slug or parent_tenant_id")
+        return self
+
+
+class FranchiseJoinRequestResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    child_tenant_id: UUID
+    parent_tenant_id: UUID
+    status: str
+    message: str | None
+    preferred_billing_mode: str | None
+    requested_by_user_id: UUID
+    decided_by_user_id: UUID | None
+    decided_at: datetime | None
+    rejection_reason: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class FranchiseJoinRequestListResponse(BaseModel):
+    items: list[FranchiseJoinRequestResponse]
+    total: int
+
+
+class FranchiseJoinDecision(BaseModel):
+    """Parent org admin approves (creates hierarchy link) or rejects."""
+
+    approve: bool
+    billing_mode: str | None = Field(
+        None, description="Required when approve=true: central or independent"
+    )
+    seat_allocations: dict[str, int] | None = None
+    governance_mode: str | None = Field(
+        None,
+        description="Required when approve=true: child_managed | parent_managed | hybrid | isolated",
+    )
+    governance: dict | None = Field(
+        None,
+        description="Optional overrides merged onto defaults for the chosen governance_mode",
+    )
+    rejection_reason: str | None = Field(None, max_length=500)
+
+    @model_validator(mode="after")
+    def approve_requires_mode(self) -> "FranchiseJoinDecision":
+        if self.approve:
+            if self.billing_mode not in ("central", "independent"):
+                raise ValueError("billing_mode must be central or independent when approving")
+            raw = (self.governance_mode or "").strip().lower()
+            if raw not in GOVERNANCE_MODES:
+                raise ValueError(
+                    "governance_mode is required when approving: child_managed, parent_managed, hybrid, or isolated"
+                )
+        return self
+
+
+class ChildOrganizationRollupResponse(BaseModel):
+    """Aggregated activity snapshot for a child org (no per-learner PII)."""
+
+    child_tenant_id: UUID
+    child_name: str
+    active_student_enrollments: int
+    active_instructor_memberships: int
+    active_classrooms: int
+    billing_mode: str | None = Field(None, description="Active link billing mode, if any")
+    governance_mode: str | None = Field(None, description="Franchise content/brand policy preset")
 
 
 # --- Seat monitoring ---

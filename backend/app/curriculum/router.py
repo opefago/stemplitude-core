@@ -52,7 +52,12 @@ async def create_course(
 ):
     """Create a course."""
     service = CurriculumService(db)
-    return await service.create_course(tenant.tenant_id, data.model_dump())
+    return await service.create_course(
+        tenant.tenant_id,
+        data.model_dump(),
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
 
 
 @router.get(
@@ -76,6 +81,8 @@ async def list_courses(
         limit=limit,
         is_published=is_published,
         program_id=program_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
     )
 
 
@@ -91,7 +98,12 @@ async def get_course(
 ):
     """Get course by ID."""
     service = CurriculumService(db)
-    return await service.get_course(id, tenant.tenant_id)
+    return await service.get_course(
+        id,
+        tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
 
 
 @router.patch(
@@ -107,7 +119,13 @@ async def update_course(
 ):
     """Update a course."""
     service = CurriculumService(db)
-    return await service.update_course(id, tenant.tenant_id, data.model_dump(exclude_unset=True))
+    return await service.update_course(
+        id,
+        tenant.tenant_id,
+        data.model_dump(exclude_unset=True),
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
 
 
 @router.delete(
@@ -122,7 +140,12 @@ async def delete_course(
 ):
     """Delete a course."""
     service = CurriculumService(db)
-    await service.delete_course(id, tenant.tenant_id)
+    await service.delete_course(
+        id,
+        tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
 
 
 @router.post(
@@ -141,6 +164,8 @@ async def bulk_assign_program(
         tenant_id=tenant.tenant_id,
         course_ids=data.course_ids,
         program_id=data.program_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
     )
     return CurriculumBulkAssignProgramResponse(updated_count=updated_count)
 
@@ -160,7 +185,13 @@ async def create_module(
 ):
     """Create a module in a course."""
     service = CurriculumService(db)
-    return await service.create_module(course_id, tenant.tenant_id, data.model_dump())
+    return await service.create_module(
+        course_id,
+        tenant.tenant_id,
+        data.model_dump(),
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
 
 
 @router.get(
@@ -175,7 +206,12 @@ async def list_modules(
 ):
     """List modules for a course."""
     service = CurriculumService(db)
-    return await service.list_modules(course_id)
+    return await service.list_modules(
+        course_id,
+        workspace_tenant_id=tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
 
 
 @router.patch(
@@ -191,7 +227,13 @@ async def update_module(
 ):
     """Update a module."""
     service = CurriculumService(db)
-    return await service.update_module(id, data.model_dump(exclude_unset=True))
+    return await service.update_module(
+        id,
+        data.model_dump(exclude_unset=True),
+        workspace_tenant_id=tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
 
 
 @router.delete(
@@ -206,7 +248,12 @@ async def delete_module(
 ):
     """Delete a module."""
     service = CurriculumService(db)
-    await service.delete_module(id)
+    await service.delete_module(
+        id,
+        workspace_tenant_id=tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
 
 
 # --- Lessons (nested under modules) ---
@@ -224,7 +271,13 @@ async def create_lesson(
 ):
     """Create a lesson in a module."""
     service = CurriculumService(db)
-    return await service.create_lesson(module_id, data.model_dump())
+    return await service.create_lesson(
+        module_id,
+        data.model_dump(),
+        workspace_tenant_id=tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
 
 
 @router.get(
@@ -239,7 +292,12 @@ async def list_lessons(
 ):
     """List lessons for a module."""
     service = CurriculumService(db)
-    return await service.list_lessons(module_id)
+    return await service.list_lessons(
+        module_id,
+        workspace_tenant_id=tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
 
 
 @router.patch(
@@ -255,7 +313,13 @@ async def update_lesson(
 ):
     """Update a lesson."""
     service = CurriculumService(db)
-    return await service.update_lesson(id, data.model_dump(exclude_unset=True))
+    return await service.update_lesson(
+        id,
+        data.model_dump(exclude_unset=True),
+        workspace_tenant_id=tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
 
 
 @router.delete(
@@ -270,7 +334,12 @@ async def delete_lesson(
 ):
     """Delete a lesson."""
     service = CurriculumService(db)
-    await service.delete_lesson(id)
+    await service.delete_lesson(
+        id,
+        workspace_tenant_id=tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
 
 
 # --- Labs (nested under lessons) ---
@@ -288,7 +357,13 @@ async def create_lab(
 ):
     """Create a lab in a lesson."""
     service = CurriculumService(db)
-    return await service.create_lab(lesson_id, data.model_dump())
+    return await service.create_lab(
+        lesson_id,
+        data.model_dump(),
+        workspace_tenant_id=tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
 
 
 @router.get(
@@ -303,7 +378,12 @@ async def list_labs(
 ):
     """List labs for a lesson."""
     service = CurriculumService(db)
-    return await service.list_labs(lesson_id)
+    return await service.list_labs(
+        lesson_id,
+        workspace_tenant_id=tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
 
 
 @router.patch(
@@ -319,7 +399,13 @@ async def update_lab(
 ):
     """Update a lab."""
     service = CurriculumService(db)
-    return await service.update_lab(id, data.model_dump(exclude_unset=True))
+    return await service.update_lab(
+        id,
+        data.model_dump(exclude_unset=True),
+        workspace_tenant_id=tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
 
 
 @router.delete(
@@ -334,4 +420,9 @@ async def delete_lab(
 ):
     """Delete a lab."""
     service = CurriculumService(db)
-    await service.delete_lab(id)
+    await service.delete_lab(
+        id,
+        workspace_tenant_id=tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )

@@ -214,6 +214,73 @@
   font-weight: 700;
 }
 
+/* Membership row already uses a colored status pill; avoid accent-tinted row + pill competing (e.g. “green on green”). */
+.sidebar__nav-link.active:has(.sidebar__mb-pill) {
+  background: color-mix(in srgb, var(--sidebar-text) 7%, transparent);
+  color: var(--sidebar-text);
+  box-shadow: inset 3px 0 0 var(--sidebar-accent);
+}
+
+.sidebar__nav-link.active:has(.sidebar__mb-pill):hover {
+  background: color-mix(in srgb, var(--sidebar-text) 10%, transparent);
+  color: var(--sidebar-text);
+}
+
+.sidebar__nav-link-label-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+  min-width: 0;
+  flex: 1;
+}
+
+/* Keep label + status pill on one row; shrink label with ellipsis if the nav is narrow */
+.sidebar__nav-link-label-wrap > span:first-child {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar__mb-pill {
+  font-size: 0.5625rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 999px;
+  line-height: 1.25;
+  flex-shrink: 0;
+}
+
+.sidebar__mb-pill--included {
+  background: color-mix(in srgb, #22c55e 20%, transparent);
+  color: #15803d;
+}
+
+.sidebar__mb-pill--active {
+  background: color-mix(in srgb, #22c55e 24%, transparent);
+  color: #166534;
+}
+
+.sidebar__mb-pill--due {
+  background: color-mix(in srgb, #f97316 24%, transparent);
+  color: #c2410c;
+}
+
+.sidebar__mb-pill--muted {
+  background: color-mix(in srgb, var(--sidebar-text-muted) 14%, transparent);
+  color: var(--sidebar-text-muted);
+}
+
+.sidebar__mb-pill--loading {
+  font-size: 0.5rem;
+  letter-spacing: 2px;
+  color: var(--sidebar-text-muted);
+}
+
 .sidebar__nav-icon {
   flex-shrink: 0;
   width: 1.875rem;

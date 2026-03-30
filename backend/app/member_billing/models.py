@@ -87,6 +87,7 @@ class MemberPurchase(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     stripe_checkout_session_id: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    stripe_payment_intent_id: Mapped[str | None] = mapped_column(String(120), nullable=True, unique=True)
     amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="usd")
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -105,6 +106,9 @@ class MemberInvoice(Base):
     )
     member_subscription_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("member_subscriptions.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    member_purchase_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("member_purchases.id", ondelete="SET NULL"), nullable=True, index=True
     )
     stripe_invoice_id: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
     amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)
