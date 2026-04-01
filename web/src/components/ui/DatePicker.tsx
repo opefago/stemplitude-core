@@ -15,6 +15,8 @@ export interface DatePickerProps {
   max?: string; // YYYY-MM-DD — latest selectable date
   error?: string | null;
   popoverClassName?: string;
+  /** When set, shown on the trigger instead of the default calendar icon (e.g. kid mascot asset). */
+  iconSrc?: string;
 }
 
 interface PopoverPos {
@@ -56,6 +58,7 @@ export function DatePicker({
   max,
   error,
   popoverClassName,
+  iconSrc,
 }: DatePickerProps) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<PopoverPos>({
@@ -169,7 +172,17 @@ export function DatePicker({
         aria-haspopup="dialog"
         aria-expanded={open}
       >
-        <CalendarDays size={15} className="dp-trigger__icon" aria-hidden />
+        {iconSrc ? (
+          <img
+            src={iconSrc}
+            alt=""
+            className="dp-trigger__icon dp-trigger__icon--mascot"
+            width={22}
+            height={22}
+          />
+        ) : (
+          <CalendarDays size={15} className="dp-trigger__icon" aria-hidden />
+        )}
         <span
           className={`dp-trigger__text ${!selected ? "dp-trigger__text--placeholder" : ""}`}
         >

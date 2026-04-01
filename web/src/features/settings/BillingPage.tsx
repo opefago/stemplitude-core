@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { CreditCard, TrendingUp } from "lucide-react";
 import { KidDropdown, ProgressBar } from "../../components/ui";
 import { ensureFreshAccessToken } from "../../lib/api/client";
 import { listSeatUsage, type SeatUsageRecord } from "../../lib/api/licenses";
-import { listPlans, type PlanRecord } from "../../lib/api/plans";
+import { fetchPlanById, listPlans, type PlanRecord } from "../../lib/api/plans";
 import {
   createCheckoutSession,
   type BillingCycle,
   listBillingProviders,
-  listSubscriptionInvoices,
   listSubscriptions,
+  listTenantInvoices,
   type BillingProviderOption,
   type InvoiceRecord,
   type SubscriptionRecord,
@@ -91,9 +92,11 @@ function normalizeBillingError(message: string): string {
 
 export function BillingPage() {
   const { user, isLoading: authLoading } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const checkoutReturnStatus = searchParams.get("checkout");
   const hasLoadedBillingRef = useRef(false);
-  const lastLoadedInvoiceSubscriptionRef = useRef<string | null>(null);
   const [plans, setPlans] = useState<PlanRecord[]>([]);
+  const [subscribedPlanExtra, setSubscribedPlanExtra] = useState<PlanRecord | null>(null);
   const [subscriptions, setSubscriptions] = useState<SubscriptionRecord[]>([]);
   const [invoices, setInvoices] = useState<InvoiceRecord[]>([]);
   const [seatUsage, setSeatUsage] = useState<SeatUsageRecord[]>([]);
@@ -141,9 +144,12 @@ export function BillingPage() {
       hasLoadedBillingRef.current = false;
       setPlans([]);
       setSubscriptions([]);
+      setInvoices([]);
       setSeatUsage([]);
       setLoadError("");
+      setInvoiceError("");
       setLoadingPlans(false);
+      setLoadingInvoices(false);
       return;
     }
     if (hasLoadedBillingRef.current) {
@@ -152,21 +158,25 @@ export function BillingPage() {
     hasLoadedBillingRef.current = true;
     async function loadBillingData() {
       setLoadingPlans(true);
+      setLoadingInvoices(true);
       setLoadError("");
+      setInvoiceError("");
       try {
         const canLoad = await ensureFreshAccessToken();
         if (!canLoad) {
           setLoadError("Your session has expired. Please log in again.");
           setPlans([]);
           setSubscriptions([]);
+          setInvoices([]);
           setSeatUsage([]);
           return;
         }
-        const [plansResult, subscriptionsResult, seatsResult] =
+        const [plansResult, subscriptionsResult, seatsResult, invoicesResult] =
           await Promise.allSettled([
             listPlans({ limit: 100 }),
             listSubscriptions({ limit: 50 }),
             listSeatUsage(),
+            listTenantInvoices({ limit: 100 }),
           ]);
         const errors: string[] = [];
 
@@ -200,6 +210,17 @@ export function BillingPage() {
           );
         }
 
+        if (invoicesResult.status === "fulfilled") {
+          setInvoices(invoicesResult.value.items);
+        } else {
+          setInvoices([]);
+          const msg =
+            invoicesResult.reason instanceof Error
+              ? normalizeBillingError(invoicesResult.reason.message)
+              : "Unable to load billing history";
+          setInvoiceError(msg);
+        }
+
         if (errors.length > 0) {
           setLoadError(errors.join(". "));
         }
@@ -220,10 +241,53 @@ export function BillingPage() {
         setLoadError(message);
       } finally {
         setLoadingPlans(false);
+        setLoadingInvoices(false);
       }
     }
     void loadBillingData();
   }, [authLoading, user?.id]);
+
+  useEffect(() => {
+    if (checkoutReturnStatus !== "success" || authLoading || !user?.id) {
+      return;
+    }
+    let cancelled = false;
+    async function refetchSubscriptions() {
+      const canLoad = await ensureFreshAccessToken();
+      if (!canLoad || cancelled) return;
+      try {
+        const [subRes, invRes] = await Promise.all([
+          listSubscriptions({ limit: 50 }),
+          listTenantInvoices({ limit: 100 }),
+        ]);
+        if (!cancelled) {
+          setSubscriptions(subRes.items);
+          setInvoices(invRes.items);
+        }
+      } catch {
+        /* ignore — main load effect will surface errors on next visit */
+      }
+    }
+    void refetchSubscriptions();
+    const t1 = window.setTimeout(() => void refetchSubscriptions(), 2000);
+    const t2 = window.setTimeout(() => void refetchSubscriptions(), 6000);
+    const tClear = window.setTimeout(() => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.delete("checkout");
+          return next;
+        },
+        { replace: true },
+      );
+    }, 8000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+      window.clearTimeout(tClear);
+    };
+  }, [checkoutReturnStatus, authLoading, user?.id, setSearchParams]);
 
   const currentSubscription = useMemo(
     () => selectCurrentSubscription(subscriptions),
@@ -231,43 +295,41 @@ export function BillingPage() {
   );
 
   useEffect(() => {
-    async function loadInvoices(subscriptionId: string) {
-      setLoadingInvoices(true);
-      setInvoiceError("");
+    const pid = currentSubscription?.plan_id;
+    if (!pid) {
+      setSubscribedPlanExtra(null);
+      return;
+    }
+    if (plans.some((p) => p.id === pid)) {
+      setSubscribedPlanExtra(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
       try {
-        const canLoad = await ensureFreshAccessToken();
-        if (!canLoad) {
-          setInvoiceError("Your session has expired. Please log in again.");
-          setInvoices([]);
-          return;
+        const plan = await fetchPlanById(pid);
+        if (!cancelled) {
+          setSubscribedPlanExtra(plan);
         }
-        const page = await listSubscriptionInvoices(subscriptionId, { limit: 50 });
-        setInvoices(page.items);
-      } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "Unable to load billing history";
-        setInvoiceError(message);
-        setInvoices([]);
-      } finally {
-        setLoadingInvoices(false);
+      } catch {
+        if (!cancelled) {
+          setSubscribedPlanExtra(null);
+        }
       }
-    }
-    if (!currentSubscription?.id) {
-      setInvoices([]);
-      lastLoadedInvoiceSubscriptionRef.current = null;
-      return;
-    }
-    if (lastLoadedInvoiceSubscriptionRef.current === currentSubscription.id) {
-      return;
-    }
-    lastLoadedInvoiceSubscriptionRef.current = currentSubscription.id;
-    void loadInvoices(currentSubscription.id);
-  }, [currentSubscription?.id]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentSubscription?.plan_id, plans]);
 
   const currentPlan = useMemo(() => {
     if (!currentSubscription) return null;
-    return plans.find((plan) => plan.id === currentSubscription.plan_id) ?? null;
-  }, [plans, currentSubscription]);
+    return (
+      plans.find((plan) => plan.id === currentSubscription.plan_id) ??
+      subscribedPlanExtra ??
+      null
+    );
+  }, [plans, currentSubscription, subscribedPlanExtra]);
 
   const paymentProviderLabel = useMemo(
     () => getProviderLabel(currentSubscription?.provider),
@@ -423,6 +485,14 @@ export function BillingPage() {
                 ? `Status: ${currentSubscription.status}`
                 : "No subscription found"}
             </div>
+            {!currentSubscription && !loadingPlans && (
+              <p className="billing-page__usage-text" style={{ marginTop: "0.75rem" }}>
+                Paid subscriptions are stored per workspace. Use the same organization in the header
+                as when you started checkout. After returning from Stripe, wait a few seconds for
+                webhooks—this page rechecks automatically when the URL includes{" "}
+                <code className="billing-page__code">checkout=success</code>.
+              </p>
+            )}
           </div>
         </section>
 
@@ -470,6 +540,9 @@ export function BillingPage() {
           <h2 id="history-heading" className="billing-page__card-title">
             Billing History
           </h2>
+          <p className="billing-page__usage-text" style={{ marginBottom: "0.75rem" }}>
+            Invoices for this workspace across all organization subscriptions (platform billing).
+          </p>
           <div className="billing-page__table-wrapper">
             <table className="billing-page__table">
               <thead>

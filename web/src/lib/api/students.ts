@@ -79,10 +79,13 @@ export async function getMyActiveSessions(
 }
 
 export async function getMyAssignments(
-  limit?: number
+  limit?: number,
+  opts?: { childContextOverride?: string | null },
 ): Promise<StudentAssignment[]> {
   const params = limit != null ? `?limit=${limit}` : "";
-  return apiFetch<StudentAssignment[]>(`/students/me/assignments${params}`);
+  return apiFetch<StudentAssignment[]>(`/students/me/assignments${params}`, {
+    childContextOverride: opts?.childContextOverride,
+  });
 }
 
 export async function getMyClassrooms(): Promise<ClassroomRecord[]> {
@@ -313,4 +316,89 @@ export async function createStudent(payload: StudentCreatePayload): Promise<Stud
     method: "POST",
     body: payload,
   });
+}
+
+/** Guardian attendance hub: class sessions with attendance + excusal state. */
+export interface GuardianExcusalSummary {
+  id: string;
+  status: string;
+  reason: string;
+  review_notes?: string | null;
+  created_at: string;
+  reviewed_at?: string | null;
+}
+
+export interface GuardianAttendanceSessionRow {
+  session_id: string;
+  classroom_id: string;
+  classroom_name: string;
+  session_start: string;
+  session_end: string;
+  session_status: string;
+  attendance_status?: string | null;
+  attendance_notes?: string | null;
+  excusal?: GuardianExcusalSummary | null;
+}
+
+export interface GuardianAttendanceOverview {
+  rows: GuardianAttendanceSessionRow[];
+}
+
+export async function getParentChildAttendanceOverview(
+  studentId: string,
+): Promise<GuardianAttendanceOverview> {
+  return apiFetch<GuardianAttendanceOverview>(
+    `/students/parent/children/${encodeURIComponent(studentId)}/attendance-overview`,
+  );
+}
+
+export async function createParentExcusalRequest(
+  studentId: string,
+  body: { session_id: string; classroom_id: string; reason: string },
+): Promise<unknown> {
+  return apiFetch(
+    `/students/parent/children/${encodeURIComponent(studentId)}/excusal-requests`,
+    { method: "POST", body },
+  );
+}
+
+export interface AttendanceExcusalStaffRow {
+  id: string;
+  student_id: string;
+  student_display_name: string;
+  session_id: string;
+  classroom_id: string;
+  classroom_name: string;
+  reason: string;
+  status: string;
+  submitted_by_user_id: string;
+  review_notes?: string | null;
+  created_at: string;
+  reviewed_at?: string | null;
+  reviewed_by_user_id?: string | null;
+}
+
+export async function listAttendanceExcusalRequestsStaff(params?: {
+  status?: string;
+  skip?: number;
+  limit?: number;
+}): Promise<AttendanceExcusalStaffRow[]> {
+  const qs = new URLSearchParams();
+  if (params?.status) qs.set("status_filter", params.status);
+  if (params?.skip != null) qs.set("skip", String(params.skip));
+  if (params?.limit != null) qs.set("limit", String(params.limit));
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return apiFetch<AttendanceExcusalStaffRow[]>(
+    `/students/attendance-excusal-requests${suffix}`,
+  );
+}
+
+export async function reviewAttendanceExcusalRequest(
+  excusalId: string,
+  body: { decision: "approved" | "denied"; review_notes?: string | null },
+): Promise<AttendanceExcusalStaffRow> {
+  return apiFetch<AttendanceExcusalStaffRow>(
+    `/students/attendance-excusal-requests/${encodeURIComponent(excusalId)}`,
+    { method: "PATCH", body },
+  );
 }

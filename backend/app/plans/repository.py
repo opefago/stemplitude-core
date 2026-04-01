@@ -1,5 +1,6 @@
 """Plan repository."""
 
+from collections.abc import Sequence
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -20,12 +21,13 @@ class PlanRepository:
         *,
         skip: int = 0,
         limit: int = 50,
-        exclude_slug: str | None = None,
+        exclude_slugs: Sequence[str] | None = None,
     ) -> tuple[list[Plan], int]:
         """List active plans (public, paginated)."""
         conditions = [Plan.is_active == True]  # noqa: E712
-        if exclude_slug:
-            conditions.append(Plan.slug != exclude_slug)
+        excl = [s.strip() for s in (exclude_slugs or ()) if s and s.strip()]
+        if excl:
+            conditions.append(Plan.slug.not_in(excl))
         count_stmt = select(func.count()).select_from(Plan).where(*conditions)
         total = int((await self.session.execute(count_stmt)).scalar() or 0)
         result = await self.session.execute(

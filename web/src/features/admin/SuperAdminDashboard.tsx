@@ -82,7 +82,13 @@ export function SuperAdminDashboard() {
           <Shield size={28} className="super-admin__shield" aria-hidden />
           <div>
             <h1 className="dashboard-bento__greeting">Platform Admin</h1>
-            <p className="dashboard-bento__subtitle">Manage tenants, monitor health, and run platform operations</p>
+            <p className="dashboard-bento__subtitle">
+              Manage tenants, monitor health, and run platform operations.{" "}
+              <Link to="/app/platform/tasks" className="super-admin__subtitle-link">
+                Admin Tasks
+              </Link>{" "}
+              includes Stripe subscription reconcile for the workspace selected in the header.
+            </p>
           </div>
         </div>
         <button type="button" className="super-admin__btn super-admin__btn--primary">

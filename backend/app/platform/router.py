@@ -28,6 +28,7 @@ from . import history as cmd_history
 from .models import CommandAuditLog
 from .parser import ParseError, parse_command
 from .registry import get_command, list_commands, validate_params
+from .slash_commands import execute_slash, parse_slash_invocation
 from .schemas import (
     CommandRequest,
     CommandResponse,
@@ -112,6 +113,20 @@ async def execute_command(
     client_ip = request.client.host if request.client else None
 
     try:
+        slash_verb, slash_args = parse_slash_invocation(raw)
+    except ValueError as e:
+        await _write_audit(
+            db, identity.id, user_email, raw, "", "", {},
+            "failed", str(e), client_ip,
+        )
+        return CommandResponse(ok=False, command=raw, error=str(e))
+
+    if slash_verb is not None:
+        return await _execute_slash_command(
+            db, identity.id, user_email, raw, slash_verb, slash_args, client_ip,
+        )
+
+    try:
         command_key, raw_params = parse_command(raw)
     except ParseError as e:
         await _write_audit(
@@ -131,7 +146,10 @@ async def execute_command(
         )
         return CommandResponse(
             ok=False, command=raw,
-            error=f"Unknown command: '{command_key}'. Use /commands to see available commands.",
+            error=(
+                f"Unknown command: '{command_key}'. "
+                "Type /commands in this terminal for the full list, or /help for usage."
+            ),
         )
 
     if cmd_def.handler is None:
@@ -197,6 +215,69 @@ async def execute_command(
         logger.warning("Failed to persist command history", exc_info=True)
 
     return response
+
+
+async def _execute_slash_command(
+    db: AsyncSession,
+    user_id,
+    user_email: str,
+    raw: str,
+    slash_verb: str,
+    slash_args: list[str],
+    client_ip: str | None,
+) -> CommandResponse:
+    """Handle ``/commands``, ``/help``, etc. Same permission as ``/execute``."""
+    if slash_verb == "":
+        err = "Incomplete /. Type /help or /commands."
+        await _write_audit(
+            db, user_id, user_email, raw, "meta", "slash",
+            {"args": slash_args}, "failed", err, client_ip,
+        )
+        return CommandResponse(ok=False, command=raw, error=err)
+
+    logger.info(
+        "Platform slash meta by user=%s: /%s %s",
+        user_id, slash_verb, slash_args,
+    )
+
+    result = execute_slash(slash_verb, slash_args)
+    is_ok = bool(result.get("ok"))
+    err = result.pop("error", None) if not is_ok else None
+
+    output_text = (
+        json.dumps(result, default=str, indent=2)
+        if is_ok
+        else (err or json.dumps(result, default=str))
+    )
+    summary = (
+        err
+        if not is_ok
+        else (result.get("message") or json.dumps(result, default=str)[:500])
+    )
+    safe_result = json.loads(json.dumps(result, default=str)) if result else None
+    await _write_audit(
+        db, user_id, user_email, raw,
+        "meta", slash_verb, {"args": slash_args},
+        "success" if is_ok else "failed",
+        summary or (err or ""),
+        client_ip,
+        result_data=safe_result,
+    )
+
+    try:
+        await cmd_history.push_entry(
+            user_id,
+            entry_id=str(uuid4()),
+            command=raw,
+            status="success" if is_ok else "failed",
+            output=output_text,
+        )
+    except Exception:
+        logger.warning("Failed to persist command history", exc_info=True)
+
+    return CommandResponse(
+        ok=is_ok, command=raw, result=result if result else None, error=err,
+    )
 
 
 async def _write_audit(

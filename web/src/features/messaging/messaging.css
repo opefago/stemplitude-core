@@ -1995,6 +1995,82 @@
   margin-top: 2px;
 }
 
+.msg-hub-events__learner-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 14px;
+}
+
+.msg-hub-events__learner-label {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+}
+
+.msg-hub-events__learner-select {
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 2px solid var(--color-border);
+  font: inherit;
+  font-weight: 600;
+  min-width: 10rem;
+  background: var(--color-surface);
+}
+
+.msg-hub-events__excusal-calendar-quick {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 2px dashed color-mix(in srgb, var(--color-secondary) 40%, var(--color-border));
+  background: color-mix(in srgb, var(--color-secondary) 8%, var(--color-surface));
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  color: var(--color-text);
+  transition:
+    border-color 0.15s ease,
+    transform 0.12s ease,
+    box-shadow 0.15s ease;
+}
+
+.msg-hub-events__excusal-calendar-quick:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 45%, var(--color-border));
+  box-shadow: 0 4px 0 color-mix(in srgb, var(--color-border) 88%, transparent);
+  transform: translateY(-1px);
+}
+
+.msg-hub-events__excusal-calendar-quick__mascot {
+  flex-shrink: 0;
+  object-fit: contain;
+  filter: drop-shadow(0 2px 4px rgba(15, 23, 42, 0.12));
+}
+
+.msg-hub-events__excusal-calendar-quick__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.msg-hub-events__excusal-calendar-quick__title {
+  font-size: 0.9375rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.msg-hub-events__excusal-calendar-quick__hint {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  line-height: 1.25;
+}
+
 .msg-hub-events__card-body {
   flex: 1;
   min-width: 0;
@@ -2002,6 +2078,14 @@
   flex-direction: column;
   gap: 6px;
   padding-top: 2px;
+}
+
+.msg-hub-events__card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
 }
 
 .msg-hub-events__card-time-row {
@@ -2069,6 +2153,34 @@
   background: color-mix(in srgb, #6366f1 20%, transparent);
   color: #3730a3;
   box-shadow: 0 3px 6px rgba(79, 70, 229, 0.2);
+  transform: translateY(-1px);
+}
+
+.msg-hub-events__card-excusal {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 0;
+  font-size: 0.8125rem;
+  font-weight: 800;
+  color: var(--color-text-secondary);
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 2px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-text) 6%, transparent);
+  cursor: pointer;
+  font-family: inherit;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    transform 0.12s ease;
+}
+
+.msg-hub-events__card-excusal:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 45%, var(--color-border));
+  color: var(--color-text);
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
   transform: translateY(-1px);
 }
 

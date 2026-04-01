@@ -321,6 +321,7 @@ class AuthService:
         )
         email_norm = normalize_email(str(data.email))
         trial_plan = None
+        trial_plan_slug: str | None = None
 
         if settings.TRIAL_ENABLED:
             if disposable_email_blocked(email_norm):
@@ -338,11 +339,16 @@ class AuthService:
                     status_code=409,
                 )
             plan_repo = PlanRepository(self.db)
-            trial_plan = await plan_repo.get_by_slug(settings.TRIAL_PLAN_SLUG)
+            org_t = (data.organization.type or "center").strip().lower()
+            if org_t in ("parent", "homeschool"):
+                trial_plan_slug = settings.TRIAL_PLAN_SLUG_PARENT
+            else:
+                trial_plan_slug = settings.TRIAL_PLAN_SLUG_CENTER
+            trial_plan = await plan_repo.get_by_slug(trial_plan_slug)
             if not trial_plan or not trial_plan.is_active:
                 logger.error(
                     "Trial plan missing or inactive slug=%s",
-                    settings.TRIAL_PLAN_SLUG,
+                    trial_plan_slug,
                 )
                 raise AuthError(
                     "Sign-up is temporarily unavailable. Please try again later.",
@@ -416,7 +422,7 @@ class AuthService:
             if not trial_plan or not trial_plan.is_active:
                 logger.error(
                     "Trial plan disappeared mid-onboard slug=%s",
-                    settings.TRIAL_PLAN_SLUG,
+                    trial_plan_slug,
                 )
                 raise AuthError(
                     "Sign-up is temporarily unavailable. Please try again later.",
@@ -437,7 +443,7 @@ class AuthService:
                 provider="trial",
                 provider_subscription_id=f"trial:{tenant.id}",
                 current_period_start=now,
-                current_period_end=None,
+                current_period_end=trial_end,
                 trial_end=trial_end,
             )
             self.db.add(trial_sub)

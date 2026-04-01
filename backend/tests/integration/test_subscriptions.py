@@ -22,3 +22,18 @@ async def test_list_subscriptions(
     assert "items" in data
     assert "total" in data
     assert isinstance(data["items"], list)
+
+
+async def test_list_tenant_invoices(
+    client: AsyncClient,
+    super_admin_tenant_headers: dict,
+) -> None:
+    response = await client.get(
+        "/api/v1/subscriptions/invoices",
+        headers=super_admin_tenant_headers,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert "items" in data
+    assert "total" in data
+    assert isinstance(data["items"], list)

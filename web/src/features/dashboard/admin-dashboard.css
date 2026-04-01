@@ -50,13 +50,19 @@
   grid-row: 3;
 }
 
+.admin-dashboard__card--excusals {
+  grid-column: 1 / span 4;
+  grid-row: 4;
+}
+
 /* Tablet (2-col): reset explicit placement, use DOM order */
 @media (max-width: 1024px) {
   .admin-dashboard__card--classes,
   .admin-dashboard__card--enrollment,
   .admin-dashboard__card--revenue,
   .admin-dashboard__card--announcements,
-  .admin-dashboard__card--activity {
+  .admin-dashboard__card--activity,
+  .admin-dashboard__card--excusals {
     grid-column: auto;
     grid-row: auto;
   }
@@ -65,6 +71,7 @@
   .admin-dashboard__card--classes      { grid-column: span 2; }
   .admin-dashboard__card--activity     { grid-column: span 2; }
   .admin-dashboard__card--announcements { grid-column: span 2; }
+  .admin-dashboard__card--excusals     { grid-column: span 2; }
 }
 
 /* Mobile (1-col): all auto */
@@ -73,7 +80,8 @@
   .admin-dashboard__card--enrollment,
   .admin-dashboard__card--revenue,
   .admin-dashboard__card--announcements,
-  .admin-dashboard__card--activity {
+  .admin-dashboard__card--activity,
+  .admin-dashboard__card--excusals {
     grid-column: auto;
     grid-row: auto;
   }
@@ -106,6 +114,24 @@
 .admin-dashboard__header-btn:hover {
   transform: translateY(-1px);
   box-shadow: 0 4px 0 var(--color-primary-dark, #46a302);
+}
+
+.admin-dashboard__header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.admin-dashboard__header-btn--secondary {
+  background: var(--color-surface, #fff);
+  color: var(--color-text-primary, #1e293b);
+  border-color: var(--color-border, #cbd5e1);
+  box-shadow: 0 2px 0 color-mix(in srgb, var(--color-border, #cbd5e1) 85%, #000);
+}
+
+.admin-dashboard__header-btn--secondary:hover {
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--color-border, #cbd5e1) 85%, #000);
 }
 
 .admin-dashboard__announcement-banner {
@@ -438,4 +464,115 @@
   font-size: 0.9375rem;
   color: var(--color-text-secondary, #64748b);
   line-height: 1.4;
+}
+
+.admin-dashboard__excusals-intro {
+  margin: 0 0 12px;
+  font-size: 0.9375rem;
+  color: var(--color-text-secondary, #64748b);
+  line-height: 1.45;
+}
+
+.admin-dashboard__excusal-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.admin-dashboard__excusal-item {
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--color-border, #e8e8e8) 80%, transparent);
+  background: color-mix(in srgb, var(--color-surface, #fff) 96%, var(--bento-accent-orange, #ff9600));
+}
+
+.admin-dashboard__excusal-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px 12px;
+  margin-bottom: 6px;
+}
+
+.admin-dashboard__excusal-student {
+  font-size: 1rem;
+}
+
+.admin-dashboard__excusal-meta {
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary, #64748b);
+}
+
+.admin-dashboard__excusal-reason {
+  margin: 0 0 10px;
+  font-size: 0.9375rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.admin-dashboard__excusal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.admin-dashboard__excusal-btn {
+  padding: 8px 14px;
+  border-radius: 10px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  border: none;
+}
+
+.admin-dashboard__excusal-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.admin-dashboard__excusal-btn--primary {
+  background: var(--color-primary, #58cc02);
+  color: #fff;
+}
+
+.admin-dashboard__excusal-btn--ghost {
+  background: var(--color-surface, #fff);
+  border: 2px solid var(--color-border, #e5e5e5);
+}
+
+.admin-dashboard__excusal-btn--danger {
+  background: color-mix(in srgb, var(--color-error, #ef4444) 92%, #fff);
+  color: #fff;
+}
+
+.admin-dashboard__excusal-deny-box {
+  margin-top: 4px;
+}
+
+.admin-dashboard__excusal-label {
+  display: block;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  margin-bottom: 6px;
+  color: var(--color-text-secondary, #64748b);
+}
+
+.admin-dashboard__excusal-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 2px solid var(--color-border, #e5e5e5);
+  font: inherit;
+  margin-bottom: 8px;
+  resize: vertical;
+}
+
+.admin-dashboard__card--excusals .dashboard-bento__card-icon {
+  background: color-mix(in srgb, var(--bento-accent-orange, #ff9600) 15%, transparent);
+  color: var(--bento-accent-orange, #ff9600);
 }

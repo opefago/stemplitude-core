@@ -28,9 +28,13 @@ class PlanService:
         limit: int = 50,
     ) -> Paginated[PlanResponse]:
         """List active plans (public, paginated)."""
-        excl = settings.TRIAL_PLAN_SLUG if settings.TRIAL_ENABLED else None
+        excl = (
+            [settings.TRIAL_CATALOG_EXCLUDE_SLUG]
+            if settings.TRIAL_ENABLED and settings.TRIAL_CATALOG_EXCLUDE_SLUG.strip()
+            else []
+        )
         plans, total = await self.repo.list_active(
-            skip=skip, limit=limit, exclude_slug=excl
+            skip=skip, limit=limit, exclude_slugs=excl or None
         )
         items = [self._to_response(p) for p in plans]
         return Paginated(items=items, total=total, skip=skip, limit=limit)

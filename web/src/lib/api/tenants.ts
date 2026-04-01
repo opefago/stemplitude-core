@@ -126,6 +126,37 @@ export async function updateTenantSettings(
   return mapTenant(data);
 }
 
+export interface TenantLabSettingRow {
+  id: string;
+  tenant_id: string;
+  lab_type: string;
+  enabled: boolean;
+  config?: Record<string, unknown> | null;
+  updated_at: string;
+}
+
+export async function getTenantLabSettings(tenantId: string): Promise<TenantLabSettingRow[]> {
+  const data = await apiFetch<{ items: TenantLabSettingRow[] }>(
+    `/tenants/${encodeURIComponent(tenantId)}/lab-settings`,
+    { tenantId },
+  );
+  return data.items ?? [];
+}
+
+export async function updateTenantLabSetting(
+  tenantId: string,
+  body: { lab_type: string; enabled: boolean },
+): Promise<TenantLabSettingRow> {
+  return apiFetch<TenantLabSettingRow>(
+    `/tenants/${encodeURIComponent(tenantId)}/lab-settings`,
+    {
+      method: "PATCH",
+      tenantId,
+      body,
+    },
+  );
+}
+
 export interface FranchiseJoinRequest {
   id: string;
   child_tenant_id: string;

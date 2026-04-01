@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.permissions import require_permission, require_super_admin
 from app.database import get_db
-from app.dependencies import get_current_identity, get_tenant_context, CurrentIdentity, TenantContext
+from app.dependencies import CurrentIdentity, get_current_identity
 
 from .schemas import (
     CapabilityCheckRequest,
@@ -15,6 +15,7 @@ from .schemas import (
     CapabilityCreate,
     CapabilityResponse,
     CapabilityUpdate,
+    LabLauncherResponse,
 )
 from .service import CapabilityService
 
@@ -37,6 +38,23 @@ async def check_capability(
         )
     service = CapabilityService(db)
     return await service.check(identity, tenant_ctx, data.capability_key)
+
+
+@router.get("/lab-launcher", response_model=LabLauncherResponse)
+async def lab_launcher_availability(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    identity: CurrentIdentity = Depends(get_current_identity),
+):
+    """Which labs are available in this workspace (license + tenant lab toggles)."""
+    tenant_ctx = getattr(request.state, "tenant", None)
+    if not tenant_ctx:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tenant context required. Provide X-Tenant-ID header.",
+        )
+    service = CapabilityService(db)
+    return await service.lab_launcher_availability(identity, tenant_ctx)
 
 
 @router.get("/", response_model=list[CapabilityResponse])

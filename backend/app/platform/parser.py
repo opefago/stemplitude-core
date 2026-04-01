@@ -44,7 +44,8 @@ def parse_command(raw: str) -> tuple[str, dict[str, str]]:
     if not match:
         raise ParseError(
             f"Invalid command format: '{cmd_token}'. "
-            "Expected 'domain:action' (lowercase, alphanumeric, hyphens)."
+            "Expected 'domain:action' (lowercase, alphanumeric, hyphens). "
+            "Type /commands in this terminal to list commands, or /help for usage."
         )
 
     command_key = cmd_token

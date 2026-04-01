@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowRight, CheckCircle2, Clock, BookOpen } from "lucide-react";
 import { useAuth } from "../../providers/AuthProvider";
 import { useChildContextStudentId } from "../../lib/childContext";
@@ -21,6 +21,7 @@ function submissionStatusClass(status?: string | null): string {
 
 export function StudentAssignmentsPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { role, subType } = useAuth();
   const childContextStudentId = useChildContextStudentId();
   const [items, setItems] = useState<StudentAssignment[]>([]);
@@ -29,11 +30,15 @@ export function StudentAssignmentsPage() {
   const [filter, setFilter] = useState<"all" | "pending" | "submitted">("all");
   const [timeFilter, setTimeFilter] = useState<"all" | "upcoming" | "past">("all");
 
+  const studentIdFromUrl = searchParams.get("studentId")?.trim() || null;
+  const isGuardianViewer =
+    subType === "user" && (role === "parent" || role === "homeschool_parent");
+  const guardianLearnerId = isGuardianViewer
+    ? studentIdFromUrl || childContextStudentId
+    : null;
+
   const canLoadMyAssignments =
-    subType === "student" ||
-    (subType === "user" &&
-      Boolean(childContextStudentId) &&
-      (role === "parent" || role === "homeschool_parent"));
+    subType === "student" || (isGuardianViewer && Boolean(guardianLearnerId));
 
   useEffect(() => {
     let mounted = true;
@@ -47,7 +52,12 @@ export function StudentAssignmentsPage() {
       setLoading(true);
       setError(null);
       try {
-        const rows = await getMyAssignments(200);
+        const rows =
+          subType === "student"
+            ? await getMyAssignments(200)
+            : await getMyAssignments(200, {
+                childContextOverride: guardianLearnerId!,
+              });
         if (!mounted) return;
         setItems(rows);
       } catch (e: unknown) {
@@ -60,7 +70,7 @@ export function StudentAssignmentsPage() {
     }
     void load();
     return () => { mounted = false; };
-  }, [canLoadMyAssignments, childContextStudentId]);
+  }, [canLoadMyAssignments, subType, guardianLearnerId]);
 
   const now = Date.now();
   const dueSoon = useMemo(
@@ -110,7 +120,11 @@ export function StudentAssignmentsPage() {
     <section className="dashboard-bento student-assignments" aria-label="Student assignments">
       <header className="dashboard-bento__header student-assignments__header">
         <h1>Assignments</h1>
-        <p>Track due work and submit your progress.</p>
+        <p>
+          {isGuardianViewer
+            ? "Track due work and submissions for your learner."
+            : "Track due work and submit your progress."}
+        </p>
       </header>
 
       {loading ? <p className="student-assignments__empty">Loading assignments…</p> : null}

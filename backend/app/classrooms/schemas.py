@@ -3,7 +3,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class ClassroomBase(BaseModel):
@@ -738,10 +738,43 @@ class ClassroomAssignmentResponse(BaseModel):
     submission_count: int = 0
 
 
+class RubricCriterionInput(BaseModel):
+    """Single row in a scoring rubric (optional breakdown alongside holistic score)."""
+
+    criterion_id: str = Field(..., min_length=1, max_length=80, description="Stable id, e.g. clarity.")
+    label: str | None = Field(None, max_length=200, description="Human-readable criterion name.")
+    max_points: int = Field(..., ge=1, le=1000, description="Maximum points for this row.")
+    points_awarded: int = Field(..., ge=0, description="Points earned (must be <= max_points).")
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class SubmissionGradeRequest(BaseModel):
     score: int = Field(..., ge=0, le=100, description="Numeric grade 0–100.")
     feedback: str | None = Field(None, max_length=1000, description="Optional feedback note.")
     assignment_id: str | None = Field(None, description="Assignment this grade applies to.")
+    rubric: list[RubricCriterionInput] | None = Field(
+        default=None,
+        description="Optional rubric rows; compliance is aggregated in analytics as points/max per submission.",
+    )
+
+    @model_validator(mode="after")
+    def _rubric_points_cap(self):
+        if self.rubric:
+            for row in self.rubric:
+                if row.points_awarded > row.max_points:
+                    raise ValueError(
+                        f"points_awarded ({row.points_awarded}) exceeds max_points ({row.max_points}) "
+                        f"for criterion {row.criterion_id!r}"
+                    )
+        return self
+
+
+class RubricCriterionScore(BaseModel):
+    criterion_id: str
+    label: str | None = None
+    max_points: int
+    points_awarded: int
 
 
 class SubmissionRecord(BaseModel):
@@ -758,6 +791,7 @@ class SubmissionRecord(BaseModel):
     grade: int | None = None
     feedback: str | None = None
     graded_at: str | None = None
+    rubric: list[RubricCriterionScore] | None = None
     preview_image: str | None = Field(
         default=None,
         description="Optional data URL snapshot of lab work (not sent over realtime).",

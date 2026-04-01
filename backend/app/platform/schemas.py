@@ -10,10 +10,10 @@ from pydantic import BaseModel, Field
 class CommandRequest(BaseModel):
     command: str = Field(
         ...,
-        min_length=3,
+        min_length=1,
         max_length=512,
-        description="Command string, e.g. 'tenants:list --active-only true'",
-        examples=["tenants:list", "users:set-role -e admin@co.com -r devops"],
+        description="Command string: 'domain:action --flags' or a slash meta-command (/help, /commands).",
+        examples=["tenants:list", "/commands", "/help tenants"],
     )
 
 

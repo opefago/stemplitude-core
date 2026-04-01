@@ -476,3 +476,78 @@ class ParentChildActivityResponse(BaseModel):
     total: int = Field(0, ge=0, description="Total activity events in the merged feed")
     skip: int = 0
     limit: int = 40
+
+
+# --- Guardian attendance & excusal requests ---
+
+
+class GuardianExcusalSummary(BaseModel):
+    id: UUID
+    status: str
+    reason: str
+    review_notes: str | None = None
+    created_at: datetime
+    reviewed_at: datetime | None = None
+
+
+class GuardianAttendanceSessionRow(BaseModel):
+    session_id: UUID
+    classroom_id: UUID
+    classroom_name: str
+    session_start: datetime
+    session_end: datetime
+    session_status: str
+    attendance_status: str | None = None
+    attendance_notes: str | None = None
+    excusal: GuardianExcusalSummary | None = None
+
+
+class GuardianAttendanceOverviewResponse(BaseModel):
+    rows: list[GuardianAttendanceSessionRow]
+
+
+class AttendanceExcusalCreate(BaseModel):
+    session_id: UUID
+    classroom_id: UUID
+    reason: str = Field(..., min_length=1, max_length=2000)
+
+
+class AttendanceExcusalRow(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    tenant_id: UUID
+    student_id: UUID
+    session_id: UUID
+    classroom_id: UUID
+    submitted_by_user_id: UUID
+    reason: str
+    status: str
+    review_notes: str | None = None
+    reviewed_by_user_id: UUID | None = None
+    created_at: datetime
+    reviewed_at: datetime | None = None
+
+
+ExcusalDecision = Literal["approved", "denied"]
+
+
+class AttendanceExcusalReview(BaseModel):
+    decision: ExcusalDecision
+    review_notes: str | None = Field(None, max_length=1000)
+
+
+class AttendanceExcusalStaffRow(BaseModel):
+    id: UUID
+    student_id: UUID
+    student_display_name: str
+    session_id: UUID
+    classroom_id: UUID
+    classroom_name: str
+    reason: str
+    status: str
+    submitted_by_user_id: UUID
+    review_notes: str | None = None
+    created_at: datetime
+    reviewed_at: datetime | None = None
+    reviewed_by_user_id: UUID | None = None

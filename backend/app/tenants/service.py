@@ -24,6 +24,7 @@ from app.tenants.models import (
 )
 from app.users.models import User
 
+from app.capabilities.engine import invalidate_capability_cache_for_tenant
 from app.tenants.franchise_governance import (
     build_stored_governance,
     normalize_governance_mode,
@@ -374,9 +375,18 @@ class TenantService:
         tenant = await self.repo.get_by_id(tenant_id)
         if not tenant:
             return None
-        return await self.lab_repo.upsert(
+        row = await self.lab_repo.upsert(
             tenant_id, data.lab_type, data.enabled, data.config
         )
+        try:
+            await invalidate_capability_cache_for_tenant(tenant_id)
+        except Exception:
+            logger.warning(
+                "Could not invalidate capability cache for tenant %s after lab toggle",
+                tenant_id,
+                exc_info=True,
+            )
+        return row
 
     async def grant_support_access(
         self,

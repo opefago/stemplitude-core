@@ -2480,6 +2480,31 @@ class ClassroomService:
             ev_id = str(ev.id)
             grade_ev = grade_map.get(ev_id)
             grade_meta = grade_ev.metadata_ if grade_ev else {}
+            rubric_raw = grade_meta.get("rubric") if grade_meta else None
+            rubric_parsed = None
+            if isinstance(rubric_raw, list):
+                rubric_parsed = []
+                for item in rubric_raw:
+                    if not isinstance(item, dict):
+                        continue
+                    cid = item.get("criterion_id")
+                    if not cid:
+                        continue
+                    try:
+                        mx = int(item.get("max_points", 0))
+                        pa = int(item.get("points_awarded", 0))
+                    except (TypeError, ValueError):
+                        continue
+                    rubric_parsed.append(
+                        {
+                            "criterion_id": str(cid),
+                            "label": item.get("label") if isinstance(item.get("label"), str) else None,
+                            "max_points": mx,
+                            "points_awarded": pa,
+                        }
+                    )
+                if not rubric_parsed:
+                    rubric_parsed = None
             student_id = str(meta.get("student_id") or ev.actor_id)
             try:
                 student_uuid = UUID(student_id)
@@ -2503,6 +2528,7 @@ class ClassroomService:
                     "grade": grade_meta.get("score") if grade_meta else None,
                     "feedback": grade_meta.get("feedback") if grade_meta else None,
                     "graded_at": grade_ev.created_at.isoformat() if grade_ev else None,
+                    "rubric": rubric_parsed,
                     "preview_image": preview_str,
                     "lab_id": lab_id_str,
                 }
@@ -2579,6 +2605,7 @@ class ClassroomService:
         score: int,
         feedback: str | None,
         assignment_id: str | None,
+        rubric: list[dict] | None = None,
     ) -> dict:
         """Record a grade for a student submission via a new session event."""
         from app.classrooms.models import ClassroomSessionEvent
@@ -2603,6 +2630,16 @@ class ClassroomService:
             student_uuid = None
 
         actor_type = self._presence_actor_type(identity)
+        meta: dict = {
+            "submission_event_id": str(submission_event_id),
+            "assignment_id": assignment_id,
+            "student_id": student_id,
+            "score": score,
+            "feedback": feedback,
+            "graded_by": str(identity.id),
+        }
+        if rubric:
+            meta["rubric"] = rubric
         grade_event = await self.repo.create_session_event(
             session_id=session_id,
             classroom_id=classroom_id,
@@ -2611,14 +2648,7 @@ class ClassroomService:
             actor_id=identity.id,
             actor_type=actor_type,
             student_id=student_uuid,
-            metadata_={
-                "submission_event_id": str(submission_event_id),
-                "assignment_id": assignment_id,
-                "student_id": student_id,
-                "score": score,
-                "feedback": feedback,
-                "graded_by": str(identity.id),
-            },
+            metadata_=meta,
         )
         await self.session.flush()
         await self.session.refresh(grade_event)

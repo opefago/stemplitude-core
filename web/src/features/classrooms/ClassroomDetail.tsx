@@ -57,6 +57,7 @@ import {
   type ClassroomSessionRecord,
   type ClassroomAssignment,
   type SubmissionRecord,
+  type RubricCriterionPayload,
   type SessionPresenceSummary,
   type SessionTextAssignment,
   type SessionResourceEntry,
@@ -107,6 +108,46 @@ function isLiveSession(session: ClassroomSessionRecord): boolean {
   const start = new Date(session.session_start).getTime();
   const end = new Date(session.session_end).getTime();
   return start <= Date.now() && Date.now() <= end;
+}
+
+type GradeRubricFormRow = {
+  id: string;
+  criterion_id: string;
+  label: string;
+  max_points: string;
+  points_awarded: string;
+};
+
+function newRubricRowId(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `r-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function buildGradeRubricPayload(
+  rows: GradeRubricFormRow[],
+): RubricCriterionPayload[] | undefined {
+  const out: RubricCriterionPayload[] = [];
+  for (const row of rows) {
+    const cid = row.criterion_id.trim();
+    if (!cid) continue;
+    const max = parseInt(row.max_points, 10);
+    const pts = parseInt(row.points_awarded, 10);
+    if (!Number.isFinite(max) || max < 1 || max > 1000) {
+      throw new Error(`Rubric "${cid}": max points must be 1–1000.`);
+    }
+    if (!Number.isFinite(pts) || pts < 0 || pts > max) {
+      throw new Error(`Rubric "${cid}": points earned must be 0–${max}.`);
+    }
+    const label = row.label.trim();
+    out.push({
+      criterion_id: cid,
+      label: label.length ? label : null,
+      max_points: max,
+      points_awarded: pts,
+    });
+  }
+  return out.length ? out : undefined;
 }
 
 export function ClassroomDetail() {
@@ -270,6 +311,9 @@ export function ClassroomDetail() {
   const [gradeFeedback, setGradeFeedback] = useState("");
   const [savingGrade, setSavingGrade] = useState(false);
   const [gradeError, setGradeError] = useState<string | null>(null);
+  const [gradeRubricRows, setGradeRubricRows] = useState<GradeRubricFormRow[]>(
+    [],
+  );
   const [assignDrillExpandedId, setAssignDrillExpandedId] = useState<
     string | null
   >(null);
@@ -346,6 +390,32 @@ export function ClassroomDetail() {
     >;
     return Boolean(gamification.points_enabled ?? settings?.points_enabled);
   }, [tenant?.settings]);
+
+  useEffect(() => {
+    if (!gradingSubmission) {
+      setGradeRubricRows([]);
+      return;
+    }
+    setGradeScore(
+      gradingSubmission.grade != null
+        ? String(gradingSubmission.grade)
+        : "100",
+    );
+    setGradeFeedback(gradingSubmission.feedback ?? "");
+    if (gradingSubmission.rubric?.length) {
+      setGradeRubricRows(
+        gradingSubmission.rubric.map((r) => ({
+          id: newRubricRowId(),
+          criterion_id: r.criterion_id,
+          label: r.label ?? "",
+          max_points: String(r.max_points),
+          points_awarded: String(r.points_awarded),
+        })),
+      );
+    } else {
+      setGradeRubricRows([]);
+    }
+  }, [gradingSubmission]);
 
   useEffect(() => {
     if (!id) return;
@@ -3522,8 +3592,6 @@ export function ClassroomDetail() {
                                       className="classroom-list__create-btn classroom-list__create-btn--ghost classroom-detail__sub-toggle"
                                       onClick={() => {
                                         setGradingSubmission(sub);
-                                        setGradeScore("100");
-                                        setGradeFeedback("");
                                         setGradeError(null);
                                       }}
                                     >
@@ -3552,6 +3620,16 @@ export function ClassroomDetail() {
                                     <strong>Feedback:</strong> {sub.feedback}
                                   </p>
                                 )}
+                                {sub.rubric && sub.rubric.length > 0 ? (
+                                  <ul className="classroom-detail__rubric-readout">
+                                    {sub.rubric.map((rc) => (
+                                      <li key={rc.criterion_id}>
+                                        <strong>{rc.label || rc.criterion_id}:</strong>{" "}
+                                        {rc.points_awarded}/{rc.max_points}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                ) : null}
                               </div>
                             </div>
                           );
@@ -3977,6 +4055,16 @@ export function ClassroomDetail() {
                       if (!id || !selectedAssignment) return;
                       setSavingGrade(true);
                       setGradeError(null);
+                      let rubricPayload: RubricCriterionPayload[] | undefined;
+                      try {
+                        rubricPayload = buildGradeRubricPayload(gradeRubricRows);
+                      } catch (e: unknown) {
+                        setGradeError(
+                          e instanceof Error ? e.message : "Invalid rubric",
+                        );
+                        setSavingGrade(false);
+                        return;
+                      }
                       void gradeSubmission(
                         id,
                         selectedAssignment.session_id,
@@ -3985,6 +4073,9 @@ export function ClassroomDetail() {
                           score: Number(gradeScore),
                           feedback: gradeFeedback || null,
                           assignment_id: gradingSubmission.assignment_id,
+                          ...(rubricPayload?.length
+                            ? { rubric: rubricPayload }
+                            : {}),
                         },
                       )
                         .then(() => {
@@ -3995,6 +4086,7 @@ export function ClassroomDetail() {
                                     ...s,
                                     grade: Number(gradeScore),
                                     feedback: gradeFeedback || null,
+                                    rubric: rubricPayload ?? null,
                                   }
                                 : s,
                             ),
@@ -4065,6 +4157,143 @@ export function ClassroomDetail() {
                     onChange={(e) => setGradeFeedback(e.target.value)}
                     placeholder="Leave feedback for the student..."
                   />
+                </div>
+                <div className="classroom-detail__grade-rubric">
+                  <div className="classroom-detail__grade-rubric-header">
+                    <span id="grade-rubric-heading">Rubric breakdown (optional)</span>
+                    <button
+                      type="button"
+                      className="classroom-list__create-btn classroom-list__create-btn--ghost"
+                      onClick={() =>
+                        setGradeRubricRows((prev) => [
+                          ...prev,
+                          {
+                            id: newRubricRowId(),
+                            criterion_id: "",
+                            label: "",
+                            max_points: "10",
+                            points_awarded: "10",
+                          },
+                        ])
+                      }
+                    >
+                      Add criterion
+                    </button>
+                  </div>
+                  <p
+                    className="classroom-detail__grade-rubric-hint"
+                    id="grade-rubric-desc"
+                  >
+                    Rows with an id feed organization analytics (compliance vs max points). Leave empty to grade with
+                    score only.
+                  </p>
+                  {gradeRubricRows.length === 0 ? (
+                    <p className="classroom-list__empty" style={{ marginTop: 8 }}>
+                      No rubric rows — holistic score only.
+                    </p>
+                  ) : (
+                    <ul
+                      className="classroom-detail__grade-rubric-list"
+                      aria-labelledby="grade-rubric-heading"
+                      aria-describedby="grade-rubric-desc"
+                    >
+                      {gradeRubricRows.map((row, idx) => (
+                        <li key={row.id} className="classroom-detail__grade-rubric-row">
+                          <div className="classroom-list__create-field">
+                            <label htmlFor={`rubric-id-${row.id}`}>Criterion id</label>
+                            <input
+                              id={`rubric-id-${row.id}`}
+                              type="text"
+                              className="classroom-list__create-input"
+                              value={row.criterion_id}
+                              onChange={(e) =>
+                                setGradeRubricRows((prev) =>
+                                  prev.map((r) =>
+                                    r.id === row.id
+                                      ? { ...r, criterion_id: e.target.value }
+                                      : r,
+                                  ),
+                                )
+                              }
+                              placeholder="e.g. clarity"
+                              autoComplete="off"
+                            />
+                          </div>
+                          <div className="classroom-list__create-field">
+                            <label htmlFor={`rubric-label-${row.id}`}>Label (optional)</label>
+                            <input
+                              id={`rubric-label-${row.id}`}
+                              type="text"
+                              className="classroom-list__create-input"
+                              value={row.label}
+                              onChange={(e) =>
+                                setGradeRubricRows((prev) =>
+                                  prev.map((r) =>
+                                    r.id === row.id ? { ...r, label: e.target.value } : r,
+                                  ),
+                                )
+                              }
+                              placeholder="Display name"
+                              autoComplete="off"
+                            />
+                          </div>
+                          <div className="classroom-detail__grade-rubric-points">
+                            <div className="classroom-list__create-field">
+                              <label htmlFor={`rubric-max-${row.id}`}>Max</label>
+                              <input
+                                id={`rubric-max-${row.id}`}
+                                type="number"
+                                min={1}
+                                max={1000}
+                                className="classroom-list__create-input"
+                                value={row.max_points}
+                                onChange={(e) =>
+                                  setGradeRubricRows((prev) =>
+                                    prev.map((r) =>
+                                      r.id === row.id
+                                        ? { ...r, max_points: e.target.value }
+                                        : r,
+                                    ),
+                                  )
+                                }
+                              />
+                            </div>
+                            <div className="classroom-list__create-field">
+                              <label htmlFor={`rubric-pts-${row.id}`}>Earned</label>
+                              <input
+                                id={`rubric-pts-${row.id}`}
+                                type="number"
+                                min={0}
+                                className="classroom-list__create-input"
+                                value={row.points_awarded}
+                                onChange={(e) =>
+                                  setGradeRubricRows((prev) =>
+                                    prev.map((r) =>
+                                      r.id === row.id
+                                        ? { ...r, points_awarded: e.target.value }
+                                        : r,
+                                    ),
+                                  )
+                                }
+                              />
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            className="classroom-list__create-btn classroom-list__create-btn--ghost classroom-detail__grade-rubric-remove"
+                            onClick={() =>
+                              setGradeRubricRows((prev) =>
+                                prev.filter((r) => r.id !== row.id),
+                              )
+                            }
+                            aria-label={`Remove rubric row ${idx + 1}`}
+                          >
+                            Remove
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               </>
             ) : null}

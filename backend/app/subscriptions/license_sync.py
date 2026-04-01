@@ -67,8 +67,8 @@ async def sync_license_from_subscription(db: AsyncSession, subscription: Subscri
         license_.tenant_id = subscription.tenant_id
         license_.user_id = subscription.user_id
         license_.status = next_status
-        if valid_until:
-            license_.valid_until = valid_until
+        # Keep in sync with subscription period / trial (including clearing when Stripe sends nulls).
+        license_.valid_until = valid_until
 
     await db.execute(
         LicenseFeature.__table__.delete().where(LicenseFeature.license_id == license_.id)

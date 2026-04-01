@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "../../providers/AuthProvider";
 import { checkEmail, checkSlug } from "../../lib/api/auth";
@@ -33,6 +33,7 @@ type OrgType = "center" | "parent";
 
 export function OnboardWizard() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { onboard } = useAuth();
   const [step, setStep] = useState(1);
 
@@ -47,7 +48,9 @@ export function OnboardWizard() {
   const [orgName, setOrgName] = useState("");
   const [orgSlug, setOrgSlug] = useState("");
   const [orgSlugManual, setOrgSlugManual] = useState(false);
-  const [orgType, setOrgType] = useState<OrgType>("center");
+  const [orgType, setOrgType] = useState<OrgType>(() =>
+    searchParams.get("role") === "parent" ? "parent" : "center",
+  );
 
   // Validation state
   const [emailStatus, setEmailStatus] = useState<"idle" | "checking" | "available" | "taken" | "invalid">("idle");

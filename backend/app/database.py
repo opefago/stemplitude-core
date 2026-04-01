@@ -108,3 +108,9 @@ async def get_db(request: Request) -> AsyncGenerator[AsyncSession, None]:
             raise
         finally:
             await session.close()
+
+
+# Tables created in migrations but queried via raw SQL in ``app.growth`` must still be
+# registered so mappers that reference them (e.g. ``Subscription.affiliate_partner_id``)
+# can flush without NoReferencedTableError.
+from app.growth.models import AffiliatePartner  # noqa: E402, F401

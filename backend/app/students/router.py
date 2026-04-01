@@ -14,6 +14,11 @@ from app.students.me_student import require_me_student_id
 from app.students.parent_access import ensure_can_view_student_as_guardian
 from app.students.parent_activity import load_parent_child_activity
 from app.students.schemas import (
+    AttendanceExcusalCreate,
+    AttendanceExcusalReview,
+    AttendanceExcusalRow,
+    AttendanceExcusalStaffRow,
+    GuardianAttendanceOverviewResponse,
     GuardianChildControlsPatch,
     GuardianChildControlsResponse,
     ParentActivityKind,
@@ -30,6 +35,7 @@ from app.students.schemas import (
     StudentUpdate,
     UsernameCheckResponse,
 )
+from app.students.attendance_excusal_service import AttendanceExcusalService
 from app.students.service import StudentService
 from app.database import async_session_factory
 from app.classrooms.schemas import (
@@ -1264,3 +1270,128 @@ async def parent_linked_classrooms(
         role_slug=role,
     )
     return [ClassroomResponse.model_validate(c) for c in classrooms]
+
+
+@router.get(
+    "/parent/children/{student_id}/attendance-overview",
+    response_model=GuardianAttendanceOverviewResponse,
+    dependencies=[_require_tenant(), require_permission("students", "view")],
+)
+async def parent_child_attendance_overview(
+    student_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    tenant: TenantContext = Depends(get_tenant_context),
+):
+    if identity.sub_type != "user":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace users can view attendance",
+        )
+    role = (identity.role or "").strip().lower()
+    if role not in ("parent", "homeschool_parent"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Parent or homeschool parent role required",
+        )
+    await ensure_can_view_student_as_guardian(
+        db,
+        identity=identity,
+        student_id=student_id,
+        tenant_id=tenant.tenant_id,
+    )
+    svc = AttendanceExcusalService(db)
+    return await svc.guardian_overview(student_id=student_id, tenant_id=tenant.tenant_id)
+
+
+@router.post(
+    "/parent/children/{student_id}/excusal-requests",
+    response_model=AttendanceExcusalRow,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[_require_tenant(), require_permission("students", "view")],
+)
+async def parent_create_excusal_request(
+    student_id: UUID,
+    data: AttendanceExcusalCreate,
+    db: AsyncSession = Depends(get_db),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    tenant: TenantContext = Depends(get_tenant_context),
+):
+    if identity.sub_type != "user":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace users can submit excusal requests",
+        )
+    role = (identity.role or "").strip().lower()
+    if role not in ("parent", "homeschool_parent"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Parent or homeschool parent role required",
+        )
+    await ensure_can_view_student_as_guardian(
+        db,
+        identity=identity,
+        student_id=student_id,
+        tenant_id=tenant.tenant_id,
+    )
+    svc = AttendanceExcusalService(db)
+    return await svc.create_excusal(
+        student_id=student_id,
+        tenant_id=tenant.tenant_id,
+        guardian_user_id=identity.id,
+        data=data,
+    )
+
+
+@router.get(
+    "/attendance-excusal-requests",
+    response_model=list[AttendanceExcusalStaffRow],
+    dependencies=[_require_tenant(), require_permission("attendance", "view")],
+)
+async def list_attendance_excusal_requests_staff(
+    db: AsyncSession = Depends(get_db),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    tenant: TenantContext = Depends(get_tenant_context),
+    status_filter: str | None = Query(None, description="pending, approved, or denied"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+):
+    if identity.sub_type != "user":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace users can list excusal requests",
+        )
+    svc = AttendanceExcusalService(db)
+    return await svc.list_for_staff(
+        tenant_id=tenant.tenant_id,
+        identity=identity,
+        status_filter=status_filter,
+        skip=skip,
+        limit=limit,
+    )
+
+
+@router.patch(
+    "/attendance-excusal-requests/{excusal_id}",
+    response_model=AttendanceExcusalStaffRow,
+    dependencies=[_require_tenant(), require_permission("attendance", "edit")],
+)
+async def review_attendance_excusal_request(
+    excusal_id: UUID,
+    data: AttendanceExcusalReview,
+    db: AsyncSession = Depends(get_db),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    tenant: TenantContext = Depends(get_tenant_context),
+):
+    if identity.sub_type != "user":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace users can review excusal requests",
+        )
+    svc = AttendanceExcusalService(db)
+    return await svc.review_excusal(
+        excusal_id=excusal_id,
+        tenant_id=tenant.tenant_id,
+        identity=identity,
+        data=data,
+    )

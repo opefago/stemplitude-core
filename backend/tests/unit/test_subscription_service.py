@@ -129,7 +129,12 @@ class TestCreateCheckout:
         assert err is None and code is None
         assert result is not None
         assert result.session_id == "cs_123"
-
+        mock_stripe.assert_called_once()
+        assert mock_stripe.call_args.kwargs.get("trial_days") == 0
+        assert mock_stripe.call_args.kwargs.get("line_item") == {
+            "price": "price_123",
+            "quantity": 1,
+        }
 
 class TestGetSubscription:
     async def test_not_found_returns_none(self, service, mock_repos, identity, tenant_ctx):

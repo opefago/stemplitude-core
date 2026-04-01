@@ -633,6 +633,14 @@ export interface ClassroomAssignment {
   submission_count: number;
 }
 
+/** Rubric row sent when grading; drives analytics mean_rubric_compliance. */
+export type RubricCriterionPayload = {
+  criterion_id: string;
+  label?: string | null;
+  max_points: number;
+  points_awarded: number;
+};
+
 export interface SubmissionRecord {
   event_id: string;
   session_id: string;
@@ -645,6 +653,7 @@ export interface SubmissionRecord {
   grade?: number | null;
   feedback?: string | null;
   graded_at?: string | null;
+  rubric?: RubricCriterionPayload[] | null;
   /** Data URL image snapshot (labs); omitted on realtime payloads. */
   preview_image?: string | null;
   lab_id?: string | null;
@@ -671,7 +680,12 @@ export async function gradeSubmission(
   classroomId: string,
   sessionId: string,
   eventId: string,
-  payload: { score: number; feedback?: string | null; assignment_id?: string | null },
+  payload: {
+    score: number;
+    feedback?: string | null;
+    assignment_id?: string | null;
+    rubric?: RubricCriterionPayload[] | null;
+  },
 ): Promise<{ event_id: string; score: number; graded_at: string }> {
   return apiFetch(
     `/classrooms/${classroomId}/sessions/${sessionId}/submissions/${eventId}/grade`,

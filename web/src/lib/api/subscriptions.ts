@@ -112,3 +112,20 @@ export async function listSubscriptionInvoices(
     `/subscriptions/${subscriptionId}/invoices${suffix}`,
   );
 }
+
+/** All invoices for the current tenant (every subscription). */
+export async function listTenantInvoices(
+  params?: { skip?: number; limit?: number },
+): Promise<Paginated<InvoiceRecord>> {
+  const query = new URLSearchParams();
+  if (params?.skip != null) {
+    query.set("skip", String(params.skip));
+  }
+  if (params?.limit != null) {
+    query.set("limit", String(params.limit));
+  }
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  return apiFetch<Paginated<InvoiceRecord>>(
+    `/subscriptions/invoices${suffix}`,
+  );
+}

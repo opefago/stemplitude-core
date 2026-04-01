@@ -19,6 +19,16 @@
   flex-shrink: 0;
 }
 
+.super-admin__subtitle-link {
+  color: var(--color-primary, #58cc02);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.super-admin__subtitle-link:hover {
+  text-decoration: underline;
+}
+
 .super-admin__btn {
   display: inline-flex;
   align-items: center;

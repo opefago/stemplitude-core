@@ -51,6 +51,16 @@ export function browserCalendarTimeZone(): string | null {
   }
 }
 
+function resolveChildContextForRequest(
+  override: string | null | undefined,
+): string | null {
+  if (override === undefined) {
+    return getChildContextStudentId()?.trim() || null;
+  }
+  const t = override?.trim();
+  return t || null;
+}
+
 function resolveTenantId(
   explicitTenantId?: string,
   token?: string | null,
@@ -106,6 +116,11 @@ export interface ApiFetchOptions extends Omit<RequestInit, "body"> {
   skipTenantHeader?: boolean;
   /** Override tenant ID for this request (e.g. when switching tenants) */
   tenantId?: string;
+  /**
+   * Guardians: send this value as ``X-Child-Context`` instead of the persisted learner id.
+   * Omit for default (localStorage). Pass ``null`` to omit the header on this request.
+   */
+  childContextOverride?: string | null;
 }
 
 export async function apiFetch<T>(
@@ -118,6 +133,7 @@ export async function apiFetch<T>(
     skipTenantHeader = false,
     headers: optHeaders = {},
     tenantId: optTenantId,
+    childContextOverride,
     ...rest
   } = options;
   const url = path.startsWith("/") ? `${BASE}${path}` : `${BASE}/${path}`;
@@ -138,8 +154,8 @@ export async function apiFetch<T>(
       const tenantId = resolveTenantId(optTenantId, token);
       if (tenantId) headers["X-Tenant-ID"] = tenantId;
     }
-    const childCtx = getChildContextStudentId();
-    if (childCtx) headers["X-Child-Context"] = childCtx;
+    const childCtxResolved = resolveChildContextForRequest(childContextOverride);
+    if (childCtxResolved) headers["X-Child-Context"] = childCtxResolved;
     const calTz = browserCalendarTimeZone();
     if (calTz) headers["X-Calendar-TZ"] = calTz;
   }
@@ -172,7 +188,7 @@ export async function apiFetch<T>(
       } else {
         delete headers["X-Tenant-ID"];
       }
-      const childCtxRetry = getChildContextStudentId();
+      const childCtxRetry = resolveChildContextForRequest(childContextOverride);
       if (childCtxRetry) headers["X-Child-Context"] = childCtxRetry;
       else delete headers["X-Child-Context"];
       const calTzRetry = browserCalendarTimeZone();

@@ -189,3 +189,20 @@ class CapabilityCheckResponse(BaseModel):
         None,
         description="Human-readable reason when the capability is denied.",
     )
+
+
+class LabLauncherItemResponse(BaseModel):
+    """One row in the app lab launcher (student or staff)."""
+
+    id: str = Field(..., description="Stable launcher id (e.g. circuit-maker).")
+    allowed: bool = Field(..., description="Whether this lab may be opened in this workspace.")
+    reason: str | None = Field(
+        None,
+        description="When not allowed, a short explanation (plan, org policy, etc.).",
+    )
+
+
+class LabLauncherResponse(BaseModel):
+    """Lab launcher tiles for the current tenant and identity."""
+
+    labs: list[LabLauncherItemResponse] = Field(default_factory=list)

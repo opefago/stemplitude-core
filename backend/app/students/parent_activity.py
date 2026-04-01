@@ -315,10 +315,7 @@ async def load_parent_child_activity(
         if include_specific_class:
             att_where.append(Classroom.id == classroom_id)
         att_where.append(
-            or_(
-                Attendance.status == "present",
-                Attendance.status == "late",
-            )
+            Attendance.status.in_(("present", "late", "absent", "excused"))
         )
         status_detail = func.concat(
             cast(Classroom.name, _STR_LONG),

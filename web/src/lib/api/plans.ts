@@ -35,3 +35,8 @@ export async function listPlans(
   return apiFetch<Paginated<PlanRecord>>(`/plans${qs ? `?${qs}` : ""}`);
 }
 
+/** Resolve a plan by id (includes inactive plans not returned by list public). */
+export async function fetchPlanById(planId: string): Promise<PlanRecord> {
+  return apiFetch<PlanRecord>(`/plans/${encodeURIComponent(planId)}`);
+}
+

@@ -12,11 +12,13 @@ import {
   decideFranchiseJoinRequest,
   getSupportAccessOptions,
   getTenantById,
+  getTenantLabSettings,
   listFranchiseJoinRequests,
   listSupportAccessGrants,
   patchTenant,
   revokeSupportAccessGrant,
   submitFranchiseJoinRequest,
+  updateTenantLabSetting,
   updateTenantSettings,
   type FranchiseGovernanceMode,
   type FranchiseJoinRequest,
@@ -75,6 +77,35 @@ const LABS = [
   { id: "game-maker", name: "Game Maker" },
   { id: "design-maker", name: "Design Maker" },
 ];
+
+/** lab.id → tenant_lab_settings.lab_type aliases (keep in sync with backend LAB_FEATURE_TO_TENANT_LAB_TYPES). */
+const LAB_SETTING_ALIASES: Record<string, string[]> = {
+  "circuit-maker": ["access_electronics_lab", "electronics_lab", "circuit-maker"],
+  "micro-maker": ["access_robotics_lab", "robotics_lab", "micro-maker"],
+  "game-maker": ["access_game_maker", "game_maker", "game-maker"],
+  "design-maker": ["access_design_maker", "design_maker", "design-maker", "3d_designer"],
+  "python-game": ["access_python_lab", "python_lab", "python-game"],
+};
+
+/** Opt-out: enabled unless at least one row is expressly false and none are expressly true. */
+function deriveLabEnabledFromRows(
+  rows: Array<{ lab_type: string; enabled: boolean }>,
+): Record<string, boolean> {
+  const byType = new Map(rows.map((r) => [r.lab_type, r.enabled]));
+  return LABS.reduce<Record<string, boolean>>((acc, lab) => {
+    const aliases = LAB_SETTING_ALIASES[lab.id] ?? [lab.id];
+    let sawTrue = false;
+    let sawFalse = false;
+    for (const t of aliases) {
+      if (!byType.has(t)) continue;
+      const v = byType.get(t);
+      if (v === true) sawTrue = true;
+      else if (v === false) sawFalse = true;
+    }
+    acc[lab.id] = sawTrue || !sawFalse;
+    return acc;
+  }, {});
+}
 
 const UI_MODES = [
   { value: "auto", label: "Auto" },
@@ -309,8 +340,11 @@ export function TenantSettings() {
     }
   }, [tabParam]);
   const [labEnabled, setLabEnabled] = useState<Record<string, boolean>>(() =>
-    LABS.reduce((acc, lab) => ({ ...acc, [lab.id]: true }), {})
+    LABS.reduce((acc, lab) => ({ ...acc, [lab.id]: true }), {}),
   );
+  const [labSettingsLoading, setLabSettingsLoading] = useState(true);
+  const [labSettingsError, setLabSettingsError] = useState("");
+  const [labToggleBusy, setLabToggleBusy] = useState<Record<string, boolean>>({});
   const [uiMode, setUiMode] = useState("auto");
   const [allowCancel, setAllowCancel] = useState(true);
   const [allowReschedule, setAllowReschedule] = useState(true);
@@ -425,6 +459,38 @@ export function TenantSettings() {
   }, [tenant?.id]);
 
   useEffect(() => {
+    const tenantId = tenant?.id;
+    if (!tenantId) {
+      setLabSettingsLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLabSettingsLoading(true);
+    setLabSettingsError("");
+    async function loadLabSettings() {
+      try {
+        const rows = await getTenantLabSettings(tenantId);
+        if (!cancelled) {
+          setLabEnabled(deriveLabEnabledFromRows(rows));
+        }
+      } catch {
+        if (!cancelled) {
+          setLabSettingsError("Could not load lab settings.");
+          setLabEnabled(LABS.reduce((acc, lab) => ({ ...acc, [lab.id]: true }), {}));
+        }
+      } finally {
+        if (!cancelled) {
+          setLabSettingsLoading(false);
+        }
+      }
+    }
+    void loadLabSettings();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenant?.id]);
+
+  useEffect(() => {
     const defaultEvent = LAB_EVENTS[goalLabType]?.[0]?.value ?? "OBJECT_CONNECTED";
     setGoalEventType(defaultEvent);
   }, [goalLabType]);
@@ -532,6 +598,31 @@ export function TenantSettings() {
       setHostErr(e instanceof Error ? e.message : "Could not save host settings.");
     } finally {
       setHostSaving(false);
+    }
+  };
+
+  const handleLabToggle = async (labId: string, next: boolean) => {
+    if (!tenant?.id || labSettingsLoading) return;
+    const aliases = LAB_SETTING_ALIASES[labId] ?? [labId];
+    setLabToggleBusy((b) => ({ ...b, [labId]: true }));
+    setLabSettingsError("");
+    setLabEnabled((prev) => ({ ...prev, [labId]: next }));
+    try {
+      await Promise.all(
+        aliases.map((lab_type) =>
+          updateTenantLabSetting(tenant.id, { lab_type, enabled: next }),
+        ),
+      );
+    } catch {
+      setLabSettingsError("Could not save lab settings. Try again.");
+      try {
+        const rows = await getTenantLabSettings(tenant.id);
+        setLabEnabled(deriveLabEnabledFromRows(rows));
+      } catch {
+        /* keep optimistic state if reload fails */
+      }
+    } finally {
+      setLabToggleBusy((b) => ({ ...b, [labId]: false }));
     }
   };
 
@@ -1156,11 +1247,16 @@ export function TenantSettings() {
           >
             <SectionHeading
               title="Lab Settings"
-              description="Enable or disable lab surfaces available to this tenant. Disabled labs are hidden from learners."
+              description="Enable or disable lab surfaces for this tenant. When disabled, a lab is unavailable to learners."
             />
             <p className="tenant-settings__panel-desc">
               Enable or disable labs for your organization
             </p>
+            {labSettingsError ? (
+              <p className="tenant-settings__panel-desc" role="alert">
+                {labSettingsError}
+              </p>
+            ) : null}
             <div className="tenant-settings__toggles">
               {LABS.map((lab) => (
                 <div
@@ -1177,13 +1273,9 @@ export function TenantSettings() {
                   </label>
                   <KidSwitch
                     id={`lab-${lab.id}`}
-                    checked={labEnabled[lab.id]}
-                    onChange={(next) =>
-                      setLabEnabled((prev) => ({
-                        ...prev,
-                        [lab.id]: next,
-                      }))
-                    }
+                    checked={labEnabled[lab.id] ?? true}
+                    disabled={labSettingsLoading || labToggleBusy[lab.id]}
+                    onChange={(next) => void handleLabToggle(lab.id, next)}
                     ariaLabel={`${lab.name} lab toggle`}
                   />
                 </div>

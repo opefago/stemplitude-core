@@ -12,6 +12,7 @@ import {
 } from "../../lib/api/notifications";
 import { ComposeModal } from "./ComposeModal";
 import { ParentEventsHub, useParentEventsWeekIndicator } from "./ParentEventsHub";
+import { ParentAttendancePanel } from "../parent/ParentAttendancePanel";
 import { subscribeMessagesInvalidate } from "../../lib/messagesInvalidate";
 import "./messaging.css";
 
@@ -307,15 +308,7 @@ export function Inbox({ variant = "default" }: { variant?: "default" | "parent" 
 
       {isParentHub && hubTab === "events" ? <ParentEventsHub /> : null}
 
-      {isParentHub && hubTab === "attendance" ? (
-        <main className="msg-hub-panel" aria-label="Attendance">
-          <h2 className="msg-hub-panel__title">Attendance</h2>
-          <p className="msg-hub-panel__desc">
-            Attendance summaries and parent excusal requests will appear here in a later
-            phase.
-          </p>
-        </main>
-      ) : null}
+      {isParentHub && hubTab === "attendance" ? <ParentAttendancePanel /> : null}
 
       {/* ── Sidebar + compose + thread ──────────────────────────────────── */}
       {(!isParentHub || hubTab === "messages") && (

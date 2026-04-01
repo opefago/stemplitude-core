@@ -84,6 +84,7 @@ from app.realtime.router import router as realtime_router  # noqa: E402
 from app.invitations.router import router as invitations_router  # noqa: E402
 from app.growth.router import router as growth_router  # noqa: E402
 from app.member_billing.router import router as member_billing_router  # noqa: E402
+from app.analytics.router import router as analytics_router  # noqa: E402
 
 prefix = settings.API_V1_PREFIX
 
@@ -117,6 +118,7 @@ app.include_router(realtime_router, prefix=f"{prefix}/realtime", tags=["Realtime
 app.include_router(invitations_router, prefix=f"{prefix}/invitations", tags=["Invitations"])
 app.include_router(growth_router, prefix=f"{prefix}/growth", tags=["Growth"])
 app.include_router(member_billing_router, prefix=f"{prefix}/member-billing", tags=["Member billing"])
+app.include_router(analytics_router, prefix=f"{prefix}/analytics", tags=["Analytics"])
 
 
 @app.get("/health")

@@ -1,0 +1,126 @@
+.parent-attendance__head {
+  margin-bottom: 12px;
+}
+
+.parent-attendance__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  margin-bottom: 16px;
+}
+
+.parent-attendance__label {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--color-text-secondary, #64748b);
+}
+
+.parent-attendance__select {
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 2px solid var(--color-border, #e5e5e5);
+  font: inherit;
+  font-weight: 600;
+  min-width: 10rem;
+  background: var(--color-surface, #fff);
+}
+
+.parent-attendance__select--block {
+  width: 100%;
+  margin-bottom: 10px;
+}
+
+.parent-attendance__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: none;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+  background: var(--color-primary, #58cc02);
+  color: #fff;
+}
+
+.parent-attendance__btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.parent-attendance__btn-secondary {
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 2px solid var(--color-border, #e5e5e5);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  background: var(--color-surface, #fff);
+}
+
+.parent-attendance__table-wrap {
+  overflow-x: auto;
+  border-radius: 12px;
+  border: 1px solid var(--color-border, #e8e8e8);
+}
+
+.parent-attendance__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9375rem;
+}
+
+.parent-attendance__table th,
+.parent-attendance__table td {
+  padding: 10px 12px;
+  text-align: left;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border, #e8e8e8) 70%, transparent);
+}
+
+.parent-attendance__table th {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-secondary, #64748b);
+  background: color-mix(in srgb, var(--color-surface, #fff) 92%, var(--color-border, #e8e8e8));
+}
+
+.parent-attendance__table tr:last-child td {
+  border-bottom: none;
+}
+
+.parent-attendance__status {
+  text-transform: capitalize;
+}
+
+.parent-attendance__pill {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-transform: capitalize;
+}
+
+.parent-attendance__pill--pending {
+  background: color-mix(in srgb, #f59e0b 22%, transparent);
+  color: #9a3412;
+}
+
+.parent-attendance__pill--approved {
+  background: color-mix(in srgb, var(--color-primary, #58cc02) 22%, transparent);
+  color: #166534;
+}
+
+.parent-attendance__pill--denied {
+  background: color-mix(in srgb, #f87171 22%, transparent);
+  color: #991b1b;
+}
+
+.parent-attendance__error {
+  margin: 8px 0;
+  font-size: 0.9375rem;
+  color: var(--color-error, #dc2626);
+}

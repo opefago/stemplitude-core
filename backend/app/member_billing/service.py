@@ -8,6 +8,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.subscriptions.stripe_client import billing_period_unix_bounds_from_stripe_subscription
 from app.dependencies import CurrentIdentity, TenantContext
 from app.students.parent_access import ensure_can_view_student_as_guardian
 from app.students.repository import StudentRepository
@@ -59,8 +60,9 @@ def _apply_stripe_subscription_to_row(ms: MemberSubscription, stripe_sub: Any) -
     st = getattr(stripe_sub, "status", None)
     if st:
         ms.status = str(st)
-    ms.current_period_start = _stripe_ts(getattr(stripe_sub, "current_period_start", None))
-    ms.current_period_end = _stripe_ts(getattr(stripe_sub, "current_period_end", None))
+    s_raw, e_raw = billing_period_unix_bounds_from_stripe_subscription(stripe_sub)
+    ms.current_period_start = _stripe_ts(s_raw)
+    ms.current_period_end = _stripe_ts(e_raw)
     ca = getattr(stripe_sub, "canceled_at", None)
     if ca:
         ms.canceled_at = _stripe_ts(ca)

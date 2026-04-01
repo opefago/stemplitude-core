@@ -106,6 +106,7 @@ import {
 } from "./features/platform";
 import { ProfilePage } from "./features/profile";
 import { NotificationsPage } from "./features/notifications";
+import { TenantAnalyticsPage } from "./features/analytics";
 import { GamificationStudioPage } from "./features/gamification/GamificationStudioPage";
 import { StudentProjectsPage } from "./features/projects/StudentProjectsPage";
 import { RewardRuntime } from "./rewards";
@@ -221,6 +222,7 @@ function DashboardRouter() {
       <Route path="/settings/member-billing" element={<MemberBillingAdminPage />} />
       <Route path="/settings" element={<TenantSettings />} />
       <Route path="/gamification" element={<GamificationStudioPage />} />
+      <Route path="/analytics" element={<TenantAnalyticsPage />} />
       <Route path="/integrations" element={<IntegrationsPage />} />
       <Route path="/billing" element={<BillingPage />} />
       <Route path="/member-billing/pay" element={<MemberPayPage />} />

@@ -77,7 +77,12 @@ class Settings(BaseSettings):
     STRIPE_SECRET_KEY: str = ""
     STRIPE_WEBHOOK_SECRET: str = ""
     STRIPE_PUBLISHABLE_KEY: str = ""
+    # ISO currency for Checkout when using inline price_data (development).
+    STRIPE_CHECKOUT_CURRENCY: str = "usd"
     # Development only: used when plan.stripe_price_id_* is empty (see app.plans.stripe_checkout)
+    # Per-plan JSON maps slug → Stripe Price id (preferred over single fallback so each plan shows correct amount).
+    STRIPE_DEV_PLAN_PRICE_MONTHLY_JSON: str = ""
+    STRIPE_DEV_PLAN_PRICE_YEARLY_JSON: str = ""
     STRIPE_DEV_FALLBACK_PRICE_MONTHLY: str = ""
     STRIPE_DEV_FALLBACK_PRICE_YEARLY: str = ""
     # Stripe Connect (tenant → student/parent payments). OAuth client id from Stripe Dashboard → Connect.
@@ -193,10 +198,14 @@ class Settings(BaseSettings):
     SUPERADMIN_EMAIL: str | None = None
     SUPERADMIN_PASSWORD: str | None = None
 
-    # Cardless signup trial (see app.auth.service onboard + app.trials.guardrails)
+    # Cardless signup trial (see app.auth.service onboard + app.trials.guardrails).
+    # Parent/homeschool orgs get TRIAL_PLAN_SLUG_PARENT ($14.99 tier); centers get TRIAL_PLAN_SLUG_CENTER.
     TRIAL_ENABLED: bool = True
-    TRIAL_PLAN_SLUG: str = "trial-evaluation"
-    # 0 = use plan.trial_days from DB (fallback 14)
+    TRIAL_PLAN_SLUG_PARENT: str = "homeschool"
+    TRIAL_PLAN_SLUG_CENTER: str = "trial-evaluation"
+    # Hidden from GET /plans public list (not sold separately; signup trial only).
+    TRIAL_CATALOG_EXCLUDE_SLUG: str = "trial-evaluation"
+    # 0 = use plan.trial_days from database (fallback 14)
     TRIAL_DURATION_DAYS: int = 14
     TRIAL_MAX_ONBOARDS_PER_IP_PER_DAY: int = 20
     TRIAL_MAX_ONBOARD_ATTEMPTS_PER_EMAIL_HOUR: int = 10

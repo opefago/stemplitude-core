@@ -17,6 +17,7 @@ SYSTEM_PERMISSIONS = [
     ("programs", "view"), ("programs", "create"), ("programs", "edit"), ("programs", "delete"),
     ("sessions", "cancel"), ("sessions", "reschedule"),
     ("member_billing", "view"), ("member_billing", "manage"), ("member_billing", "collect"),
+    ("analytics", "view"), ("analytics", "export"),
 ]
 
 DEFAULT_ROLES = {
@@ -28,7 +29,8 @@ DEFAULT_ROLES = {
         "name": "Admin",
         "permissions": [
             f"{r}:{a}" for r, a in SYSTEM_PERMISSIONS
-            if r not in ("roles",) or a in ("view",)
+            if (r not in ("roles", "analytics") or a in ("view",))
+            and not (r == "analytics" and a == "export")
         ],
     },
     "instructor": {

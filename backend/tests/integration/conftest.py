@@ -197,14 +197,14 @@ async def _ensure_trial_evaluation_plan(db_session: AsyncSession) -> None:
         return
 
     result = await db_session.execute(
-        select(Plan).where(Plan.slug == settings.TRIAL_PLAN_SLUG)
+        select(Plan).where(Plan.slug == settings.TRIAL_PLAN_SLUG_CENTER)
     )
     if result.scalar_one_or_none():
         return
 
     plan = Plan(
         name="Evaluation trial (center)",
-        slug=settings.TRIAL_PLAN_SLUG,
+        slug=settings.TRIAL_PLAN_SLUG_CENTER,
         type="center",
         price_monthly=None,
         price_yearly=None,

@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 from app.dependencies import CurrentIdentity, TenantContext
 from app.growth.router import validate_promo_for_checkout
 from app.plans.repository import PlanRepository
+from app.plans.stripe_checkout import subscription_checkout_line_item
 from app.users.repository import UserRepository
 
 from .billing_provider import BillingCheckoutError, get_billing_provider
@@ -51,18 +52,18 @@ class SubscriptionService:
             logger.warning("Checkout failed: plan not found plan_id=%s", data.plan_id)
             return None, "Subscription plan not found.", 400
 
-        price_id, price_error = impl.resolve_subscription_price_id(
+        line_item, line_error = subscription_checkout_line_item(
             plan,
             billing_cycle=data.billing_cycle,
         )
-        if not price_id:
+        if not line_item:
             logger.warning(
-                "Checkout failed: no price_id provider=%s plan=%s cycle=%s",
+                "Checkout failed: no line item provider=%s plan=%s cycle=%s",
                 provider_key,
                 data.plan_id,
                 data.billing_cycle,
             )
-            return None, price_error or "No payment catalog price is configured for this plan.", 400
+            return None, line_error or "No payment catalog price is configured for this plan.", 400
 
         user = await self.user_repo.get_by_id(identity.id)
         if not user or not user.email:
@@ -94,6 +95,7 @@ class SubscriptionService:
             checkout_metadata["affiliate_code"] = affiliate_code
 
         try:
+            # Trial is provisioned at signup (cardless); Stripe checkout starts paid billing immediately.
             billing_session = impl.create_checkout_session(
                 tenant_id=tenant_ctx.tenant_id,
                 user_id=identity.id,
@@ -102,8 +104,8 @@ class SubscriptionService:
                 success_url=data.success_url,
                 cancel_url=data.cancel_url,
                 billing_cycle=data.billing_cycle,
-                price_id=price_id,
-                trial_days=plan.trial_days or 0,
+                line_item=line_item,
+                trial_days=0,
                 metadata=checkout_metadata or None,
             )
         except BillingCheckoutError as exc:
@@ -230,5 +232,27 @@ class SubscriptionService:
 
         invoices, total = await self.repo.list_invoices(
             subscription_id, skip=skip, limit=limit
+        )
+        return [InvoiceResponse.model_validate(i) for i in invoices], total
+
+    async def list_invoices_for_tenant(
+        self,
+        identity: CurrentIdentity,
+        tenant_ctx: TenantContext,
+        *,
+        skip: int = 0,
+        limit: int = 50,
+    ) -> tuple[list[InvoiceResponse], int]:
+        """All invoices for the tenant (across every subscription)."""
+        from app.subscriptions.stripe_invoice_sync import (
+            backfill_paid_invoices_from_stripe_for_tenant,
+        )
+
+        await backfill_paid_invoices_from_stripe_for_tenant(
+            self.session,
+            tenant_ctx.tenant_id,
+        )
+        invoices, total = await self.repo.list_invoices_for_tenant(
+            tenant_ctx.tenant_id, skip=skip, limit=limit
         )
         return [InvoiceResponse.model_validate(i) for i in invoices], total

@@ -15,6 +15,17 @@ from .schemas import (
     CapabilityResponse,
     CapabilityRuleResponse,
     CapabilityUpdate,
+    LabLauncherItemResponse,
+    LabLauncherResponse,
+)
+
+# (launcher_tile_id, capability_key) — must match web ``LabLauncher`` / ``labRouting``.
+LAB_LAUNCHER_CAPABILITIES: tuple[tuple[str, str], ...] = (
+    ("circuit-maker", "access_electronics_lab"),
+    ("micro-maker", "access_robotics_lab"),
+    ("python-game", "access_python_lab"),
+    ("game-maker", "access_game_maker"),
+    ("design-maker", "access_design_maker"),
 )
 
 
@@ -35,6 +46,24 @@ class CapabilityService:
         """Check if identity has the capability in tenant context."""
         result = await self.engine.can(identity, tenant_ctx, capability_key)
         return CapabilityCheckResponse(allowed=result.allowed, reason=result.reason)
+
+    async def lab_launcher_availability(
+        self,
+        identity: CurrentIdentity,
+        tenant_ctx: TenantContext,
+    ) -> LabLauncherResponse:
+        """Resolve which labs appear as available for this tenant (plan + org lab toggles)."""
+        labs: list[LabLauncherItemResponse] = []
+        for tile_id, cap_key in LAB_LAUNCHER_CAPABILITIES:
+            result = await self.engine.can(identity, tenant_ctx, cap_key)
+            labs.append(
+                LabLauncherItemResponse(
+                    id=tile_id,
+                    allowed=result.allowed,
+                    reason=result.reason,
+                )
+            )
+        return LabLauncherResponse(labs=labs)
 
     async def list_all(self, *, skip: int = 0, limit: int = 100) -> tuple[list[CapabilityResponse], int]:
         """List all capabilities (admin)."""

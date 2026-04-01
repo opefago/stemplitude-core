@@ -64,7 +64,7 @@ class BillingProvider(Protocol):
         success_url: str,
         cancel_url: str,
         billing_cycle: str,
-        price_id: str,
+        line_item: dict,
         trial_days: int,
         metadata: dict | None,
     ) -> BillingCheckoutSession | None: ...
@@ -113,7 +113,7 @@ class StripeBillingProvider:
         success_url: str,
         cancel_url: str,
         billing_cycle: str,
-        price_id: str,
+        line_item: dict,
         trial_days: int,
         metadata: dict | None,
     ) -> BillingCheckoutSession | None:
@@ -125,7 +125,7 @@ class StripeBillingProvider:
                 plan_id=plan_id,
                 success_url=success_url,
                 cancel_url=cancel_url,
-                price_id=price_id,
+                line_item=line_item,
                 billing_cycle=billing_cycle,
                 trial_days=trial_days,
                 metadata=metadata,
@@ -196,7 +196,7 @@ class PayPalBillingProvider:
         success_url: str,
         cancel_url: str,
         billing_cycle: str,
-        price_id: str,
+        line_item: dict,
         trial_days: int,
         metadata: dict | None,
     ) -> BillingCheckoutSession | None:

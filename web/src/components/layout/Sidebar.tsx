@@ -21,6 +21,8 @@ type NavItem = {
   icon?: LucideIcon;
   iconSrc?: string;
   section?: string;
+  /** Parent inbox: only active when ``?hub=`` matches (see ``/app/messages`` rows). */
+  messagesHub?: string;
 };
 
 const STUDENT_NAV: NavItem[] = [
@@ -58,6 +60,13 @@ const PARENT_NAV: NavItem[] = [
     label: "Updates & Messages",
     iconSrc: "/assets/cartoon-icons/Information.png",
     section: "Stay in touch",
+  },
+  {
+    path: "/app/messages",
+    label: "Attendance",
+    iconSrc: "/assets/cartoon-icons/Callendar.png",
+    section: "Stay in touch",
+    messagesHub: "attendance",
   },
   {
     path: "/app/notifications",
@@ -98,6 +107,13 @@ const HOMESCHOOL_NAV: NavItem[] = [
     iconSrc: "/assets/cartoon-icons/Information.png",
     section: "Stay in touch",
   },
+  {
+    path: "/app/messages",
+    label: "Attendance",
+    iconSrc: "/assets/cartoon-icons/Callendar.png",
+    section: "Stay in touch",
+    messagesHub: "attendance",
+  },
   { path: "/app/billing", label: "Billing", iconSrc: "/assets/cartoon-icons/coin.png" },
   { path: "/app/settings/member-billing", label: "Membership admin", iconSrc: "/assets/cartoon-icons/Papyrus.png" },
   { path: "/app/settings", label: "Settings", iconSrc: "/assets/cartoon-icons/Lock.png" },
@@ -125,6 +141,7 @@ const ADMIN_NAV: NavItem[] = [
   { path: "/app/programs", label: "Programs", iconSrc: "/assets/cartoon-icons/Globe.png" },
   { path: "/app/assets", label: "Assets", iconSrc: "/assets/cartoon-icons/Chest.png" },
   { path: "/app/gamification", label: "Gamification", iconSrc: "/assets/cartoon-icons/Gift1.png", section: "Organization" },
+  { path: "/app/analytics", label: "Insights", iconSrc: "/assets/cartoon-icons/Trail.png", section: "Organization" },
   { path: "/app/integrations", label: "Integrations", iconSrc: "/assets/cartoon-icons/Thunder.png", section: "Organization" },
   { path: "/app/billing", label: "Billing", iconSrc: "/assets/cartoon-icons/coin.png" },
   { path: "/app/settings/member-billing", label: "Membership", iconSrc: "/assets/cartoon-icons/Papyrus.png" },
@@ -373,18 +390,29 @@ export function Sidebar() {
       >
         <ul className="sidebar__nav-list">
           {navItems.map((item, idx) => {
+            const hub = new URLSearchParams(location.search).get("hub");
             const isActive =
               item.path === "/app"
                 ? location.pathname === "/app"
-                : location.pathname.startsWith(item.path);
+                : item.path === "/app/messages"
+                  ? item.messagesHub != null
+                    ? location.pathname === "/app/messages" && hub === item.messagesHub
+                    : location.pathname === "/app/messages" &&
+                      hub !== "attendance" &&
+                      hub !== "events"
+                  : location.pathname.startsWith(item.path);
             const showSection = item.section && (idx === 0 || navItems[idx - 1]?.section !== item.section);
+            const toPath =
+              item.messagesHub != null
+                ? `${item.path}?hub=${encodeURIComponent(item.messagesHub)}`
+                : item.path;
             return (
-              <li key={item.path}>
+              <li key={`${item.path}-${item.label}-${item.messagesHub ?? ""}`}>
                 {showSection && !collapsed && (
                   <span className="sidebar__section-label">{item.section}</span>
                 )}
                 <NavLink
-                  to={item.path}
+                  to={toPath}
                   className={({ isPending, isTransitioning }) =>
                     [
                       "sidebar__nav-link",
@@ -401,7 +429,8 @@ export function Sidebar() {
                   {item.iconSrc ? (
                     <div
                       className={`sidebar__nav-icon-wrap${
-                        item.path === "/app/messages" || item.path === "/app/notifications"
+                        (item.path === "/app/messages" && item.messagesHub == null) ||
+                        item.path === "/app/notifications"
                           ? " sidebar__nav-icon-wrap--badges"
                           : ""
                       }`}
@@ -412,13 +441,16 @@ export function Sidebar() {
                         className="sidebar__nav-icon sidebar__nav-icon--img"
                         aria-hidden
                       />
-                      {item.path === "/app/messages" && unreadChatThreads > 0 ? (
+                      {item.path === "/app/messages" &&
+                      item.messagesHub == null &&
+                      unreadChatThreads > 0 ? (
                         <span
                           className="sidebar__nav-ping"
                           aria-label={`${unreadChatThreads} conversation${unreadChatThreads === 1 ? "" : "s"} with new messages`}
                         />
                       ) : null}
                       {item.path === "/app/messages" &&
+                      item.messagesHub == null &&
                       isParentLike &&
                       unreadNotifications > 0 ? (
                         <span

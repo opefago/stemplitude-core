@@ -727,6 +727,9 @@ async def grade_submission(
 ):
     """Record a grade for a student submission."""
     service = ClassroomService(db)
+    rubric_payload = None
+    if data.rubric:
+        rubric_payload = [r.model_dump(mode="json") for r in data.rubric]
     return await service.grade_submission(
         classroom_id=id,
         session_id=session_id,
@@ -736,6 +739,7 @@ async def grade_submission(
         score=data.score,
         feedback=data.feedback,
         assignment_id=data.assignment_id,
+        rubric=rubric_payload,
     )
 
 
