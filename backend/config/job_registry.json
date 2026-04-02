@@ -73,7 +73,7 @@
       "max_retries": 0,
       "retry_delay_seconds": 0,
       "dedup_ttl_seconds": 60,
-      "description": "Process a Stripe webhook event",
+      "description": "Process a platform Stripe webhook payload (checkout.session.completed, checkout.session.async_payment_succeeded, invoice.*, customer.subscription.*). Tenant plan fulfillment matches POST /subscriptions/webhook.",
       "params_schema": {
         "event_type": { "type": "string", "required": true, "description": "Stripe event type" },
         "event_data": { "type": "object", "required": true, "description": "Stripe event data payload" }
@@ -86,10 +86,36 @@
       "max_retries": 0,
       "retry_delay_seconds": 0,
       "dedup_ttl_seconds": 300,
-      "description": "Aggregate progress stats for a tenant",
+      "description": "Rebuild daily analytics rollups for a tenant (yesterday UTC if date omitted)",
       "params_schema": {
         "tenant_id": { "type": "string", "required": true, "description": "UUID of the tenant" }
       }
+    },
+    "analytics.rebuild_tenant_day": {
+      "task_path": "workers.tasks.analytics_tasks.rebuild_tenant_analytics_day",
+      "queue": "default",
+      "runtime": "python",
+      "max_retries": 1,
+      "retry_delay_seconds": 60,
+      "dedup_ttl_seconds": 120,
+      "description": "Rebuild tenant_analytics_daily for one tenant and UTC day",
+      "params_schema": {
+        "tenant_id": { "type": "string", "required": true, "description": "UUID of the tenant" },
+        "bucket_date_iso": { "type": "string", "required": false, "description": "YYYY-MM-DD or null for yesterday UTC" }
+      }
+    },
+    "analytics.rebuild_all_tenants": {
+      "task_path": "workers.tasks.analytics_tasks.rebuild_all_tenants_analytics_day",
+      "queue": "default",
+      "runtime": "python",
+      "max_retries": 0,
+      "retry_delay_seconds": 0,
+      "dedup_ttl_seconds": 3600,
+      "description": "Enqueue rebuild_tenant_analytics_day for every active tenant (yesterday UTC when bucket_date_iso omitted). Scheduled nightly via Celery Beat.",
+      "params_schema": {
+        "bucket_date_iso": { "type": "string", "required": false, "description": "Optional YYYY-MM-DD UTC" }
+      },
+      "schedule": { "type": "crontab", "hour": "4", "minute": "15" }
     },
     "analytics.usage_report": {
       "task_path": "workers.tasks.analytics_tasks.generate_usage_report",

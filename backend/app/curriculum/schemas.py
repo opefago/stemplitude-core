@@ -1,5 +1,6 @@
 """Curriculum schemas."""
 
+from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -438,3 +439,89 @@ class CurriculumBulkAssignProgramResponse(BaseModel):
     """Bulk assignment summary."""
 
     updated_count: int = Field(..., description="Number of curricula updated.")
+
+
+# --- Rubric & assignment templates (classroom assignment authoring) ---
+
+
+class RubricCriterionDefinition(BaseModel):
+    """Single rubric row stored on a template (max points only; no score yet)."""
+
+    criterion_id: str = Field(..., min_length=1, max_length=80)
+    label: str | None = Field(None, max_length=200)
+    max_points: int = Field(..., ge=1, le=1000)
+    description: str | None = Field(None, max_length=500)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class RubricTemplateCreate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+    description: str | None = Field(None, max_length=1000)
+    criteria: list[RubricCriterionDefinition] = Field(default_factory=list)
+
+
+class RubricTemplateUpdate(BaseModel):
+    title: str | None = Field(None, min_length=1, max_length=200)
+    description: str | None = Field(None, max_length=1000)
+    criteria: list[RubricCriterionDefinition] | None = None
+
+
+class RubricTemplateResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    tenant_id: UUID
+    title: str
+    description: str | None
+    criteria: list
+    created_at: datetime
+    updated_at: datetime
+
+
+class AssignmentTemplateCreate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+    instructions: str | None = None
+    course_id: UUID | None = Field(None, description="Optional course scope.")
+    lesson_id: UUID | None = Field(None, description="Optional lesson scope (must belong to course if both set).")
+    lab_id: UUID | None = Field(None, description="Optional designated curriculum lab for this template.")
+    rubric_template_id: UUID | None = None
+    use_rubric: bool = True
+    requires_lab: bool = False
+    requires_assets: bool = False
+    allow_edit_after_submit: bool = False
+    sort_order: int = 0
+
+
+class AssignmentTemplateUpdate(BaseModel):
+    title: str | None = Field(None, min_length=1, max_length=200)
+    instructions: str | None = None
+    course_id: UUID | None = None
+    lesson_id: UUID | None = None
+    lab_id: UUID | None = None
+    rubric_template_id: UUID | None = None
+    use_rubric: bool | None = None
+    requires_lab: bool | None = None
+    requires_assets: bool | None = None
+    allow_edit_after_submit: bool | None = None
+    sort_order: int | None = None
+
+
+class AssignmentTemplateResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    tenant_id: UUID
+    course_id: UUID | None
+    lesson_id: UUID | None
+    title: str
+    instructions: str | None
+    lab_id: UUID | None
+    rubric_template_id: UUID | None
+    use_rubric: bool
+    requires_lab: bool
+    requires_assets: bool
+    allow_edit_after_submit: bool
+    sort_order: int
+    created_at: datetime
+    updated_at: datetime

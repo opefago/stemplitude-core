@@ -19,11 +19,13 @@ import { useTenant } from "../../providers/TenantProvider";
 import { useTenantRealtime } from "../../hooks/useTenantRealtime";
 import {
   getParentChildActivity,
+  getParentChildAssignmentGrades,
   getMyAssignments,
   getParentChildren,
   getParentChildrenSessions,
   sessionStartBeforeExclusiveRollingDaysFromNow,
   type ParentChildActivity,
+  type ParentChildAssignmentGrades,
   type SessionResponse,
   type StudentAssignment,
   type StudentProfile,
@@ -144,6 +146,9 @@ export function ParentDashboard() {
     null,
   );
   const [activityLoading, setActivityLoading] = useState(false);
+  const [assignmentGrades, setAssignmentGrades] =
+    useState<ParentChildAssignmentGrades | null>(null);
+  const [gradesLoading, setGradesLoading] = useState(false);
   const activeChildIdRef = useRef<string | null>(null);
   const [progress, setProgress] = useState<ProgressSummary | null>(null);
   const [gProfile, setGProfile] = useState<GamificationProfile | null>(null);
@@ -260,6 +265,25 @@ export function ParentDashboard() {
     }
   }, []);
 
+  const loadGradesForChild = useCallback(async (childId: string) => {
+    setGradesLoading(true);
+    try {
+      const ref = new Date();
+      const from = new Date(ref);
+      from.setDate(from.getDate() - 120);
+      const data = await getParentChildAssignmentGrades(childId, {
+        graded_after: from.toISOString(),
+        graded_before: ref.toISOString(),
+        limit: 8,
+      });
+      setAssignmentGrades(data);
+    } catch {
+      setAssignmentGrades(null);
+    } finally {
+      setGradesLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!activeChildId) {
       setSessions([]);
@@ -270,16 +294,20 @@ export function ParentDashboard() {
       setAssignmentsError(null);
       setChildActivity(null);
       setActivityLoading(false);
+      setAssignmentGrades(null);
+      setGradesLoading(false);
       return;
     }
     void loadSessionsForChild(activeChildId);
     void loadActivityForChild(activeChildId);
     void loadAssignmentsForChild(activeChildId);
+    void loadGradesForChild(activeChildId);
   }, [
     activeChildId,
     loadSessionsForChild,
     loadActivityForChild,
     loadAssignmentsForChild,
+    loadGradesForChild,
   ]);
 
   useEffect(() => {
@@ -322,6 +350,7 @@ export function ParentDashboard() {
       if (id) {
         void loadSessionsForChild(id);
         void loadActivityForChild(id);
+        void loadGradesForChild(id);
         void loadAssignmentsForChild(id);
       }
     },
@@ -891,6 +920,53 @@ export function ParentDashboard() {
                         </span>
                       </div>
                     ) : null}
+                    <div
+                      className="parent-dashboard__grades-preview"
+                      aria-label="Recent graded assignments"
+                    >
+                      <div className="parent-dashboard__insights-panel-toolbar parent-dashboard__insights-panel-toolbar--tight">
+                        <span className="parent-dashboard__insights-panel-hint">
+                          Graded work (last ~4 months)
+                        </span>
+                      </div>
+                      <ul className="parent-dashboard__grades-preview-list" role="list">
+                        {gradesLoading ? (
+                          <li className="parent-dashboard__grades-preview-row">
+                            <span>Loading grades…</span>
+                          </li>
+                        ) : !assignmentGrades?.grades?.length ? (
+                          <li className="parent-dashboard__grades-preview-row parent-dashboard__grades-preview-row--muted">
+                            <span>
+                              No graded assignments in this window yet. When instructors
+                              post scores, they will appear here.
+                            </span>
+                          </li>
+                        ) : (
+                          assignmentGrades.grades.map((g) => (
+                            <li
+                              key={`${g.session_id}-${g.graded_at}-${g.assignment_id ?? ""}`}
+                              className="parent-dashboard__grades-preview-row"
+                              role="listitem"
+                            >
+                              <span className="parent-dashboard__grades-preview-main">
+                                <strong>{g.score}/100</strong>
+                                <span className="parent-dashboard__grades-preview-class">
+                                  {g.classroom_name}
+                                </span>
+                                {g.session_display_title ? (
+                                  <span className="parent-dashboard__grades-preview-session">
+                                    {g.session_display_title}
+                                  </span>
+                                ) : null}
+                              </span>
+                              <span className="parent-dashboard__grades-preview-when">
+                                {formatActivityWhen(g.graded_at)}
+                              </span>
+                            </li>
+                          ))
+                        )}
+                      </ul>
+                    </div>
                     <div
                       className="parent-dashboard__activity-scroll parent-dashboard__activity-scroll--in-insights"
                       role="region"

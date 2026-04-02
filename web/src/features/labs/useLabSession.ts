@@ -12,6 +12,8 @@ export interface LabClassroomContext {
   labType: string | null;
   /** Set when opened from the assignment workflow (for submitting back with snapshot). */
   assignmentId: string | null;
+  curriculumLabId: string | null;
+  savedProjectId: string | null;
 }
 
 const IN_LAB_HEARTBEAT_MS = 30_000;
@@ -35,6 +37,8 @@ function parseClassroomContext(search: string): LabClassroomContext | null {
       referrer,
       labType: params.get("lab"),
       assignmentId: params.get("assignment_id"),
+      curriculumLabId: params.get("curriculum_lab_id"),
+      savedProjectId: params.get("saved_project_id"),
     };
   }
   return null;

@@ -29,11 +29,17 @@ import {
   KidDropdown,
   ProgressBar,
   DatePicker,
+  DateTimePicker,
+  SearchableDropdown,
   ModalDialog,
 } from "../../components/ui";
 import { useAuth } from "../../providers/AuthProvider";
 import { useTenant } from "../../providers/TenantProvider";
-import { buildLabLaunchPath } from "../labs/labRouting";
+import { buildLabLaunchPath, isCurriculumLabUuid } from "../labs/labRouting";
+import {
+  listStudentLabProjects,
+  type StudentLabProject,
+} from "../../lib/api/labs";
 import {
   createClassroomSession,
   enrollClassroomStudent,
@@ -47,6 +53,7 @@ import {
   listMyClassroomSessions,
   listClassroomSessions,
   updateClassroomSessionContent,
+  createSessionAssignmentFromTemplate,
   submitAssignment,
   listClassroomAssignments,
   listMySessionSubmissions,
@@ -62,6 +69,10 @@ import {
   type SessionTextAssignment,
   type SessionResourceEntry,
 } from "../../lib/api/classrooms";
+import {
+  listAssignmentTemplates,
+  type AssignmentTemplate,
+} from "../../lib/api/curriculum";
 import {
   getAssetById,
   getAssetLibrary,
@@ -94,6 +105,23 @@ import "./classrooms.css";
 import { ClassroomFormWizard } from "./ClassroomFormWizard";
 import { SubmissionSnapshotViewport } from "./SubmissionSnapshotViewport";
 import { useTenantRealtime } from "../../hooks/useTenantRealtime";
+
+type AssignmentWorkbench = SessionTextAssignment & {
+  lab_launcher_id?: string | null;
+  curriculum_lab_title?: string | null;
+};
+
+function resolveAssignmentLabLauncher(assignment: {
+  lab_launcher_id?: string | null;
+  lab_id?: string | null;
+}): string | null {
+  const fromApi = assignment.lab_launcher_id?.trim();
+  if (fromApi) return fromApi;
+  const lid = assignment.lab_id?.trim();
+  if (!lid) return null;
+  if (isCurriculumLabUuid(lid)) return null;
+  return lid;
+}
 
 type TabId =
   | "students"
@@ -252,6 +280,13 @@ export function ClassroomDetail() {
   ] = useState(false);
   const [addingAssignment, setAddingAssignment] = useState(false);
   const [showAssignmentForm, setShowAssignmentForm] = useState(false);
+  const [assignmentTemplates, setAssignmentTemplates] = useState<
+    AssignmentTemplate[]
+  >([]);
+  const [assignmentTemplatesLoading, setAssignmentTemplatesLoading] =
+    useState(false);
+  const [selectedAssignmentTemplateId, setSelectedAssignmentTemplateId] =
+    useState("");
   const [resourceUploadedAssets, setResourceUploadedAssets] = useState<Asset[]>(
     [],
   );
@@ -271,7 +306,7 @@ export function ClassroomDetail() {
 
   // ── Student assignment view ──────────────────────────────────────────────
   const [viewingAssignment, setViewingAssignment] =
-    useState<SessionTextAssignment | null>(null);
+    useState<AssignmentWorkbench | null>(null);
   const [viewingAssignmentSession, setViewingAssignmentSession] =
     useState<ClassroomSessionRecord | null>(null);
   const [submissionText, setSubmissionText] = useState("");
@@ -290,6 +325,10 @@ export function ClassroomDetail() {
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [uploadingSubmissionFile, setUploadingSubmissionFile] = useState(false);
   const submissionFileRef = useRef<HTMLInputElement>(null);
+  const [labProjectPickerOpen, setLabProjectPickerOpen] = useState(false);
+  const [labProjectPickerRows, setLabProjectPickerRows] = useState<
+    StudentLabProject[]
+  >([]);
 
   // ── Assignments tab ──────────────────────────────────────────────────────
   const [classroomAssignments, setClassroomAssignments] = useState<
@@ -1339,6 +1378,7 @@ export function ClassroomDetail() {
     setNewAssignmentTitle("");
     setNewAssignmentInstructions("");
     setNewAssignmentDueAt("");
+    setSelectedAssignmentTemplateId("");
     setNewAssignmentRequirement("none");
     setNewAssignmentAllowEditAfterSubmit(false);
     setResourceUploadedAssets([]);
@@ -1575,8 +1615,76 @@ export function ClassroomDetail() {
     setSelectedLibraryAssetId("");
   };
 
+  const loadAssignmentTemplateOptions = async () => {
+    setAssignmentTemplatesLoading(true);
+    try {
+      const courseId = classroom?.curriculum_id ?? undefined;
+      const rows = await listAssignmentTemplates({
+        limit: 300,
+        ...(courseId ? { course_id: courseId } : {}),
+      });
+      setAssignmentTemplates(rows);
+    } catch {
+      // Keep dialog usable for custom assignments even if template fetch fails.
+      setAssignmentTemplates([]);
+    } finally {
+      setAssignmentTemplatesLoading(false);
+    }
+  };
+
+  const openAssignmentForm = () => {
+    setNewAssignmentRequirement("none");
+    setNewAssignmentLabId(selectedSessionLab || permittedLabs[0] || "");
+    setNewAssignmentAllowEditAfterSubmit(false);
+    setNewAssignmentTitle("");
+    setNewAssignmentInstructions("");
+    setNewAssignmentDueAt("");
+    setSelectedAssignmentTemplateId("");
+    setShowAssignmentForm(true);
+    void loadAssignmentTemplateOptions();
+  };
+
   const handleAddTextAssignment = async () => {
-    if (!id || !resourcesSession || !newAssignmentTitle.trim()) return;
+    if (!id || !resourcesSession) return;
+    if (selectedAssignmentTemplateId) {
+      setAddingAssignment(true);
+      setResourcesError(null);
+      try {
+        await createSessionAssignmentFromTemplate(id, resourcesSession.id, {
+          template_id: selectedAssignmentTemplateId,
+          due_at: newAssignmentDueAt
+            ? new Date(newAssignmentDueAt).toISOString()
+            : null,
+          title: newAssignmentTitle.trim() || null,
+        });
+        const refreshed = await listClassroomSessions(id);
+        setSessions(refreshed);
+        const assignmentRows = await listClassroomAssignments(id);
+        setClassroomAssignments(assignmentRows);
+        setResourcesSession(
+          refreshed.find((s) => s.id === resourcesSession.id) ?? null,
+        );
+        setShowAssignmentForm(false);
+        setSelectedAssignmentTemplateId("");
+        setNewAssignmentTitle("");
+        setNewAssignmentInstructions("");
+        setNewAssignmentDueAt("");
+      } catch (e: unknown) {
+        setResourcesError(
+          e instanceof Error ? e.message : "Failed to add assignment",
+        );
+      } finally {
+        setAddingAssignment(false);
+      }
+      return;
+    }
+    if (!isContentWindowOpen(resourcesSession)) {
+      setResourcesError(
+        "This session is closed for manual edits. Select an existing template to add an assignment.",
+      );
+      return;
+    }
+    if (!newAssignmentTitle.trim()) return;
     const requiresLab =
       newAssignmentRequirement === "lab" || newAssignmentRequirement === "both";
     const requiresAssets =
@@ -1613,6 +1721,8 @@ export function ClassroomDetail() {
       setSessions((prev) =>
         prev.map((s) => (s.id === updated.id ? updated : s)),
       );
+      const assignmentRows = await listClassroomAssignments(id);
+      setClassroomAssignments(assignmentRows);
       setResourcesSession(updated);
       setNewAssignmentTitle("");
       setNewAssignmentInstructions("");
@@ -1657,7 +1767,7 @@ export function ClassroomDetail() {
 
   // ── Student assignment view handlers ────────────────────────────────────
   const handleOpenAssignment = (
-    assignment: SessionTextAssignment,
+    assignment: AssignmentWorkbench,
     session: ClassroomSessionRecord,
   ) => {
     setViewingAssignment(assignment);
@@ -1668,6 +1778,8 @@ export function ClassroomDetail() {
     setSubmitError(null);
     setSubmitSuccess(false);
     setSavedSubmissions([]);
+    setLabProjectPickerOpen(false);
+    setLabProjectPickerRows([]);
   };
 
   const parseSubmissionPayload = (
@@ -1706,15 +1818,21 @@ export function ClassroomDetail() {
     }
   };
 
-  const handleSaveDraftAndOpenLab = async () => {
-    if (
-      !id ||
-      !viewingAssignment ||
-      !viewingAssignmentSession ||
-      !viewingAssignment.lab_id
-    ) {
+  const runDraftAndLaunch = async (savedProjectId: string | null) => {
+    if (!id || !viewingAssignment || !viewingAssignmentSession) return;
+    const launcher = resolveAssignmentLabLauncher(viewingAssignment);
+    if (!launcher) {
+      setSubmitError(
+        "This lab is not linked to an app launcher yet. Ask your instructor.",
+      );
+      setLabProjectPickerOpen(false);
       return;
     }
+    const curriculumLabId = isCurriculumLabUuid(viewingAssignment.lab_id ?? "")
+      ? viewingAssignment.lab_id!.trim()
+      : undefined;
+
+    setLabProjectPickerOpen(false);
     setSubmittingWork(true);
     setSubmitError(null);
     try {
@@ -1723,6 +1841,7 @@ export function ClassroomDetail() {
         : JSON.stringify({
             type: "lab_draft",
             lab_id: viewingAssignment.lab_id,
+            saved_project_id: savedProjectId,
             note: "Draft saved before opening lab",
             opened_at: new Date().toISOString(),
             attached_asset_id: submissionAssetId,
@@ -1734,14 +1853,20 @@ export function ClassroomDetail() {
         viewingAssignment.id,
         content,
         "draft",
+        {
+          lab_id: viewingAssignment.lab_id ?? undefined,
+        },
       );
-      const launchPath = buildLabLaunchPath(viewingAssignment.lab_id, {
-        classroomId: id,
-        sessionId: viewingAssignmentSession.id,
-        referrer: "assignment_view",
-        assignmentId: viewingAssignment.id,
-      });
-      navigate(launchPath);
+      navigate(
+        buildLabLaunchPath(launcher, {
+          classroomId: id,
+          sessionId: viewingAssignmentSession.id,
+          referrer: "assignment_view",
+          assignmentId: viewingAssignment.id,
+          curriculumLabId,
+          savedProjectId: savedProjectId ?? undefined,
+        }),
+      );
     } catch (err: unknown) {
       setSubmitError(
         err instanceof Error ? err.message : "Failed to save draft",
@@ -1749,6 +1874,44 @@ export function ClassroomDetail() {
     } finally {
       setSubmittingWork(false);
     }
+  };
+
+  const handleSaveDraftAndOpenLab = async () => {
+    if (!id || !viewingAssignment || !viewingAssignmentSession) return;
+    if (!viewingAssignment.lab_id) return;
+
+    const launcher = resolveAssignmentLabLauncher(viewingAssignment);
+    if (!launcher) {
+      setSubmitError(
+        "This lab is not linked to an app launcher yet. Ask your instructor.",
+      );
+      return;
+    }
+    const curriculumLabId = isCurriculumLabUuid(viewingAssignment.lab_id ?? "")
+      ? viewingAssignment.lab_id!.trim()
+      : undefined;
+
+    if (curriculumLabId) {
+      setSubmittingWork(true);
+      setSubmitError(null);
+      try {
+        const projects = await listStudentLabProjects({
+          lab_id: curriculumLabId,
+          limit: 40,
+        });
+        if (projects.length > 0) {
+          setLabProjectPickerRows(projects);
+          setLabProjectPickerOpen(true);
+          return;
+        }
+      } catch {
+        /* open without picker */
+      } finally {
+        setSubmittingWork(false);
+      }
+    }
+
+    await runDraftAndLaunch(null);
   };
 
   const handleSubmissionFileUpload = async (
@@ -4299,67 +4462,51 @@ export function ClassroomDetail() {
             ) : null}
           </ModalDialog>
 
-          {showEndDialog && activeSession && (
-            <div
-              className="classroom-list__dialog-overlay"
-              onClick={() => setShowEndDialog(false)}
-            >
-              <div
-                className="classroom-list__create-form classroom-list__create-form--dialog classroom-detail__end-dialog"
-                role="dialog"
-                aria-modal="true"
-                aria-label="End session confirmation"
-                onClick={(e) => e.stopPropagation()}
-              >
+          <ModalDialog
+            isOpen={showEndDialog && Boolean(activeSession)}
+            onClose={() => setShowEndDialog(false)}
+            title="End active session"
+            ariaLabel="End session confirmation"
+            contentClassName="classroom-list__create-form classroom-list__create-form--dialog classroom-detail__end-dialog"
+            closeVariant="neutral"
+            disableClose={endingSession}
+            footer={
+              <div className="classroom-list__create-actions">
                 <button
                   type="button"
-                  className="classroom-list__dialog-close"
+                  className="classroom-list__create-btn classroom-list__create-btn--ghost"
                   onClick={() => setShowEndDialog(false)}
-                  aria-label="Close dialog"
                   disabled={endingSession}
                 >
-                  <X size={28} aria-hidden />
+                  Cancel
                 </button>
-                <h3 className="classroom-list__create-title">
-                  End active session
-                </h3>
-                {forceEndRequired ? (
-                  <p className="classroom-detail__end-dialog-copy">
-                    {presenceSummary?.active_students ?? 0} student(s) are still
-                    in the session. Ending now will end the meeting for
-                    everyone.
-                  </p>
-                ) : (
-                  <p className="classroom-detail__end-dialog-copy">
-                    No students are currently active in this session. Confirm to
-                    end it now.
-                  </p>
-                )}
-                <div className="classroom-list__create-actions">
-                  <button
-                    type="button"
-                    className="classroom-list__create-btn classroom-list__create-btn--ghost"
-                    onClick={() => setShowEndDialog(false)}
-                    disabled={endingSession}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    className="classroom-list__create-btn classroom-list__create-btn--danger"
-                    onClick={handleConfirmEndSession}
-                    disabled={endingSession}
-                  >
-                    {endingSession
-                      ? "Ending..."
-                      : forceEndRequired
-                        ? "End for all"
-                        : "End session"}
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  className="classroom-list__create-btn classroom-list__create-btn--danger"
+                  onClick={handleConfirmEndSession}
+                  disabled={endingSession}
+                >
+                  {endingSession
+                    ? "Ending..."
+                    : forceEndRequired
+                      ? "End for all"
+                      : "End session"}
+                </button>
               </div>
-            </div>
-          )}
+            }
+          >
+            {forceEndRequired ? (
+              <p className="classroom-detail__end-dialog-copy">
+                {presenceSummary?.active_students ?? 0} student(s) are still in
+                the session. Ending now will end the meeting for everyone.
+              </p>
+            ) : (
+              <p className="classroom-detail__end-dialog-copy">
+                No students are currently active in this session. Confirm to end
+                it now.
+              </p>
+            )}
+          </ModalDialog>
 
           {classroom && id ? (
             <ClassroomFormWizard
@@ -4508,24 +4655,16 @@ export function ClassroomDetail() {
                 <div className="classroom-detail__resources-section">
                   <div className="classroom-detail__resources-section-header">
                     <h4>Assignments</h4>
-                    {isContentWindowOpen(resourcesSession) &&
-                      !showAssignmentForm && (
-                        <button
-                          type="button"
-                          className="classroom-list__create-btn classroom-list__create-btn--ghost classroom-detail__resources-add-btn"
-                          onClick={() => {
-                            setNewAssignmentRequirement("none");
-                            setNewAssignmentLabId(
-                              selectedSessionLab || permittedLabs[0] || "",
-                            );
-                            setNewAssignmentAllowEditAfterSubmit(false);
-                            setShowAssignmentForm(true);
-                          }}
-                        >
-                          <Plus size={14} aria-hidden />
-                          Add assignment
-                        </button>
-                      )}
+                    {!showAssignmentForm && (
+                      <button
+                        type="button"
+                        className="classroom-list__create-btn classroom-list__create-btn--ghost classroom-detail__resources-add-btn"
+                        onClick={openAssignmentForm}
+                      >
+                        <Plus size={14} aria-hidden />
+                        Add assignment
+                      </button>
+                    )}
                   </div>
 
                   {(() => {
@@ -4593,34 +4732,78 @@ export function ClassroomDetail() {
             </div>
           )}
 
-          {showAssignmentForm && resourcesSession && (
-            <div
-              className="classroom-list__dialog-overlay"
-              onClick={() => setShowAssignmentForm(false)}
-            >
-              <div
-                className="classroom-list__create-form classroom-list__create-form--dialog classroom-detail__assignment-create-dialog"
-                role="dialog"
-                aria-modal="true"
-                aria-label="Add assignment"
-                onClick={(e) => e.stopPropagation()}
-              >
+          <ModalDialog
+            isOpen={showAssignmentForm && Boolean(resourcesSession)}
+            onClose={() => !addingAssignment && setShowAssignmentForm(false)}
+            title="Add assignment"
+            ariaLabel="Add assignment"
+            contentClassName="classroom-list__create-form classroom-list__create-form--dialog classroom-detail__assignment-create-dialog"
+            closeVariant="neutral"
+            disableClose={addingAssignment}
+            footer={
+              <div className="classroom-list__create-actions">
                 <button
                   type="button"
-                  className="classroom-list__dialog-close"
-                  onClick={() => setShowAssignmentForm(false)}
-                  aria-label="Close"
+                  className="classroom-list__create-btn classroom-list__create-btn--ghost"
+                  onClick={() => {
+                    setShowAssignmentForm(false);
+                    setNewAssignmentTitle("");
+                    setNewAssignmentInstructions("");
+                    setNewAssignmentDueAt("");
+                    setNewAssignmentLabId("");
+                    setNewAssignmentRequirement("none");
+                    setNewAssignmentAllowEditAfterSubmit(false);
+                    setSelectedAssignmentTemplateId("");
+                  }}
+                  disabled={addingAssignment}
                 >
-                  <X size={28} aria-hidden />
+                  Cancel
                 </button>
-                <h3 className="classroom-list__create-title">Add assignment</h3>
+                <button
+                  type="button"
+                  className="classroom-list__create-btn"
+                  onClick={() => void handleAddTextAssignment()}
+                  disabled={
+                    addingAssignment ||
+                    (!selectedAssignmentTemplateId && !newAssignmentTitle.trim())
+                  }
+                >
+                  {addingAssignment ? "Adding..." : "Add assignment"}
+                </button>
+              </div>
+            }
+          >
+            {resourcesSession ? (
+              <>
                 <p className="classroom-detail__resources-date">
-                  Session:{" "}
-                  {new Date(
-                    resourcesSession.session_start,
-                  ).toLocaleDateString()}
+                  Session: {new Date(resourcesSession.session_start).toLocaleDateString()}
                 </p>
-
+                {!isContentWindowOpen(resourcesSession) && (
+                  <p className="classroom-detail__window-warning">
+                    This session is closed for manual edits. You can still add an assignment from an existing template.
+                  </p>
+                )}
+                <div className="classroom-list__create-field">
+                  <label>Existing assignment template (optional)</label>
+                  <SearchableDropdown
+                    value={selectedAssignmentTemplateId}
+                    onChange={setSelectedAssignmentTemplateId}
+                    ariaLabel="Choose assignment template"
+                    placeholder={
+                      assignmentTemplatesLoading
+                        ? "Loading templates..."
+                        : "Select an existing template"
+                    }
+                    searchPlaceholder="Search templates..."
+                    emptyLabel="No templates found"
+                    fullWidth
+                    options={assignmentTemplates.map((template) => ({
+                      value: template.id,
+                      label: template.title,
+                      searchText: `${template.instructions ?? ""} ${template.course_id ?? ""} ${template.lesson_id ?? ""}`,
+                    }))}
+                  />
+                </div>
                 <div className="classroom-list__create-field">
                   <label htmlFor="new-assign-title">Title</label>
                   <input
@@ -4629,117 +4812,105 @@ export function ClassroomDetail() {
                     className="classroom-list__create-input"
                     value={newAssignmentTitle}
                     onChange={(e) => setNewAssignmentTitle(e.target.value)}
-                    placeholder="Assignment title"
+                    placeholder={
+                      selectedAssignmentTemplateId
+                        ? "Optional title override"
+                        : "Assignment title"
+                    }
                     autoFocus
+                    disabled={
+                      !isContentWindowOpen(resourcesSession) &&
+                      !selectedAssignmentTemplateId
+                    }
                   />
                 </div>
-                <div className="classroom-list__create-field">
-                  <label>Submission requirement</label>
-                  <KidDropdown
-                    value={newAssignmentRequirement}
-                    onChange={(value) => {
-                      const next = value as "none" | "lab" | "assets" | "both";
-                      setNewAssignmentRequirement(next);
-                      if (
-                        (next === "lab" || next === "both") &&
-                        !newAssignmentLabId
-                      ) {
-                        setNewAssignmentLabId(
-                          selectedSessionLab || permittedLabs[0] || "",
-                        );
-                      }
-                    }}
-                    ariaLabel="Assignment requirement type"
-                    minWidth={240}
-                    options={[
-                      { value: "none", label: "Flexible (no requirement)" },
-                      { value: "lab", label: "Requires lab" },
-                      { value: "assets", label: "Requires assets/files" },
-                      { value: "both", label: "Requires lab + assets" },
-                    ]}
-                  />
-                </div>
-                <div className="classroom-list__create-field">
-                  <KidCheckbox
-                    checked={newAssignmentAllowEditAfterSubmit}
-                    onChange={setNewAssignmentAllowEditAfterSubmit}
-                  >
-                    Allow edits after student submits
-                  </KidCheckbox>
-                </div>
-                {permittedLabs.length > 0 &&
-                  (newAssignmentRequirement === "lab" ||
-                    newAssignmentRequirement === "both") && (
+                {isContentWindowOpen(resourcesSession) && (
+                  <>
                     <div className="classroom-list__create-field">
-                      <label>Linked lab</label>
+                      <label>Submission requirement</label>
                       <KidDropdown
-                        value={newAssignmentLabId}
-                        onChange={setNewAssignmentLabId}
-                        ariaLabel="Select a lab for this assignment"
+                        value={newAssignmentRequirement}
+                        onChange={(value) => {
+                          const next =
+                            value as "none" | "lab" | "assets" | "both";
+                          setNewAssignmentRequirement(next);
+                          if (
+                            (next === "lab" || next === "both") &&
+                            !newAssignmentLabId
+                          ) {
+                            setNewAssignmentLabId(
+                              selectedSessionLab || permittedLabs[0] || "",
+                            );
+                          }
+                        }}
+                        ariaLabel="Assignment requirement type"
                         minWidth={240}
                         options={[
-                          { value: "", label: "No lab" },
-                          ...permittedLabs.map((lab) => ({
-                            value: lab,
-                            label: lab
-                              .replace(/-/g, " ")
-                              .replace(/\b\w/g, (c) => c.toUpperCase()),
-                          })),
+                          { value: "none", label: "Flexible (no requirement)" },
+                          { value: "lab", label: "Requires lab" },
+                          { value: "assets", label: "Requires assets/files" },
+                          { value: "both", label: "Requires lab + assets" },
                         ]}
                       />
                     </div>
-                  )}
+                    <div className="classroom-list__create-field">
+                      <KidCheckbox
+                        checked={newAssignmentAllowEditAfterSubmit}
+                        onChange={setNewAssignmentAllowEditAfterSubmit}
+                      >
+                        Allow edits after student submits
+                      </KidCheckbox>
+                    </div>
+                    {permittedLabs.length > 0 &&
+                      (newAssignmentRequirement === "lab" ||
+                        newAssignmentRequirement === "both") && (
+                        <div className="classroom-list__create-field">
+                          <label>Linked lab</label>
+                          <KidDropdown
+                            value={newAssignmentLabId}
+                            onChange={setNewAssignmentLabId}
+                            ariaLabel="Select a lab for this assignment"
+                            minWidth={240}
+                            options={[
+                              { value: "", label: "No lab" },
+                              ...permittedLabs.map((lab) => ({
+                                value: lab,
+                                label: lab
+                                  .replace(/-/g, " ")
+                                  .replace(/\b\w/g, (c) => c.toUpperCase()),
+                              })),
+                            ]}
+                          />
+                        </div>
+                      )}
+                    <div className="classroom-list__create-field">
+                      <label htmlFor="new-assign-instructions">Instructions</label>
+                      <textarea
+                        id="new-assign-instructions"
+                        className="classroom-list__create-input classroom-detail__textarea"
+                        value={newAssignmentInstructions}
+                        onChange={(e) =>
+                          setNewAssignmentInstructions(e.target.value)
+                        }
+                        placeholder="Describe what students need to do"
+                        rows={3}
+                      />
+                    </div>
+                  </>
+                )}
                 <div className="classroom-list__create-field">
-                  <label htmlFor="new-assign-instructions">Instructions</label>
-                  <textarea
-                    id="new-assign-instructions"
-                    className="classroom-list__create-input classroom-detail__textarea"
-                    value={newAssignmentInstructions}
-                    onChange={(e) =>
-                      setNewAssignmentInstructions(e.target.value)
-                    }
-                    placeholder="Describe what students need to do"
-                    rows={3}
-                  />
-                </div>
-                <div className="classroom-list__create-field">
-                  <label htmlFor="new-assign-due">Due date (optional)</label>
-                  <DatePicker
+                  <label htmlFor="new-assign-due">Due date & time (optional)</label>
+                  <DateTimePicker
                     id="new-assign-due"
                     value={newAssignmentDueAt}
                     onChange={setNewAssignmentDueAt}
-                    placeholder="Pick a due date"
+                    datePlaceholder="Pick due date"
+                    timePlaceholder="Pick due time"
                   />
                 </div>
-                <div className="classroom-list__create-actions">
-                  <button
-                    type="button"
-                    className="classroom-list__create-btn classroom-list__create-btn--ghost"
-                    onClick={() => {
-                      setShowAssignmentForm(false);
-                      setNewAssignmentTitle("");
-                      setNewAssignmentInstructions("");
-                      setNewAssignmentDueAt("");
-                      setNewAssignmentLabId("");
-                      setNewAssignmentRequirement("none");
-                      setNewAssignmentAllowEditAfterSubmit(false);
-                    }}
-                    disabled={addingAssignment}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    className="classroom-list__create-btn"
-                    onClick={() => void handleAddTextAssignment()}
-                    disabled={addingAssignment || !newAssignmentTitle.trim()}
-                  >
-                    {addingAssignment ? "Adding..." : "Add assignment"}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
+              </>
+            ) : null}
+          </ModalDialog>
 
           {showAssetLibrary && resourcesSession && (
             <div
@@ -4907,6 +5078,8 @@ export function ClassroomDetail() {
               onClick={() => {
                 setViewingAssignment(null);
                 setViewingAssignmentSession(null);
+                setLabProjectPickerOpen(false);
+                setLabProjectPickerRows([]);
               }}
             >
               <div
@@ -4940,6 +5113,8 @@ export function ClassroomDetail() {
                       onClick={() => {
                         setViewingAssignment(null);
                         setViewingAssignmentSession(null);
+                        setLabProjectPickerOpen(false);
+                        setLabProjectPickerRows([]);
                       }}
                       aria-label="Close"
                     >
@@ -4996,9 +5171,11 @@ export function ClassroomDetail() {
                         {submittingWork
                           ? "Saving draft..."
                           : "Save draft & open"}{" "}
-                        {viewingAssignment.lab_id
-                          .replace(/-/g, " ")
-                          .replace(/\b\w/g, (c) => c.toUpperCase())}
+                        {(viewingAssignment.curriculum_lab_title?.trim() ||
+                          viewingAssignment.lab_launcher_id?.trim() ||
+                          (!isCurriculumLabUuid(viewingAssignment.lab_id)
+                            ? viewingAssignment.lab_id
+                            : "lab")) ?? "lab"}
                         <ChevronRight size={16} aria-hidden />
                       </button>
                     </section>
@@ -5201,26 +5378,38 @@ export function ClassroomDetail() {
                                           ? "Locked"
                                           : "Load"}
                                       </button>
-                                      {labToOpen && (
-                                        <button
-                                          type="button"
-                                          className="classroom-list__create-btn classroom-list__create-btn--ghost classroom-detail__resources-add-btn"
-                                          onClick={() =>
-                                            navigate(
-                                              buildLabLaunchPath(labToOpen, {
-                                                classroomId: id,
-                                                sessionId:
-                                                  viewingAssignmentSession.id,
-                                                referrer: "assignment_view",
-                                                assignmentId:
-                                                  viewingAssignment.id,
-                                              }),
-                                            )
-                                          }
-                                        >
-                                          Open lab
-                                        </button>
-                                      )}
+                                      {labToOpen &&
+                                        (() => {
+                                          const ln = resolveAssignmentLabLauncher({
+                                            lab_launcher_id:
+                                              viewingAssignment.lab_launcher_id,
+                                            lab_id: labToOpen,
+                                          });
+                                          return ln ? (
+                                            <button
+                                              type="button"
+                                              className="classroom-list__create-btn classroom-list__create-btn--ghost classroom-detail__resources-add-btn"
+                                              onClick={() =>
+                                                navigate(
+                                                  buildLabLaunchPath(ln, {
+                                                    classroomId: id!,
+                                                    sessionId:
+                                                      viewingAssignmentSession.id,
+                                                    referrer: "assignment_view",
+                                                    assignmentId:
+                                                      viewingAssignment.id,
+                                                    curriculumLabId:
+                                                      isCurriculumLabUuid(labToOpen)
+                                                        ? labToOpen
+                                                        : undefined,
+                                                  }),
+                                                )
+                                              }
+                                            >
+                                              Open lab
+                                            </button>
+                                          ) : null;
+                                        })()}
                                     </div>
                                   </div>
                                 </div>
@@ -5370,6 +5559,65 @@ export function ClassroomDetail() {
               </div>
             </div>
           )}
+
+          <ModalDialog
+            isOpen={labProjectPickerOpen}
+            onClose={() => {
+              if (!submittingWork) {
+                setLabProjectPickerOpen(false);
+                setLabProjectPickerRows([]);
+              }
+            }}
+            title="Use a saved project?"
+            ariaLabel="Choose saved lab project"
+            backdropClassName="ui-modal__backdrop--stack"
+            contentClassName="classroom-list__create-form classroom-list__create-form--dialog"
+            disableClose={submittingWork}
+            footer={
+              <div className="classroom-list__create-actions">
+                <button
+                  type="button"
+                  className="classroom-list__create-btn classroom-list__create-btn--ghost"
+                  disabled={submittingWork}
+                  onClick={() => {
+                    setLabProjectPickerOpen(false);
+                    setLabProjectPickerRows([]);
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="classroom-list__create-btn"
+                  disabled={submittingWork}
+                  onClick={() => void runDraftAndLaunch(null)}
+                >
+                  Start fresh
+                </button>
+              </div>
+            }
+          >
+            <p className="classroom-detail__resources-label">
+              Pick an existing submission for this lab, or start fresh.
+            </p>
+            <ul className="classroom-detail__lab-project-pick-list" role="list">
+              {labProjectPickerRows.map((p) => (
+                <li key={p.id}>
+                  <button
+                    type="button"
+                    className="classroom-detail__lab-project-pick-btn"
+                    disabled={submittingWork}
+                    onClick={() => void runDraftAndLaunch(p.id)}
+                  >
+                    <strong>{p.title}</strong>
+                    <span>
+                      {new Date(p.submitted_at).toLocaleDateString()}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </ModalDialog>
 
           <ModalDialog
             isOpen={showEnrollDialog}

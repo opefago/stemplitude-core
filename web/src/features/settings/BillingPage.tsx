@@ -1,14 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { CreditCard, TrendingUp } from "lucide-react";
-import { KidDropdown, ProgressBar } from "../../components/ui";
+import { KidDropdown, ModalDialog, ProgressBar } from "../../components/ui";
 import { ensureFreshAccessToken } from "../../lib/api/client";
 import { listSeatUsage, type SeatUsageRecord } from "../../lib/api/licenses";
 import { fetchPlanById, listPlans, type PlanRecord } from "../../lib/api/plans";
 import {
   createCheckoutSession,
+  cancelSubscription,
   type BillingCycle,
   listBillingProviders,
+  pauseSubscription,
+  reactivateSubscription,
+  resumeSubscription,
   listSubscriptions,
   listTenantInvoices,
   type BillingProviderOption,
@@ -113,6 +117,11 @@ export function BillingPage() {
   const [checkoutInfo, setCheckoutInfo] = useState("");
   const [billingProviders, setBillingProviders] = useState<BillingProviderOption[]>([]);
   const [paymentProvider, setPaymentProvider] = useState("stripe");
+  const [subscriptionAction, setSubscriptionAction] = useState<
+    "cancel" | "pause" | null
+  >(null);
+  const [subscriptionActionBusy, setSubscriptionActionBusy] = useState(false);
+  const [subscriptionActionError, setSubscriptionActionError] = useState("");
 
   useEffect(() => {
     void listBillingProviders()
@@ -293,6 +302,9 @@ export function BillingPage() {
     () => selectCurrentSubscription(subscriptions),
     [subscriptions],
   );
+  const currentSubscriptionStatus = (currentSubscription?.status ?? "").toLowerCase();
+  const isPaused = currentSubscriptionStatus === "paused";
+  const isCancelScheduled = Boolean(currentSubscription?.canceled_at);
 
   useEffect(() => {
     const pid = currentSubscription?.plan_id;
@@ -454,6 +466,68 @@ export function BillingPage() {
     }
   }
 
+  async function refreshBillingSnapshot() {
+    const [subRes, invRes] = await Promise.all([
+      listSubscriptions({ limit: 50 }),
+      listTenantInvoices({ limit: 100 }),
+    ]);
+    setSubscriptions(subRes.items);
+    setInvoices(invRes.items);
+  }
+
+  async function handleConfirmPauseOrCancel() {
+    if (!currentSubscription?.id || !subscriptionAction) return;
+    setSubscriptionActionBusy(true);
+    setSubscriptionActionError("");
+    try {
+      if (subscriptionAction === "pause") {
+        await pauseSubscription(currentSubscription.id);
+      } else {
+        await cancelSubscription(currentSubscription.id);
+      }
+      await refreshBillingSnapshot();
+      setSubscriptionAction(null);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Could not update subscription.";
+      setSubscriptionActionError(message);
+    } finally {
+      setSubscriptionActionBusy(false);
+    }
+  }
+
+  async function handleResumeBilling() {
+    if (!currentSubscription?.id) return;
+    setSubscriptionActionError("");
+    setSubscriptionActionBusy(true);
+    try {
+      await resumeSubscription(currentSubscription.id);
+      await refreshBillingSnapshot();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Could not resume subscription.";
+      setSubscriptionActionError(message);
+    } finally {
+      setSubscriptionActionBusy(false);
+    }
+  }
+
+  async function handleUndoCancel() {
+    if (!currentSubscription?.id) return;
+    setSubscriptionActionError("");
+    setSubscriptionActionBusy(true);
+    try {
+      await reactivateSubscription(currentSubscription.id);
+      await refreshBillingSnapshot();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Could not reactivate subscription.";
+      setSubscriptionActionError(message);
+    } finally {
+      setSubscriptionActionBusy(false);
+    }
+  }
+
   return (
     <div className="billing-page" role="main" aria-label="Billing">
       <header className="billing-page__header">
@@ -491,6 +565,53 @@ export function BillingPage() {
                 as when you started checkout. After returning from Stripe, wait a few seconds for
                 webhooks—this page rechecks automatically when the URL includes{" "}
                 <code className="billing-page__code">checkout=success</code>.
+              </p>
+            )}
+            {currentSubscription && (
+              <div className="billing-page__subscription-actions">
+                {isPaused ? (
+                  <button
+                    type="button"
+                    className="billing-page__btn-secondary"
+                    onClick={() => void handleResumeBilling()}
+                    disabled={subscriptionActionBusy}
+                  >
+                    Resume billing
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="billing-page__btn-secondary"
+                    onClick={() => setSubscriptionAction("pause")}
+                    disabled={subscriptionActionBusy}
+                  >
+                    Pause subscription
+                  </button>
+                )}
+                {isCancelScheduled ? (
+                  <button
+                    type="button"
+                    className="billing-page__btn-secondary"
+                    onClick={() => void handleUndoCancel()}
+                    disabled={subscriptionActionBusy}
+                  >
+                    Undo cancel
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="billing-page__btn-secondary billing-page__btn-secondary--danger"
+                    onClick={() => setSubscriptionAction("cancel")}
+                    disabled={subscriptionActionBusy}
+                  >
+                    Cancel at period end
+                  </button>
+                )}
+              </div>
+            )}
+            {subscriptionActionError && (
+              <p className="billing-page__flash billing-page__flash--error">
+                {subscriptionActionError}
               </p>
             )}
           </div>
@@ -701,6 +822,57 @@ export function BillingPage() {
           </button>
         </div>
       </div>
+      <ModalDialog
+        isOpen={subscriptionAction != null}
+        onClose={() => {
+          if (subscriptionActionBusy) return;
+          setSubscriptionAction(null);
+          setSubscriptionActionError("");
+        }}
+        title={
+          subscriptionAction === "pause"
+            ? "Pause subscription"
+            : "Cancel subscription"
+        }
+        ariaLabel={
+          subscriptionAction === "pause"
+            ? "Pause subscription"
+            : "Cancel subscription"
+        }
+        footer={
+          <div className="ui-form-actions">
+            <button
+              type="button"
+              className="ui-btn ui-btn--ghost"
+              onClick={() => {
+                setSubscriptionAction(null);
+                setSubscriptionActionError("");
+              }}
+              disabled={subscriptionActionBusy}
+            >
+              Keep as is
+            </button>
+            <button
+              type="button"
+              className="ui-btn ui-btn--primary"
+              onClick={() => void handleConfirmPauseOrCancel()}
+              disabled={subscriptionActionBusy}
+            >
+              {subscriptionActionBusy
+                ? "Saving..."
+                : subscriptionAction === "pause"
+                  ? "Pause now"
+                  : "Confirm cancel"}
+            </button>
+          </div>
+        }
+      >
+        <p className="billing-page__usage-text" style={{ marginTop: 0 }}>
+          {subscriptionAction === "pause"
+            ? "Pausing stops upcoming billing collection until you resume."
+            : "Your subscription will remain active until the end of the current billing period."}
+        </p>
+      </ModalDialog>
     </div>
   );
 }

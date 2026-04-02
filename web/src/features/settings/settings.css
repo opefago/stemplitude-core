@@ -887,6 +887,13 @@
   color: var(--color-text-secondary, #64748b);
 }
 
+.billing-page__subscription-actions {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .billing-page__usage-text {
   margin: var(--spacing-sm, 8px) 0 0;
   font-size: 0.875rem;
@@ -928,6 +935,18 @@
   color: var(--color-primary, #0066ff);
   box-shadow: 0 4px 0
     color-mix(in srgb, var(--color-primary, #0066ff) 35%, white);
+}
+
+.billing-page__btn-secondary--danger {
+  border-color: color-mix(in srgb, var(--color-danger, #ef4444) 40%, var(--color-border, #e2e8f0));
+  color: color-mix(in srgb, var(--color-danger, #ef4444) 82%, #111827);
+}
+
+.billing-page__btn-secondary--danger:hover {
+  border-color: color-mix(in srgb, var(--color-danger, #ef4444) 70%, var(--color-border, #e2e8f0));
+  background: color-mix(in srgb, var(--color-danger, #ef4444) 8%, white);
+  color: color-mix(in srgb, var(--color-danger, #ef4444) 88%, #111827);
+  box-shadow: 0 4px 0 color-mix(in srgb, var(--color-danger, #ef4444) 25%, white);
 }
 
 .billing-page__table-wrapper {

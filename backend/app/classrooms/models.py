@@ -86,6 +86,7 @@ class ClassroomSession(Base):
     meeting_link: Mapped[str | None] = mapped_column(String(500))
     external_meeting_id: Mapped[str | None] = mapped_column(String(200))
     notes: Mapped[str | None] = mapped_column(String(2000))
+    display_title: Mapped[str | None] = mapped_column(String(200), nullable=True)
     canceled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 

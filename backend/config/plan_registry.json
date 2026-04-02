@@ -1,5 +1,5 @@
 {
-  "_description": "Central plan registry. Defines subscription plans, their features, and limits. Consumed by seed_plans and seed_all at startup. For Stripe Checkout, add optional stripe_price_id_monthly and stripe_price_id_yearly (e.g. price_xxx) per plan — create matching recurring Prices in the Stripe Dashboard and paste IDs here, or set them on plans in the database later.",
+  "_description": "Central plan registry. Defines subscription plans, their features, and limits. Consumed by seed_plans and seed_all at startup. For Stripe Checkout, add optional stripe_price_id_monthly and stripe_price_id_yearly (e.g. price_xxx) per plan — create matching recurring Prices in the Stripe Dashboard and paste IDs here, or set them on plans in the database later. In APP_ENV=development, checkout resolves empty DB IDs from these registry fields before STRIPE_DEV_FALLBACK_* (one fallback price applies to every plan if per-plan IDs are missing).",
   "plans": [
     {
       "name": "Free (Parent)",
@@ -160,7 +160,8 @@
         { "feature_key": "api_access", "enabled": true },
         { "feature_key": "sso", "enabled": true },
         { "feature_key": "dedicated_support", "enabled": true },
-        { "feature_key": "custom_integrations", "enabled": true }
+        { "feature_key": "custom_integrations", "enabled": true },
+        { "feature_key": "analytics_export", "enabled": true }
       ],
       "limits": [
         { "limit_key": "max_students", "limit_value": 9999 },

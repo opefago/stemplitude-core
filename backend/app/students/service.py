@@ -22,6 +22,7 @@ from app.students.schemas import (
 )
 from app.dependencies import CurrentIdentity
 from app.tenants.models import Tenant
+from app.classrooms.assignment_lab_enrich import enrich_assignments_lab_launcher
 from app.classrooms.models import Classroom, ClassroomSession
 from app.classrooms.schemas import SessionResponse
 from app.classrooms.schedule_occurrences import merge_db_and_scheduled_upcoming
@@ -637,6 +638,7 @@ class StudentService:
                         "submission_status": sub_status,
                     }
                 )
+        await enrich_assignments_lab_launcher(self.session, assignments)
         assignments.sort(
             key=lambda item: (
                 item.get("due_at") is None,

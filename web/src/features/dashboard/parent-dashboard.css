@@ -889,3 +889,68 @@ button.parent-dashboard__quick-link:disabled:hover {
 .parent-dashboard__quick-link--invoices {
   --ql-accent: #0d9488;
 }
+
+.parent-dashboard__grades-preview {
+  margin-top: var(--spacing-sm, 8px);
+  padding-top: var(--spacing-sm, 8px);
+  border-top: 1px solid var(--color-border, #e5e5e5);
+}
+
+.parent-dashboard__insights-panel-toolbar--tight {
+  margin-bottom: 6px;
+}
+
+.parent-dashboard__grades-preview-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 11rem;
+  overflow: auto;
+}
+
+.parent-dashboard__grades-preview-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.8125rem;
+  line-height: 1.35;
+}
+
+.parent-dashboard__grades-preview-row--muted {
+  color: var(--color-text-secondary, #64748b);
+}
+
+.parent-dashboard__grades-preview-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 10px;
+  min-width: 0;
+}
+
+.parent-dashboard__grades-preview-main strong {
+  font-weight: 800;
+  color: var(--color-text, #1e293b);
+}
+
+.parent-dashboard__grades-preview-class {
+  font-weight: 600;
+  color: var(--color-text-secondary, #64748b);
+}
+
+.parent-dashboard__grades-preview-session {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary, #94a3b8);
+  width: 100%;
+}
+
+.parent-dashboard__grades-preview-when {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  color: var(--color-text-secondary, #94a3b8);
+  white-space: nowrap;
+}

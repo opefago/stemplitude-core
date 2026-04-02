@@ -29,7 +29,12 @@ import {
   Minimize2,
   Search,
 } from "lucide-react";
-import { DateTimePicker, KidDropdown, ModalDialog } from "../../components/ui";
+import {
+  DateTimePicker,
+  KidDropdown,
+  ModalDialog,
+  SearchableDropdown,
+} from "../../components/ui";
 import { useAuth } from "../../providers/AuthProvider";
 import { useTenant } from "../../providers/TenantProvider";
 import {
@@ -56,12 +61,17 @@ import {
   type RealtimeEventEnvelope,
   type RealtimeSnapshot,
   updateClassroomSessionContent,
+  createSessionAssignmentFromTemplate,
   type ClassroomSessionEventRecord,
   type ClassroomRecord,
   type ClassroomSessionRecord,
   type SessionPresenceParticipant,
   type SessionPresenceSummary,
 } from "../../lib/api/classrooms";
+import {
+  listAssignmentTemplates,
+  type AssignmentTemplate,
+} from "../../lib/api/curriculum";
 import {
   getAssetById,
   getAssetLibrary,
@@ -104,6 +114,9 @@ interface SessionAssignment {
   title: string;
   instructions: string;
   dueAt: string;
+  labId?: string | null;
+  requiresLab?: boolean;
+  requiresAssets?: boolean;
 }
 
 interface StudentSubmissionState {
@@ -171,6 +184,16 @@ export function ClassroomLiveSession() {
   const [assignmentTitle, setAssignmentTitle] = useState("");
   const [assignmentInstructions, setAssignmentInstructions] = useState("");
   const [assignmentDueAt, setAssignmentDueAt] = useState("");
+  const [assignmentRequirement, setAssignmentRequirement] = useState<
+    "none" | "lab" | "assets" | "both"
+  >("none");
+  const [assignmentLabId, setAssignmentLabId] = useState("");
+  const [assignmentTemplateId, setAssignmentTemplateId] = useState("");
+  const [assignmentTemplates, setAssignmentTemplates] = useState<
+    AssignmentTemplate[]
+  >([]);
+  const [assignmentTemplatesLoading, setAssignmentTemplatesLoading] =
+    useState(false);
   const [sessionAssignments, setSessionAssignments] = useState<SessionAssignment[]>([
     {
       id: "a-1",
@@ -675,6 +698,9 @@ export function ClassroomLiveSession() {
               title: String(r.title ?? ""),
               instructions: String(r.instructions ?? ""),
               dueAt: String(r.due_at ?? ""),
+              labId: typeof r.lab_id === "string" ? r.lab_id : null,
+              requiresLab: Boolean(r.requires_lab),
+              requiresAssets: Boolean(r.requires_assets),
             };
           }),
         );
@@ -1005,6 +1031,9 @@ export function ClassroomLiveSession() {
                 title: String(r.title ?? ""),
                 instructions: String(r.instructions ?? ""),
                 dueAt: String(r.due_at ?? ""),
+                labId: typeof r.lab_id === "string" ? r.lab_id : null,
+                requiresLab: Boolean(r.requires_lab),
+                requiresAssets: Boolean(r.requires_assets),
               };
             }),
           );
@@ -1076,6 +1105,9 @@ export function ClassroomLiveSession() {
                   title: String(r.title ?? ""),
                   instructions: String(r.instructions ?? ""),
                   dueAt: String(r.due_at ?? ""),
+                  labId: typeof r.lab_id === "string" ? r.lab_id : null,
+                  requiresLab: Boolean(r.requires_lab),
+                  requiresAssets: Boolean(r.requires_assets),
                 };
               }),
             );
@@ -1664,24 +1696,79 @@ export function ClassroomLiveSession() {
     }
   };
 
+  const loadAssignmentTemplateOptions = async () => {
+    setAssignmentTemplatesLoading(true);
+    try {
+      const rows = await listAssignmentTemplates({
+        limit: 300,
+        ...(classroom?.curriculum_id ? { course_id: classroom.curriculum_id } : {}),
+      });
+      setAssignmentTemplates(rows);
+    } catch {
+      setAssignmentTemplates([]);
+    } finally {
+      setAssignmentTemplatesLoading(false);
+    }
+  };
+
   const openCreateAssignmentDialog = () => {
     setEditingAssignmentId(null);
+    setAssignmentTemplateId("");
     setAssignmentTitle("");
     setAssignmentInstructions("");
     setAssignmentDueAt("");
+    setAssignmentRequirement("none");
+    setAssignmentLabId(selectedSessionLab || permittedLabs[0] || "");
     setShowAssignmentDialog(true);
+    void loadAssignmentTemplateOptions();
   };
 
   const openEditAssignmentDialog = (assignment: SessionAssignment) => {
     setEditingAssignmentId(assignment.id);
+    setAssignmentTemplateId("");
     setAssignmentTitle(assignment.title);
     setAssignmentInstructions(assignment.instructions);
     setAssignmentDueAt(assignment.dueAt);
+    const nextRequirement =
+      assignment.requiresLab && assignment.requiresAssets
+        ? "both"
+        : assignment.requiresLab
+          ? "lab"
+          : assignment.requiresAssets
+            ? "assets"
+            : "none";
+    setAssignmentRequirement(nextRequirement);
+    setAssignmentLabId(assignment.labId ?? "");
     setShowAssignmentDialog(true);
+    void loadAssignmentTemplateOptions();
   };
 
-  const handleSaveAssignment = () => {
+  const handleSaveAssignment = async () => {
     if (!id || !activeSession) return;
+    const requiresLab = assignmentRequirement === "lab" || assignmentRequirement === "both";
+    const requiresAssets = assignmentRequirement === "assets" || assignmentRequirement === "both";
+    if (requiresLab && !assignmentLabId) {
+      setError("Choose a designated lab when this assignment requires lab work.");
+      return;
+    }
+    if (!editingAssignmentId && assignmentTemplateId) {
+      setError(null);
+      try {
+        await createSessionAssignmentFromTemplate(id, activeSession.id, {
+          template_id: assignmentTemplateId,
+          due_at: assignmentDueAt ? new Date(assignmentDueAt).toISOString() : null,
+          title: assignmentTitle.trim() || null,
+        });
+        setShowAssignmentDialog(false);
+        setAssignmentTemplateId("");
+        setAssignmentTitle("");
+        setAssignmentInstructions("");
+        setAssignmentDueAt("");
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : "Failed to add assignment.");
+      }
+      return;
+    }
     const title = assignmentTitle.trim();
     const instructions = assignmentInstructions.trim();
     if (!title || !instructions) {
@@ -1694,6 +1781,9 @@ export function ClassroomLiveSession() {
       title,
       instructions,
       due_at: assignmentDueAt || null,
+      lab_id: assignmentLabId || null,
+      requires_lab: requiresLab,
+      requires_assets: requiresAssets,
     };
     const sentViaRealtime = realtimeRef.current?.send("assignment.upsert", { assignment }) ?? false;
     if (!sentViaRealtime) {
@@ -1706,6 +1796,9 @@ export function ClassroomLiveSession() {
                   title,
                   instructions,
                   dueAt: assignmentDueAt,
+                  labId: assignmentLabId || null,
+                  requiresLab,
+                  requiresAssets,
                 }
               : item,
           ),
@@ -1717,12 +1810,17 @@ export function ClassroomLiveSession() {
             title,
             instructions,
             dueAt: assignmentDueAt,
+            labId: assignmentLabId || null,
+            requiresLab,
+            requiresAssets,
           },
           ...prev,
         ]);
       }
     }
     setShowAssignmentDialog(false);
+    setAssignmentRequirement("none");
+    setAssignmentLabId(selectedSessionLab || permittedLabs[0] || "");
   };
 
   const handleStudentSubmission = async (status: "draft" | "submitted") => {
@@ -2643,6 +2741,17 @@ export function ClassroomLiveSession() {
                               <strong>{assignment.title}</strong>
                               <p>{assignment.instructions}</p>
                               {assignment.dueAt ? <span>Due {new Date(assignment.dueAt).toLocaleString()}</span> : null}
+                              {(assignment.requiresLab || assignment.requiresAssets) ? (
+                                <span>
+                                  Requires{" "}
+                                  {assignment.requiresLab && assignment.requiresAssets
+                                    ? "lab + assets"
+                                    : assignment.requiresLab
+                                      ? "lab"
+                                      : "assets"}
+                                </span>
+                              ) : null}
+                              {assignment.labId ? <span>Designated lab: {assignment.labId}</span> : null}
                             </div>
                             {isInstructorView && (
                               <button
@@ -3090,7 +3199,58 @@ export function ClassroomLiveSession() {
             ariaLabel={editingAssignmentId ? "Update assignment" : "Create assignment"}
             contentClassName="classroom-list__create-form classroom-list__create-form--dialog classroom-live__assignment-dialog"
             closeVariant="neutral"
+            footer={
+              <div className="classroom-list__create-actions">
+                <button
+                  type="button"
+                  className="classroom-list__create-btn classroom-list__create-btn--ghost"
+                  onClick={() => {
+                    setShowAssignmentDialog(false);
+                    setAssignmentTemplateId("");
+                    setAssignmentRequirement("none");
+                    setAssignmentLabId(selectedSessionLab || permittedLabs[0] || "");
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="classroom-list__create-btn"
+                  onClick={() => void handleSaveAssignment()}
+                  disabled={
+                    !editingAssignmentId &&
+                    !assignmentTemplateId &&
+                    (!assignmentTitle.trim() || !assignmentInstructions.trim())
+                  }
+                >
+                  {editingAssignmentId ? "Update assignment" : "Create assignment"}
+                </button>
+              </div>
+            }
           >
+            {!editingAssignmentId && (
+              <div className="classroom-list__create-field">
+                <label>Existing assignment template (optional)</label>
+                <SearchableDropdown
+                  value={assignmentTemplateId}
+                  onChange={setAssignmentTemplateId}
+                  ariaLabel="Select assignment template"
+                  placeholder={
+                    assignmentTemplatesLoading
+                      ? "Loading templates..."
+                      : "Select an existing template"
+                  }
+                  searchPlaceholder="Search templates..."
+                  emptyLabel="No templates found"
+                  fullWidth
+                  options={assignmentTemplates.map((template) => ({
+                    value: template.id,
+                    label: template.title,
+                    searchText: `${template.instructions ?? ""} ${template.course_id ?? ""} ${template.lesson_id ?? ""}`,
+                  }))}
+                />
+              </div>
+            )}
             <div className="classroom-list__create-field">
               <label htmlFor="session-assignment-title">Title</label>
               <input
@@ -3098,7 +3258,11 @@ export function ClassroomLiveSession() {
                 className="classroom-list__create-input"
                 value={assignmentTitle}
                 onChange={(e) => setAssignmentTitle(e.target.value)}
-                placeholder="Assignment title"
+                placeholder={
+                  assignmentTemplateId
+                    ? "Optional title override"
+                    : "Assignment title"
+                }
               />
             </div>
             <div className="classroom-list__create-field">
@@ -3108,7 +3272,11 @@ export function ClassroomLiveSession() {
                 className="classroom-list__create-input classroom-live__assignment-textarea"
                 value={assignmentInstructions}
                 onChange={(e) => setAssignmentInstructions(e.target.value)}
-                placeholder="What should students do?"
+                placeholder={
+                  assignmentTemplateId
+                    ? "Optional override instructions"
+                    : "What should students do?"
+                }
               />
             </div>
             <div className="classroom-list__create-field">
@@ -3121,18 +3289,43 @@ export function ClassroomLiveSession() {
                 timePlaceholder="Pick due time"
               />
             </div>
-            <div className="classroom-list__create-actions">
-              <button
-                type="button"
-                className="classroom-list__create-btn classroom-list__create-btn--ghost"
-                onClick={() => setShowAssignmentDialog(false)}
-              >
-                Cancel
-              </button>
-              <button type="button" className="classroom-list__create-btn" onClick={handleSaveAssignment}>
-                {editingAssignmentId ? "Update assignment" : "Create assignment"}
-              </button>
+            <div className="classroom-list__create-field">
+              <label>Submission requirement</label>
+              <KidDropdown
+                value={assignmentRequirement}
+                onChange={(value) => {
+                  const next = value as "none" | "lab" | "assets" | "both";
+                  setAssignmentRequirement(next);
+                  if ((next === "lab" || next === "both") && !assignmentLabId) {
+                    setAssignmentLabId(selectedSessionLab || permittedLabs[0] || "");
+                  }
+                }}
+                ariaLabel="Assignment requirement type"
+                minWidth={240}
+                options={[
+                  { value: "none", label: "Flexible (no requirement)" },
+                  { value: "lab", label: "Requires lab" },
+                  { value: "assets", label: "Requires assets/files" },
+                  { value: "both", label: "Requires lab + assets" },
+                ]}
+              />
             </div>
+            {permittedLabs.length > 0 &&
+              (assignmentRequirement === "lab" || assignmentRequirement === "both") && (
+                <div className="classroom-list__create-field">
+                  <label>Designated lab</label>
+                  <KidDropdown
+                    value={assignmentLabId}
+                    onChange={setAssignmentLabId}
+                    ariaLabel="Select designated lab"
+                    minWidth={240}
+                    options={[
+                      { value: "", label: "No designated lab" },
+                      ...permittedLabs.map((lab) => ({ value: lab, label: lab })),
+                    ]}
+                  />
+                </div>
+              )}
           </ModalDialog>
 
           <ModalDialog
@@ -3143,6 +3336,26 @@ export function ClassroomLiveSession() {
             contentClassName="classroom-list__create-form classroom-list__create-form--dialog classroom-detail__end-dialog"
             closeVariant="neutral"
             disableClose={endingSession}
+            footer={
+              <div className="classroom-list__create-actions">
+                <button
+                  type="button"
+                  className="classroom-list__create-btn classroom-list__create-btn--ghost"
+                  onClick={() => setShowEndDialog(false)}
+                  disabled={endingSession}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="classroom-list__create-btn classroom-list__create-btn--danger"
+                  onClick={handleConfirmEndSession}
+                  disabled={endingSession}
+                >
+                  {endingSession ? "Ending..." : forceEndRequired ? "End for all" : "End session"}
+                </button>
+              </div>
+            }
           >
             {forceEndRequired ? (
               <p className="classroom-detail__end-dialog-copy">
@@ -3155,24 +3368,6 @@ export function ClassroomLiveSession() {
                 now.
               </p>
             )}
-            <div className="classroom-list__create-actions">
-              <button
-                type="button"
-                className="classroom-list__create-btn classroom-list__create-btn--ghost"
-                onClick={() => setShowEndDialog(false)}
-                disabled={endingSession}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="classroom-list__create-btn classroom-list__create-btn--danger"
-                onClick={handleConfirmEndSession}
-                disabled={endingSession}
-              >
-                {endingSession ? "Ending..." : forceEndRequired ? "End for all" : "End session"}
-              </button>
-            </div>
           </ModalDialog>
         </>
       )}

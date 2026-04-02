@@ -1,4 +1,5 @@
 import logging
+from datetime import date, datetime, timedelta, timezone
 
 from workers.async_db import run_async_db
 from workers.celery_app import celery_app
@@ -8,61 +9,64 @@ logger = logging.getLogger(__name__)
 
 @celery_app.task
 def aggregate_progress_stats(tenant_id: str):
-    """Aggregate progress statistics for a tenant's students.
+    """Back-compat alias: rebuild analytics rollups for yesterday (UTC)."""
+    rebuild_tenant_analytics_day.delay(tenant_id, None)
 
-    Collects lesson completion rates, lab scores, and time spent metrics.
+
+@celery_app.task
+def rebuild_tenant_analytics_day(tenant_id: str, bucket_date_iso: str | None):
+    """Recompute ``tenant_analytics_daily`` for one tenant and UTC calendar day.
+
+    ``bucket_date_iso`` as ``YYYY-MM-DD`` or None for yesterday UTC.
     """
-    logger.info("aggregate_progress_stats started tenant_id=%s", tenant_id)
     from uuid import UUID
-    from sqlalchemy import func, select
-    from app.progress.models import LessonProgress, LabProgress
 
-    async def _aggregate():
+    from app.analytics.rollup import rebuild_tenant_bucket_day
+
+    tid = UUID(tenant_id)
+    if bucket_date_iso:
+        y, m, d = (int(x) for x in bucket_date_iso.split("-", 2))
+        day = date(y, m, d)
+    else:
+        day = datetime.now(timezone.utc).date() - timedelta(days=1)
+
+    async def _run():
         import app.database as db_mod
 
-        async with db_mod.async_session_factory() as db:
-            tid = UUID(tenant_id)
-
-            lesson_stats = await db.execute(
-                select(
-                    func.count(LessonProgress.id).label("total"),
-                    func.count(LessonProgress.completed_at).label("completed"),
-                    func.avg(LessonProgress.score).label("avg_score"),
-                    func.sum(LessonProgress.time_spent_seconds).label("total_time"),
-                ).where(LessonProgress.tenant_id == tid)
-            )
-
-            lab_stats = await db.execute(
-                select(
-                    func.count(LabProgress.id).label("total"),
-                    func.count(LabProgress.completed_at).label("completed"),
-                    func.avg(LabProgress.score).label("avg_score"),
-                    func.sum(LabProgress.time_spent_seconds).label("total_time"),
-                ).where(LabProgress.tenant_id == tid)
-            )
-
-            # TODO: Store aggregated stats (e.g., in a stats table or cache)
-            return {
-                "lessons": lesson_stats.first()._asdict(),
-                "labs": lab_stats.first()._asdict(),
-            }
+        async with db_mod.async_session_factory() as session:
+            await rebuild_tenant_bucket_day(session, tid, day)
+            await session.commit()
 
     try:
-        result = run_async_db(_aggregate)
-        logger.info("aggregate_progress_stats completed tenant_id=%s", tenant_id)
-        return result
+        run_async_db(_run)
+        logger.info("rebuild_tenant_analytics_day ok tenant=%s day=%s", tenant_id, day)
     except Exception as exc:
-        logger.error("aggregate_progress_stats failed tenant_id=%s: %s", tenant_id, exc)
+        logger.error("rebuild_tenant_analytics_day failed tenant=%s: %s", tenant_id, exc)
+        raise
+
+
+@celery_app.task
+def rebuild_all_tenants_analytics_day(bucket_date_iso: str | None = None):
+    """Schedule rollup rebuild for every active tenant (yesterday UTC if date omitted)."""
+    from app.analytics.rollup import list_active_tenant_ids
+
+    async def _list():
+        import app.database as db_mod
+
+        async with db_mod.async_session_factory() as session:
+            return await list_active_tenant_ids(session)
+
+    try:
+        ids = run_async_db(_list)
+        for raw in ids:
+            rebuild_tenant_analytics_day.delay(str(raw), bucket_date_iso)
+        logger.info("rebuild_all_tenants_analytics_day scheduled count=%s", len(ids))
+    except Exception as exc:
+        logger.error("rebuild_all_tenants_analytics_day failed: %s", exc)
         raise
 
 
 @celery_app.task
 def generate_usage_report(tenant_id: str):
-    """Generate usage report for a tenant (seat usage, active students, etc.)."""
-    logger.info("generate_usage_report started tenant_id=%s", tenant_id)
-    try:
-        # TODO: Implement detailed usage reporting
-        logger.info("generate_usage_report completed tenant_id=%s", tenant_id)
-    except Exception as exc:
-        logger.error("generate_usage_report failed tenant_id=%s: %s", tenant_id, exc)
-        raise
+    """Reserved: usage report generation; rollups cover core learning metrics."""
+    logger.info("generate_usage_report noop tenant_id=%s (use analytics rollups)", tenant_id)

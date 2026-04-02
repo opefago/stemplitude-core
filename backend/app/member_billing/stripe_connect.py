@@ -112,7 +112,7 @@ def ensure_stripe_product_price(
 def create_member_checkout_session(
     *,
     connected_account_id: str,
-    price_id: str,
+    line_item: dict[str, Any],
     mode: str,
     success_url: str,
     cancel_url: str,
@@ -123,9 +123,15 @@ def create_member_checkout_session(
 ) -> Any | None:
     if not _configure():
         return None
+    if mode not in ("subscription", "payment"):
+        logger.warning("create_member_checkout_session invalid mode=%s", mode)
+        return None
+    if not isinstance(line_item, dict) or not line_item.get("price"):
+        logger.warning("create_member_checkout_session invalid line_item")
+        return None
     params: dict[str, Any] = {
         "mode": mode,
-        "line_items": [{"price": price_id, "quantity": 1}],
+        "line_items": [line_item],
         "success_url": success_url,
         "cancel_url": cancel_url,
         "metadata": metadata,
@@ -147,6 +153,14 @@ def create_member_checkout_session(
     except stripe.StripeError as e:
         logger.warning("create_member_checkout_session failed: %s", e)
         return None
+
+
+def member_checkout_line_item(price_id: str) -> tuple[dict[str, Any] | None, str | None]:
+    """Return a Stripe Checkout line item for a connected-account member product."""
+    normalized = (price_id or "").strip()
+    if not normalized:
+        return None, "Member product is missing a Stripe price."
+    return {"price": normalized, "quantity": 1}, None
 
 
 def retrieve_checkout_session(session_id: str, *, connected_account_id: str) -> Any | None:

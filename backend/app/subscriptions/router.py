@@ -183,6 +183,48 @@ async def reactivate_subscription(
     return sub
 
 
+@router.post("/{id}/pause", response_model=SubscriptionResponse)
+async def pause_subscription(
+    id: UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    identity: CurrentIdentity = Depends(get_current_identity),
+):
+    """Pause subscription billing collection."""
+    tenant_ctx = getattr(request.state, "tenant", None)
+    if not tenant_ctx:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tenant context required. Provide X-Tenant-ID header.",
+        )
+    service = SubscriptionService(db)
+    sub = await service.pause_subscription(id, identity, tenant_ctx)
+    if not sub:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subscription not found")
+    return sub
+
+
+@router.post("/{id}/resume", response_model=SubscriptionResponse)
+async def resume_subscription(
+    id: UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    identity: CurrentIdentity = Depends(get_current_identity),
+):
+    """Resume billing collection for a paused subscription."""
+    tenant_ctx = getattr(request.state, "tenant", None)
+    if not tenant_ctx:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tenant context required. Provide X-Tenant-ID header.",
+        )
+    service = SubscriptionService(db)
+    sub = await service.resume_subscription(id, identity, tenant_ctx)
+    if not sub:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subscription not found")
+    return sub
+
+
 @router.post("/webhook")
 async def stripe_webhook(
     request: Request,

@@ -129,3 +129,35 @@ export async function listTenantInvoices(
     `/subscriptions/invoices${suffix}`,
   );
 }
+
+export async function cancelSubscription(
+  subscriptionId: string,
+): Promise<SubscriptionRecord> {
+  return apiFetch<SubscriptionRecord>(`/subscriptions/${subscriptionId}/cancel`, {
+    method: "POST",
+  });
+}
+
+export async function reactivateSubscription(
+  subscriptionId: string,
+): Promise<SubscriptionRecord> {
+  return apiFetch<SubscriptionRecord>(`/subscriptions/${subscriptionId}/reactivate`, {
+    method: "POST",
+  });
+}
+
+export async function pauseSubscription(
+  subscriptionId: string,
+): Promise<SubscriptionRecord> {
+  return apiFetch<SubscriptionRecord>(`/subscriptions/${subscriptionId}/pause`, {
+    method: "POST",
+  });
+}
+
+export async function resumeSubscription(
+  subscriptionId: string,
+): Promise<SubscriptionRecord> {
+  return apiFetch<SubscriptionRecord>(`/subscriptions/${subscriptionId}/resume`, {
+    method: "POST",
+  });
+}

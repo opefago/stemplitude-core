@@ -478,6 +478,32 @@ class ParentChildActivityResponse(BaseModel):
     limit: int = 40
 
 
+class ParentAssignmentGradeRow(BaseModel):
+    """Single graded submission visible to a guardian."""
+
+    graded_at: datetime
+    score: int = Field(..., ge=0, le=100)
+    feedback: str | None = None
+    assignment_id: str | None = None
+    classroom_id: UUID
+    classroom_name: str
+    session_id: UUID
+    session_start: datetime
+    session_end: datetime
+    session_display_title: str | None = None
+    rubric: list[dict] | None = Field(
+        None,
+        description="Instructor rubric breakdown (criterion_id, max_points, points_awarded) when provided.",
+    )
+
+
+class ParentChildAssignmentGradesResponse(BaseModel):
+    grades: list[ParentAssignmentGradeRow]
+    total: int = Field(0, ge=0)
+    skip: int = 0
+    limit: int = 50
+
+
 # --- Guardian attendance & excusal requests ---
 
 

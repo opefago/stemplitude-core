@@ -42,6 +42,7 @@ from .stripe_connect import (
     create_member_checkout_session,
     create_price_on_connected_product,
     ensure_stripe_product_price,
+    member_checkout_line_item,
     modify_connected_product,
     retrieve_account,
 )
@@ -409,6 +410,9 @@ class MemberBillingService:
             raise HTTPException(status_code=404, detail="Product not found")
 
         mode = "subscription" if product.billing_type == "recurring" else "payment"
+        line_item, line_error = member_checkout_line_item(product.stripe_price_id or "")
+        if not line_item:
+            raise HTTPException(status_code=400, detail=line_error or "Could not prepare checkout line item.")
         meta = {
             "member_billing": "1",
             "tenant_id": str(tenant.tenant_id),
@@ -422,7 +426,7 @@ class MemberBillingService:
         base = settings.FRONTEND_URL.rstrip("/")
         session = create_member_checkout_session(
             connected_account_id=t.stripe_connect_account_id,
-            price_id=product.stripe_price_id,
+            line_item=line_item,
             mode=mode,
             success_url=f"{base}/app/member-billing/success?session_id={{CHECKOUT_SESSION_ID}}",
             cancel_url=f"{base}/app/member-billing/cancel",

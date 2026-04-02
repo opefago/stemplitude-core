@@ -16,7 +16,9 @@ from .stripe_client import (
     cancel_subscription as stripe_cancel_subscription,
     construct_webhook_event as stripe_construct_webhook_event,
     create_checkout_session as stripe_create_checkout_session,
+    pause_subscription as stripe_pause_subscription,
     reactivate_subscription as stripe_reactivate_subscription,
+    resume_subscription as stripe_resume_subscription,
 )
 
 if TYPE_CHECKING:
@@ -72,6 +74,10 @@ class BillingProvider(Protocol):
     def cancel_subscription(self, provider_subscription_id: str) -> bool: ...
 
     def reactivate_subscription(self, provider_subscription_id: str) -> bool: ...
+
+    def pause_subscription(self, provider_subscription_id: str) -> bool: ...
+
+    def resume_subscription(self, provider_subscription_id: str) -> bool: ...
 
     def parse_webhook(
         self,
@@ -152,6 +158,14 @@ class StripeBillingProvider:
         result = stripe_reactivate_subscription(provider_subscription_id)
         return result is not None
 
+    def pause_subscription(self, provider_subscription_id: str) -> bool:
+        result = stripe_pause_subscription(provider_subscription_id)
+        return result is not None
+
+    def resume_subscription(self, provider_subscription_id: str) -> bool:
+        result = stripe_resume_subscription(provider_subscription_id)
+        return result is not None
+
     def parse_webhook(
         self,
         *,
@@ -213,6 +227,14 @@ class PayPalBillingProvider:
 
     def reactivate_subscription(self, provider_subscription_id: str) -> bool:
         logger.warning("PayPal reactivate_subscription not implemented sub=%s", provider_subscription_id)
+        return False
+
+    def pause_subscription(self, provider_subscription_id: str) -> bool:
+        logger.warning("PayPal pause_subscription not implemented sub=%s", provider_subscription_id)
+        return False
+
+    def resume_subscription(self, provider_subscription_id: str) -> bool:
+        logger.warning("PayPal resume_subscription not implemented sub=%s", provider_subscription_id)
         return False
 
     def parse_webhook(

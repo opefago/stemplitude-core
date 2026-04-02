@@ -486,6 +486,11 @@ class SessionEditRequest(BaseModel):
     session_end: datetime | None = Field(None, description="New end time (ISO 8601 datetime).")
     meeting_link: str | None = Field(None, max_length=500, description="Meeting URL.")
     notes: str | None = Field(None, max_length=2000, description="Session notes.")
+    display_title: str | None = Field(
+        None,
+        max_length=200,
+        description="Optional label shown instead of raw dates (e.g. 'Week 3 — Line follower').",
+    )
 
 
 class SessionResponse(BaseModel):
@@ -505,6 +510,10 @@ class SessionResponse(BaseModel):
         description="External meeting ID from the provider.",
     )
     notes: str | None = Field(None, description="Session notes.")
+    display_title: str | None = Field(
+        None,
+        description="Instructor-defined session label; UI may show this with an ordinal (Class 1, Class 2, …).",
+    )
     session_content: dict | None = Field(
         None,
         description="Session-linked shared/downloadable asset references.",
@@ -728,14 +737,40 @@ class ClassroomAssignmentResponse(BaseModel):
     instructions: str | None = None
     due_at: str | None = None
     lab_id: str | None = None
+    lab_launcher_id: str | None = None
+    curriculum_lab_title: str | None = None
     requires_lab: bool = False
     requires_assets: bool = False
     allow_edit_after_submit: bool = False
+    use_rubric: bool = True
+    rubric_template_id: str | None = None
+    rubric_snapshot: list | None = None
+    assignment_template_id: str | None = None
     session_id: str
     session_start: str
     session_end: str
     session_status: str
+    session_display_title: str | None = None
     submission_count: int = 0
+
+
+class CreateAssignmentFromTemplateRequest(BaseModel):
+    """Create or replace a session assignment from a curriculum assignment template."""
+
+    template_id: UUID = Field(..., description="Assignment template ID.")
+    due_at: str | None = Field(None, description="ISO 8601 due date for this instance.")
+    title: str | None = Field(None, max_length=200, description="Override template title.")
+    assignment_id: str | None = Field(
+        None,
+        description="Stable assignment id for idempotent upserts (defaults to new UUID).",
+    )
+    rubric_snapshot: list[dict] | None = Field(
+        None,
+        description=(
+            "When the template uses a rubric but has no linked rubric template, "
+            "provide criterion rows here (criterion_id, max_points, optional label)."
+        ),
+    )
 
 
 class RubricCriterionInput(BaseModel):

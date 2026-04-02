@@ -23,7 +23,10 @@ def _stripe_attr(obj: Any, key: str) -> Any:
 def apply_stripe_subscription_payload_to_local(subscription: Subscription, stripe_sub: Any) -> None:
     """Copy status, billing period, trial, and cancel timestamps from Stripe onto our row."""
     status = _stripe_attr(stripe_sub, "status")
-    if status:
+    pause_collection = _stripe_attr(stripe_sub, "pause_collection")
+    if pause_collection:
+        subscription.status = "paused"
+    elif status:
         subscription.status = str(status)
     cps_raw, cpe_raw = billing_period_unix_bounds_from_stripe_subscription(stripe_sub)
     subscription.current_period_start = stripe_unix_to_aware_utc(cps_raw)

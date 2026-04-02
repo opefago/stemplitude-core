@@ -209,6 +209,42 @@ def reactivate_subscription(stripe_subscription_id: str) -> stripe.Subscription 
         raise
 
 
+def pause_subscription(stripe_subscription_id: str) -> stripe.Subscription | None:
+    """Pause collection for a Stripe subscription."""
+    if not settings.STRIPE_SECRET_KEY:
+        return None
+
+    configure_stripe()
+    try:
+        result = stripe.Subscription.modify(
+            stripe_subscription_id,
+            pause_collection={"behavior": "mark_uncollectible"},
+        )
+        logger.info("Stripe subscription paused sub=%s", stripe_subscription_id)
+        return result
+    except stripe.error.StripeError:
+        logger.error("Stripe pause failed sub=%s", stripe_subscription_id, exc_info=True)
+        raise
+
+
+def resume_subscription(stripe_subscription_id: str) -> stripe.Subscription | None:
+    """Resume collection for a paused Stripe subscription."""
+    if not settings.STRIPE_SECRET_KEY:
+        return None
+
+    configure_stripe()
+    try:
+        result = stripe.Subscription.modify(
+            stripe_subscription_id,
+            pause_collection=None,
+        )
+        logger.info("Stripe subscription resumed sub=%s", stripe_subscription_id)
+        return result
+    except stripe.error.StripeError:
+        logger.error("Stripe resume failed sub=%s", stripe_subscription_id, exc_info=True)
+        raise
+
+
 def list_invoices_for_stripe_subscription(
     stripe_subscription_id: str, *, limit: int = 50
 ) -> Any | None:

@@ -11,6 +11,7 @@ import { useChildContextStudentId } from "../../lib/childContext";
 import { useAuth } from "../../providers/AuthProvider";
 import { useTenant } from "../../providers/TenantProvider";
 import type { LabClassroomContext } from "./useLabSession";
+import { buildLabLaunchPath, isCurriculumLabUuid } from "./labRouting";
 import { playAwardSound, playChatSound, playHelpSound, playJoinSound } from "./labSounds";
 import { RecognitionToast, type RecognitionEvent } from "../classrooms/RecognitionToast";
 import "./lab-assistant.css";
@@ -104,7 +105,11 @@ export function LabAssistantPanel({ classroomContext }: Props) {
       }
     }
 
-    if (ev.event_type === "assignment_upserted" || ev.event_type === "assignment_deleted") {
+    if (
+      ev.event_type === "assignment.updated" ||
+      ev.event_type === "assignment.created" ||
+      ev.event_type === "assignment.deleted"
+    ) {
       setAssignments((ev as unknown as { payload?: { assignments?: unknown[] } }).payload?.assignments ?? []);
     }
 
@@ -419,12 +424,52 @@ export function LabAssistantPanel({ classroomContext }: Props) {
                 <p className="lab-assistant-panel__empty">No assignments yet.</p>
               ) : (
                 <ul className="lab-assistant-panel__assignment-list">
-                  {(assignments as Array<{ id: string; title?: string; description?: string }>).map((a) => (
-                    <li key={a.id} className="lab-assistant-panel__assignment-item">
-                      <strong>{a.title ?? "Untitled"}</strong>
-                      {a.description && <p>{a.description}</p>}
-                    </li>
-                  ))}
+                  {(
+                    assignments as Array<Record<string, unknown>>
+                  ).map((a) => {
+                    const aid = String(a.id ?? "");
+                    const title = String(a.title ?? "Untitled");
+                    const desc = a.description;
+                    const labLauncher =
+                      typeof a.lab_launcher_id === "string" &&
+                      a.lab_launcher_id.trim()
+                        ? a.lab_launcher_id.trim()
+                        : null;
+                    const rawLid =
+                      typeof a.lab_id === "string" ? a.lab_id.trim() : "";
+                    const launcher =
+                      labLauncher ||
+                      (rawLid && !isCurriculumLabUuid(rawLid) ? rawLid : null);
+                    return (
+                      <li key={aid} className="lab-assistant-panel__assignment-item">
+                        <strong>{title}</strong>
+                        {typeof desc === "string" && desc ? <p>{desc}</p> : null}
+                        {isInstructor && launcher ? (
+                          <button
+                            type="button"
+                            className="lab-assistant-panel__observe-btn"
+                            style={{ marginTop: 6 }}
+                            onClick={() =>
+                              navigate(
+                                buildLabLaunchPath(launcher, {
+                                  classroomId,
+                                  sessionId,
+                                  referrer: "classroom_live_session",
+                                  assignmentId: aid,
+                                  curriculumLabId: isCurriculumLabUuid(rawLid)
+                                    ? rawLid
+                                    : undefined,
+                                }),
+                              )
+                            }
+                          >
+                            <Eye size={12} />
+                            Open lab
+                          </button>
+                        ) : null}
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </div>

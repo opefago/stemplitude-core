@@ -1,8 +1,10 @@
-import { useState, useEffect, type ReactNode } from "react";
-import { NavLink, useLocation } from "react-router-dom";
+import { useState, useEffect, useMemo, useRef, type ReactNode } from "react";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
+  Lock,
   PanelLeftClose,
   Mail,
+  Plus,
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "../../providers/AuthProvider";
@@ -13,6 +15,9 @@ import { useChildContextStudentId } from "../../lib/childContext";
 import { useNavInboxSignals } from "../../hooks/useNavInboxSignals";
 import { useGuardianMemberBillingSummary } from "../../hooks/useGuardianMemberBillingSummary";
 import { TenantSwitcher } from "./TenantSwitcher";
+import { apiFetch } from "../../lib/api/client";
+import { ModalDialog } from "../ui";
+import "../ui/ui.css";
 import "./sidebar.css";
 
 type NavItem = {
@@ -211,6 +216,253 @@ function getDisplayName(firstName?: string, lastName?: string, email?: string): 
   return "User";
 }
 
+type CreateAction = {
+  id: string;
+  label: string;
+  description: string;
+  section: string;
+  to: string;
+  capabilityKey?: string;
+  locked?: boolean;
+  lockReason?: string | null;
+};
+
+function getCreateActions(
+  isAdminLike: boolean,
+  isInstructor: boolean,
+  isHomeschool: boolean,
+): CreateAction[] {
+  const out: CreateAction[] = [];
+  if (isAdminLike) {
+    out.push(
+      {
+        id: "class",
+        label: "New class",
+        description: "Create a classroom and schedule sessions.",
+        section: "Teaching",
+        to: "/app/classrooms?create=1",
+        capabilityKey: "create_classroom",
+      },
+      {
+        id: "program",
+        label: "New program",
+        description: "Set term dates and defaults for groups of classes.",
+        section: "Teaching",
+        to: "/app/programs?create=1",
+      },
+      {
+        id: "curriculum",
+        label: "New curriculum",
+        description: "Add a new course with modules, lessons, and labs.",
+        section: "Curriculum",
+        to: "/app/curriculum?create=1",
+      },
+      {
+        id: "rubric",
+        label: "New rubric template",
+        description: "Define reusable grading criteria.",
+        section: "Curriculum",
+        to: "/app/curriculum/authoring?tab=rubrics&create=rubric",
+      },
+      {
+        id: "assignment",
+        label: "New assignment template",
+        description: "Create a reusable assignment for session launch.",
+        section: "Curriculum",
+        to: "/app/curriculum/authoring?tab=assignments&create=assignment",
+      },
+      {
+        id: "invite",
+        label: "Invite users",
+        description: "Send invites to staff and instructors.",
+        section: "People",
+        to: "/app/invitations?create=user",
+        capabilityKey: "create_student",
+      },
+    );
+    return out;
+  }
+  if (isInstructor || isHomeschool) {
+    if (isHomeschool) {
+      out.push({
+        id: "curriculum",
+        label: "New curriculum",
+        description: "Add a new course with modules, lessons, and labs.",
+        section: "Curriculum",
+        to: "/app/curriculum?create=1",
+      });
+    }
+    out.push(
+      {
+        id: "class",
+        label: "New class",
+        description: "Create a classroom and schedule sessions.",
+        section: "Teaching",
+        to: "/app/classrooms?create=1",
+      },
+      {
+        id: "rubric",
+        label: "New rubric template",
+        description: "Define reusable grading criteria.",
+        section: "Curriculum",
+        to: "/app/curriculum/authoring?tab=rubrics&create=rubric",
+      },
+      {
+        id: "assignment",
+        label: "New assignment template",
+        description: "Create a reusable assignment for session launch.",
+        section: "Curriculum",
+        to: "/app/curriculum/authoring?tab=assignments&create=assignment",
+      },
+    );
+  }
+  return out;
+}
+
+function SidebarCreateMenu({
+  actions,
+  collapsed,
+  onNavigate,
+  canUpgrade,
+}: {
+  actions: CreateAction[];
+  collapsed: boolean;
+  onNavigate: () => void;
+  canUpgrade: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [paywallAction, setPaywallAction] = useState<CreateAction | null>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
+  const grouped = actions.reduce<Record<string, CreateAction[]>>((acc, item) => {
+    if (!acc[item.section]) acc[item.section] = [];
+    acc[item.section].push(item);
+    return acc;
+  }, {});
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  if (actions.length === 0) return null;
+
+  return (
+    <div className="sidebar__create-wrap" ref={wrapRef}>
+      <button
+        type="button"
+        className="sidebar__create-trigger"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={collapsed ? "Create" : undefined}
+        title={collapsed ? "Create" : undefined}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <Plus size={18} strokeWidth={2.5} aria-hidden className="sidebar__create-plus" />
+        <span className="sidebar__create-label">Create</span>
+      </button>
+      {open && (
+        <div className="sidebar__create-menu" role="menu" aria-label="Create menu">
+          <div className="sidebar__create-menu-header">
+            <h3 className="sidebar__create-menu-title">Create new</h3>
+            <p className="sidebar__create-menu-subtitle">
+              Start a new workflow quickly.
+            </p>
+          </div>
+          <div className="sidebar__create-menu-body">
+            {Object.entries(grouped).map(([section, rows]) => (
+              <div key={section} className="sidebar__create-section">
+                <p className="sidebar__create-section-title">{section}</p>
+                <ul className="sidebar__create-section-list" role="none">
+                  {rows.map((a) => (
+                    <li key={a.id} role="none">
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className={`sidebar__create-menu-item${a.locked ? " sidebar__create-menu-item--locked" : ""}`}
+                        onClick={() => {
+                          if (a.locked) {
+                            setPaywallAction(a);
+                            return;
+                          }
+                          navigate(a.to);
+                          setOpen(false);
+                          onNavigate();
+                        }}
+                        aria-disabled={a.locked ? true : undefined}
+                      >
+                        <span className="sidebar__create-menu-item-label">
+                          {a.locked && <Lock size={14} aria-hidden className="sidebar__create-menu-item-lock" />}
+                          {a.label}
+                        </span>
+                        <span className="sidebar__create-menu-item-desc">
+                          {a.locked ? (a.lockReason ?? "Not available on your current plan.") : a.description}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+          <div className="sidebar__create-menu-footer">
+            Pick an action to open its creation flow.
+          </div>
+        </div>
+      )}
+      <ModalDialog
+        isOpen={Boolean(paywallAction)}
+        onClose={() => setPaywallAction(null)}
+        title="Feature not available on your plan"
+        ariaLabel="Upgrade required"
+        contentClassName="sidebar__upgrade-modal"
+        closeVariant="neutral"
+        footer={
+          <div className="ui-form-actions">
+            <button type="button" className="ui-btn ui-btn--ghost" onClick={() => setPaywallAction(null)}>
+              Not now
+            </button>
+            {canUpgrade ? (
+              <button
+                type="button"
+                className="ui-btn ui-btn--primary"
+                onClick={() => {
+                  setPaywallAction(null);
+                  setOpen(false);
+                  navigate("/app/billing");
+                  onNavigate();
+                }}
+              >
+                Upgrade now
+              </button>
+            ) : null}
+          </div>
+        }
+      >
+        <p className="sidebar__upgrade-copy">
+          <strong>{paywallAction?.label}</strong> is currently locked for your subscription.
+        </p>
+        <p className="sidebar__upgrade-copy">
+          {canUpgrade
+            ? "Upgrade your plan to unlock this action."
+            : "Ask your organization owner/admin to upgrade the plan."}
+        </p>
+      </ModalDialog>
+    </div>
+  );
+}
+
 function membershipNavPill(
   path: string,
   mb: ReturnType<typeof useGuardianMemberBillingSummary>,
@@ -274,6 +526,8 @@ export function Sidebar() {
   const isAdmin = isSuperAdmin || role === "admin" || role === "owner";
   const isParentLike = role === "parent" || role === "homeschool_parent";
   const isInstructor = role === "instructor";
+  const isHomeschool = role === "homeschool_parent";
+  const isAdminLike = role === "admin" || role === "owner";
   const showTenantSwitcher = isAdmin || isParentLike || isInstructor;
   const [isMobile, setIsMobile] = useState(false);
   const { unreadChatThreads, unreadNotifications } = useNavInboxSignals();
@@ -315,6 +569,68 @@ export function Sidebar() {
     location.pathname.startsWith("/app/platform/users") ||
     location.pathname.startsWith("/app/platform/roles") ||
     location.pathname.startsWith("/app/platform/member-billing-fees");
+  const showSidebarCreate =
+    !isPlatformView &&
+    !isOnPlatformPage &&
+    (isAdminLike || isInstructor || isHomeschool);
+  const createActionsBase = useMemo(
+    () => (showSidebarCreate ? getCreateActions(isAdminLike, isInstructor, isHomeschool) : []),
+    [showSidebarCreate, isAdminLike, isInstructor, isHomeschool],
+  );
+  const [capabilityChecks, setCapabilityChecks] = useState<
+    Record<string, { allowed: boolean; reason?: string | null }>
+  >({});
+  useEffect(() => {
+    let cancelled = false;
+    if (!showSidebarCreate || !isAdminLike) {
+      setCapabilityChecks((prev) => (Object.keys(prev).length === 0 ? prev : {}));
+      return;
+    }
+    const keys = Array.from(
+      new Set(
+        createActionsBase
+          .map((a) => a.capabilityKey)
+          .filter((k): k is string => Boolean(k)),
+      ),
+    );
+    if (keys.length === 0) {
+      setCapabilityChecks((prev) => (Object.keys(prev).length === 0 ? prev : {}));
+      return;
+    }
+    void Promise.all(
+      keys.map(async (key) => {
+        try {
+          const res = await apiFetch<{ allowed: boolean; reason?: string | null }>(
+            "/capabilities/check",
+            { method: "POST", body: { capability_key: key } },
+          );
+          return [key, res] as const;
+        } catch {
+          return [key, { allowed: true, reason: null }] as const;
+        }
+      }),
+    ).then((rows) => {
+      if (cancelled) return;
+      setCapabilityChecks(Object.fromEntries(rows));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [showSidebarCreate, isAdminLike, createActionsBase]);
+  const createActions = useMemo(() => {
+    if (!isAdminLike) return createActionsBase;
+    return createActionsBase.map((action) => {
+      const key = action.capabilityKey;
+      if (!key) return action;
+      const cap = capabilityChecks[key];
+      if (!cap || cap.allowed) return action;
+      return {
+        ...action,
+        locked: true,
+        lockReason: cap.reason ?? "Not available on your current plan.",
+      };
+    });
+  }, [isAdminLike, createActionsBase, capabilityChecks]);
   const displayName = (isPlatformView || isOnPlatformPage) ? "Platform Admin" : (tenant?.name ?? "Organization");
 
   if (closed && !isMobile) {
@@ -379,6 +695,17 @@ export function Sidebar() {
           )}
         </div>
       </div>
+
+      {createActions.length > 0 && (
+        <SidebarCreateMenu
+          actions={createActions}
+          collapsed={collapsed}
+          canUpgrade={isAdminLike}
+          onNavigate={() => {
+            if (isMobile) setClosed(true);
+          }}
+        />
+      )}
 
       <nav
         className="sidebar__nav"

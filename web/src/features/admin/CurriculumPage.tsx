@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type Dispatch, type FormEvent, type SetStateAction } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { ChevronLeft, ChevronRight, Plus, Search } from "lucide-react";
+import { ChevronLeft, ChevronRight, ClipboardList, Plus, Search } from "lucide-react";
 import {
   createCourse,
   deleteCourse,
@@ -39,6 +39,7 @@ export function CurriculumPage() {
   const [createPublished, setCreatePublished] = useState(false);
   const [createProgramId, setCreateProgramId] = useState<string>("");
   const [createDefaultPermittedLabs, setCreateDefaultPermittedLabs] = useState<string[]>([]);
+  const [afterCreateDestination, setAfterCreateDestination] = useState<"stay" | "rubrics" | "assignments">("stay");
   const [creating, setCreating] = useState(false);
 
   const [editing, setEditing] = useState<Course | null>(null);
@@ -95,7 +96,15 @@ export function CurriculumPage() {
     setShowCreateForm(true);
     const prefilledProgramId = params.get("programId");
     if (prefilledProgramId) setCreateProgramId(prefilledProgramId);
-  }, [location.search]);
+    params.delete("create");
+    navigate(
+      {
+        pathname: location.pathname,
+        search: params.toString() ? `?${params.toString()}` : "",
+      },
+      { replace: true },
+    );
+  }, [location.pathname, location.search, navigate]);
 
   const filteredCurricula = useMemo(() => {
     return curricula.filter((c) => {
@@ -143,6 +152,12 @@ export function CurriculumPage() {
       setCreatePublished(false);
       setCreateProgramId("");
       setCreateDefaultPermittedLabs([]);
+      if (afterCreateDestination === "rubrics") {
+        navigate(`/app/curriculum/authoring?tab=rubrics&create=rubric&courseId=${created.id}`);
+      } else if (afterCreateDestination === "assignments") {
+        navigate(`/app/curriculum/authoring?tab=assignments&create=assignment&courseId=${created.id}`);
+      }
+      setAfterCreateDestination("stay");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to create curriculum");
     } finally {
@@ -193,6 +208,13 @@ export function CurriculumPage() {
         <h1 className="curriculum-page__title">Curriculum</h1>
         {error && <p className="curriculum-page__subtitle" style={{ color: "var(--color-error, #ef4444)" }}>{error}</p>}
         <div className="curriculum-page__header-actions">
+          <button
+            type="button"
+            className="ui-btn ui-btn--secondary"
+            onClick={() => navigate("/app/curriculum/authoring")}
+          >
+            <ClipboardList size={18} aria-hidden /> Rubrics & assignments
+          </button>
           <button
             type="button"
             className="ui-btn ui-btn--primary"
@@ -305,6 +327,22 @@ export function CurriculumPage() {
                 </button>
                 <button
                   type="button"
+                  className="ui-btn ui-btn--secondary"
+                  onClick={() =>
+                    navigate(`/app/curriculum/authoring?tab=assignments&courseId=${curriculum.id}`)
+                  }
+                >
+                  Assignment templates
+                </button>
+                <button
+                  type="button"
+                  className="ui-btn ui-btn--secondary"
+                  onClick={() => navigate(`/app/curriculum/authoring?tab=rubrics&create=rubric`)}
+                >
+                  New rubric
+                </button>
+                <button
+                  type="button"
                   className="curriculum-page__action-btn"
                   onClick={() => {
                     setEditing(curriculum);
@@ -370,8 +408,28 @@ export function CurriculumPage() {
         title="Create Curriculum"
         ariaLabel="Create Curriculum"
         contentClassName="curriculum-page__form-section curriculum-page__form-section--dialog"
+        footer={
+          <div className="ui-form-actions">
+            <button
+              type="button"
+              className="ui-btn ui-btn--ghost"
+              onClick={() => setShowCreateForm(false)}
+              disabled={creating}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              form="create-curriculum-form"
+              className="ui-btn ui-btn--primary"
+              disabled={creating}
+            >
+              {creating ? "Creating..." : "Create"}
+            </button>
+          </div>
+        }
       >
-        <form className="curriculum-page__form" onSubmit={handleCreateCurriculum}>
+        <form id="create-curriculum-form" className="curriculum-page__form" onSubmit={handleCreateCurriculum}>
           <div className="curriculum-page__form-grid">
             <div className="curriculum-page__field curriculum-page__field--full">
               <label htmlFor="curriculum-name">Name</label>
@@ -439,14 +497,42 @@ export function CurriculumPage() {
                 ))}
               </div>
             </div>
-          </div>
-          <div className="ui-form-actions">
-            <button type="button" className="ui-btn ui-btn--ghost" onClick={() => setShowCreateForm(false)} disabled={creating}>
-              Cancel
-            </button>
-            <button type="submit" className="ui-btn ui-btn--primary" disabled={creating}>
-              {creating ? "Creating..." : "Create"}
-            </button>
+            <div className="curriculum-page__field curriculum-page__field--full">
+              <label>After saving</label>
+              <p className="curriculum-page__field-hint">
+                Optionally jump straight into rubric or assignment template authoring for this new curriculum.
+              </p>
+              <KidDropdown
+                value={afterCreateDestination}
+                onChange={(v) => setAfterCreateDestination(v as "stay" | "rubrics" | "assignments")}
+                fullWidth
+                ariaLabel="After creating curriculum"
+                options={[
+                  { value: "stay", label: "Stay on curriculum list" },
+                  { value: "rubrics", label: "Open rubric template builder" },
+                  { value: "assignments", label: "Open assignment template builder" },
+                ]}
+              />
+            </div>
+            <div className="curriculum-page__field curriculum-page__field--full curriculum-page__authoring-shortcuts">
+              <span className="curriculum-page__field-hint">Or open authoring without saving this form:</span>
+              <div className="curriculum-page__header-actions">
+                <button
+                  type="button"
+                  className="ui-btn ui-btn--ghost"
+                  onClick={() => navigate("/app/curriculum/authoring?tab=rubrics&create=rubric")}
+                >
+                  New rubric template
+                </button>
+                <button
+                  type="button"
+                  className="ui-btn ui-btn--ghost"
+                  onClick={() => navigate("/app/curriculum/authoring?tab=assignments&create=assignment")}
+                >
+                  New assignment template
+                </button>
+              </div>
+            </div>
           </div>
         </form>
       </ModalDialog>
@@ -457,8 +543,28 @@ export function CurriculumPage() {
         title="Edit Curriculum"
         ariaLabel="Edit Curriculum"
         contentClassName="curriculum-page__form-section curriculum-page__form-section--dialog"
+        footer={
+          <div className="ui-form-actions">
+            <button
+              type="button"
+              className="ui-btn ui-btn--ghost"
+              onClick={() => setEditing(null)}
+              disabled={savingEdit}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              form="edit-curriculum-form"
+              className="ui-btn ui-btn--primary"
+              disabled={savingEdit}
+            >
+              {savingEdit ? "Saving..." : "Save"}
+            </button>
+          </div>
+        }
       >
-        <form className="curriculum-page__form" onSubmit={handleSaveEdit}>
+        <form id="edit-curriculum-form" className="curriculum-page__form" onSubmit={handleSaveEdit}>
           <div className="curriculum-page__form-grid">
             <div className="curriculum-page__field curriculum-page__field--full">
               <label htmlFor="edit-curriculum-name">Name</label>
@@ -526,14 +632,6 @@ export function CurriculumPage() {
                 ))}
               </div>
             </div>
-          </div>
-          <div className="ui-form-actions">
-            <button type="button" className="ui-btn ui-btn--ghost" onClick={() => setEditing(null)} disabled={savingEdit}>
-              Cancel
-            </button>
-            <button type="submit" className="ui-btn ui-btn--primary" disabled={savingEdit}>
-              {savingEdit ? "Saving..." : "Save"}
-            </button>
           </div>
         </form>
       </ModalDialog>

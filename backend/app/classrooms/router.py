@@ -11,6 +11,7 @@ from app.dependencies import TenantContext, get_tenant_context
 from app.classrooms.schemas import (
     ClassroomAssignmentResponse,
     ClassroomCreate,
+    CreateAssignmentFromTemplateRequest,
     ClassroomRosterStudentResponse,
     ClassroomResponse,
     ClassroomStudentResponse,
@@ -37,6 +38,7 @@ from app.classrooms.schemas import (
     SessionEventResponse,
     SessionResponse,
     AttendanceResponse,
+    RealtimeEventEnvelope,
     SubmissionGradeRequest,
     SubmissionRecord,
 )
@@ -474,6 +476,36 @@ async def cancel_session(
         id, session_id, tenant.tenant_id,
         tenant_settings=tenant_settings,
         caller_role=caller_role,
+    )
+
+
+@router.post(
+    "/{id}/sessions/{session_id}/assignments/from-template",
+    response_model=RealtimeEventEnvelope,
+    dependencies=[_require_tenant(), require_permission("classrooms", "update")],
+)
+async def create_session_assignment_from_template(
+    id: UUID,
+    session_id: UUID,
+    data: CreateAssignmentFromTemplateRequest,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(get_tenant_context),
+    identity: CurrentIdentity = Depends(get_current_identity),
+):
+    """Add or update a session assignment from a curriculum assignment template (rubric snapshot copied)."""
+    service = ClassroomService(db)
+    return await service.create_session_assignment_from_template(
+        classroom_id=id,
+        session_id=session_id,
+        tenant_id=tenant.tenant_id,
+        identity=identity,
+        template_id=data.template_id,
+        due_at=data.due_at,
+        title_override=data.title,
+        assignment_id=data.assignment_id,
+        rubric_snapshot_override=data.rubric_snapshot,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
     )
 
 

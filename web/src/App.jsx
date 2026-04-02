@@ -84,6 +84,7 @@ import {
   MembersPage,
   IntegrationsPage,
   CurriculumPage,
+  CurriculumAuthoringPage,
   ProgramsPage,
   SuperAdminDashboard,
   AssetsPage,
@@ -215,6 +216,7 @@ function DashboardRouter() {
       <Route path="/members" element={<MembersPage />} />
       <Route path="/invitations" element={<InvitationsPage />} />
       <Route path="/curriculum" element={<CurriculumPage />} />
+      <Route path="/curriculum/authoring" element={<CurriculumAuthoringPage />} />
       <Route path="/programs" element={<ProgramsPage />} />
       <Route path="/assets" element={<AssetsPage />} />
       {/* More specific than /settings — Stripe checkout success/cancel URLs use this path */}

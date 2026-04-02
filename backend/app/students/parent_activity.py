@@ -19,7 +19,9 @@ from app.gamification.models import BadgeDefinition, StudentBadge, XPTransaction
 from app.progress.models import Attendance, LabProgress, LessonProgress
 from app.students.schemas import (
     ParentActivityItem,
+    ParentAssignmentGradeRow,
     ParentChildActivityResponse,
+    ParentChildAssignmentGradesResponse,
     ParentEnrolledClassroomRef,
     ParentWeeklyDigest,
 )
@@ -29,6 +31,8 @@ _DEFAULT_ACTIVITY_LIMIT = 40
 _MAX_ACTIVITY_LIMIT = 100
 _DEFAULT_RANGE_DAYS = 90
 _MAX_RANGE_DAYS = 366
+_MAX_GRADE_LIMIT = 100
+_DEFAULT_GRADE_LIMIT = 50
 
 _STR = String(500)
 _STR_LONG = String(4000)
@@ -387,4 +391,120 @@ async def load_parent_child_activity(
         total=total,
         skip=sk,
         limit=lim,
+    )
+
+
+async def load_parent_child_assignment_grades(
+    db: AsyncSession,
+    *,
+    student_id: UUID,
+    tenant_id: UUID,
+    graded_after: datetime | None = None,
+    graded_before: datetime | None = None,
+    classroom_id: UUID | None = None,
+    skip: int = 0,
+    limit: int = _DEFAULT_GRADE_LIMIT,
+) -> ParentChildAssignmentGradesResponse:
+    """Graded assignment scores for a learner, limited to classes they are enrolled in."""
+    now = datetime.now(timezone.utc)
+    if graded_before is None:
+        graded_before = now
+    if graded_after is None:
+        graded_after = graded_before - timedelta(days=366)
+    if graded_after > graded_before:
+        raise ValueError("graded_after must be before or equal to graded_before")
+
+    lim = max(1, min(limit, _MAX_GRADE_LIMIT))
+    sk = max(0, skip)
+
+    where_extra = []
+    if classroom_id is not None:
+        where_extra.append(ClassroomSessionEvent.classroom_id == classroom_id)
+
+    count_q = (
+        select(func.count(ClassroomSessionEvent.id))
+        .join(Classroom, Classroom.id == ClassroomSessionEvent.classroom_id)
+        .join(
+            ClassroomStudent,
+            and_(
+                ClassroomStudent.classroom_id == Classroom.id,
+                ClassroomStudent.student_id == student_id,
+            ),
+        )
+        .where(
+            ClassroomSessionEvent.tenant_id == tenant_id,
+            ClassroomSessionEvent.event_type == "instructor.submission.graded",
+            ClassroomSessionEvent.student_id == student_id,
+            ClassroomSessionEvent.created_at >= graded_after,
+            ClassroomSessionEvent.created_at <= graded_before,
+            Classroom.deleted_at.is_(None),
+            *where_extra,
+        )
+    )
+    total = int(await db.scalar(count_q) or 0)
+
+    list_q = (
+        select(ClassroomSessionEvent, Classroom.name, ClassroomSession)
+        .join(Classroom, Classroom.id == ClassroomSessionEvent.classroom_id)
+        .join(
+            ClassroomStudent,
+            and_(
+                ClassroomStudent.classroom_id == Classroom.id,
+                ClassroomStudent.student_id == student_id,
+            ),
+        )
+        .join(ClassroomSession, ClassroomSession.id == ClassroomSessionEvent.session_id)
+        .where(
+            ClassroomSessionEvent.tenant_id == tenant_id,
+            ClassroomSessionEvent.event_type == "instructor.submission.graded",
+            ClassroomSessionEvent.student_id == student_id,
+            ClassroomSessionEvent.created_at >= graded_after,
+            ClassroomSessionEvent.created_at <= graded_before,
+            Classroom.deleted_at.is_(None),
+            *where_extra,
+        )
+        .order_by(ClassroomSessionEvent.created_at.desc())
+        .offset(sk)
+        .limit(lim)
+    )
+    rows = (await db.execute(list_q)).all()
+
+    grades: list[ParentAssignmentGradeRow] = []
+    for ev, classroom_name, session in rows:
+        meta = ev.metadata_ or {}
+        sc = meta.get("score")
+        try:
+            score = int(sc) if sc is not None else 0
+        except (TypeError, ValueError):
+            score = 0
+        score = max(0, min(100, score))
+        feedback = meta.get("feedback")
+        fb_str = feedback.strip()[:1000] if isinstance(feedback, str) and feedback.strip() else None
+        aid = meta.get("assignment_id")
+        aid_str = str(aid).strip() if aid is not None and str(aid).strip() else None
+        rub_raw = meta.get("rubric")
+        rub_out: list[dict] | None = None
+        if isinstance(rub_raw, list) and rub_raw:
+            rub_out = [dict(c) for c in rub_raw if isinstance(c, dict)]
+            if not rub_out:
+                rub_out = None
+        cname = classroom_name if isinstance(classroom_name, str) else str(classroom_name or "")
+        grades.append(
+            ParentAssignmentGradeRow(
+                graded_at=ev.created_at,
+                score=score,
+                feedback=fb_str,
+                assignment_id=aid_str,
+                classroom_id=ev.classroom_id,
+                classroom_name=cname.strip() or "Class",
+                session_id=ev.session_id,
+                session_start=session.session_start,
+                session_end=session.session_end,
+                session_display_title=session.display_title,
+                rubric=rub_out,
+            )
+        )
+
+    return ParentChildAssignmentGradesResponse(
+        grades=grades, total=total, skip=sk, limit=lim
     )

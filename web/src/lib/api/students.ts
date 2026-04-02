@@ -55,6 +55,8 @@ export interface StudentAssignment {
   instructions?: string | null;
   due_at?: string | null;
   lab_id?: string | null;
+  lab_launcher_id?: string | null;
+  curriculum_lab_title?: string | null;
   classroom_id: string;
   classroom_name: string;
   session_id: string;
@@ -146,6 +148,51 @@ export type GetParentChildActivityParams = {
   without_classroom?: boolean;
   classroom_id?: string;
 };
+
+export interface ParentAssignmentGradeRow {
+  graded_at: string;
+  score: number;
+  feedback?: string | null;
+  assignment_id?: string | null;
+  classroom_id: string;
+  classroom_name: string;
+  session_id: string;
+  session_start: string;
+  session_end: string;
+  session_display_title?: string | null;
+  rubric?: Record<string, unknown>[] | null;
+}
+
+export interface ParentChildAssignmentGrades {
+  grades: ParentAssignmentGradeRow[];
+  total: number;
+  skip: number;
+  limit: number;
+}
+
+export type GetParentChildAssignmentGradesParams = {
+  skip?: number;
+  limit?: number;
+  graded_after?: string;
+  graded_before?: string;
+  classroom_id?: string;
+};
+
+export async function getParentChildAssignmentGrades(
+  studentId: string,
+  params?: GetParentChildAssignmentGradesParams,
+): Promise<ParentChildAssignmentGrades> {
+  const query = new URLSearchParams();
+  if (params?.skip != null) query.set("skip", String(params.skip));
+  if (params?.limit != null) query.set("limit", String(params.limit));
+  if (params?.graded_after) query.set("graded_after", params.graded_after);
+  if (params?.graded_before) query.set("graded_before", params.graded_before);
+  if (params?.classroom_id) query.set("classroom_id", params.classroom_id);
+  const qs = query.toString();
+  return apiFetch<ParentChildAssignmentGrades>(
+    `/students/parent/children/${encodeURIComponent(studentId)}/assignment-grades${qs ? `?${qs}` : ""}`,
+  );
+}
 
 export async function getParentChildActivity(
   studentId: string,

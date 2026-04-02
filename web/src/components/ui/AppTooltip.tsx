@@ -1,4 +1,4 @@
-import { type ReactElement, type ReactNode } from "react";
+import { type ReactElement, type ReactNode, version as reactVersion } from "react";
 import Tippy, { type TippyProps } from "@tippyjs/react";
 import "tippy.js/dist/tippy.css";
 import "./ui.css";
@@ -29,6 +29,7 @@ export function AppTooltip({
   tippyProps,
 }: AppTooltipProps) {
   const hasStructuredContent = Boolean(title || description || media);
+  const isReact19Plus = Number.parseInt(reactVersion.split(".")[0] ?? "0", 10) >= 19;
   const resolvedContent =
     content ??
     (hasStructuredContent ? (
@@ -42,6 +43,14 @@ export function AppTooltip({
     ) : null);
 
   if (disabled || !resolvedContent) return children;
+  if (isReact19Plus) {
+    const nativeTitle = [title, description].filter(Boolean).join(" - ");
+    return (
+      <span className="ui-tooltip__ref-anchor" title={nativeTitle || undefined}>
+        {children}
+      </span>
+    );
+  }
 
   /* Tippy must attach ref to a host DOM node. In React 19, refs on composite
    * children (e.g. react-router Link) are regular props — @tippyjs/react still

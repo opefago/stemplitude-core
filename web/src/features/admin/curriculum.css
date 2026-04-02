@@ -44,6 +44,11 @@
   max-height: min(82vh, 720px);
 }
 
+.curriculum-page__form-section--dialog .ui-modal__header {
+  background: var(--color-surface, #fff);
+  box-shadow: 0 8px 14px -14px rgba(15, 23, 42, 0.6);
+}
+
 .curriculum-page__form-title {
   margin: 0 0 var(--spacing-md);
   font-size: 1.125rem;
@@ -74,6 +79,16 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.curriculum-page__authoring-shortcuts {
+  padding-top: var(--spacing-sm);
+  border-top: 1px dashed var(--color-border);
+}
+
+.curriculum-page__authoring-shortcuts .curriculum-page__header-actions {
+  margin-top: var(--spacing-sm);
+  flex-wrap: wrap;
 }
 
 .curriculum-page__chip {

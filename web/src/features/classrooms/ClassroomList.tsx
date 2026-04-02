@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { MoreVertical, Plus, Search, Pencil, Trash2 } from "lucide-react";
@@ -64,11 +64,21 @@ export function ClassroomList() {
 
   const canManageClassrooms =
     isSuperAdmin || role === "admin" || role === "owner" || role === "instructor";
+  const canCreateClassrooms = canManageClassrooms || role === "homeschool_parent";
   const useGuardianClassroomList =
     !canManageClassrooms &&
     subType === "user" &&
     (role === "parent" || role === "homeschool_parent");
   const currentTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+  const loadClassrooms = useCallback(async () => {
+    const rows = canManageClassrooms
+      ? await listClassrooms({ limit: 200 })
+      : useGuardianClassroomList
+        ? await listGuardianLinkedClassrooms()
+        : await listMyClassrooms();
+    setClassrooms(rows);
+  }, [canManageClassrooms, useGuardianClassroomList]);
 
   useEffect(() => {
     let mounted = true;
@@ -126,11 +136,33 @@ export function ClassroomList() {
   const initialCurriculumIdFromQuery = useMemo(() => {
     return new URLSearchParams(location.search).get("curriculumId");
   }, [location.search]);
+  const openCreateFromQuery = useMemo(() => {
+    return new URLSearchParams(location.search).get("create") === "1";
+  }, [location.search]);
 
   useEffect(() => {
-    if (!initialCurriculumIdFromQuery || !canManageClassrooms) return;
+    if (!canCreateClassrooms) return;
+    if (!initialCurriculumIdFromQuery && !openCreateFromQuery) return;
     setShowCreate(true);
-  }, [initialCurriculumIdFromQuery, canManageClassrooms]);
+    if (openCreateFromQuery) {
+      const next = new URLSearchParams(location.search);
+      next.delete("create");
+      navigate(
+        {
+          pathname: location.pathname,
+          search: next.toString() ? `?${next.toString()}` : "",
+        },
+        { replace: true },
+      );
+    }
+  }, [
+    initialCurriculumIdFromQuery,
+    openCreateFromQuery,
+    canCreateClassrooms,
+    location.pathname,
+    location.search,
+    navigate,
+  ]);
 
   const filtered = useMemo(() => {
     return classrooms.filter((c) => {
@@ -164,7 +196,7 @@ export function ClassroomList() {
     >
       <header className="classroom-list__header">
         <h1 className="classroom-list__title">Classrooms</h1>
-        {canManageClassrooms && (
+        {canCreateClassrooms && (
           <button
             type="button"
             className="classroom-list__create-btn"
@@ -178,7 +210,7 @@ export function ClassroomList() {
       </header>
       {error && <p className="classroom-list__empty">{error}</p>}
 
-      {canManageClassrooms ? (
+      {canCreateClassrooms ? (
         <>
           <ClassroomFormWizard
             mode="create"
@@ -187,8 +219,7 @@ export function ClassroomList() {
             navigate={navigate}
             initialCurriculumIdFromQuery={initialCurriculumIdFromQuery}
             onSuccess={async () => {
-              const rows = await listClassrooms({ limit: 200 });
-              setClassrooms(rows);
+              await loadClassrooms();
             }}
           />
           <ClassroomFormWizard

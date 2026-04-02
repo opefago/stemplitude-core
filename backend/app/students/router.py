@@ -12,7 +12,10 @@ from app.database import get_db
 from app.dependencies import CurrentIdentity, TenantContext, get_current_identity, get_tenant_context
 from app.students.me_student import require_me_student_id
 from app.students.parent_access import ensure_can_view_student_as_guardian
-from app.students.parent_activity import load_parent_child_activity
+from app.students.parent_activity import (
+    load_parent_child_activity,
+    load_parent_child_assignment_grades,
+)
 from app.students.schemas import (
     AttendanceExcusalCreate,
     AttendanceExcusalReview,
@@ -23,6 +26,7 @@ from app.students.schemas import (
     GuardianChildControlsResponse,
     ParentActivityKind,
     ParentChildActivityResponse,
+    ParentChildAssignmentGradesResponse,
     ParentLinkRequest,
     ParentResponse,
     ResetPasswordRequest,
@@ -1151,6 +1155,67 @@ async def parent_child_activity(
             occurred_before=_utc_activity_datetime(occurred_before),
             activity_kind=activity_kind,
             without_classroom=without_classroom,
+            classroom_id=classroom_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+
+@router.get(
+    "/parent/children/{student_id}/assignment-grades",
+    response_model=ParentChildAssignmentGradesResponse,
+    dependencies=[_require_tenant(), require_permission("progress", "view")],
+)
+async def parent_child_assignment_grades(
+    student_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    tenant: TenantContext = Depends(get_tenant_context),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=100),
+    graded_after: datetime | None = Query(
+        None,
+        description="Inclusive lower bound on grade time (ISO 8601). Defaults to one year before graded_before.",
+    ),
+    graded_before: datetime | None = Query(
+        None,
+        description="Inclusive upper bound on grade time (ISO 8601). Defaults to now (UTC).",
+    ),
+    classroom_id: UUID | None = Query(
+        None,
+        description="When set, only grades from this classroom.",
+    ),
+):
+    """Assignment scores and rubric breakdown for a linked learner (guardian dashboard)."""
+    if identity.sub_type != "user":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace users can view child grades",
+        )
+    role = (identity.role or "").strip().lower()
+    if role not in ("parent", "homeschool_parent"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Parent or homeschool parent role required",
+        )
+    await ensure_can_view_student_as_guardian(
+        db,
+        identity=identity,
+        student_id=student_id,
+        tenant_id=tenant.tenant_id,
+    )
+    try:
+        return await load_parent_child_assignment_grades(
+            db,
+            student_id=student_id,
+            tenant_id=tenant.tenant_id,
+            skip=skip,
+            limit=limit,
+            graded_after=_utc_activity_datetime(graded_after),
+            graded_before=_utc_activity_datetime(graded_before),
             classroom_id=classroom_id,
         )
     except ValueError as exc:

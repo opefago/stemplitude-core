@@ -16,7 +16,7 @@ from app.classrooms.attendance_config import resolve_attendance_config
 from app.classrooms.models import Classroom, ClassroomSession, ClassroomStudent
 from app.programs.models import Program
 from app.tenants.models import Tenant
-from app.curriculum.models import Course
+from app.curriculum.models import AssignmentTemplate, Course, RubricTemplate
 from app.dependencies import CurrentIdentity, TenantContext
 from app.tenants.franchise_governance import curriculum_read_tenant_ids
 from app.notifications.models import Notification
@@ -40,29 +40,8 @@ from app.email.presets import (
 )
 from app.gamification.streak_side_effects import bump_student_streak, bump_students_streak
 
+from .assignment_lab_enrich import enrich_assignments_lab_launcher
 from .repository import ClassroomRepository
-
-
-async def _assignable_course_or_404(
-    session: AsyncSession,
-    curriculum_id: UUID,
-    *,
-    workspace_tenant_id: UUID,
-    parent_tenant_id: UUID | None = None,
-    governance_mode: str | None = None,
-) -> Course:
-    read_ids = curriculum_read_tenant_ids(
-        child_tenant_id=workspace_tenant_id,
-        parent_tenant_id=parent_tenant_id,
-        governance_mode=governance_mode,
-    )
-    course = await session.get(Course, curriculum_id)
-    if not course or course.tenant_id not in read_ids:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Curriculum not found",
-        )
-    return course
 from .schemas import (
     AttendanceResponse,
     ClassroomCreate,
@@ -91,6 +70,29 @@ from .schemas import (
     SessionResponse,
 )
 
+
+async def _assignable_course_or_404(
+    session: AsyncSession,
+    curriculum_id: UUID,
+    *,
+    workspace_tenant_id: UUID,
+    parent_tenant_id: UUID | None = None,
+    governance_mode: str | None = None,
+) -> Course:
+    read_ids = curriculum_read_tenant_ids(
+        child_tenant_id=workspace_tenant_id,
+        parent_tenant_id=parent_tenant_id,
+        governance_mode=governance_mode,
+    )
+    course = await session.get(Course, curriculum_id)
+    if not course or course.tenant_id not in read_ids:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Curriculum not found",
+        )
+    return course
+
+
 logger = logging.getLogger(__name__)
 
 PRESENCE_ACTIVE_WINDOW = timedelta(seconds=45)
@@ -104,6 +106,80 @@ class ClassroomService:
     def __init__(self, session: AsyncSession):
         self.session = session
         self.repo = ClassroomRepository(session)
+
+    @staticmethod
+    def _normalize_rubric_snapshot_storage(raw) -> list | None:
+        """Persistable rubric definition (criterion ids + max points; no scores)."""
+        if raw is None:
+            return None
+        if not isinstance(raw, list):
+            return None
+        out: list[dict] = []
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            cid = str(item.get("criterion_id") or "").strip()
+            if not cid:
+                continue
+            try:
+                mx = int(item.get("max_points"))
+            except (TypeError, ValueError):
+                continue
+            if mx < 1 or mx > 1000:
+                continue
+            row: dict = {"criterion_id": cid[:80], "max_points": mx}
+            label = item.get("label")
+            if isinstance(label, str) and label.strip():
+                row["label"] = label.strip()[:200]
+            out.append(row)
+        return out or None
+
+    def _merge_session_assignment_row(self, prev: dict, assignment: dict) -> dict:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        aid = str(assignment.get("id") or prev.get("id") or uuid.uuid4())
+        out = dict(prev)
+        out["id"] = aid
+        if "title" in assignment:
+            out["title"] = str(assignment.get("title") or "").strip()
+        if "instructions" in assignment:
+            out["instructions"] = str(assignment.get("instructions") or "").strip()
+        if "due_at" in assignment:
+            out["due_at"] = assignment.get("due_at")
+        out["updated_at"] = now_iso
+
+        if "lab_id" in assignment:
+            lid = assignment.get("lab_id")
+            if lid is None or lid == "":
+                out.pop("lab_id", None)
+            else:
+                out["lab_id"] = str(lid)
+
+        for key in ("requires_lab", "requires_assets", "allow_edit_after_submit", "use_rubric"):
+            if key in assignment:
+                out[key] = bool(assignment.get(key))
+
+        if "rubric_template_id" in assignment:
+            rid = assignment.get("rubric_template_id")
+            if rid is None or rid == "":
+                out.pop("rubric_template_id", None)
+            else:
+                out["rubric_template_id"] = str(rid)
+
+        if "assignment_template_id" in assignment:
+            tid = assignment.get("assignment_template_id")
+            if tid is None or tid == "":
+                out.pop("assignment_template_id", None)
+            else:
+                out["assignment_template_id"] = str(tid)
+
+        if "rubric_snapshot" in assignment:
+            snap = self._normalize_rubric_snapshot_storage(assignment.get("rubric_snapshot"))
+            if snap is None:
+                out.pop("rubric_snapshot", None)
+            else:
+                out["rubric_snapshot"] = snap
+
+        return out
 
     async def _session_recipient_principal_ids(
         self,
@@ -348,6 +424,17 @@ class ClassroomService:
                     meta_flat["has_preview"] = True
                     meta_flat["preview_image"] = None
                 payload.update(meta_flat)
+                assign_list = payload.get("assignments")
+                if (
+                    event.event_type.startswith("assignment.")
+                    and isinstance(assign_list, list)
+                    and assign_list
+                ):
+                    enriched = [
+                        dict(a) if isinstance(a, dict) else a for a in assign_list
+                    ]
+                    await enrich_assignments_lab_launcher(self.session, enriched)
+                    payload["assignments"] = enriched
                 payload["metadata"] = meta_flat
         return RealtimeEventEnvelope(
             event_id=event.id,
@@ -1694,6 +1781,10 @@ class ClassroomService:
                 resource_entries=list(existing_content.get("resource_entries") or []),
             )
 
+        if data.display_title is not None:
+            dt = data.display_title.strip()
+            session_obj.display_title = dt[:200] if dt else None
+
         await self.session.flush()
         await self.session.refresh(session_obj)
         logger.info("Session updated id=%s classroom=%s", session_id, classroom_id)
@@ -2025,11 +2116,23 @@ class ClassroomService:
             after_sequence=after_sequence,
             limit=replay_limit,
         )
+        assigns = list(state_row.assignments or [])
+        if assigns:
+            await enrich_assignments_lab_launcher(self.session, assigns)
+        state_for_snap = SessionStateResponse(
+            session_id=session_obj.id,
+            classroom_id=session_obj.classroom_id,
+            tenant_id=session_obj.tenant_id,
+            active_lab=state_row.active_lab,
+            assignments=assigns,
+            metadata=dict(state_row.metadata_ or {}),
+            updated_at=state_row.updated_at,
+        )
         return RealtimeSessionSnapshotResponse(
             session=self._session_to_response(session_obj),
             presence=presence,
             participants=participants,
-            state=self._session_state_to_response(state_row, session_obj=session_obj),
+            state=state_for_snap,
             latest_sequence=latest_sequence,
             events=events,
         )
@@ -2129,23 +2232,24 @@ class ClassroomService:
             tenant_id=tenant_id,
         )
         assignments = list(state_row.assignments or [])
-        now_iso = datetime.now(timezone.utc).isoformat()
         assignment_id = str(assignment.get("id") or uuid.uuid4())
-        normalized = {
-            "id": assignment_id,
-            "title": str(assignment.get("title") or "").strip(),
-            "instructions": str(assignment.get("instructions") or "").strip(),
-            "due_at": assignment.get("due_at"),
-            "updated_at": now_iso,
-        }
+        assignment_with_id = dict(assignment)
+        assignment_with_id["id"] = assignment_id
         replaced = False
         for idx, row in enumerate(assignments):
             if str(row.get("id")) == assignment_id:
-                assignments[idx] = {**row, **normalized}
+                assignments[idx] = self._merge_session_assignment_row(row, assignment_with_id)
                 replaced = True
                 break
         if not replaced:
-            assignments.insert(0, normalized)
+            assignments.insert(
+                0, self._merge_session_assignment_row({}, assignment_with_id)
+            )
+        normalized: dict = {}
+        for row in assignments:
+            if str(row.get("id")) == assignment_id:
+                normalized = row
+                break
         await self.repo.update_session_state(
             session_id=session_id,
             classroom_id=classroom_id,
@@ -2195,6 +2299,75 @@ class ClassroomService:
             identity=identity,
             event_type="assignment.deleted",
             payload={"assignment_id": assignment_id, "assignments": next_assignments},
+            correlation_id=correlation_id,
+            student_actor_id=student_actor_id,
+        )
+
+    async def create_session_assignment_from_template(
+        self,
+        *,
+        classroom_id: UUID,
+        session_id: UUID,
+        tenant_id: UUID,
+        identity: CurrentIdentity,
+        template_id: UUID,
+        due_at: str | None = None,
+        title_override: str | None = None,
+        assignment_id: str | None = None,
+        rubric_snapshot_override: list | None = None,
+        parent_tenant_id: UUID | None = None,
+        governance_mode: str | None = None,
+        correlation_id: str | None = None,
+        student_actor_id: UUID | None = None,
+    ) -> RealtimeEventEnvelope:
+        session_obj = await self.repo.get_session_by_id(session_id, classroom_id, tenant_id)
+        if session_obj is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        read_ids = curriculum_read_tenant_ids(
+            child_tenant_id=tenant_id,
+            parent_tenant_id=parent_tenant_id,
+            governance_mode=governance_mode,
+        )
+        tmpl = await self.session.get(AssignmentTemplate, template_id)
+        if tmpl is None or tmpl.tenant_id not in read_ids:
+            raise HTTPException(status_code=404, detail="Assignment template not found")
+
+        rubric_snapshot = None
+        rubric_template_id_str = None
+        if tmpl.use_rubric:
+            if rubric_snapshot_override is not None:
+                rubric_snapshot = self._normalize_rubric_snapshot_storage(rubric_snapshot_override)
+            elif tmpl.rubric_template_id:
+                rt = await self.session.get(RubricTemplate, tmpl.rubric_template_id)
+                if rt is not None and rt.tenant_id in read_ids:
+                    rubric_template_id_str = str(rt.id)
+                    rubric_snapshot = self._normalize_rubric_snapshot_storage(rt.criteria)
+
+        new_id = assignment_id or str(uuid.uuid4())
+        payload: dict = {
+            "id": new_id,
+            "title": (title_override or tmpl.title or "").strip(),
+            "instructions": (tmpl.instructions or "") if tmpl.instructions else "",
+            "due_at": due_at,
+            "lab_id": str(tmpl.lab_id) if tmpl.lab_id else None,
+            "requires_lab": tmpl.requires_lab,
+            "requires_assets": tmpl.requires_assets,
+            "allow_edit_after_submit": tmpl.allow_edit_after_submit,
+            "use_rubric": tmpl.use_rubric,
+            "assignment_template_id": str(tmpl.id),
+        }
+        if rubric_template_id_str:
+            payload["rubric_template_id"] = rubric_template_id_str
+        if rubric_snapshot is not None:
+            payload["rubric_snapshot"] = rubric_snapshot
+
+        return await self.upsert_session_assignment(
+            classroom_id=classroom_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            identity=identity,
+            assignment=payload,
             correlation_id=correlation_id,
             student_actor_id=student_actor_id,
         )
@@ -2359,13 +2532,19 @@ class ClassroomService:
                         "requires_lab": bool(raw.get("requires_lab")),
                         "requires_assets": bool(raw.get("requires_assets")),
                         "allow_edit_after_submit": bool(raw.get("allow_edit_after_submit")),
+                        "use_rubric": bool(raw.get("use_rubric", True)),
+                        "rubric_template_id": raw.get("rubric_template_id") or None,
+                        "rubric_snapshot": raw.get("rubric_snapshot") or None,
+                        "assignment_template_id": raw.get("assignment_template_id") or None,
                         "session_id": str(session.id),
                         "session_start": session.session_start.isoformat(),
                         "session_end": session.session_end.isoformat(),
                         "session_status": session.status,
+                        "session_display_title": session.display_title,
                         "submission_count": count,
                     }
                 )
+        await enrich_assignments_lab_launcher(self.session, result)
         result.sort(
             key=lambda x: (x.get("due_at") is None, str(x.get("due_at") or ""))
         )

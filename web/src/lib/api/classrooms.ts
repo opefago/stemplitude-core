@@ -39,6 +39,9 @@ export interface SessionTextAssignment {
   instructions?: string | null;
   due_at?: string | null;
   lab_id?: string | null;
+  /** Playground launcher id when ``lab_id`` is a curriculum UUID (from API). */
+  lab_launcher_id?: string | null;
+  curriculum_lab_title?: string | null;
   requires_lab?: boolean;
   requires_assets?: boolean;
   allow_edit_after_submit?: boolean;
@@ -615,6 +618,24 @@ export async function submitAssignment(
   });
 }
 
+export async function createSessionAssignmentFromTemplate(
+  classroomId: string,
+  sessionId: string,
+  payload: {
+    template_id: string;
+    due_at?: string | null;
+    title?: string | null;
+  },
+): Promise<RealtimeEventEnvelope> {
+  return apiFetch<RealtimeEventEnvelope>(
+    `/classrooms/${classroomId}/sessions/${sessionId}/assignments/from-template`,
+    {
+      method: "POST",
+      body: payload,
+    },
+  );
+}
+
 // ── Assignments & Grading ─────────────────────────────────────────────────
 
 export interface ClassroomAssignment {
@@ -623,13 +644,20 @@ export interface ClassroomAssignment {
   instructions?: string | null;
   due_at?: string | null;
   lab_id?: string | null;
+  lab_launcher_id?: string | null;
+  curriculum_lab_title?: string | null;
   requires_lab?: boolean;
   requires_assets?: boolean;
   allow_edit_after_submit?: boolean;
+  use_rubric?: boolean;
+  rubric_template_id?: string | null;
+  rubric_snapshot?: unknown[] | null;
+  assignment_template_id?: string | null;
   session_id: string;
   session_start: string;
   session_end: string;
   session_status: string;
+  session_display_title?: string | null;
   submission_count: number;
 }
 

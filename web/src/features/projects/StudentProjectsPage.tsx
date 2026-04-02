@@ -100,11 +100,14 @@ function formatProjectTime(project: LabProject): string {
 }
 
 export function StudentProjectsPage() {
+  const { user, subType } = useAuth();
+  const childCtx = useChildContextStudentId();
   const [labFilter, setLabFilter] = useState<string>("all");
   const allProjects = useMemo<LabProject[]>(() => {
     const projects: LabProject[] = [];
     LAB_CONFIGS.forEach((lab) => {
-      const rows = readStorageArray(lab.storageKey);
+      migrateLegacyLabProjectsIfNeeded(lab.storageKey);
+      const rows = readLabProjectsArray(lab.storageKey);
       rows.forEach((row) => {
         const mapped = lab.projectMapper(row);
         projects.push({
@@ -120,7 +123,7 @@ export function StudentProjectsPage() {
       const bTime = new Date(b.updatedAt || b.createdAt || 0).getTime() || 0;
       return bTime - aTime;
     });
-  }, [childCtx, user?.id, user?.subType]);
+  }, [childCtx, user?.id, subType]);
 
   const visibleProjects =
     labFilter === "all" ? allProjects : allProjects.filter((project) => project.labId === labFilter);

@@ -216,6 +216,61 @@ class SubscriptionService:
 
         return SubscriptionResponse.model_validate(sub)
 
+    async def pause_subscription(
+        self,
+        subscription_id: UUID,
+        identity: CurrentIdentity,
+        tenant_ctx: TenantContext,
+    ) -> SubscriptionResponse | None:
+        """Pause subscription billing collection."""
+        sub = await self.repo.get_by_id(subscription_id)
+        if not sub or sub.tenant_id != tenant_ctx.tenant_id:
+            logger.warning("Subscription not found id=%s", subscription_id)
+            return None
+        prov_id = sub.provider_subscription_id or sub.stripe_subscription_id
+        if not prov_id:
+            return None
+
+        impl = get_billing_provider(sub.provider or "stripe")
+        if not impl:
+            return None
+        ok = impl.pause_subscription(prov_id)
+        if ok:
+            logger.info("Subscription paused id=%s tenant=%s", subscription_id, tenant_ctx.tenant_id)
+            sub.status = "paused"
+            await self.session.flush()
+            await self.session.refresh(sub)
+
+        return SubscriptionResponse.model_validate(sub)
+
+    async def resume_subscription(
+        self,
+        subscription_id: UUID,
+        identity: CurrentIdentity,
+        tenant_ctx: TenantContext,
+    ) -> SubscriptionResponse | None:
+        """Resume billing collection for a paused subscription."""
+        sub = await self.repo.get_by_id(subscription_id)
+        if not sub or sub.tenant_id != tenant_ctx.tenant_id:
+            logger.warning("Subscription not found id=%s", subscription_id)
+            return None
+        prov_id = sub.provider_subscription_id or sub.stripe_subscription_id
+        if not prov_id:
+            return None
+
+        impl = get_billing_provider(sub.provider or "stripe")
+        if not impl:
+            return None
+        ok = impl.resume_subscription(prov_id)
+        if ok:
+            logger.info("Subscription resumed id=%s tenant=%s", subscription_id, tenant_ctx.tenant_id)
+            if (sub.status or "").lower() == "paused":
+                sub.status = "active"
+            await self.session.flush()
+            await self.session.refresh(sub)
+
+        return SubscriptionResponse.model_validate(sub)
+
     async def list_invoices(
         self,
         subscription_id: UUID,
