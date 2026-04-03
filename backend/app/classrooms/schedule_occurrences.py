@@ -93,16 +93,48 @@ def _classroom_schedule_tz(classroom: Classroom) -> ZoneInfo:
         return ZoneInfo("UTC")
 
 
+def _program_date_bounds(classroom: Classroom) -> tuple[datetime | None, datetime | None]:
+    """If the classroom belongs to a program, return (start, end) as UTC datetimes."""
+    program = getattr(classroom, "program", None)
+    if program is None or classroom.program_id is None:
+        return None, None
+    p_start: datetime | None = None
+    p_end: datetime | None = None
+    if getattr(program, "start_date", None) is not None:
+        p_start = datetime.combine(program.start_date, time.min, tzinfo=timezone.utc)
+    if getattr(program, "end_date", None) is not None:
+        p_end = datetime.combine(program.end_date, time(23, 59, 59), tzinfo=timezone.utc)
+    return p_start, p_end
+
+
+def _tighten_bound(
+    current: datetime | None, candidate: datetime | None, *, pick_later: bool
+) -> datetime | None:
+    """Return the tighter of two optional bounds.  *pick_later=True* keeps the later
+    value (for start bounds); *pick_later=False* keeps the earlier value (for end bounds)."""
+    if current is None:
+        return candidate
+    if candidate is None:
+        return current
+    return max(current, candidate) if pick_later else min(current, candidate)
+
+
 def _series_bounds(
     classroom: Classroom, horizon_end: datetime
 ) -> tuple[datetime | None, datetime | None]:
-    """Return optional UTC (start, end) bounds for the class series."""
+    """Return optional UTC (start, end) bounds for the class series,
+    tightened by the parent program's term dates when applicable."""
     start = classroom.starts_at
     end = classroom.ends_at
     if start and start.tzinfo is None:
         start = start.replace(tzinfo=timezone.utc)
     if end and end.tzinfo is None:
         end = end.replace(tzinfo=timezone.utc)
+
+    prog_start, prog_end = _program_date_bounds(classroom)
+    start = _tighten_bound(start, prog_start, pick_later=True)
+    end = _tighten_bound(end, prog_end, pick_later=False)
+
     if end and end > horizon_end:
         end = horizon_end
     return start, end
@@ -143,6 +175,14 @@ def _occurrence_starts_from_rrule(
 ) -> list[datetime]:
     rule_raw = (classroom.recurrence_rule or "").strip()
     if not rule_raw:
+        return []
+
+    prog_start, prog_end = _program_date_bounds(classroom)
+    if prog_start and prog_start > after_utc:
+        after_utc = prog_start
+    if prog_end and prog_end < until_utc:
+        until_utc = prog_end
+    if after_utc >= until_utc:
         return []
 
     tz = _classroom_schedule_tz(classroom)

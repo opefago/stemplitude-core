@@ -1,9 +1,8 @@
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from sqlalchemy import or_
+from sqlalchemy.orm import selectinload
 
 from app.classrooms.models import (
     Classroom,
@@ -232,6 +231,7 @@ class StudentRepository:
                 Classroom.tenant_id == tenant_id,
                 Classroom.is_active == True,
             )
+            .options(selectinload(Classroom.program))
             .order_by(Classroom.updated_at.desc())
         )
         return list(result.scalars().all())
@@ -250,6 +250,7 @@ class StudentRepository:
                 Classroom.tenant_id == tenant_id,
                 Classroom.is_active == True,
             )
+            .options(selectinload(Classroom.program))
             .order_by(Classroom.updated_at.desc())
         )
         rows = list(result.scalars().all())

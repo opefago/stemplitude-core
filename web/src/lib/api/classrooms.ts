@@ -13,7 +13,7 @@ export interface ClassroomRecord {
   program_end_date?: string | null;
   curriculum_title?: string | null;
   instructor_id?: string | null;
-  mode: "online" | "in-person";
+  mode: "online" | "in-person" | "hybrid";
   recurrence_type?: string | null;
   meeting_provider?: string | null;
   meeting_link?: string | null;
@@ -100,6 +100,35 @@ export interface SessionPresenceParticipant {
   lab_type?: string | null;
 }
 
+export interface SessionVideoToken {
+  provider: string;
+  room_name: string;
+  participant_identity: string;
+  participant_name: string;
+  ws_url: string;
+  token: string;
+  expires_at: string;
+}
+
+export interface SessionRecordingRecord {
+  id: string;
+  tenant_id: string;
+  classroom_id: string;
+  session_id: string;
+  created_by_id?: string | null;
+  provider: string;
+  provider_room_name?: string | null;
+  provider_recording_id?: string | null;
+  status: string;
+  blob_key?: string | null;
+  duration_seconds?: number | null;
+  size_bytes?: number | null;
+  retention_expires_at?: string | null;
+  deleted_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ClassroomSessionEventRecord {
   id: string;
   session_id: string;
@@ -176,7 +205,7 @@ export interface CreateClassroomPayload {
   program_id?: string | null;
   curriculum_id?: string | null;
   instructor_id?: string | null;
-  mode: "online" | "in-person";
+  mode: "online" | "in-person" | "hybrid";
   recurrence_type?: string | null;
   meeting_provider?: string | null;
   meeting_link?: string | null;
@@ -345,6 +374,85 @@ export async function heartbeatClassroomSession(
   });
 }
 
+export async function issueSessionVideoToken(
+  classroomId: string,
+  sessionId: string,
+): Promise<SessionVideoToken> {
+  return apiFetch<SessionVideoToken>(`/classrooms/${classroomId}/sessions/${sessionId}/video-token`, {
+    method: "POST",
+  });
+}
+
+export async function listSessionRecordings(
+  classroomId: string,
+  sessionId: string,
+): Promise<SessionRecordingRecord[]> {
+  return apiFetch<SessionRecordingRecord[]>(
+    `/classrooms/${classroomId}/sessions/${sessionId}/recordings`,
+  );
+}
+
+export async function startSessionRecording(
+  classroomId: string,
+  sessionId: string,
+  payload?: { provider_recording_id?: string | null },
+): Promise<SessionRecordingRecord> {
+  return apiFetch<SessionRecordingRecord>(
+    `/classrooms/${classroomId}/sessions/${sessionId}/recordings/start`,
+    {
+      method: "POST",
+      body: payload ?? {},
+    },
+  );
+}
+
+export async function stopSessionRecording(
+  classroomId: string,
+  sessionId: string,
+  recordingId: string,
+  payload?: {
+    status?: string;
+    blob_key?: string | null;
+    duration_seconds?: number | null;
+    size_bytes?: number | null;
+    provider_recording_id?: string | null;
+  },
+): Promise<SessionRecordingRecord> {
+  return apiFetch<SessionRecordingRecord>(
+    `/classrooms/${classroomId}/sessions/${sessionId}/recordings/${recordingId}/stop`,
+    {
+      method: "POST",
+      body: payload ?? {},
+    },
+  );
+}
+
+export async function createRecordingAccessLink(
+  classroomId: string,
+  sessionId: string,
+  recordingId: string,
+): Promise<{ recording_id: string; download_url: string; expires_in_seconds: number }> {
+  return apiFetch<{ recording_id: string; download_url: string; expires_in_seconds: number }>(
+    `/classrooms/${classroomId}/sessions/${sessionId}/recordings/${recordingId}/access-link`,
+    {
+      method: "POST",
+    },
+  );
+}
+
+export async function deleteSessionRecording(
+  classroomId: string,
+  sessionId: string,
+  recordingId: string,
+): Promise<SessionRecordingRecord> {
+  return apiFetch<SessionRecordingRecord>(
+    `/classrooms/${classroomId}/sessions/${sessionId}/recordings/${recordingId}`,
+    {
+      method: "DELETE",
+    },
+  );
+}
+
 export async function heartbeatMySession(
   classroomId: string,
   sessionId: string,
@@ -449,7 +557,7 @@ export type UpdateClassroomPayload = Partial<{
   program_id: string | null;
   curriculum_id: string | null;
   instructor_id: string | null;
-  mode: "online" | "in-person";
+  mode: "online" | "in-person" | "hybrid";
   recurrence_type: string | null;
   meeting_provider: string | null;
   meeting_link: string | null;

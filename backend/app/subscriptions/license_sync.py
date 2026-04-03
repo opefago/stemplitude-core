@@ -1,8 +1,9 @@
 """Build / refresh License + seat rows from a Subscription's Plan (Stripe, trial, etc.)."""
 
 from datetime import date
+from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -15,6 +16,51 @@ ACTIVE_SUB_STATUSES = frozenset({"active", "trialing", "past_due"})
 
 def license_status_for_subscription(subscription_status: str) -> str:
     return "active" if subscription_status in ACTIVE_SUB_STATUSES else "inactive"
+
+
+async def count_live_seats(db: AsyncSession, tenant_id: UUID, seat_type: str) -> int:
+    """Return the actual count of active entities for a seat type in a tenant."""
+    if seat_type == "student":
+        from app.students.models import StudentMembership
+
+        result = await db.execute(
+            select(func.count(StudentMembership.id)).where(
+                StudentMembership.tenant_id == tenant_id,
+                StudentMembership.is_active == True,  # noqa: E712
+            )
+        )
+        return result.scalar() or 0
+    if seat_type == "instructor":
+        from app.tenants.models import Membership
+        from app.roles.models import Role
+
+        result = await db.execute(
+            select(func.count(Membership.id))
+            .join(Role, Role.id == Membership.role_id, isouter=True)
+            .where(
+                Membership.tenant_id == tenant_id,
+                Membership.is_active == True,  # noqa: E712
+                Role.slug == "instructor",
+            )
+        )
+        return result.scalar() or 0
+    return 0
+
+
+async def adjust_seat_count(db: AsyncSession, tenant_id: UUID, seat_type: str, delta: int) -> None:
+    """Atomically adjust ``SeatUsage.current_count`` by *delta* (+1 / -1).
+
+    Safe no-op when no seat_usage row exists for the tenant (e.g. free plan with no limits).
+    """
+    result = await db.execute(
+        select(SeatUsage).where(
+            SeatUsage.tenant_id == tenant_id,
+            SeatUsage.seat_type == seat_type,
+        )
+    )
+    seat = result.scalar_one_or_none()
+    if seat is not None:
+        seat.current_count = max(0, seat.current_count + delta)
 
 
 def seat_limits_from_plan(plan: Plan) -> dict[str, int]:
@@ -97,12 +143,13 @@ async def sync_license_from_subscription(db: AsyncSession, subscription: Subscri
             )
         )
     for seat_type, max_count in seat_limits_from_plan(plan).items():
+        live_count = await count_live_seats(db, subscription.tenant_id, seat_type)
         db.add(
             SeatUsage(
                 license_id=license_.id,
                 tenant_id=subscription.tenant_id,
                 seat_type=seat_type,
-                current_count=0,
+                current_count=live_count,
                 max_count=max_count,
             )
         )

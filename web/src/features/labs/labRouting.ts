@@ -35,6 +35,8 @@ export function buildLabLaunchPath(
     curriculumLabId?: string;
     /** Optional saved project (``projects.id``) for this lab type. */
     savedProjectId?: string;
+    /** Classroom meeting provider — forwarded so the lab can show built-in video. */
+    meetingProvider?: string;
   } = {},
 ): string {
   const match = resolveLabRoute(labNameOrId);
@@ -47,5 +49,6 @@ export function buildLabLaunchPath(
   if (opts.assignmentId) params.set("assignment_id", opts.assignmentId);
   if (opts.curriculumLabId) params.set("curriculum_lab_id", opts.curriculumLabId);
   if (opts.savedProjectId) params.set("saved_project_id", opts.savedProjectId);
+  if (opts.meetingProvider) params.set("meeting_provider", opts.meetingProvider);
   return `${match.route}?${params.toString()}`;
 }

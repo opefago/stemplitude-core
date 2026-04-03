@@ -14,6 +14,7 @@ export interface AppTooltipProps {
   theme?: AppTooltipTheme;
   placement?: TippyProps["placement"];
   disabled?: boolean;
+  forceCustomInReact19?: boolean;
   tippyProps?: Partial<TippyProps>;
 }
 
@@ -26,6 +27,7 @@ export function AppTooltip({
   theme = "cartoon",
   placement = "bottom",
   disabled = false,
+  forceCustomInReact19 = false,
   tippyProps,
 }: AppTooltipProps) {
   const hasStructuredContent = Boolean(title || description || media);
@@ -43,7 +45,7 @@ export function AppTooltip({
     ) : null);
 
   if (disabled || !resolvedContent) return children;
-  if (isReact19Plus) {
+  if (isReact19Plus && !forceCustomInReact19) {
     const nativeTitle = [title, description].filter(Boolean).join(" - ");
     return (
       <span className="ui-tooltip__ref-anchor" title={nativeTitle || undefined}>

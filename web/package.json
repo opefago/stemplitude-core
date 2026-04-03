@@ -32,6 +32,7 @@
     "dagre": "^0.8.5",
     "framer-motion": "^11.18.0",
     "js-base64": "^3.7.8",
+    "livekit-client": "^2.18.0",
     "lucide-react": "^0.468.0",
     "mathjs": "^14.9.1",
     "partycles": "^1.2.6",

@@ -26,6 +26,7 @@ from app.classrooms.assignment_lab_enrich import enrich_assignments_lab_launcher
 from app.classrooms.models import Classroom, ClassroomSession
 from app.classrooms.schemas import SessionResponse
 from app.classrooms.schedule_occurrences import merge_db_and_scheduled_upcoming
+from app.subscriptions.license_sync import adjust_seat_count
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +109,7 @@ class StudentService:
             enrolled_by=created_by,
         )
         await self.repo.create_membership(membership)
+        await adjust_seat_count(self.session, tenant_id, "student", +1)
         logger.info("Student created id=%s", student.id)
         return student
 
@@ -143,6 +145,7 @@ class StudentService:
             enrolled_by=None,
         )
         await self.repo.create_membership(membership)
+        await adjust_seat_count(self.session, tenant.id, "student", +1)
         logger.info("Student created id=%s", student.id)
         return student
 
@@ -187,10 +190,17 @@ class StudentService:
             for f in admin_only_fields:
                 update_data.pop(f, None)
 
+        was_active = student.is_active
         for key, value in update_data.items():
             setattr(student, key, value)
-        if "is_active" in update_data and update_data["is_active"] is False:
-            logger.info("Student deactivated id=%s by=%s", student_id, identity.id if identity else "unknown")
+        if "is_active" in update_data:
+            now_active = update_data["is_active"]
+            if was_active and not now_active:
+                await adjust_seat_count(self.session, tenant_id, "student", -1)
+                logger.info("Student deactivated id=%s by=%s", student_id, identity.id if identity else "unknown")
+            elif not was_active and now_active:
+                await adjust_seat_count(self.session, tenant_id, "student", +1)
+                logger.info("Student reactivated id=%s by=%s", student_id, identity.id if identity else "unknown")
         await self.session.flush()
         await self.session.refresh(student)
         return student
@@ -233,6 +243,7 @@ class StudentService:
             enrolled_by=enrolled_by,
         )
         result = await self.repo.create_membership(membership)
+        await adjust_seat_count(self.session, target_tenant_id, "student", +1)
         logger.info("Student enrolled student=%s tenant=%s", student_id, target_tenant_id)
         return result
 

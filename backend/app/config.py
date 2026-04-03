@@ -184,6 +184,17 @@ class Settings(BaseSettings):
     # True = scan only: no S3 deletes and no DB row repairs for missing objects.
     BLOB_ORPHAN_CLEANUP_DRY_RUN: bool = False
 
+    # LiveKit classroom video (cloud first, self-host compatible)
+    LIVEKIT_PROVIDER_MODE: str = "livekit_cloud"  # livekit_cloud | livekit_self_host
+    LIVEKIT_WS_URL: str = ""
+    LIVEKIT_API_KEY: str = ""
+    LIVEKIT_API_SECRET: str = ""
+    LIVEKIT_TOKEN_TTL_SECONDS: int = 3600
+
+    # Classroom session recording governance
+    SESSION_RECORDING_RETENTION_DAYS: int = 30
+    SESSION_RECORDING_PRESIGNED_EXPIRES_SECONDS: int = 900
+
     # Public API origin for signed email actions (unsubscribe one-click). No trailing slash.
     # Use scheme + host[:port] only (e.g. https://api.yourdomain.com), not …/api/v1 — the app appends API_V1_PREFIX.
     EMAIL_PUBLIC_BASE_URL: str = ""

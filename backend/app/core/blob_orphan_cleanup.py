@@ -178,6 +178,7 @@ async def collect_referenced_blob_keys(db: AsyncSession) -> set[str]:
     """All object keys that must be kept: primary blobs, stored thumbnails, and derived thumb paths."""
     from app.admin.models import GlobalAsset
     from app.assets.models import Asset
+    from app.classrooms.models import SessionRecording
     from app.labs.models import Project
 
     refs: set[str] = set()
@@ -207,6 +208,16 @@ async def collect_referenced_blob_keys(db: AsyncSession) -> set[str]:
             refs.add(blob_storage.thumbnail_key_for(bk))
         if tk and str(tk).strip():
             refs.add(str(tk).strip())
+
+    r = await db.execute(
+        select(SessionRecording.blob_key).where(
+            SessionRecording.deleted_at.is_(None),
+            SessionRecording.blob_key.isnot(None),
+        )
+    )
+    for (bk,) in r.all():
+        if bk and str(bk).strip():
+            refs.add(str(bk).strip())
 
     return refs
 

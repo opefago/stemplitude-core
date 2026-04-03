@@ -9,23 +9,30 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.classrooms.attendance_config import resolve_attendance_config
-from app.classrooms.models import Classroom, ClassroomSession, ClassroomStudent
+from app.classrooms.models import Classroom, ClassroomSession, ClassroomStudent, SessionRecording
 from app.programs.models import Program
 from app.tenants.models import Tenant
 from app.curriculum.models import AssignmentTemplate, Course, RubricTemplate
+from app.roles.models import Role
 from app.dependencies import CurrentIdentity, TenantContext
 from app.tenants.franchise_governance import curriculum_read_tenant_ids
 from app.notifications.models import Notification
 from app.progress.models import Attendance
 from app.students.models import ParentStudent, Student
-from app.students.parent_access import ensure_can_view_student_as_guardian
+from app.students.parent_access import (
+    ensure_can_view_student_as_guardian,
+    guardian_may_use_child_context_in_tenant,
+)
 from app.users.models import User
 from app.tenants.repository import MembershipRepository
 from app.realtime.gateway import publish_channel_message
+from app.config import settings
+from app.audit.models import AuditEvent
+from app.core import blob_storage
 from app.realtime.user_events import (
     publish_notifications_changed,
     publish_reward_granted,
@@ -68,7 +75,13 @@ from .schemas import (
     RealtimeEventEnvelope,
     RealtimeSessionSnapshotResponse,
     SessionResponse,
+    SessionVideoTokenResponse,
+    SessionRecordingResponse,
+    SessionRecordingStartRequest,
+    SessionRecordingStopRequest,
+    SessionRecordingAccessResponse,
 )
+from .video_provider import build_livekit_access_token, resolve_video_provider_config
 
 
 async def _assignable_course_or_404(
@@ -106,6 +119,7 @@ class ClassroomService:
     def __init__(self, session: AsyncSession):
         self.session = session
         self.repo = ClassroomRepository(session)
+        self._audit_table_available: bool | None = None
 
     @staticmethod
     def _normalize_rubric_snapshot_storage(raw) -> list | None:
@@ -2939,3 +2953,390 @@ class ClassroomService:
             "feedback": feedback,
             "graded_at": grade_event.created_at.isoformat(),
         }
+
+    async def _ensure_session_media_access(
+        self,
+        *,
+        classroom_id: UUID,
+        session_id: UUID,
+        tenant_id: UUID,
+        identity: CurrentIdentity,
+        child_context_student_id: UUID | None = None,
+    ) -> ClassroomSession:
+        session_obj = await self._ensure_session_exists(
+            classroom_id=classroom_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+        )
+        if identity.is_super_admin:
+            return session_obj
+
+        if identity.sub_type == "student":
+            enrollment = await self.repo.get_enrollment(classroom_id, identity.id)
+            if not enrollment:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enrolled in this classroom.")
+            return session_obj
+
+        role_slug = (identity.role or "").strip().lower()
+        if role_slug in {"owner", "admin", "instructor"}:
+            return session_obj
+
+        if child_context_student_id is not None and role_slug in {"parent", "homeschool_parent"}:
+            allowed = await guardian_may_use_child_context_in_tenant(
+                self.session,
+                identity=identity,
+                student_id=child_context_student_id,
+                tenant_id=tenant_id,
+            )
+            if not allowed:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Child context access denied.")
+            enrollment = await self.repo.get_enrollment(classroom_id, child_context_student_id)
+            if not enrollment:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Student is not enrolled in this classroom.")
+            return session_obj
+
+        membership_repo = MembershipRepository(self.session)
+        membership = await membership_repo.get_by_user_tenant(identity.id, tenant_id)
+        if not membership or not bool(membership.is_active):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized for this classroom session.")
+        return session_obj
+
+    async def _recording_or_404(
+        self,
+        *,
+        recording_id: UUID,
+        classroom_id: UUID,
+        session_id: UUID,
+        tenant_id: UUID,
+    ) -> SessionRecording:
+        row = await self.session.get(SessionRecording, recording_id)
+        if (
+            not row
+            or row.tenant_id != tenant_id
+            or row.classroom_id != classroom_id
+            or row.session_id != session_id
+        ):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recording not found")
+        return row
+
+    async def _can_manage_recordings(self, *, identity: CurrentIdentity, tenant_id: UUID) -> bool:
+        if identity.is_super_admin:
+            return True
+        role_slug = (identity.role or "").strip().lower()
+        if role_slug in {"owner", "admin", "instructor"}:
+            return True
+        if identity.sub_type != "user":
+            return False
+        membership = await MembershipRepository(self.session).get_by_user_tenant(identity.id, tenant_id)
+        if not membership or not bool(membership.is_active) or not membership.role_id:
+            return False
+        role = await self.session.get(Role, membership.role_id)
+        return bool(role and (role.slug or "").strip().lower() in {"owner", "admin", "instructor"})
+
+    async def _emit_recording_audit(
+        self,
+        *,
+        action: str,
+        recording: SessionRecording,
+        identity: CurrentIdentity,
+        old_data: dict | None = None,
+        new_data: dict | None = None,
+        changed_fields: list[str] | None = None,
+    ) -> None:
+        if self._audit_table_available is None:
+            try:
+                result = await self.session.execute(
+                    text("SELECT to_regclass('public.audit_events')")
+                )
+                self._audit_table_available = bool(result.scalar_one_or_none())
+            except Exception:
+                self._audit_table_available = False
+        if not self._audit_table_available:
+            return
+        evt = AuditEvent(
+            table_name="session_recordings",
+            record_id=str(recording.id),
+            action=action.upper(),
+            old_data=old_data,
+            new_data=new_data,
+            changed_fields=changed_fields,
+            db_user="app",
+            app_user_id=str(identity.id),
+            tenant_id=str(recording.tenant_id),
+            ip_address=None,
+            created_at=datetime.now(timezone.utc),
+        )
+        self.session.add(evt)
+
+    async def issue_session_video_token(
+        self,
+        *,
+        classroom_id: UUID,
+        session_id: UUID,
+        tenant_id: UUID,
+        identity: CurrentIdentity,
+        child_context_student_id: UUID | None = None,
+    ) -> SessionVideoTokenResponse:
+        session_obj = await self._ensure_session_media_access(
+            classroom_id=classroom_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            identity=identity,
+            child_context_student_id=child_context_student_id,
+        )
+        config = resolve_video_provider_config()
+        if not config.enabled:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Live video is not configured for this environment.",
+            )
+        participant_id = child_context_student_id or identity.id
+        participant_name = await self._resolve_actor_display_name(identity)
+        result = build_livekit_access_token(
+            config=config,
+            tenant_id=tenant_id,
+            classroom_id=classroom_id,
+            session_id=session_obj.id,
+            participant_identity=str(participant_id),
+            participant_name=participant_name,
+            can_publish=True,
+            can_subscribe=True,
+        )
+        return SessionVideoTokenResponse(
+            provider=result.provider,
+            room_name=result.room_name,
+            participant_identity=result.participant_identity,
+            participant_name=result.participant_name,
+            ws_url=result.ws_url,
+            token=result.token,
+            expires_at=result.expires_at,
+        )
+
+    async def list_session_recordings(
+        self,
+        *,
+        classroom_id: UUID,
+        session_id: UUID,
+        tenant_id: UUID,
+        identity: CurrentIdentity,
+        child_context_student_id: UUID | None = None,
+    ) -> list[SessionRecordingResponse]:
+        await self._ensure_session_media_access(
+            classroom_id=classroom_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            identity=identity,
+            child_context_student_id=child_context_student_id,
+        )
+        result = await self.session.execute(
+            select(SessionRecording)
+            .where(
+                SessionRecording.tenant_id == tenant_id,
+                SessionRecording.classroom_id == classroom_id,
+                SessionRecording.session_id == session_id,
+                SessionRecording.deleted_at.is_(None),
+            )
+            .order_by(SessionRecording.created_at.desc())
+        )
+        return [SessionRecordingResponse.model_validate(row) for row in result.scalars().all()]
+
+    async def start_session_recording(
+        self,
+        *,
+        classroom_id: UUID,
+        session_id: UUID,
+        tenant_id: UUID,
+        identity: CurrentIdentity,
+        data: SessionRecordingStartRequest,
+        child_context_student_id: UUID | None = None,
+    ) -> SessionRecordingResponse:
+        await self._ensure_session_media_access(
+            classroom_id=classroom_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            identity=identity,
+            child_context_student_id=child_context_student_id,
+        )
+        if not await self._can_manage_recordings(identity=identity, tenant_id=tenant_id):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only staff can start recordings.")
+
+        provider = resolve_video_provider_config()
+        retention_days = max(1, int(settings.SESSION_RECORDING_RETENTION_DAYS or 30))
+        row = SessionRecording(
+            tenant_id=tenant_id,
+            classroom_id=classroom_id,
+            session_id=session_id,
+            created_by_id=identity.id,
+            provider=provider.provider,
+            provider_room_name=provider.ws_url or None,
+            provider_recording_id=(data.provider_recording_id or "").strip() or None,
+            status="recording",
+            retention_expires_at=datetime.now(timezone.utc) + timedelta(days=retention_days),
+        )
+        self.session.add(row)
+        await self.session.flush()
+        await self._emit_recording_audit(
+            action="INSERT",
+            recording=row,
+            identity=identity,
+            new_data={
+                "status": row.status,
+                "provider": row.provider,
+                "provider_recording_id": row.provider_recording_id,
+            },
+            changed_fields=["status", "provider", "provider_recording_id"],
+        )
+        await self.session.flush()
+        await self.session.refresh(row)
+        return SessionRecordingResponse.model_validate(row)
+
+    async def stop_session_recording(
+        self,
+        *,
+        classroom_id: UUID,
+        session_id: UUID,
+        recording_id: UUID,
+        tenant_id: UUID,
+        identity: CurrentIdentity,
+        data: SessionRecordingStopRequest,
+        child_context_student_id: UUID | None = None,
+    ) -> SessionRecordingResponse:
+        await self._ensure_session_media_access(
+            classroom_id=classroom_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            identity=identity,
+            child_context_student_id=child_context_student_id,
+        )
+        if not await self._can_manage_recordings(identity=identity, tenant_id=tenant_id):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only staff can stop recordings.")
+
+        row = await self._recording_or_404(
+            recording_id=recording_id,
+            classroom_id=classroom_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+        )
+        old_status = row.status
+        row.status = (data.status or "ready").strip().lower()
+        if data.blob_key is not None:
+            row.blob_key = (data.blob_key or "").strip() or None
+        if data.duration_seconds is not None:
+            row.duration_seconds = int(data.duration_seconds)
+        if data.size_bytes is not None:
+            row.size_bytes = int(data.size_bytes)
+        if data.provider_recording_id is not None:
+            row.provider_recording_id = (data.provider_recording_id or "").strip() or None
+        await self._emit_recording_audit(
+            action="UPDATE",
+            recording=row,
+            identity=identity,
+            old_data={"status": old_status},
+            new_data={
+                "status": row.status,
+                "blob_key": row.blob_key,
+                "duration_seconds": row.duration_seconds,
+                "size_bytes": row.size_bytes,
+                "provider_recording_id": row.provider_recording_id,
+            },
+            changed_fields=[
+                "status",
+                "blob_key",
+                "duration_seconds",
+                "size_bytes",
+                "provider_recording_id",
+            ],
+        )
+        await self.session.flush()
+        await self.session.refresh(row)
+        return SessionRecordingResponse.model_validate(row)
+
+    async def create_session_recording_access_link(
+        self,
+        *,
+        classroom_id: UUID,
+        session_id: UUID,
+        recording_id: UUID,
+        tenant_id: UUID,
+        identity: CurrentIdentity,
+        child_context_student_id: UUID | None = None,
+    ) -> SessionRecordingAccessResponse:
+        await self._ensure_session_media_access(
+            classroom_id=classroom_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            identity=identity,
+            child_context_student_id=child_context_student_id,
+        )
+        row = await self._recording_or_404(
+            recording_id=recording_id,
+            classroom_id=classroom_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+        )
+        if row.deleted_at is not None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recording has been deleted.")
+        if not row.blob_key:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Recording file is not available yet.")
+        expires = max(60, int(settings.SESSION_RECORDING_PRESIGNED_EXPIRES_SECONDS or 900))
+        url = blob_storage.generate_presigned_download_url(row.blob_key, expires_in=expires)
+        await self._emit_recording_audit(
+            action="UPDATE",
+            recording=row,
+            identity=identity,
+            new_data={"access_link_generated": True, "expires_in_seconds": expires},
+            changed_fields=["access_link_generated"],
+        )
+        await self.session.flush()
+        return SessionRecordingAccessResponse(
+            recording_id=row.id,
+            download_url=url,
+            expires_in_seconds=expires,
+        )
+
+    async def delete_session_recording(
+        self,
+        *,
+        classroom_id: UUID,
+        session_id: UUID,
+        recording_id: UUID,
+        tenant_id: UUID,
+        identity: CurrentIdentity,
+        child_context_student_id: UUID | None = None,
+    ) -> SessionRecordingResponse:
+        await self._ensure_session_media_access(
+            classroom_id=classroom_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            identity=identity,
+            child_context_student_id=child_context_student_id,
+        )
+        if not await self._can_manage_recordings(identity=identity, tenant_id=tenant_id):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only staff can delete recordings.")
+
+        row = await self._recording_or_404(
+            recording_id=recording_id,
+            classroom_id=classroom_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+        )
+        if row.deleted_at is None:
+            row.deleted_at = datetime.now(timezone.utc)
+            row.status = "deleted"
+            old_blob = row.blob_key
+            await self._emit_recording_audit(
+                action="DELETE",
+                recording=row,
+                identity=identity,
+                old_data={"blob_key": old_blob},
+                new_data={"status": row.status, "deleted_at": row.deleted_at.isoformat()},
+                changed_fields=["status", "deleted_at"],
+            )
+            if old_blob:
+                try:
+                    blob_storage.delete_file(old_blob)
+                except Exception:
+                    logger.exception("Failed to delete recording blob key=%s", old_blob)
+        await self.session.flush()
+        await self.session.refresh(row)
+        return SessionRecordingResponse.model_validate(row)

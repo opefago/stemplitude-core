@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import tippy, { type Instance as TippyInstance } from "tippy.js";
+import * as Y from "yjs";
 import {
   ArrowLeft,
   Video,
@@ -24,6 +25,8 @@ import {
   SkipForward,
   X,
   Pencil,
+  Eraser,
+  Trash2,
   Plus,
   Maximize2,
   Minimize2,
@@ -84,6 +87,7 @@ import { buildLabLaunchPath, resolveLabRoute } from "../labs/labRouting";
 import "../../components/ui/ui.css";
 import "./classrooms.css";
 import { RecognitionToast, type RecognitionEvent } from "./RecognitionToast";
+import { LiveVideoWidget } from "./LiveVideoWidget";
 import { playAwardSound } from "../labs/labSounds";
 import { ApiHttpError } from "../../lib/api/client";
 import { rewardEngine } from "../../rewards";
@@ -117,6 +121,35 @@ interface SessionAssignment {
   labId?: string | null;
   requiresLab?: boolean;
   requiresAssets?: boolean;
+}
+
+type ChalkboardAccessMode = "teacher_only" | "participants" | "selected_students";
+type ChalkTool = "chalk" | "eraser";
+
+interface ChalkboardStroke {
+  id: string;
+  author_id: string;
+  color: string;
+  size: number;
+  eraser: boolean;
+  points: number[];
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 1) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+function base64ToBytes(b64: string): Uint8Array {
+  const binary = atob(b64);
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    out[i] = binary.charCodeAt(i);
+  }
+  return out;
 }
 
 interface StudentSubmissionState {
@@ -170,7 +203,15 @@ export function ClassroomLiveSession() {
   const [sharedResources, setSharedResources] = useState<SessionSharedResource[]>([]);
   const [downloadableResources, setDownloadableResources] = useState<SessionSharedResource[]>([]);
   const [selectedSharedResourceId, setSelectedSharedResourceId] = useState("");
-  const [contentView, setContentView] = useState<"shared" | "lab">("shared");
+  const [contentView, setContentView] = useState<"shared" | "board">("board");
+  const [contentFullscreen, setContentFullscreen] = useState(false);
+  const [boardAccessMode, setBoardAccessMode] = useState<ChalkboardAccessMode>("teacher_only");
+  const [boardAllowedStudentIds, setBoardAllowedStudentIds] = useState<string[]>([]);
+  const [boardStrokes, setBoardStrokes] = useState<ChalkboardStroke[]>([]);
+  const [boardTool, setBoardTool] = useState<ChalkTool>("chalk");
+  const [boardColor, setBoardColor] = useState("#ffffff");
+  const [boardSize, setBoardSize] = useState(5);
+  const [savingBoardSnapshot, setSavingBoardSnapshot] = useState(false);
   const [showFloatingChat, setShowFloatingChat] = useState(false);
   const [railPanels, setRailPanels] = useState({
     participants: false,
@@ -240,7 +281,11 @@ export function ClassroomLiveSession() {
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const viewerContainerRef = useRef<HTMLDivElement>(null);
   const contentViewerRef = useRef<HTMLDivElement>(null);
+  const chalkboardCanvasRef = useRef<HTMLCanvasElement>(null);
   const sharedVideoRef = useRef<HTMLVideoElement>(null);
+  const boardDocRef = useRef<Y.Doc | null>(null);
+  const boardYStrokesRef = useRef<Y.Array<unknown> | null>(null);
+  const boardYConfigRef = useRef<Y.Map<unknown> | null>(null);
   const liveRootRef = useRef<HTMLDivElement>(null);
   const leaveSentForSessionRef = useRef<string | null>(null);
   const realtimeRef = useRef<ClassroomRealtimeClient | null>(null);
@@ -262,11 +307,34 @@ export function ClassroomLiveSession() {
     action: "play" | "pause";
     at?: number;
   } | null>(null);
+  const boardActiveStrokeRef = useRef<ChalkboardStroke | null>(null);
 
   const isInstructorView =
     isSuperAdmin || role === "admin" || role === "owner" || role === "instructor";
 
   const childContextStudentId = useChildContextStudentId();
+  const actorId = childContextStudentId ?? user?.id ?? "";
+
+  const studentParticipants = useMemo(() => {
+    const map = new Map<string, SessionPresenceParticipant>();
+    for (const participant of participants) {
+      if (participant.actor_type !== "student") continue;
+      if (!map.has(participant.actor_id)) {
+        map.set(participant.actor_id, participant);
+      }
+    }
+    return [...map.values()];
+  }, [participants]);
+
+  const canDrawOnBoard = useMemo(() => {
+    if (isInstructorView) return true;
+    if (!actorId) return false;
+    if (boardAccessMode === "participants") return true;
+    if (boardAccessMode === "selected_students") {
+      return boardAllowedStudentIds.includes(actorId);
+    }
+    return false;
+  }, [actorId, boardAccessMode, boardAllowedStudentIds, isInstructorView]);
 
   const pointsEnabled = useMemo(() => {
     const settings = tenant?.settings as Record<string, unknown> | undefined;
@@ -296,7 +364,10 @@ export function ClassroomLiveSession() {
     [sortedSessions],
   );
   const liveCallLink = activeSession?.meeting_link ?? classroom?.meeting_link ?? null;
-  const canJoinLiveCall = classroom?.mode !== "in-person" && Boolean(liveCallLink);
+  const canJoinLiveCall =
+    classroom?.mode !== "in-person" &&
+    classroom?.meeting_provider !== "built_in" &&
+    Boolean(liveCallLink);
 
   const permittedLabs = useMemo(() => {
     const schedule = (classroom?.schedule ?? {}) as { permitted_labs?: string[] };
@@ -413,6 +484,73 @@ export function ClassroomLiveSession() {
     [isInstructorView],
   );
 
+  const sendRealtimeEvent = useCallback((type: string, payload: Record<string, unknown>) => {
+    return realtimeRef.current?.send(type, { payload }) ?? false;
+  }, []);
+
+  const syncBoardStateFromYDoc = useCallback(() => {
+    const yStrokes = boardYStrokesRef.current;
+    const yConfig = boardYConfigRef.current;
+    if (!yStrokes || !yConfig) return;
+    const parsedStrokes = yStrokes
+      .toArray()
+      .map((row) => row as ChalkboardStroke)
+      .filter((row) => row && typeof row.id === "string" && Array.isArray(row.points))
+      .slice(-300);
+    const modeRaw = yConfig.get("access_mode");
+    const allowedRaw = yConfig.get("allowed_student_ids");
+    const nextMode: ChalkboardAccessMode =
+      modeRaw === "participants" || modeRaw === "selected_students" || modeRaw === "teacher_only"
+        ? modeRaw
+        : "teacher_only";
+    const nextAllowed = Array.isArray(allowedRaw)
+      ? allowedRaw.filter((id): id is string => typeof id === "string")
+      : [];
+    setBoardStrokes(parsedStrokes);
+    setBoardAccessMode(nextMode);
+    setBoardAllowedStudentIds(nextAllowed);
+  }, []);
+
+  useEffect(() => {
+    if (!activeSession?.id) return;
+    const doc = new Y.Doc();
+    const yStrokes = doc.getArray("board_strokes");
+    const yConfig = doc.getMap("board_config");
+    boardDocRef.current = doc;
+    boardYStrokesRef.current = yStrokes;
+    boardYConfigRef.current = yConfig;
+
+    if (typeof yConfig.get("access_mode") !== "string") {
+      yConfig.set("access_mode", "teacher_only");
+    }
+    if (!Array.isArray(yConfig.get("allowed_student_ids"))) {
+      yConfig.set("allowed_student_ids", []);
+    }
+
+    const pushUpdate = (update: Uint8Array, origin: unknown) => {
+      if (origin === "remote") return;
+      void sendRealtimeEvent("session.board.yjs", { update_b64: bytesToBase64(update) });
+    };
+    doc.on("update", pushUpdate);
+
+    const onLocalChanged = () => {
+      syncBoardStateFromYDoc();
+    };
+    yStrokes.observe(onLocalChanged);
+    yConfig.observe(onLocalChanged);
+    syncBoardStateFromYDoc();
+
+    return () => {
+      yStrokes.unobserve(onLocalChanged);
+      yConfig.unobserve(onLocalChanged);
+      doc.off("update", pushUpdate);
+      doc.destroy();
+      boardDocRef.current = null;
+      boardYStrokesRef.current = null;
+      boardYConfigRef.current = null;
+    };
+  }, [activeSession?.id, sendRealtimeEvent, syncBoardStateFromYDoc]);
+
   const normalizedViewerUrl = useMemo(() => {
     if (!viewerAssetUrl) return null;
     const isPdfLike =
@@ -447,11 +585,136 @@ export function ClassroomLiveSession() {
     [],
   );
 
+  const redrawChalkboard = useCallback(
+    (extraStroke?: ChalkboardStroke | null) => {
+      const canvas = chalkboardCanvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.save();
+      ctx.fillStyle = "#0f2a1d";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      const renderStroke = (stroke: ChalkboardStroke) => {
+        if (!Array.isArray(stroke.points) || stroke.points.length < 4) return;
+        ctx.save();
+        ctx.globalCompositeOperation = stroke.eraser ? "destination-out" : "source-over";
+        ctx.strokeStyle = stroke.eraser ? "rgba(0,0,0,1)" : stroke.color;
+        ctx.lineWidth = Math.max(1, stroke.size);
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.beginPath();
+        ctx.moveTo(stroke.points[0] * canvas.width, stroke.points[1] * canvas.height);
+        for (let i = 2; i < stroke.points.length; i += 2) {
+          ctx.lineTo(stroke.points[i] * canvas.width, stroke.points[i + 1] * canvas.height);
+        }
+        ctx.stroke();
+        ctx.restore();
+      };
+
+      for (const stroke of boardStrokes) renderStroke(stroke);
+      if (extraStroke) renderStroke(extraStroke);
+      ctx.restore();
+    },
+    [boardStrokes],
+  );
+
+  const resizeChalkboardCanvas = useCallback(() => {
+    const canvas = chalkboardCanvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    canvas.width = Math.max(1, Math.floor(rect.width * dpr));
+    canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    redrawChalkboard(boardActiveStrokeRef.current);
+  }, [redrawChalkboard]);
+
+  useEffect(() => {
+    resizeChalkboardCanvas();
+    window.addEventListener("resize", resizeChalkboardCanvas);
+    return () => window.removeEventListener("resize", resizeChalkboardCanvas);
+  }, [resizeChalkboardCanvas]);
+
+  useEffect(() => {
+    if (contentView !== "board") return;
+    const raf = window.requestAnimationFrame(() => {
+      resizeChalkboardCanvas();
+    });
+    return () => window.cancelAnimationFrame(raf);
+  }, [contentView, contentFullscreen, resizeChalkboardCanvas]);
+
+  useEffect(() => {
+    redrawChalkboard(boardActiveStrokeRef.current);
+  }, [boardStrokes, redrawChalkboard]);
+
+  const pointerToBoardPoint = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
+    const canvas = chalkboardCanvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    const x = rect.width > 0 ? Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)) : 0;
+    const y = rect.height > 0 ? Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height)) : 0;
+    return { x, y };
+  }, []);
+
+  const onBoardPointerDown = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
+    if (!canDrawOnBoard || !actorId) return;
+    const canvas = event.currentTarget;
+    canvas.setPointerCapture(event.pointerId);
+    const { x, y } = pointerToBoardPoint(event);
+    const stroke: ChalkboardStroke = {
+      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      author_id: actorId,
+      color: boardColor,
+      size: boardSize,
+      eraser: boardTool === "eraser",
+      points: [x, y],
+    };
+    boardActiveStrokeRef.current = stroke;
+    redrawChalkboard(stroke);
+  }, [actorId, boardColor, boardSize, boardTool, canDrawOnBoard, pointerToBoardPoint, redrawChalkboard]);
+
+  const onBoardPointerMove = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
+    const active = boardActiveStrokeRef.current;
+    if (!active) return;
+    const { x, y } = pointerToBoardPoint(event);
+    active.points.push(x, y);
+    redrawChalkboard(active);
+  }, [pointerToBoardPoint, redrawChalkboard]);
+
+  const finalizeActiveStroke = useCallback(() => {
+    const active = boardActiveStrokeRef.current;
+    if (!active || active.points.length < 4) {
+      boardActiveStrokeRef.current = null;
+      redrawChalkboard(null);
+      return;
+    }
+    boardActiveStrokeRef.current = null;
+    const yStrokes = boardYStrokesRef.current;
+    if (!yStrokes) return;
+    yStrokes.push([active]);
+    if (yStrokes.length > 300) {
+      yStrokes.delete(0, yStrokes.length - 300);
+    }
+  }, [redrawChalkboard]);
+
+  const onBoardPointerUp = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
+    event.currentTarget.releasePointerCapture(event.pointerId);
+    finalizeActiveStroke();
+  }, [finalizeActiveStroke]);
+
+  const onBoardPointerLeave = useCallback(() => {
+    finalizeActiveStroke();
+  }, [finalizeActiveStroke]);
+
   const applyLiveSyncState = useCallback(
     (syncRaw: Record<string, unknown> | null | undefined) => {
       if (!syncRaw) return;
       const view = syncRaw.view;
-      if (view === "shared" || view === "lab") {
+      if (view === "shared" || view === "board") {
         setContentView(view);
       }
       const resourceId = syncRaw.selected_resource_id;
@@ -483,6 +746,27 @@ export function ClassroomLiveSession() {
           window.setTimeout(() => {
             suppressScrollBroadcastRef.current = false;
           }, 200);
+        }
+      }
+      const board = syncRaw.board;
+      if (board && typeof board === "object") {
+        const boardObj = board as Record<string, unknown>;
+        const mode = boardObj.access_mode;
+        if (mode === "teacher_only" || mode === "participants" || mode === "selected_students") {
+          setBoardAccessMode(mode);
+        }
+        if (Array.isArray(boardObj.allowed_student_ids)) {
+          setBoardAllowedStudentIds(
+            boardObj.allowed_student_ids.filter((id): id is string => typeof id === "string"),
+          );
+        }
+        if (Array.isArray(boardObj.strokes)) {
+          setBoardStrokes(
+            boardObj.strokes
+              .map((row) => row as ChalkboardStroke)
+              .filter((row) => row && Array.isArray(row.points) && typeof row.id === "string")
+              .slice(-300),
+          );
         }
       }
     },
@@ -567,8 +851,21 @@ export function ClassroomLiveSession() {
 
     if (envelope.event_type === "session.view.changed") {
       const nextView = payload.view;
-      if (nextView === "shared" || nextView === "lab") {
+      if (nextView === "shared" || nextView === "board") {
         setContentView(nextView);
+      }
+      return;
+    }
+
+    if (envelope.event_type === "session.board.yjs") {
+      const b64 = typeof payload.update_b64 === "string" ? payload.update_b64 : "";
+      if (!b64) return;
+      const doc = boardDocRef.current;
+      if (!doc) return;
+      try {
+        Y.applyUpdate(doc, base64ToBytes(b64), "remote");
+      } catch {
+        // Ignore invalid CRDT payloads
       }
       return;
     }
@@ -1366,6 +1663,7 @@ export function ClassroomLiveSession() {
         classroomId: id,
         sessionId: activeSession?.id,
         referrer: "classroom_live_session",
+        meetingProvider: classroom?.meeting_provider ?? undefined,
       }),
     );
   };
@@ -1657,6 +1955,44 @@ export function ClassroomLiveSession() {
       if (uploadInputRef.current) {
         uploadInputRef.current.value = "";
       }
+    }
+  };
+
+  const handleSaveBoardSnapshot = async () => {
+    if (!isInstructorView) return;
+    const canvas = chalkboardCanvasRef.current;
+    if (!canvas) return;
+    setSavingBoardSnapshot(true);
+    setError(null);
+    try {
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((result) => {
+          if (result) resolve(result);
+          else reject(new Error("Could not capture chalkboard snapshot."));
+        }, "image/png");
+      });
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const file = new File([blob], `chalkboard-${timestamp}.png`, { type: "image/png" });
+      const uploaded = await uploadAsset({
+        file,
+        name: file.name,
+        asset_type: "image",
+        owner_type: "tenant",
+      });
+      const uploadedResource: SessionSharedResource = {
+        id: uploaded.id,
+        title: uploaded.name,
+        kind: detectContentKind(uploaded),
+        source: "upload",
+        assetType: uploaded.asset_type,
+      };
+      const nextDownloads = [...downloadableResources, uploadedResource];
+      setDownloadableResources(nextDownloads);
+      void persistSessionContent(sharedResources, nextDownloads);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to save chalkboard snapshot.");
+    } finally {
+      setSavingBoardSnapshot(false);
     }
   };
 
@@ -1998,7 +2334,6 @@ export function ClassroomLiveSession() {
                       onChange={(lab) => {
                         setSelectedSessionLab(lab);
                         realtimeRef.current?.send("lab.select", { active_lab: lab });
-                        sendGenericRealtimeEvent("session.view.changed", { view: "lab" });
                       }}
                       ariaLabel="Current session lab"
                       minWidth={220}
@@ -2073,14 +2408,14 @@ export function ClassroomLiveSession() {
                 </button>
                 <button
                   type="button"
-                  className={`classroom-list__create-btn classroom-list__create-btn--ghost ${contentView === "lab" ? "classroom-live__view-switch-btn--active" : ""}`}
+                  className={`classroom-list__create-btn classroom-list__create-btn--ghost ${contentView === "board" ? "classroom-live__view-switch-btn--active" : ""}`}
                   onClick={() => {
-                    setContentView("lab");
-                    sendGenericRealtimeEvent("session.view.changed", { view: "lab" });
+                    setContentView("board");
+                    sendGenericRealtimeEvent("session.view.changed", { view: "board" });
                   }}
                 >
-                  <FlaskConical size={16} />
-                  Lab view
+                  <Pencil size={16} />
+                  Chalkboard
                 </button>
               </div>
             )}
@@ -2098,24 +2433,70 @@ export function ClassroomLiveSession() {
               ) : null}
             </button>
           </div>
+          {classroom?.meeting_provider === "built_in" && (
+            <LiveVideoWidget
+              classroomId={id ?? ""}
+              sessionId={activeSession.id}
+              isInstructorView={isInstructorView}
+            />
+          )}
 
           <div className="classroom-live__main">
             <div className="classroom-live__workspace">
               <section className="classroom-live__content-stage">
-                <div className={`classroom-live__content-card classroom-live__content-card--${contentView}`}>
+                <div className={`classroom-live__content-card classroom-live__content-card--${contentView}${contentFullscreen ? " classroom-live__content-card--fullscreen" : ""}`}>
                   <header className="classroom-live__content-header">
-                    <h3>{contentView === "lab" ? "Lab content" : "Shared class content"}</h3>
+                    <h3>{contentView === "board" ? "Class chalkboard" : "Shared class content"}</h3>
+                    <button
+                      type="button"
+                      className="classroom-live__fullscreen-btn"
+                      onClick={() => setContentFullscreen((prev) => !prev)}
+                      aria-label={contentFullscreen ? "Exit fullscreen" : "Expand to fullscreen"}
+                    >
+                      {contentFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+                    </button>
                     <div className="classroom-live__content-actions">
-                      {contentView === "lab" ? (
+                      {contentView === "board" ? (
                         <>
-                          <button type="button" className="classroom-list__create-btn classroom-list__create-btn--ghost" onClick={openLab}>
-                            <FlaskConical size={15} />
-                            {isInstructorView ? "Open lab" : "Start lab"}
+                          <button
+                            type="button"
+                            className={`classroom-list__create-btn classroom-list__create-btn--ghost ${boardTool === "chalk" ? "classroom-live__view-switch-btn--active" : ""}`}
+                            onClick={() => setBoardTool("chalk")}
+                          >
+                            <Pencil size={15} />
+                            Chalk
+                          </button>
+                          <button
+                            type="button"
+                            className={`classroom-list__create-btn classroom-list__create-btn--ghost ${boardTool === "eraser" ? "classroom-live__view-switch-btn--active" : ""}`}
+                            onClick={() => setBoardTool("eraser")}
+                          >
+                            <Eraser size={15} />
+                            Eraser
+                          </button>
+                          <button
+                            type="button"
+                            className="classroom-list__create-btn classroom-list__create-btn--ghost"
+                            onClick={() => {
+                              if (!isInstructorView) return;
+                              const yStrokes = boardYStrokesRef.current;
+                              if (!yStrokes) return;
+                              if (yStrokes.length > 0) yStrokes.delete(0, yStrokes.length);
+                            }}
+                            disabled={!isInstructorView}
+                          >
+                            <Trash2 size={15} />
+                            Clear
                           </button>
                           {isInstructorView && (
-                            <button type="button" className="classroom-list__create-btn classroom-list__create-btn--ghost" onClick={openShareDialog}>
-                              <Share2 size={15} />
-                              Share content
+                            <button
+                              type="button"
+                              className="classroom-list__create-btn classroom-list__create-btn--ghost"
+                              onClick={handleSaveBoardSnapshot}
+                              disabled={savingBoardSnapshot}
+                            >
+                              <Download size={15} />
+                              {savingBoardSnapshot ? "Saving..." : "Save snapshot"}
                             </button>
                           )}
                         </>
@@ -2164,59 +2545,101 @@ export function ClassroomLiveSession() {
                     </div>
                   </header>
 
-                  {contentView === "lab" ? (
+                  {contentView === "board" ? (
                     <>
-                      <p>
-                        {selectedSessionLab
-                          ? `Current lab: ${selectedSessionLab}`
-                          : "No active lab selected yet."}
-                      </p>
-                      <div ref={viewerContainerRef} className="classroom-live__viewer-frame classroom-live__viewer-frame--lab">
-                        <div className="classroom-live__viewer-overlay-controls" aria-hidden={!isViewerFullscreen}>
-                              <button
-                                type="button"
-                                className="classroom-list__create-btn classroom-list__create-btn--ghost"
-                                onClick={openLab}
-                              >
-                                <FlaskConical size={15} />
-                                {isInstructorView ? "Open lab" : "Start lab"}
-                              </button>
-                        </div>
-                        <button
-                          type="button"
-                          className="classroom-live__viewer-fullscreen-btn"
-                          onClick={toggleViewerFullscreen}
-                          aria-label={isViewerFullscreen ? "Exit fullscreen content viewer" : "Open fullscreen content viewer"}
-                          title={isViewerFullscreen ? "Exit fullscreen (Esc)" : "Fullscreen"}
-                        >
-                          {isViewerFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
-                        </button>
-                        <div className="classroom-live__lab-thumb">
-                          <FlaskConical size={42} aria-hidden />
-                          <span>{selectedSessionLab || "Lab thumbnail placeholder"}</span>
-                        </div>
-                      </div>
-                      {permittedLabs.length > 0 && (
-                        <div className="classroom-live__lab-thumbs" role="list" aria-label="Available lab thumbnails">
-                          {permittedLabs.map((lab) => (
+                      <div className="classroom-live__board-tools">
+                        <div className="classroom-live__board-colors" role="group" aria-label="Chalk colors">
+                          {["#ffffff", "#fef08a", "#93c5fd", "#fda4af", "#86efac", "#d8b4fe"].map((color) => (
                             <button
-                              key={lab}
+                              key={color}
                               type="button"
-                              className={`classroom-live__lab-chip ${lab === selectedSessionLab ? "classroom-live__lab-chip--active" : ""}`}
+                              className={`classroom-live__board-color ${boardColor === color ? "is-active" : ""}`}
+                              style={{ backgroundColor: color }}
                               onClick={() => {
-                                if (!isInstructorView) return;
-                                setSelectedSessionLab(lab);
-                                realtimeRef.current?.send("lab.select", { active_lab: lab });
-                                sendGenericRealtimeEvent("session.view.changed", { view: "lab" });
+                                setBoardTool("chalk");
+                                setBoardColor(color);
                               }}
-                              disabled={!isInstructorView}
-                            >
-                              <FlaskConical size={14} />
-                              {lab}
-                            </button>
+                              title={`Use ${color} chalk`}
+                              disabled={!canDrawOnBoard}
+                            />
                           ))}
                         </div>
-                      )}
+                        <label className="classroom-live__board-size">
+                          Size
+                          <input
+                            type="range"
+                            min={2}
+                            max={18}
+                            step={1}
+                            value={boardSize}
+                            onChange={(event) => setBoardSize(Number(event.target.value))}
+                            disabled={!canDrawOnBoard}
+                          />
+                        </label>
+                        {isInstructorView && (
+                          <div className="classroom-live__board-moderation">
+                            <KidDropdown
+                              value={boardAccessMode}
+                              onChange={(value) => {
+                                const next = value as ChalkboardAccessMode;
+                                const yConfig = boardYConfigRef.current;
+                                if (!yConfig) return;
+                                yConfig.set("access_mode", next);
+                                if (next !== "selected_students") {
+                                  yConfig.set("allowed_student_ids", []);
+                                } else {
+                                  yConfig.set("allowed_student_ids", boardAllowedStudentIds);
+                                }
+                              }}
+                              ariaLabel="Board writing permissions"
+                              minWidth={240}
+                              options={[
+                                { value: "teacher_only", label: "Teacher only" },
+                                { value: "participants", label: "Participants (teacher + students)" },
+                                { value: "selected_students", label: "Selected students" },
+                              ]}
+                            />
+                            {boardAccessMode === "selected_students" && studentParticipants.length > 0 ? (
+                              <div className="classroom-live__board-student-list">
+                                {studentParticipants.map((student) => (
+                                  <label key={student.actor_id} className="classroom-live__board-student-option">
+                                    <input
+                                      type="checkbox"
+                                      checked={boardAllowedStudentIds.includes(student.actor_id)}
+                                      onChange={(event) => {
+                                        const nextIds = event.target.checked
+                                          ? [...boardAllowedStudentIds, student.actor_id]
+                                          : boardAllowedStudentIds.filter((id) => id !== student.actor_id);
+                                        const yConfig = boardYConfigRef.current;
+                                        if (!yConfig) return;
+                                        yConfig.set("access_mode", "selected_students");
+                                        yConfig.set("allowed_student_ids", nextIds);
+                                      }}
+                                    />
+                                    <span>{student.actor_display_name || "Student"}</span>
+                                  </label>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        )}
+                      </div>
+                      <div className="classroom-live__board-frame">
+                        <canvas
+                          ref={chalkboardCanvasRef}
+                          className={`classroom-live__chalkboard ${canDrawOnBoard ? "is-editable" : "is-readonly"}`}
+                          onPointerDown={onBoardPointerDown}
+                          onPointerMove={onBoardPointerMove}
+                          onPointerUp={onBoardPointerUp}
+                          onPointerCancel={onBoardPointerLeave}
+                          onPointerLeave={onBoardPointerLeave}
+                        />
+                        {!canDrawOnBoard && (
+                          <div className="classroom-live__board-readonly-note">
+                            Board is view-only right now. Your teacher controls who can write.
+                          </div>
+                        )}
+                      </div>
                     </>
                   ) : (
                     <>

@@ -2,6 +2,8 @@ import { type ReactElement, useCallback, useEffect, useMemo, useRef } from "reac
 import { createElement } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { heartbeatMySession } from "../../lib/api/classrooms";
+import { useAuth } from "../../providers/AuthProvider";
+import { LiveVideoWidget } from "../classrooms/LiveVideoWidget";
 import { LabAssistantPanel } from "./LabAssistantPanel";
 
 /** Classroom context carried through URL params when a lab is launched from a session or assignment. */
@@ -73,6 +75,7 @@ function getFallbackExitPath(search: string): string {
 export function useLabSession() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { user } = useAuth();
 
   const classroomContext = useMemo(
     () => parseClassroomContext(location.search),
@@ -121,8 +124,26 @@ export function useLabSession() {
     navigate(fallbackExitPath, { replace: true });
   }, [fallbackExitPath, navigate]);
 
+  const meetingProvider = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    return params.get("meeting_provider");
+  }, [location.search]);
+
+  const useBuiltInVideo = meetingProvider === "built_in";
+
   const panel: ReactElement | null = classroomContext
-    ? createElement(LabAssistantPanel, { classroomContext })
+    ? createElement(
+        "div",
+        null,
+        useBuiltInVideo
+          ? createElement(LiveVideoWidget, {
+              classroomId: classroomContext.classroomId,
+              sessionId: classroomContext.sessionId,
+              isInstructorView: user?.subType === "user",
+            })
+          : null,
+        createElement(LabAssistantPanel, { classroomContext }),
+      )
     : null;
 
   return { exitLab, fallbackExitPath, classroomContext, panel };

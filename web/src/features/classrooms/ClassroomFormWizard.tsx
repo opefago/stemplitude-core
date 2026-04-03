@@ -529,6 +529,7 @@ export function ClassroomFormWizard({
         };
 
         if (mode === "create") {
+          const needsExternalMeeting = w.deliveryMode !== "in-person" && w.meetingMode === "generate";
           const created = await createClassroom({
             name: w.name.trim(),
             program_id: w.programId || selectedCurriculum?.program_id || null,
@@ -537,9 +538,21 @@ export function ClassroomFormWizard({
             mode: w.deliveryMode,
             recurrence_type: w.isRecurring ? "weekly" : "one_time",
             meeting_provider:
-              w.deliveryMode === "online" && w.meetingMode === "generate" ? w.meetingProvider : null,
-            meeting_link: w.deliveryMode === "online" && w.meetingMode === "paste" ? w.manualMeetingLink || null : null,
-            location_address: w.deliveryMode === "in-person" ? w.locationAddress || null : null,
+              w.deliveryMode === "in-person"
+                ? null
+                : w.meetingMode === "built_in"
+                  ? "built_in"
+                  : w.meetingMode === "generate"
+                    ? w.meetingProvider
+                    : null,
+            meeting_link:
+              w.deliveryMode !== "in-person" && w.meetingMode === "paste"
+                ? w.manualMeetingLink || null
+                : null,
+            location_address:
+              w.deliveryMode === "in-person" || w.deliveryMode === "hybrid"
+                ? w.locationAddress || null
+                : null,
             schedule,
             timezone: w.timeZone,
             max_students: (() => {
@@ -548,7 +561,7 @@ export function ClassroomFormWizard({
             })(),
             is_active: true,
           });
-          if (w.deliveryMode === "online" && w.meetingMode === "generate") {
+          if (needsExternalMeeting) {
             try {
               await regenerateClassroomMeeting(created.id, w.meetingProvider);
             } catch {
@@ -571,7 +584,7 @@ export function ClassroomFormWizard({
           recordName: editBaseline.name,
         });
         const updated = await updateClassroom(editClassroomId, patch);
-        if (w.deliveryMode === "online" && w.meetingMode === "generate") {
+        if (w.deliveryMode !== "in-person" && w.meetingMode === "generate") {
           try {
             await regenerateClassroomMeeting(updated.id, w.meetingProvider);
           } catch {

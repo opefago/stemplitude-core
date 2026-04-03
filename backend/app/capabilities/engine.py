@@ -159,9 +159,12 @@ class CapabilityEngine:
 
         if not link or link.billing_mode == "independent":
             seat = await self.repo.get_seat_usage(tenant_id, seat_type)
-            if seat and seat.current_count >= seat.max_count:
-                logger.debug("Seat check tenant=%s type=%s result=%s", tenant_id, seat_type, "Seat limit reached for your plan")
-                return Deny("Seat limit reached for your plan")
+            if seat:
+                live_count = await self._count_seat_type(tenant_id, seat_type)
+                if live_count >= seat.max_count:
+                    reason = f"Seat limit reached ({live_count}/{seat.max_count})"
+                    logger.debug("Seat check tenant=%s type=%s result=%s", tenant_id, seat_type, reason)
+                    return Deny(reason)
             logger.debug("Seat check tenant=%s type=%s result=%s", tenant_id, seat_type, "ok")
             return None
 

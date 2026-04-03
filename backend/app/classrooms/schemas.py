@@ -30,7 +30,7 @@ class ClassroomBase(BaseModel):
     mode: str = Field(
         default="online",
         max_length=20,
-        description="Delivery mode: 'online' or 'in-person'.",
+        description="Delivery mode: 'online', 'hybrid', or 'in-person'.",
     )
     recurrence_type: str | None = Field(
         None,
@@ -40,7 +40,7 @@ class ClassroomBase(BaseModel):
     meeting_provider: str | None = Field(
         None,
         max_length=20,
-        description="Video meeting provider (e.g., 'zoom', 'meet', 'teams').",
+        description="Video meeting provider: 'built_in' (platform video), 'zoom', 'meet', or 'teams'.",
     )
     meeting_link: str | None = Field(
         None,
@@ -141,7 +141,7 @@ class ClassroomUpdate(BaseModel):
     mode: str | None = Field(
         None,
         max_length=20,
-        description="Updated delivery mode: 'online' or 'in-person'.",
+        description="Updated delivery mode: 'online', 'hybrid', or 'in-person'.",
     )
     recurrence_type: str | None = Field(
         None,
@@ -151,7 +151,7 @@ class ClassroomUpdate(BaseModel):
     meeting_provider: str | None = Field(
         None,
         max_length=20,
-        description="Updated meeting provider.",
+        description="Updated meeting provider: 'built_in', 'zoom', 'meet', or 'teams'.",
     )
     meeting_link: str | None = Field(
         None,
@@ -580,6 +580,67 @@ class EndSessionRequest(BaseModel):
         default=False,
         description="Must be true when ending while students are still active.",
     )
+
+
+class SessionVideoTokenResponse(BaseModel):
+    provider: str = Field(..., description="Video provider mode.")
+    room_name: str = Field(..., description="Provider room name.")
+    participant_identity: str = Field(..., description="Participant identity used in provider token.")
+    participant_name: str = Field(..., description="Participant display name.")
+    ws_url: str = Field(..., description="LiveKit websocket URL.")
+    token: str = Field(..., description="Signed provider access token.")
+    expires_at: datetime = Field(..., description="Token expiration timestamp.")
+
+
+class SessionRecordingStartRequest(BaseModel):
+    provider_recording_id: str | None = Field(
+        None,
+        max_length=255,
+        description="Optional provider recording identifier when recording starts.",
+    )
+
+
+class SessionRecordingStopRequest(BaseModel):
+    status: str = Field(
+        default="ready",
+        max_length=32,
+        description="Final status after stop (usually ready or failed).",
+    )
+    blob_key: str | None = Field(
+        None,
+        max_length=1024,
+        description="Storage object key for the recording file.",
+    )
+    duration_seconds: int | None = Field(None, ge=0, description="Recording length in seconds.")
+    size_bytes: int | None = Field(None, ge=0, description="File size in bytes.")
+    provider_recording_id: str | None = Field(None, max_length=255, description="Provider recording id.")
+
+
+class SessionRecordingResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    tenant_id: UUID
+    classroom_id: UUID
+    session_id: UUID
+    created_by_id: UUID | None = None
+    provider: str
+    provider_room_name: str | None = None
+    provider_recording_id: str | None = None
+    status: str
+    blob_key: str | None = None
+    duration_seconds: int | None = None
+    size_bytes: int | None = None
+    retention_expires_at: datetime | None = None
+    deleted_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class SessionRecordingAccessResponse(BaseModel):
+    recording_id: UUID = Field(..., description="Session recording id.")
+    download_url: str = Field(..., description="Presigned download URL.")
+    expires_in_seconds: int = Field(..., ge=1, description="Link validity in seconds.")
 
 
 class SessionTextAssignment(BaseModel):

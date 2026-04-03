@@ -41,6 +41,11 @@ from app.classrooms.schemas import (
     RealtimeEventEnvelope,
     SubmissionGradeRequest,
     SubmissionRecord,
+    SessionVideoTokenResponse,
+    SessionRecordingResponse,
+    SessionRecordingStartRequest,
+    SessionRecordingStopRequest,
+    SessionRecordingAccessResponse,
 )
 from app.dependencies import CurrentIdentity, get_current_identity
 from app.students.me_student import parse_optional_child_context_uuid
@@ -258,6 +263,161 @@ async def list_sessions(
     """List sessions for a classroom."""
     service = ClassroomService(db)
     return await service.list_sessions(id, tenant.tenant_id, limit=limit)
+
+
+@router.post(
+    "/{id}/sessions/{session_id}/video-token",
+    response_model=SessionVideoTokenResponse,
+    dependencies=[_require_tenant()],
+)
+async def issue_session_video_token(
+    request: Request,
+    id: UUID,
+    session_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(get_tenant_context),
+    identity: CurrentIdentity = Depends(get_current_identity),
+):
+    """Issue a LiveKit access token for this classroom session."""
+    service = ClassroomService(db)
+    child_ctx = parse_optional_child_context_uuid(request)
+    return await service.issue_session_video_token(
+        classroom_id=id,
+        session_id=session_id,
+        tenant_id=tenant.tenant_id,
+        identity=identity,
+        child_context_student_id=child_ctx,
+    )
+
+
+@router.get(
+    "/{id}/sessions/{session_id}/recordings",
+    response_model=list[SessionRecordingResponse],
+    dependencies=[_require_tenant()],
+)
+async def list_session_recordings(
+    request: Request,
+    id: UUID,
+    session_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(get_tenant_context),
+    identity: CurrentIdentity = Depends(get_current_identity),
+):
+    service = ClassroomService(db)
+    child_ctx = parse_optional_child_context_uuid(request)
+    return await service.list_session_recordings(
+        classroom_id=id,
+        session_id=session_id,
+        tenant_id=tenant.tenant_id,
+        identity=identity,
+        child_context_student_id=child_ctx,
+    )
+
+
+@router.post(
+    "/{id}/sessions/{session_id}/recordings/start",
+    response_model=SessionRecordingResponse,
+    dependencies=[_require_tenant()],
+)
+async def start_session_recording(
+    request: Request,
+    id: UUID,
+    session_id: UUID,
+    data: SessionRecordingStartRequest,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(get_tenant_context),
+    identity: CurrentIdentity = Depends(get_current_identity),
+):
+    service = ClassroomService(db)
+    child_ctx = parse_optional_child_context_uuid(request)
+    return await service.start_session_recording(
+        classroom_id=id,
+        session_id=session_id,
+        tenant_id=tenant.tenant_id,
+        identity=identity,
+        data=data,
+        child_context_student_id=child_ctx,
+    )
+
+
+@router.post(
+    "/{id}/sessions/{session_id}/recordings/{recording_id}/stop",
+    response_model=SessionRecordingResponse,
+    dependencies=[_require_tenant()],
+)
+async def stop_session_recording(
+    request: Request,
+    id: UUID,
+    session_id: UUID,
+    recording_id: UUID,
+    data: SessionRecordingStopRequest,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(get_tenant_context),
+    identity: CurrentIdentity = Depends(get_current_identity),
+):
+    service = ClassroomService(db)
+    child_ctx = parse_optional_child_context_uuid(request)
+    return await service.stop_session_recording(
+        classroom_id=id,
+        session_id=session_id,
+        recording_id=recording_id,
+        tenant_id=tenant.tenant_id,
+        identity=identity,
+        data=data,
+        child_context_student_id=child_ctx,
+    )
+
+
+@router.post(
+    "/{id}/sessions/{session_id}/recordings/{recording_id}/access-link",
+    response_model=SessionRecordingAccessResponse,
+    dependencies=[_require_tenant()],
+)
+async def create_session_recording_access_link(
+    request: Request,
+    id: UUID,
+    session_id: UUID,
+    recording_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(get_tenant_context),
+    identity: CurrentIdentity = Depends(get_current_identity),
+):
+    service = ClassroomService(db)
+    child_ctx = parse_optional_child_context_uuid(request)
+    return await service.create_session_recording_access_link(
+        classroom_id=id,
+        session_id=session_id,
+        recording_id=recording_id,
+        tenant_id=tenant.tenant_id,
+        identity=identity,
+        child_context_student_id=child_ctx,
+    )
+
+
+@router.delete(
+    "/{id}/sessions/{session_id}/recordings/{recording_id}",
+    response_model=SessionRecordingResponse,
+    dependencies=[_require_tenant()],
+)
+async def delete_session_recording(
+    request: Request,
+    id: UUID,
+    session_id: UUID,
+    recording_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(get_tenant_context),
+    identity: CurrentIdentity = Depends(get_current_identity),
+):
+    service = ClassroomService(db)
+    child_ctx = parse_optional_child_context_uuid(request)
+    return await service.delete_session_recording(
+        classroom_id=id,
+        session_id=session_id,
+        recording_id=recording_id,
+        tenant_id=tenant.tenant_id,
+        identity=identity,
+        child_context_student_id=child_ctx,
+    )
 
 
 @router.post(

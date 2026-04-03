@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from app.classrooms.models import Classroom, ClassroomSession
 from app.classrooms.schedule_occurrences import (
     expand_classroom_upcoming_occurrences,
     merge_db_and_scheduled_upcoming,
 )
+from app.programs.models import Program
 
 
 def _classroom(**kwargs: object) -> Classroom:
@@ -135,3 +136,118 @@ def test_one_time_recurrence_does_not_expand():
     after = datetime(2026, 3, 29, 20, 0, tzinfo=timezone.utc)
     until = datetime(2026, 5, 1, 0, 0, tzinfo=timezone.utc)
     assert expand_classroom_upcoming_occurrences(c, after_utc=after, until_utc=until) == []
+
+
+def _make_program(
+    start_date: date | None = None, end_date: date | None = None
+) -> Program:
+    return Program(
+        id=uuid.uuid4(),
+        tenant_id=uuid.uuid4(),
+        name="Test program",
+        is_active=True,
+        start_date=start_date,
+        end_date=end_date,
+        settings={},
+    )
+
+
+def test_weekly_schedule_clipped_by_program_end_date():
+    """Occurrences must not exceed the parent program's end_date."""
+    program = _make_program(end_date=date(2026, 4, 7))
+    c = _classroom(
+        program_id=program.id,
+        schedule={
+            "recurring": True,
+            "days": ["Monday"],
+            "time": "15:00",
+            "end_time": "16:00",
+        },
+    )
+    c.program = program
+
+    after = datetime(2026, 3, 29, 20, 0, tzinfo=timezone.utc)
+    until = datetime(2026, 5, 1, 0, 0, tzinfo=timezone.utc)
+    occ = expand_classroom_upcoming_occurrences(c, after_utc=after, until_utc=until)
+    assert len(occ) >= 1
+    for o in occ:
+        assert o.session_start.date() <= date(2026, 4, 7)
+
+
+def test_weekly_schedule_clipped_by_program_start_date():
+    """Occurrences must not start before the parent program's start_date."""
+    program = _make_program(start_date=date(2026, 4, 7))
+    c = _classroom(
+        program_id=program.id,
+        schedule={
+            "recurring": True,
+            "days": ["Monday"],
+            "time": "15:00",
+            "end_time": "16:00",
+        },
+    )
+    c.program = program
+
+    after = datetime(2026, 3, 29, 20, 0, tzinfo=timezone.utc)
+    until = datetime(2026, 5, 1, 0, 0, tzinfo=timezone.utc)
+    occ = expand_classroom_upcoming_occurrences(c, after_utc=after, until_utc=until)
+    assert len(occ) >= 1
+    for o in occ:
+        assert o.session_start.date() >= date(2026, 4, 7)
+
+
+def test_program_bounds_clip_rrule_occurrences():
+    """RRule-based expansion must also respect program term dates."""
+    program = _make_program(
+        start_date=date(2026, 4, 1), end_date=date(2026, 4, 14)
+    )
+    c = _classroom(
+        program_id=program.id,
+        recurrence_rule="FREQ=WEEKLY;BYDAY=MO",
+        starts_at=datetime(2026, 3, 30, 22, 0, tzinfo=timezone.utc),
+        schedule={"time": "15:00", "end_time": "16:00"},
+    )
+    c.program = program
+
+    after = datetime(2026, 3, 29, 20, 0, tzinfo=timezone.utc)
+    until = datetime(2026, 5, 1, 0, 0, tzinfo=timezone.utc)
+    occ = expand_classroom_upcoming_occurrences(c, after_utc=after, until_utc=until)
+    for o in occ:
+        assert o.session_start.date() >= date(2026, 4, 1)
+        assert o.session_start.date() <= date(2026, 4, 14)
+
+
+def test_classroom_without_program_unaffected():
+    """A classroom with no program_id should expand normally without clipping."""
+    c = _classroom(
+        schedule={
+            "recurring": True,
+            "days": ["Monday"],
+            "time": "15:00",
+            "end_time": "16:00",
+        },
+    )
+    after = datetime(2026, 3, 29, 20, 0, tzinfo=timezone.utc)
+    until = datetime(2026, 5, 1, 0, 0, tzinfo=timezone.utc)
+    occ_no_program = expand_classroom_upcoming_occurrences(c, after_utc=after, until_utc=until)
+    assert len(occ_no_program) >= 4
+
+
+def test_program_with_no_dates_does_not_clip():
+    """A program without start_date / end_date should not clip occurrences."""
+    program = _make_program()
+    c = _classroom(
+        program_id=program.id,
+        schedule={
+            "recurring": True,
+            "days": ["Monday"],
+            "time": "15:00",
+            "end_time": "16:00",
+        },
+    )
+    c.program = program
+
+    after = datetime(2026, 3, 29, 20, 0, tzinfo=timezone.utc)
+    until = datetime(2026, 5, 1, 0, 0, tzinfo=timezone.utc)
+    occ = expand_classroom_upcoming_occurrences(c, after_utc=after, until_utc=until)
+    assert len(occ) >= 4

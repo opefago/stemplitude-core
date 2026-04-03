@@ -9,8 +9,8 @@ export type EditWizardPayloadSource = {
   programId: string;
   curriculumId: string;
   instructorId: string;
-  deliveryMode: "online" | "in-person";
-  meetingMode: "generate" | "paste";
+  deliveryMode: "online" | "in-person" | "hybrid";
+  meetingMode: "built_in" | "generate" | "paste";
   meetingProvider: "zoom" | "meet" | "teams";
   manualMeetingLink: string;
   locationAddress: string;
@@ -34,8 +34,10 @@ export function editPayloadSourceFromClassroom(
   const days = Array.isArray(daysRaw) ? daysRaw.map(String) : [];
   const labsRaw = sch.permitted_labs;
   const labs = Array.isArray(labsRaw) ? filterToPermittedLabOptions(labsRaw.map(String)) : [];
+  const provRaw = (c.meeting_provider ?? "").toLowerCase();
+  const isBuiltIn = provRaw === "built_in";
   const autoGen = Boolean(c.meeting_auto_generated);
-  const prov = (c.meeting_provider ?? "zoom").toLowerCase();
+  const prov = provRaw || "zoom";
   const meetingProvider =
     prov === "meet" || prov === "teams" || prov === "zoom" ? (prov as "zoom" | "meet" | "teams") : "zoom";
 
@@ -45,8 +47,8 @@ export function editPayloadSourceFromClassroom(
     programId: c.program_id ?? "",
     curriculumId: c.curriculum_id ?? "",
     instructorId: c.instructor_id ?? "",
-    deliveryMode: c.mode === "in-person" ? "in-person" : "online",
-    meetingMode: autoGen ? "generate" : "paste",
+    deliveryMode: c.mode === "in-person" ? "in-person" : c.mode === "hybrid" ? "hybrid" : "online",
+    meetingMode: isBuiltIn ? "built_in" : autoGen ? "generate" : "paste",
     meetingProvider,
     manualMeetingLink: c.meeting_link ?? "",
     locationAddress: c.location_address ?? "",
@@ -254,12 +256,21 @@ export function buildClassroomEditUpdatePayload(
     mode: src.deliveryMode,
     recurrence_type: src.isRecurring ? "weekly" : "one_time",
     meeting_provider:
-      src.deliveryMode === "online" && src.meetingMode === "generate" ? src.meetingProvider : null,
+      src.deliveryMode === "in-person"
+        ? null
+        : src.meetingMode === "built_in"
+          ? "built_in"
+          : src.meetingMode === "generate"
+            ? src.meetingProvider
+            : null,
     meeting_link:
-      src.deliveryMode === "online" && src.meetingMode === "paste"
+      src.deliveryMode !== "in-person" && src.meetingMode === "paste"
         ? src.manualMeetingLink.trim() || null
         : null,
-    location_address: src.deliveryMode === "in-person" ? src.locationAddress || null : null,
+    location_address:
+      src.deliveryMode === "in-person" || src.deliveryMode === "hybrid"
+        ? src.locationAddress || null
+        : null,
     schedule,
     timezone: src.timeZone,
     max_students: (() => {
