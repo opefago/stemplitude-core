@@ -87,12 +87,9 @@ export class Transistor extends CircuitComponent {
   protected createVisuals(): void {
     this.componentGraphics.clear();
 
-    const isBJT =
-      this.transistorProps.type === "NPN" ||
-      this.transistorProps.type === "PNP";
-    const isNType =
-      this.transistorProps.type === "NPN" ||
-      this.transistorProps.type === "NMOS";
+    const tType = this.transistorProps?.type ?? "NPN";
+    const isBJT = tType === "NPN" || tType === "PNP";
+    const isNType = tType === "NPN" || tType === "NMOS";
 
     if (isBJT) {
       this.drawBJT(isNType);
@@ -303,7 +300,7 @@ export class Transistor extends CircuitComponent {
   }
 
   private updateLabels(): void {
-    // Component label with type
+    if (!this.transistorProps) return;
     this.labelText.text = `${this.name}\n${this.transistorProps.type}`;
     this.labelText.style = {
       fontSize: 10,
@@ -314,7 +311,6 @@ export class Transistor extends CircuitComponent {
     this.labelText.anchor.set(0.5);
     this.labelText.position.set(0, -40);
 
-    // Operating region indicator
     let region = "OFF";
     if (this.transistorProps.isSaturated) {
       region = "SAT";

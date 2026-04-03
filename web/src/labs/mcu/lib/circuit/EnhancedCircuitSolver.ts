@@ -6,10 +6,14 @@ import { Battery } from "./components/Battery";
 import { Inductor } from "./components/Inductor";
 import { LED } from "./components/LED";
 import { Switch } from "./components/Switch";
+import { SpdtSwitch } from "./components/SpdtSwitch";
+import { Potentiometer } from "./components/Potentiometer";
+import { ZenerDiode } from "./components/ZenerDiode";
 import { Ammeter } from "./components/Ammeter";
 import { ACSource } from "./components/ACSource";
 import { NPNTransistor } from "./components/NPNTransistor";
 import { PNPTransistor } from "./components/PNPTransistor";
+import type { SimulationSnapshot } from "./types/SimulationSnapshot";
 
 /**
  * Enhanced Circuit Solver using Modified Nodal Analysis (MNA) with MathJS
@@ -39,6 +43,10 @@ export class EnhancedCircuitSolver {
   private timeStep: number = 1e-3; // 1ms default
   private currentTime: number = 0;
   private previousState: Map<string, { voltage: number; current: number }>;
+
+  // Store last solve results for snapshot export
+  private lastSolveNodeVoltages: number[] = [];
+  private lastSolveSourceCurrents: number[] = [];
 
   constructor() {
     this.components = new Map();
@@ -500,8 +508,15 @@ export class EnhancedCircuitSolver {
           this.addPNPTransistor(component as PNPTransistor);
           break;
         case "switch":
+        case "push_button":
           // Switch: acts as variable resistor (low when closed, high when open)
           this.addSwitch(component as Switch);
+          break;
+        case "spdt_switch":
+          this.addSpdtSwitch(component as SpdtSwitch);
+          break;
+        case "potentiometer":
+          this.addPotentiometer(component as Potentiometer);
           break;
         case "ammeter":
           // Ammeter: acts as very low resistance
@@ -512,8 +527,48 @@ export class EnhancedCircuitSolver {
           // Voltmeter/Oscilloscope: acts as very high resistance
           this.addHighResistance(component);
           break;
+        case "diode":
+          // Diode: same simplified model as LED (Vf + Rd)
+          vsIndex = this.addLEDSimplified(component as any, vsIndex);
+          break;
+        case "zener_diode":
+          // Zener: forward diode + reverse-breakdown clamp
+          vsIndex = this.addZenerSimplified(component as ZenerDiode, vsIndex);
+          break;
+        case "nmos_transistor":
+          // NMOS: piecewise linear like BJT — model as switch/variable resistor
+          this.addMOSFETSwitch(component);
+          break;
+        case "pmos_transistor":
+          // PMOS: same treatment as NMOS
+          this.addMOSFETSwitch(component);
+          break;
+        case "opamp":
+          // Op-amp: high-gain VCVS — model as high input impedance + voltage source output
+          this.addHighResistance(component);
+          break;
+        case "comparator":
+          // Comparator: digital output based on input comparison
+          this.addHighResistance(component);
+          break;
+        case "timer555":
+          // 555: behavioral macro-model — treat pins as high impedance for now
+          this.addHighResistance(component);
+          break;
+        case "relay":
+          // Relay coil as resistor; contacts handled separately
+          this.addRelayCoil(component);
+          break;
+        case "nor_gate":
+        case "nand_gate":
+        case "and_gate":
+        case "or_gate":
+        case "xor_gate":
+        case "not_gate":
+          // Logic gates: high input impedance
+          this.addHighResistance(component);
+          break;
         case "ground":
-          // Ground is handled by node 0
           break;
         default:
           console.warn(`Component type ${type} not handled in MNA`);
@@ -648,6 +703,69 @@ export class EnhancedCircuitSolver {
     }
   }
 
+  /** SPDT: common to one throw low-R, other throw open */
+  private addSpdtSwitch(c: SpdtSwitch): void {
+    const props = c.getCircuitProperties() as { connectUpper?: boolean };
+    const connectUpper = props.connectUpper ?? true;
+    const nodes = c.getNodes();
+    const componentId = c.getName();
+    const rOn = 0.001;
+    const rOff = 1e9;
+    const gA = connectUpper ? 1 / rOn : 1 / rOff;
+    const gB = connectUpper ? 1 / rOff : 1 / rOn;
+    const nc = this.nodeMap.get(`${componentId}_${nodes[0].id}`)! - 1;
+    const na = this.nodeMap.get(`${componentId}_${nodes[1].id}`)! - 1;
+    const nb = this.nodeMap.get(`${componentId}_${nodes[2].id}`)! - 1;
+
+    if (nc >= 0) {
+      this.G[nc][nc] += gA + gB;
+      if (na >= 0) this.G[nc][na] -= gA;
+      if (nb >= 0) this.G[nc][nb] -= gB;
+    }
+    if (na >= 0) {
+      this.G[na][na] += gA;
+      if (nc >= 0) this.G[na][nc] -= gA;
+    }
+    if (nb >= 0) {
+      this.G[nb][nb] += gB;
+      if (nc >= 0) this.G[nb][nc] -= gB;
+    }
+  }
+
+  /** Potentiometer: two resistors end1–wiper and wiper–end2 */
+  private addPotentiometer(c: Potentiometer): void {
+    const props = c.getCircuitProperties() as {
+      totalResistance?: number;
+      value?: number;
+      wiperPosition?: number;
+    };
+    const R = props.totalResistance ?? props.value ?? 10000;
+    const alpha = props.wiperPosition ?? 0.5;
+    const R1 = Math.max(R * alpha, 1e-9);
+    const R2 = Math.max(R * (1 - alpha), 1e-9);
+    const g1 = 1 / R1;
+    const g2 = 1 / R2;
+    const nodes = c.getNodes();
+    const componentId = c.getName();
+    const n1 = this.nodeMap.get(`${componentId}_end1`)! - 1;
+    const nw = this.nodeMap.get(`${componentId}_wiper`)! - 1;
+    const n2 = this.nodeMap.get(`${componentId}_end2`)! - 1;
+
+    if (n1 >= 0) {
+      this.G[n1][n1] += g1;
+      if (nw >= 0) this.G[n1][nw] -= g1;
+    }
+    if (nw >= 0) {
+      this.G[nw][nw] += g1 + g2;
+      if (n1 >= 0) this.G[nw][n1] -= g1;
+      if (n2 >= 0) this.G[nw][n2] -= g2;
+    }
+    if (n2 >= 0) {
+      this.G[n2][n2] += g2;
+      if (nw >= 0) this.G[n2][nw] -= g2;
+    }
+  }
+
   /**
    * Add Ammeter to MNA matrices
    * Acts as very low resistance
@@ -693,6 +811,87 @@ export class EnhancedCircuitSolver {
     if (n2 >= 0) {
       this.G[n2][n2] += conductance;
       if (n1 >= 0) this.G[n2][n1] -= conductance;
+    }
+  }
+
+  /**
+   * Add MOSFET as a piecewise-linear switch: low Rds(on) when gate voltage
+   * exceeds threshold, very high resistance when off.
+   */
+  private addMOSFETSwitch(component: CircuitComponent): void {
+    const props = component.getCircuitProperties() as any;
+    const nodes = component.getNodes();
+    const componentId = component.getName();
+
+    const gateNode = nodes.find((n: any) => n.id === "gate");
+    const drainNode = nodes.find((n: any) => n.id === "drain");
+    const sourceNode = nodes.find((n: any) => n.id === "source");
+    if (!drainNode || !sourceNode) return;
+
+    const vgsThreshold = props.vgsThreshold ?? 2;
+    const rdson = props.rdson ?? 0.1;
+    const isConducting = props.isConducting ?? false;
+
+    const resistance = isConducting ? rdson : 1e9;
+    const conductance = 1 / resistance;
+
+    const n1 = (this.nodeMap.get(`${componentId}_${drainNode.id}`) ?? 0) - 1;
+    const n2 = (this.nodeMap.get(`${componentId}_${sourceNode.id}`) ?? 0) - 1;
+
+    if (n1 >= 0) {
+      this.G[n1][n1] += conductance;
+      if (n2 >= 0) this.G[n1][n2] -= conductance;
+    }
+    if (n2 >= 0) {
+      this.G[n2][n2] += conductance;
+      if (n1 >= 0) this.G[n2][n1] -= conductance;
+    }
+  }
+
+  /**
+   * Add relay coil as a simple resistor between coil terminals.
+   */
+  private addRelayCoil(component: CircuitComponent): void {
+    const props = component.getCircuitProperties() as any;
+    const nodes = component.getNodes();
+    const componentId = component.getName();
+
+    const coil1 = nodes.find((n: any) => n.id === "coil1");
+    const coil2 = nodes.find((n: any) => n.id === "coil2");
+    if (!coil1 || !coil2) return;
+
+    const resistance = props.coilResistance ?? 100;
+    const conductance = 1 / resistance;
+
+    const n1 = (this.nodeMap.get(`${componentId}_${coil1.id}`) ?? 0) - 1;
+    const n2 = (this.nodeMap.get(`${componentId}_${coil2.id}`) ?? 0) - 1;
+
+    if (n1 >= 0) {
+      this.G[n1][n1] += conductance;
+      if (n2 >= 0) this.G[n1][n2] -= conductance;
+    }
+    if (n2 >= 0) {
+      this.G[n2][n2] += conductance;
+      if (n1 >= 0) this.G[n2][n1] -= conductance;
+    }
+
+    // Contact side: if activated, connect common to NO with low resistance
+    const isActivated = props.isActivated ?? false;
+    const contactCommon = nodes.find((n: any) => n.id === "contact_common");
+    const contactNo = nodes.find((n: any) => n.id === "contact_no");
+    if (contactCommon && contactNo) {
+      const contactR = isActivated ? 0.01 : 1e9;
+      const contactG = 1 / contactR;
+      const nc = (this.nodeMap.get(`${componentId}_${contactCommon.id}`) ?? 0) - 1;
+      const nn = (this.nodeMap.get(`${componentId}_${contactNo.id}`) ?? 0) - 1;
+      if (nc >= 0) {
+        this.G[nc][nc] += contactG;
+        if (nn >= 0) this.G[nc][nn] -= contactG;
+      }
+      if (nn >= 0) {
+        this.G[nn][nn] += contactG;
+        if (nc >= 0) this.G[nn][nc] -= contactG;
+      }
     }
   }
 
@@ -783,6 +982,63 @@ export class EnhancedCircuitSolver {
 
     this.D[vsIndex][vsIndex] = -dynamicResistance;
     this.e[vsIndex] = forwardVoltage;
+
+    return vsIndex + 1;
+  }
+
+  /**
+   * Add Zener diode with piecewise model:
+   * - Forward bias: Vf + dynamic resistance (like diode)
+   * - Reverse below breakdown: high resistance leakage
+   * - Reverse at/above breakdown: -Vz + dynamic resistance
+   */
+  private addZenerSimplified(zener: ZenerDiode, vsIndex: number): number {
+    const nodes = zener.getNodes();
+    const componentId = zener.getName();
+    const props = zener.getCircuitProperties() as any;
+
+    const nAnode = this.nodeMap.get(`${componentId}_${nodes[0].id}`)! - 1;
+    const nCathode = this.nodeMap.get(`${componentId}_${nodes[1].id}`)! - 1;
+
+    const vAnode = nAnode >= 0 ? (nodes[0].voltage || 0) : 0;
+    const vCathode = nCathode >= 0 ? (nodes[1].voltage || 0) : 0;
+    const vForward = vAnode - vCathode;
+    const vReverse = vCathode - vAnode;
+
+    const forwardVoltage = zener.getForwardVoltage();
+    const breakdownVoltage = zener.getBreakdownVoltage();
+    const dynamicResistance = props.dynamicResistance || 10;
+
+    // Reverse leakage region (below breakdown): very high resistance
+    if (vForward < 0 && vReverse < breakdownVoltage) {
+      const rLeak = 1e9;
+      const gLeak = 1 / rLeak;
+      if (nAnode >= 0) {
+        this.G[nAnode][nAnode] += gLeak;
+        if (nCathode >= 0) this.G[nAnode][nCathode] -= gLeak;
+      }
+      if (nCathode >= 0) {
+        this.G[nCathode][nCathode] += gLeak;
+        if (nAnode >= 0) this.G[nCathode][nAnode] -= gLeak;
+      }
+      this.voltageSourceMap.set(componentId, vsIndex);
+      return vsIndex + 1;
+    }
+
+    this.voltageSourceMap.set(componentId, vsIndex);
+
+    if (nAnode >= 0) {
+      this.B[nAnode][vsIndex] = 1;
+      this.C[vsIndex][nAnode] = 1;
+    }
+    if (nCathode >= 0) {
+      this.B[nCathode][vsIndex] = -1;
+      this.C[vsIndex][nCathode] = -1;
+    }
+
+    this.D[vsIndex][vsIndex] = -dynamicResistance;
+    // Forward: Va - Vk = +Vf ; Breakdown: Va - Vk = -Vz
+    this.e[vsIndex] = vForward >= 0 ? forwardVoltage : -breakdownVoltage;
 
     return vsIndex + 1;
   }
@@ -1088,10 +1344,13 @@ export class EnhancedCircuitSolver {
       const solution = lusolve(matrixA, vectorZ) as Matrix;
       const x = solution.toArray() as number[][];
 
-      return {
-        nodeVoltages: x.slice(0, n).map((row) => row[0]),
-        sourceCurrents: x.slice(n).map((row) => row[0]),
-      };
+      const nodeVoltages = x.slice(0, n).map((row) => row[0]);
+      const sourceCurrents = x.slice(n).map((row) => row[0]);
+
+      this.lastSolveNodeVoltages = nodeVoltages;
+      this.lastSolveSourceCurrents = sourceCurrents;
+
+      return { nodeVoltages, sourceCurrents };
     } catch (error) {
       console.error("Matrix solve error:", error);
       console.log("Matrix A:", A);
@@ -1143,12 +1402,13 @@ export class EnhancedCircuitSolver {
           current = prevIndCurrent + (voltage * this.timeStep) / inductance;
           break;
         case "led":
-          // LED current comes from MNA solution (voltage source)
+        case "diode":
+        case "zener_diode":
+          // LED/Diode current comes from MNA solution (voltage source model)
           const ledVsIndex = this.voltageSourceMap.get(componentId);
           if (ledVsIndex !== undefined) {
             current = solution.sourceCurrents[ledVsIndex];
           } else {
-            console.warn(`LED ${componentId} voltage source index not found`);
             current = 0;
           }
           break;
@@ -1187,6 +1447,7 @@ export class EnhancedCircuitSolver {
           }
           break;
         case "switch":
+        case "push_button":
         case "ammeter":
         case "voltmeter":
         case "oscilloscope":
@@ -1234,8 +1495,16 @@ export class EnhancedCircuitSolver {
     let count = 0;
     this.components.forEach((comp) => {
       const type = comp.getComponentType();
-      // LEDs are modeled as voltage source (Vf) in series with resistance
-      if (type === "battery" || type === "acsource" || type === "led") count++;
+      // Components modeled with explicit MNA voltage sources.
+      if (
+        type === "battery" ||
+        type === "acsource" ||
+        type === "led" ||
+        type === "diode" ||
+        type === "zener_diode"
+      ) {
+        count++;
+      }
     });
     return count;
   }
@@ -1262,6 +1531,36 @@ export class EnhancedCircuitSolver {
   }
 
   /**
+   * True if two pins of a component share the same post-union electrical node
+   * (e.g. 555 TRIG/THR/DIS tied per classic astable).
+   */
+  public areNodesElectricallyCommon(
+    componentId: string,
+    nodeIdA: string,
+    nodeIdB: string
+  ): boolean {
+    const a = `${componentId}_${nodeIdA}`;
+    const b = `${componentId}_${nodeIdB}`;
+    const ia = this.nodeMap.get(a);
+    const ib = this.nodeMap.get(b);
+    if (ia === undefined || ib === undefined) return false;
+    return ia === ib;
+  }
+
+  /** Merged net index after union-find (same index ⇒ same electrical node). Ground group is 0. */
+  public getMergedNodeIndex(
+    componentId: string,
+    nodeId: string
+  ): number | undefined {
+    return this.nodeMap.get(`${componentId}_${nodeId}`);
+  }
+
+  /** For discrete R/C discovery (e.g. 555 astable passives). */
+  public getCircuitComponents(): ReadonlyMap<string, CircuitComponent> {
+    return this.components;
+  }
+
+  /**
    * Round value for kid-friendly display
    * Rounds very small values to zero and limits decimal places
    */
@@ -1275,19 +1574,24 @@ export class EnhancedCircuitSolver {
   }
 
   /**
-   * Get circuit analysis results
+   * Get circuit analysis results (legacy interface, kept for compatibility)
    */
   public getAnalysisResults(): any {
     const nodeVoltages: { [key: string]: number } = {};
 
-    this.nodeMap.forEach((_index, nodeId) => {
+    this.nodeMap.forEach((index, nodeId) => {
       if (nodeId !== "ground") {
-        nodeVoltages[nodeId] = 0; // Would need to store from last solve
+        const solverIndex = index - 1;
+        nodeVoltages[nodeId] =
+          solverIndex >= 0 && solverIndex < this.lastSolveNodeVoltages.length
+            ? this.lastSolveNodeVoltages[solverIndex]
+            : 0;
       }
     });
 
     return {
       time: this.roundForDisplay(this.currentTime),
+      nodeVoltages,
       components: Array.from(this.components.entries()).map(([id, comp]) => {
         const props = comp.getCircuitProperties();
         return {
@@ -1298,8 +1602,81 @@ export class EnhancedCircuitSolver {
           power: this.roundForDisplay(props.power),
         };
       }),
-      nodeCount: this.nodeMap.size - 1, // Exclude ground
+      nodeCount: this.nodeMap.size - 1,
       voltageSourceCount: this.voltageSourceCount,
+    };
+  }
+
+  /**
+   * Get typed simulation snapshot with per-node voltages and per-terminal data.
+   */
+  public getSimulationSnapshot(): SimulationSnapshot {
+    const nodeVoltages: Record<string, number> = {};
+    this.nodeMap.forEach((index, nodeId) => {
+      if (nodeId === "ground") {
+        nodeVoltages[nodeId] = 0;
+      } else {
+        const solverIndex = index - 1;
+        nodeVoltages[nodeId] =
+          solverIndex >= 0 && solverIndex < this.lastSolveNodeVoltages.length
+            ? this.lastSolveNodeVoltages[solverIndex]
+            : 0;
+      }
+    });
+
+    const componentTerminalCurrents: Record<string, Record<string, number>> = {};
+    const componentTerminalVoltages: Record<string, Record<string, number>> = {};
+    const componentPower: Record<string, number> = {};
+
+    this.components.forEach((component, componentId) => {
+      const props = component.getCircuitProperties();
+      const nodes = component.getNodes();
+
+      componentPower[componentId] = Math.abs(props.voltage * props.current);
+
+      const terminalVoltages: Record<string, number> = {};
+      const terminalCurrents: Record<string, number> = {};
+
+      const isVoltageSource = this.voltageSourceMap.has(componentId);
+      for (let ni = 0; ni < nodes.length; ni++) {
+        const node = nodes[ni];
+        const globalNodeId = `${componentId}_${node.id}`;
+        const idx = this.nodeMap.get(globalNodeId);
+        if (idx !== undefined) {
+          const solverIdx = idx - 1;
+          terminalVoltages[node.id] =
+            solverIdx >= 0 && solverIdx < this.lastSolveNodeVoltages.length
+              ? this.lastSolveNodeVoltages[solverIdx]
+              : 0;
+        } else {
+          terminalVoltages[node.id] = 0;
+        }
+
+        if (Math.abs(node.current) > 1e-12) {
+          terminalCurrents[node.id] = node.current;
+        } else if (nodes.length === 2) {
+          // Convention: positive = enters terminal from wire.
+          // Passive: current enters nodes[0] when props.current > 0.
+          // Voltage source: current exits nodes[0] when j_vs > 0 → negate.
+          const sign = isVoltageSource
+            ? (ni === 0 ? -1 : 1)
+            : (ni === 0 ? 1 : -1);
+          terminalCurrents[node.id] = sign * props.current;
+        } else {
+          terminalCurrents[node.id] = 0;
+        }
+      }
+
+      componentTerminalVoltages[componentId] = terminalVoltages;
+      componentTerminalCurrents[componentId] = terminalCurrents;
+    });
+
+    return {
+      time: this.currentTime,
+      nodeVoltages,
+      componentTerminalCurrents,
+      componentTerminalVoltages,
+      componentPower,
     };
   }
 }

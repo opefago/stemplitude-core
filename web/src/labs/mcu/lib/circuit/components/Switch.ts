@@ -1,5 +1,9 @@
-import { Graphics } from "pixi.js";
+import * as PIXI from "pixi.js";
 import { CircuitComponent, CircuitProperties } from "../CircuitComponent";
+import {
+  applyIECSchematicTransform,
+  drawSwitchSPSTIEC,
+} from "../rendering/iecSchematicDraw";
 
 export interface SwitchProperties extends CircuitProperties {
   isClosed: boolean;
@@ -42,14 +46,14 @@ export class Switch extends CircuitComponent {
     this.nodes = [
       {
         id: "terminal1",
-        position: { x: -25, y: 0 }, // Relative to component center
+        position: { x: -30, y: 0 }, // Relative to component center
         voltage: 0,
         current: 0,
         connections: [],
       },
       {
         id: "terminal2",
-        position: { x: 25, y: 0 }, // Relative to component center
+        position: { x: 30, y: 0 }, // Relative to component center
         voltage: 0,
         current: 0,
         connections: [],
@@ -67,78 +71,32 @@ export class Switch extends CircuitComponent {
     const sin = Math.sin((this.orientation * Math.PI) / 180);
 
     // Terminal 1 (left when orientation = 0)
-    this.nodes[0].position.x = -25 * cos - 0 * sin;
-    this.nodes[0].position.y = -25 * sin + 0 * cos;
+    this.nodes[0].position.x = -30 * cos - 0 * sin;
+    this.nodes[0].position.y = -30 * sin + 0 * cos;
 
     // Terminal 2 (right when orientation = 0)
-    this.nodes[1].position.x = 25 * cos - 0 * sin;
-    this.nodes[1].position.y = 25 * sin + 0 * cos;
+    this.nodes[1].position.x = 30 * cos - 0 * sin;
+    this.nodes[1].position.y = 30 * sin + 0 * cos;
+  }
+
+  protected getTerminalPinRadius(): number {
+    return 5;
   }
 
   protected createVisuals(): void {
-    if (this.componentGraphics.parent) {
-      this.componentGraphics.parent.removeChild(this.componentGraphics);
-    }
-    this.componentGraphics = new Graphics();
-
-    // Draw the switch
     this.drawSwitch();
-
-    // Use base class labels instead of creating new ones
     this.updateLabels();
-
-    this.displayContainer.addChild(this.componentGraphics);
-    this.createPinGraphics();
-
-    // Make it interactive (click handling is done by CircuitScene)
     this.componentGraphics.eventMode = "static";
     this.componentGraphics.cursor = "pointer";
   }
 
   private drawSwitch(): void {
-    this.componentGraphics.clear();
-
-    const lineColor = 0xaaaaaa;
-
-    // Left terminal
-    this.componentGraphics
-      .moveTo(-25, 0)
-      .lineTo(-15, 0)
-      .stroke({ width: 2, color: lineColor });
-
-    // Right terminal
-    this.componentGraphics
-      .moveTo(15, 0)
-      .lineTo(25, 0)
-      .stroke({ width: 2, color: lineColor });
-
-    if (this.isClosed) {
-      // Closed switch - straight line
-      this.componentGraphics
-        .moveTo(-15, 0)
-        .lineTo(15, 0)
-        .stroke({ width: 3, color: 0x00ff00 });
-
-      // Terminal circles
-      this.componentGraphics.circle(-15, 0, 3).fill(0x00ff00);
-      this.componentGraphics.circle(15, 0, 3).fill(0x00ff00);
-    } else {
-      // Open switch - angled line (disconnected)
-      this.componentGraphics
-        .moveTo(-15, 0)
-        .lineTo(5, -10)
-        .stroke({ width: 3, color: 0xff6666 });
-
-      // Terminal circles
-      this.componentGraphics.circle(-15, 0, 3).fill(0xff6666);
-      this.componentGraphics.circle(15, 0, 3).fill(0xff6666);
-
-      // Gap indicator
-      this.componentGraphics
-        .moveTo(10, -5)
-        .lineTo(15, 0)
-        .stroke({ width: 1, color: 0xff6666, alpha: 0.5 });
-    }
+    const g = this.componentGraphics;
+    g.clear();
+    drawSwitchSPSTIEC(g, this.isClosed);
+    applyIECSchematicTransform(g, Math.sign(g.scale.x) || 1);
+    g.hitArea = new PIXI.Rectangle(0, 0, 150, 150);
+    g.tint = this.isClosed ? 0xaaffaa : 0xffaaaa;
   }
 
   private updateLabels(): void {
@@ -220,6 +178,13 @@ export class Switch extends CircuitComponent {
   public updateCircuitState(voltage: number, current: number): void {
     super.updateCircuitState(voltage, current);
     // Switches don't need visual updates based on voltage/current
+  }
+
+  protected updateNodeVoltages(): void {
+    // Keep terminal-current convention consistent with passive 2-terminal components:
+    // positive current enters terminal1 from wire, exits terminal2.
+    this.nodes[0].current = this.circuitProps.current;
+    this.nodes[1].current = -this.circuitProps.current;
   }
 
   protected updateVisuals(_deltaTime: number): void {

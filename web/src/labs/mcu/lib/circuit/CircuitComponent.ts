@@ -1,5 +1,8 @@
 import { Container, Graphics, Text } from "pixi.js";
 import GameObject from "../shared/GameObject";
+import type { ComponentRuntimeState } from "./types/RuntimeState";
+import { createDefaultRuntimeState } from "./types/RuntimeState";
+import { DesignTokens } from "./rendering/DesignTokens";
 
 /**
  * Simple browser-compatible event emitter
@@ -60,26 +63,48 @@ export type CircuitComponentType =
   | "battery"
   | "acsource"
   | "led"
+  | "diode"
+  | "zener_diode"
   | "transistor"
   | "npn_transistor"
   | "pnp_transistor"
+  | "nmos_transistor"
+  | "pmos_transistor"
   | "ground"
   | "wire"
   | "switch"
+  | "spdt_switch"
+  | "push_button"
+  | "relay"
+  | "potentiometer"
   | "ammeter"
   | "voltmeter"
   | "oscilloscope"
+  | "opamp"
+  | "comparator"
+  | "timer555"
   | "and_gate"
   | "or_gate"
+  | "nor_gate"
+  | "nand_gate"
   | "xor_gate"
   | "not_gate";
+
+export type AnchorRole =
+  | "terminal"
+  | "control"
+  | "power"
+  | "ground"
+  | "logic"
+  | "probe";
 
 export interface CircuitNode {
   id: string;
   position: { x: number; y: number };
   voltage: number;
   current: number;
-  connections: string[]; // IDs of connected components
+  connections: string[];
+  role?: AnchorRole;
 }
 
 export interface CircuitProperties {
@@ -107,8 +132,10 @@ export abstract class CircuitComponent extends GameObject {
   protected componentType: CircuitComponentType;
   protected circuitProps: CircuitProperties;
   protected nodes: CircuitNode[];
-  protected gridPosition: { x: number; y: number }; // Grid coordinates
+  protected gridPosition: { x: number; y: number };
   protected orientation: number; // 0, 90, 180, 270 degrees
+
+  public runtimeState: ComponentRuntimeState = createDefaultRuntimeState();
 
   // Visual elements
   protected componentGraphics: Graphics;
@@ -144,8 +171,8 @@ export abstract class CircuitComponent extends GameObject {
     // Initialize visual elements
     this.componentGraphics = new Graphics();
     this.labelContainer = new Container(); // Separate container for labels
-    this.labelText = new Text("", { fontSize: 10, fill: 0xffffff });
-    this.valueText = new Text("", { fontSize: 8, fill: 0xcccccc });
+    this.labelText = new Text({ text: "", style: { fontSize: 10, fill: 0xffffff } });
+    this.valueText = new Text({ text: "", style: { fontSize: 8, fill: 0xcccccc } });
 
     // Add component graphics to display container (will be transformed)
     this.displayContainer.addChild(this.componentGraphics);
@@ -402,11 +429,15 @@ export abstract class CircuitComponent extends GameObject {
     return `${(henries * 1e6).toFixed(1)}μH`;
   }
 
+  /** Connection-point disc radius in px; override for symbols with tight geometry. */
+  protected getTerminalPinRadius(): number {
+    return DesignTokens.node.radius;
+  }
+
   /**
-   * Create interactive pin graphics (from reference implementation)
+   * Create interactive pin graphics with state-driven colors and hover rings.
    */
   protected createPinGraphics(): void {
-    // Clear existing pin graphics
     this.pinGraphics.forEach((pin) => {
       if (pin.parent) {
         pin.parent.removeChild(pin);
@@ -415,46 +446,66 @@ export abstract class CircuitComponent extends GameObject {
     });
     this.pinGraphics = [];
 
-    // Create pin graphics for each node
-    this.nodes.forEach((node, index) => {
-      const pinGraphics = new Graphics();
-      const pinSize = 6;
+    const tokenNode = DesignTokens.node;
 
-      // Pin position is already relative to component center in node.position
-      // No need to subtract this.position since node.position is already relative
-      const relativePos = {
-        x: node.position.x,
-        y: node.position.y,
-      };
+    this.nodes.forEach((node) => {
+      const pinGraphics = new Graphics();
+      const pinSize = this.getTerminalPinRadius();
+      const hoverRingR =
+        tokenNode.hoverRingRadius * (pinSize / DesignTokens.node.radius);
+      const relativePos = { x: node.position.x, y: node.position.y };
+
+      const isActive =
+        Math.abs(this.circuitProps.current) > 0.001;
+      const defaultFill = isActive ? tokenNode.activeCurrent : tokenNode.default;
 
       pinGraphics.circle(relativePos.x, relativePos.y, pinSize);
-      pinGraphics.fill(0xffffff);
-      pinGraphics.stroke({ width: 2, color: 0x888888 });
+      pinGraphics.fill(defaultFill);
+      pinGraphics.stroke({
+        width: tokenNode.strokeWidth,
+        color: tokenNode.strokeColor,
+      });
 
-      // Make pin interactive
       pinGraphics.eventMode = "static";
       pinGraphics.cursor = "pointer";
 
-      // Pin hover effects
       pinGraphics.on("pointerover", () => {
         pinGraphics.clear();
+        // Hover ring (outer glow)
+        pinGraphics.circle(
+          relativePos.x,
+          relativePos.y,
+          hoverRingR
+        );
+        pinGraphics.fill({
+          color: tokenNode.hover,
+          alpha: tokenNode.hoverRingAlpha,
+        });
+        // Main node
         pinGraphics.circle(relativePos.x, relativePos.y, pinSize);
-        pinGraphics.fill(0x44ff44);
-        pinGraphics.stroke({ width: 2, color: 0x66ff66 });
+        pinGraphics.fill(tokenNode.hover);
+        pinGraphics.stroke({
+          width: tokenNode.strokeWidth,
+          color: tokenNode.hover,
+        });
       });
 
       pinGraphics.on("pointerout", () => {
         pinGraphics.clear();
+        const fillNow =
+          Math.abs(this.circuitProps.current) > 0.001
+            ? tokenNode.activeCurrent
+            : tokenNode.default;
         pinGraphics.circle(relativePos.x, relativePos.y, pinSize);
-        pinGraphics.fill(0xffffff);
-        pinGraphics.stroke({ width: 2, color: 0x888888 });
+        pinGraphics.fill(fillNow);
+        pinGraphics.stroke({
+          width: tokenNode.strokeWidth,
+          color: tokenNode.strokeColor,
+        });
       });
 
-      // Pin click events
       pinGraphics.on("pointerdown", (event) => {
         event.stopPropagation();
-        // Pin clicks are handled by the scene's canvas event listeners
-        console.log(`🔌 Pin clicked: ${this.getName()}.${node.id}`);
       });
 
       this.displayContainer.addChild(pinGraphics);

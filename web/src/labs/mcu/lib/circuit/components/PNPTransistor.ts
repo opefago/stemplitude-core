@@ -1,6 +1,11 @@
-import { Graphics, Rectangle } from "pixi.js";
+import { Rectangle } from "pixi.js";
 import * as PIXI from "pixi.js";
 import { CircuitComponent, CircuitProperties } from "../CircuitComponent";
+import {
+  BJT_SVG_PIVOT,
+  BJT_SVG_SCALE,
+  drawPnpBjtInSvgSpace,
+} from "../rendering/bjtSchematicSvg";
 
 export interface PNPBJTProperties extends CircuitProperties {
   beta: number;
@@ -56,11 +61,11 @@ export class PNPTransistor extends CircuitComponent {
   }
 
   protected initializeNodes(): void {
-    // Store base positions (unrotated) - match visual terminal endpoints
+    // PNP SVG terminals after pivot+scale: base (−30,0), emitter top, collector bottom
     this.baseNodePositions = {
-      base: { x: -30, y: 0 }, // Left terminal end
-      collector: { x: 5, y: 25 }, // Bottom terminal end (inverted for PNP)
-      emitter: { x: 5, y: -25 }, // Top terminal end (inverted for PNP)
+      base: { x: -30, y: 0 },
+      collector: { x: 10, y: 30 },
+      emitter: { x: 10, y: -30 },
     };
 
     this.nodes = [
@@ -73,14 +78,14 @@ export class PNPTransistor extends CircuitComponent {
       },
       {
         id: "collector",
-        position: { x: 5, y: 25 },
+        position: { x: 10, y: 30 },
         voltage: 0,
         current: 0,
         connections: [],
       },
       {
         id: "emitter",
-        position: { x: 5, y: -25 },
+        position: { x: 10, y: -30 },
         voltage: 0,
         current: 0,
         connections: [],
@@ -102,8 +107,8 @@ export class PNPTransistor extends CircuitComponent {
     if (!this.baseNodePositions) {
       this.baseNodePositions = {
         base: { x: -30, y: 0 },
-        collector: { x: 5, y: 25 },
-        emitter: { x: 5, y: -25 },
+        collector: { x: 10, y: 30 },
+        emitter: { x: 10, y: -30 },
       };
     }
 
@@ -121,53 +126,18 @@ export class PNPTransistor extends CircuitComponent {
     });
   }
 
+  protected getTerminalPinRadius(): number {
+    return 5;
+  }
+
   protected createVisuals(): void {
-    this.componentGraphics.clear();
-
-    // Circle enclosure - draw first as background
-    this.componentGraphics.circle(0, 0, 22);
-    this.componentGraphics.stroke({ width: 2.5, color: 0xff88ff });
-
-    // === BASE (left terminal) ===
-    // External base connection (extend slightly for visual alignment)
-    this.componentGraphics.moveTo(-32, 0);
-    this.componentGraphics.lineTo(-6, 0);
-
-    // === EMITTER (top terminal - INVERTED for PNP) ===
-    this.componentGraphics.moveTo(-3, -7);
-    this.componentGraphics.lineTo(5, -14);
-    this.componentGraphics.lineTo(5, -27);
-
-    // === COLLECTOR (bottom terminal - INVERTED for PNP) ===
-    this.componentGraphics.moveTo(-3, 7);
-    this.componentGraphics.lineTo(5, 14);
-    this.componentGraphics.lineTo(5, 27);
-
-    // Apply stroke to all terminal lines at once
-    this.componentGraphics.stroke({ width: 2.5, color: 0xff88ff });
-
-    // Base vertical bar (solid rectangle)
-    this.componentGraphics.rect(-6, -14, 3, 28);
-    this.componentGraphics.fill({ color: 0xff88ff });
-
-    // === ARROW (PNP - pointing IN on emitter line) ===
-    // Arrow positioned on the diagonal emitter line (top, inverted)
-    // The emitter line goes from (-3, -7) to (5, -14) - diagonal direction
-    // Position arrow at midpoint, angled toward the base
-
-    // Top angled line of arrow (pointing inward toward base)
-    this.componentGraphics.moveTo(4, -16);
-    this.componentGraphics.lineTo(0, -12);
-    this.componentGraphics.stroke({ width: 3.5, color: 0xff88ff });
-
-    // Bottom angled line of arrow
-    this.componentGraphics.moveTo(0, -12);
-    this.componentGraphics.lineTo(4, -8);
-    this.componentGraphics.stroke({ width: 3.5, color: 0xff88ff });
-
-    // Set explicit hit area to ensure transistor is clickable
-    // Spans from base connection to collector/emitter terminals
-    this.componentGraphics.hitArea = new PIXI.Rectangle(-35, -30, 45, 60);
+    const g = this.componentGraphics;
+    g.clear();
+    drawPnpBjtInSvgSpace(g);
+    g.pivot.set(BJT_SVG_PIVOT, BJT_SVG_PIVOT);
+    const flipSign = Math.sign(g.scale.x) || 1;
+    g.scale.set(flipSign * BJT_SVG_SCALE, BJT_SVG_SCALE);
+    g.hitArea = new PIXI.Rectangle(0, 0, 150, 150);
 
     this.updateLabels();
   }

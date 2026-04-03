@@ -8,7 +8,7 @@ import {
 import { useAuth } from "../../../providers/AuthProvider";
 import type * as Y from "yjs";
 import type { WebsocketProvider } from "y-websocket";
-import Tippy from "@tippyjs/react";
+import { TippyAnchor } from "../../../components/ui/TippyAnchor";
 import "tippy.js/dist/tippy.css";
 import "tippy.js/animations/shift-away.css";
 import { Application } from "pixi.js";
@@ -322,12 +322,12 @@ export const CircuitLabContainer: React.FC<Props> = ({
               outline: "none",
             }}
           />
-          <Tippy content="Save project (Ctrl+S)" {...tipProps}>
+          <TippyAnchor content="Save project (Ctrl+S)" {...tipProps}>
             <button onClick={handleSaveProject} style={btnStyle}>
               <Save size={14} /> {saveStatus ? "Saved!" : "Save"}
             </button>
-          </Tippy>
-          <Tippy content="Open a saved project" {...tipProps}>
+          </TippyAnchor>
+          <TippyAnchor content="Open a saved project" {...tipProps}>
             <button
               onClick={() => {
                 setSavedProjects(loadProjectsFromStorage());
@@ -337,26 +337,26 @@ export const CircuitLabContainer: React.FC<Props> = ({
             >
               <FolderOpen size={14} /> Open
             </button>
-          </Tippy>
+          </TippyAnchor>
 
           {sep}
 
           {/* Undo / Redo */}
-          <Tippy content="Undo last action (Ctrl+Z)" {...tipProps}>
+          <TippyAnchor content="Undo last action (Ctrl+Z)" {...tipProps}>
             <button onClick={handleUndo} style={btnStyle}>
               <Undo2 size={14} />
             </button>
-          </Tippy>
-          <Tippy content="Redo last action (Ctrl+Y)" {...tipProps}>
+          </TippyAnchor>
+          <TippyAnchor content="Redo last action (Ctrl+Y)" {...tipProps}>
             <button onClick={handleRedo} style={btnStyle}>
               <Redo2 size={14} />
             </button>
-          </Tippy>
+          </TippyAnchor>
 
           {sep}
 
           {/* Simulation */}
-          <Tippy
+          <TippyAnchor
             content={
               isSimulationRunning
                 ? "Stop time-domain simulation"
@@ -382,9 +382,9 @@ export const CircuitLabContainer: React.FC<Props> = ({
               )}
               {isSimulationRunning ? "Stop" : "Start"}
             </button>
-          </Tippy>
+          </TippyAnchor>
 
-          <Tippy content="Run DC circuit analysis" {...tipProps}>
+          <TippyAnchor content="Run DC circuit analysis" {...tipProps}>
             <button
               onClick={handleAnalyze}
               style={{
@@ -396,28 +396,28 @@ export const CircuitLabContainer: React.FC<Props> = ({
             >
               <Activity size={14} /> Analyze
             </button>
-          </Tippy>
+          </TippyAnchor>
 
           {sep}
 
-          <Tippy content="Clear all components from canvas" {...tipProps}>
+          <TippyAnchor content="Clear all components from canvas" {...tipProps}>
             <button onClick={handleClear} style={btnStyle}>
               <Trash2 size={14} /> Clear
             </button>
-          </Tippy>
+          </TippyAnchor>
 
-          <Tippy content="Quick help & keyboard shortcuts" {...tipProps}>
+          <TippyAnchor content="Quick help & keyboard shortcuts" {...tipProps}>
             <button onClick={() => setShowHelp(!showHelp)} style={btnStyle}>
               <HelpCircle size={14} /> Help
             </button>
-          </Tippy>
+          </TippyAnchor>
         </div>
 
         {/* Right: Exit */}
         <div
           style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}
         >
-          <Tippy content="Exit lab" {...tipProps}>
+          <TippyAnchor content="Exit lab" {...tipProps}>
             <button
               type="button"
               onClick={() => {
@@ -435,7 +435,7 @@ export const CircuitLabContainer: React.FC<Props> = ({
             >
               <X size={14} /> Exit
             </button>
-          </Tippy>
+          </TippyAnchor>
         </div>
       </div>
 

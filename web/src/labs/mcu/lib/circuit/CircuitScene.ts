@@ -20,6 +20,9 @@ import { ACSource } from "./components/ACSource";
 import { Ground } from "./components/Ground";
 import { LED } from "./components/LED";
 import { Switch } from "./components/Switch";
+import { SpdtSwitch } from "./components/SpdtSwitch";
+import { PushButton } from "./components/PushButton";
+import { Potentiometer } from "./components/Potentiometer";
 import { Ammeter } from "./components/Ammeter";
 import { Voltmeter } from "./components/Voltmeter";
 import { Oscilloscope } from "./components/Oscilloscope";
@@ -31,6 +34,27 @@ import { OrGate } from "./components/OrGate";
 import { XorGate } from "./components/XorGate";
 import { NotGate } from "./components/NotGate";
 import { Inductor } from "./components/Inductor";
+import { Diode } from "./components/Diode";
+import { ZenerDiode } from "./components/ZenerDiode";
+import { NMOSTransistor } from "./components/NMOSTransistor";
+import { PMOSTransistor } from "./components/PMOSTransistor";
+import { OpAmp } from "./components/OpAmp";
+import { Comparator } from "./components/Comparator";
+import { Timer555, type Timer555Properties } from "./components/Timer555";
+import { Relay } from "./components/Relay";
+import { NorGate } from "./components/NorGate";
+import { NandGate } from "./components/NandGate";
+import { WireParticleSystem } from "./rendering/WireParticleSystem";
+import { resolveComponentState } from "./state/DerivedStateResolvers";
+import { EducationOverlays } from "./rendering/EducationOverlays";
+import { SimulatorMode } from "./state/SimulatorMode";
+import { setTransientSimulationRunning } from "./state/circuitSimulationFlags";
+import {
+  setComponentWireCountGetter,
+  setDiscreteRcResolver,
+  setSameNetChecker,
+} from "./state/circuitComponentWiring";
+import { resolveAstableDiscreteRcFromNetlist } from "./model/timer555DiscreteRc";
 
 export interface CircuitToolbarItem {
   id: string;
@@ -104,6 +128,14 @@ export class CircuitScene extends BaseScene {
   private isPanningCanvas: boolean = false;
   private panStartPosition: { x: number; y: number } = { x: 0, y: 0 };
   private cameraStartPosition: { x: number; y: number } = { x: 0, y: 0 };
+
+  // EveryCircuit-style wire animation
+  private wireGlowLayer: Container = new Container();
+  private particleFlowLayer: Container = new Container();
+  private overlayLayer: Container = new Container();
+  private wireParticleSystem: WireParticleSystem | null = null;
+  private educationOverlays: EducationOverlays | null = null;
+  private simulatorMode: SimulatorMode = new SimulatorMode();
 
   // Simulation state
   private isSimulationRunning: boolean = false;
@@ -208,6 +240,33 @@ export class CircuitScene extends BaseScene {
       description: "Click to open/close circuit",
       category: "active",
     },
+    {
+      id: "spdt_switch",
+      name: "SPDT Switch",
+      icon: "🔀",
+      svgPath: "/assets/circuit-symbols/spdt-switch.svg",
+      type: "spdt_switch",
+      description: "Single-pole double-throw toggle",
+      category: "active",
+    },
+    {
+      id: "potentiometer",
+      name: "Potentiometer",
+      icon: "🎚️",
+      svgPath: "/assets/circuit-symbols/potentiometer-iec.svg",
+      type: "potentiometer",
+      description: "Variable resistor (wiper)",
+      category: "passive",
+    },
+    {
+      id: "push_button",
+      name: "Push Button",
+      icon: "🟦",
+      svgPath: "/assets/circuit-symbols/push-button-no.svg",
+      type: "push_button",
+      description: "Momentary button (press to close)",
+      category: "active",
+    },
     // Measurement tools
     {
       id: "ammeter",
@@ -241,6 +300,7 @@ export class CircuitScene extends BaseScene {
       id: "and_gate",
       name: "AND Gate",
       icon: "∧",
+      svgPath: "/assets/circuit-symbols/logic-and.svg",
       type: "and_gate",
       description: "Logical AND gate",
       category: "digital",
@@ -249,6 +309,7 @@ export class CircuitScene extends BaseScene {
       id: "or_gate",
       name: "OR Gate",
       icon: "∨",
+      svgPath: "/assets/circuit-symbols/logic-or.svg",
       type: "or_gate",
       description: "Logical OR gate",
       category: "digital",
@@ -257,6 +318,7 @@ export class CircuitScene extends BaseScene {
       id: "xor_gate",
       name: "XOR Gate",
       icon: "⊕",
+      svgPath: "/assets/circuit-symbols/logic-xor.svg",
       type: "xor_gate",
       description: "Logical XOR gate",
       category: "digital",
@@ -265,9 +327,100 @@ export class CircuitScene extends BaseScene {
       id: "not_gate",
       name: "NOT Gate",
       icon: "¬",
+      svgPath: "/assets/circuit-symbols/logic-not.svg",
       type: "not_gate",
       description: "Logical NOT gate",
       category: "digital",
+    },
+    {
+      id: "nor_gate",
+      name: "NOR Gate",
+      icon: "⊽",
+      svgPath: "/assets/circuit-symbols/logic-nor.svg",
+      type: "nor_gate",
+      description: "Logical NOR gate",
+      category: "digital",
+    },
+    {
+      id: "nand_gate",
+      name: "NAND Gate",
+      icon: "⊼",
+      svgPath: "/assets/circuit-symbols/logic-nand.svg",
+      type: "nand_gate",
+      description: "Logical NAND gate",
+      category: "digital",
+    },
+    {
+      id: "diode",
+      name: "Diode",
+      icon: "▶",
+      svgPath: "/assets/circuit-symbols/diode.svg",
+      type: "diode",
+      description: "Semiconductor diode",
+      category: "active",
+    },
+    {
+      id: "zener_diode",
+      name: "Zener Diode",
+      icon: "⏚▶",
+      svgPath: "/assets/circuit-symbols/zener-diode.svg",
+      type: "zener_diode",
+      description: "Diode with reverse breakdown regulation",
+      category: "active",
+    },
+    {
+      id: "nmos_transistor",
+      name: "N-MOSFET",
+      icon: "Ⓝ",
+      svgPath: "/assets/circuit-symbols/nmos.svg",
+      type: "nmos_transistor",
+      description: "N-channel MOSFET",
+      category: "active",
+    },
+    {
+      id: "pmos_transistor",
+      name: "P-MOSFET",
+      icon: "Ⓟ",
+      svgPath: "/assets/circuit-symbols/pmos.svg",
+      type: "pmos_transistor",
+      description: "P-channel MOSFET",
+      category: "active",
+    },
+    {
+      id: "opamp",
+      name: "Op-Amp",
+      icon: "△",
+      svgPath: "/assets/circuit-symbols/opamp.svg",
+      type: "opamp",
+      description: "Operational amplifier",
+      category: "active",
+    },
+    {
+      id: "comparator",
+      name: "Comparator",
+      icon: "⇌",
+      svgPath: "/assets/circuit-symbols/comparator.svg",
+      type: "comparator",
+      description: "Voltage comparator",
+      category: "active",
+    },
+    {
+      id: "timer555",
+      name: "555 Timer",
+      icon: "⏱",
+      svgPath: "/assets/circuit-symbols/timer-555.svg",
+      type: "timer555",
+      description: "555 timer IC",
+      category: "active",
+    },
+    {
+      id: "relay",
+      name: "Relay",
+      icon: "⚙",
+      svgPath: "/assets/circuit-symbols/relay.svg",
+      type: "relay",
+      description: "Electromagnetic relay",
+      category: "active",
     },
   ];
 
@@ -305,12 +458,42 @@ export class CircuitScene extends BaseScene {
     this.sceneContainer.addChild(this.gridContainer);
     this.sceneContainer.addChild(this.zoomableContainer);
 
-    // Initialize interactive wire system AFTER containers are created
+    // Add wire glow layer BELOW wires
+    this.zoomableContainer.addChild(this.wireGlowLayer);
+
+    // Initialize interactive wire system — adds its wire container to zoomableContainer
     this.interactiveWireIntegration = new InteractiveWireIntegration(
       this,
       this.gridCanvas
     );
     this.wireEditToggle = new WireEditToggle(this.interactiveWireIntegration);
+
+    // Add particle flow layer ABOVE wires so particles render on top
+    this.zoomableContainer.addChild(this.particleFlowLayer);
+    this.zoomableContainer.addChild(this.overlayLayer);
+    this.wireParticleSystem = new WireParticleSystem(
+      this.particleFlowLayer,
+      this.wireGlowLayer
+    );
+    this.educationOverlays = new EducationOverlays(this.overlayLayer);
+
+    setComponentWireCountGetter((componentId: string) => {
+      let count = 0;
+      this.interactiveWireIntegration.getWires().forEach((wire) => {
+        if (
+          wire.nodes.some(
+            (n) => n.type === "component" && n.componentId === componentId
+          )
+        ) {
+          count++;
+        }
+      });
+      return count;
+    });
+
+    setSameNetChecker((componentId, nodeIdA, nodeIdB) =>
+      this.circuitSolver.areNodesElectricallyCommon(componentId, nodeIdA, nodeIdB)
+    );
 
     // Initialize hybrid wire router with open-source algorithms
     this.hybridWireRouter = new HybridWireRouter(screenWidth, screenHeight, 10);
@@ -801,20 +984,19 @@ export class CircuitScene extends BaseScene {
   private setupDragAndDrop(): void {
     let draggedItemId = "";
 
-    // Mouse move - update drag preview
-    document.addEventListener("mousemove", (e) => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!this.app?.renderer) return;
       if (this.isDraggingFromToolbar) {
         e.preventDefault();
         this.updateDragPreview(e.clientX, e.clientY);
       }
-    });
+    };
 
-    // Mouse up - handle drop
-    document.addEventListener("mouseup", (e) => {
+    const onMouseUp = (e: MouseEvent) => {
+      if (!this.app?.renderer) return;
       if (this.isDraggingFromToolbar) {
         e.preventDefault();
 
-        // Check if we're dropping over the canvas (not the toolbar)
         const toolbarElement = this.toolbar;
         const toolbarRect = toolbarElement.getBoundingClientRect();
         const isOverToolbar =
@@ -824,7 +1006,6 @@ export class CircuitScene extends BaseScene {
           e.clientY <= toolbarRect.bottom;
 
         if (!isOverToolbar) {
-          // Convert screen coordinates to world coordinates
           const worldPosition = this.screenToWorldCoordinates(
             e.clientX,
             e.clientY
@@ -832,13 +1013,17 @@ export class CircuitScene extends BaseScene {
           this.handleDrop(draggedItemId, worldPosition);
         }
 
-        // Reset drag state
         this.isDraggingFromToolbar = false;
         this.isDragging = false;
         this.hideDragPreview();
         draggedItemId = "";
       }
-    });
+    };
+
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+    (this as any)._dragMoveHandler = onMouseMove;
+    (this as any)._dragUpHandler = onMouseUp;
 
     // Store reference for toolbar button mousedown events
     (this as any).startToolbarDrag = (itemId: string, event: MouseEvent) => {
@@ -867,16 +1052,19 @@ export class CircuitScene extends BaseScene {
     screenX: number,
     screenY: number
   ): { x: number; y: number } {
-    const rect = this.app.canvas.getBoundingClientRect();
-    const canvasX = screenX - rect.left;
-    const canvasY = screenY - rect.top;
+    try {
+      const rect = this.app.canvas.getBoundingClientRect();
+      const canvasX = screenX - rect.left;
+      const canvasY = screenY - rect.top;
 
-    // Convert to world coordinates relative to zoomable container
-    const containerScale = this.zoomableContainer.scale.x;
-    const worldX = (canvasX - this.zoomableContainer.x) / containerScale;
-    const worldY = (canvasY - this.zoomableContainer.y) / containerScale;
+      const containerScale = this.zoomableContainer.scale.x;
+      const worldX = (canvasX - this.zoomableContainer.x) / containerScale;
+      const worldY = (canvasY - this.zoomableContainer.y) / containerScale;
 
-    return { x: worldX, y: worldY };
+      return { x: worldX, y: worldY };
+    } catch {
+      return { x: screenX, y: screenY };
+    }
   }
 
   /**
@@ -999,6 +1187,15 @@ export class CircuitScene extends BaseScene {
       case "switch":
         component = new Switch(name, false, gridCoords.x, gridCoords.y); // Default to OPEN (false)
         break;
+      case "spdt_switch":
+        component = new SpdtSwitch(name, gridCoords.x, gridCoords.y);
+        break;
+      case "potentiometer":
+        component = new Potentiometer(name, 10000, gridCoords.x, gridCoords.y);
+        break;
+      case "push_button":
+        component = new PushButton(name, false, gridCoords.x, gridCoords.y); // Normally-open by default
+        break;
       case "ammeter":
         component = new Ammeter(name, gridCoords.x, gridCoords.y);
         break;
@@ -1019,6 +1216,36 @@ export class CircuitScene extends BaseScene {
         break;
       case "not_gate":
         component = new NotGate(name, gridCoords.x, gridCoords.y);
+        break;
+      case "diode":
+        component = new Diode(name, 0.7, gridCoords.x, gridCoords.y);
+        break;
+      case "zener_diode":
+        component = new ZenerDiode(name, 5.1, gridCoords.x, gridCoords.y);
+        break;
+      case "nmos_transistor":
+        component = new NMOSTransistor(name, 2, gridCoords.x, gridCoords.y);
+        break;
+      case "pmos_transistor":
+        component = new PMOSTransistor(name, -2, gridCoords.x, gridCoords.y);
+        break;
+      case "opamp":
+        component = new OpAmp(name, gridCoords.x, gridCoords.y);
+        break;
+      case "comparator":
+        component = new Comparator(name, gridCoords.x, gridCoords.y);
+        break;
+      case "timer555":
+        component = new Timer555(name, gridCoords.x, gridCoords.y);
+        break;
+      case "relay":
+        component = new Relay(name, gridCoords.x, gridCoords.y);
+        break;
+      case "nor_gate":
+        component = new NorGate(name, gridCoords.x, gridCoords.y);
+        break;
+      case "nand_gate":
+        component = new NandGate(name, gridCoords.x, gridCoords.y);
         break;
       default:
         console.warn(`Component type ${type} not implemented yet`);
@@ -2770,6 +2997,45 @@ export class CircuitScene extends BaseScene {
         stateInfo.innerHTML = stateHTML;
         content.appendChild(stateInfo);
         break;
+
+      case "timer555": {
+        const t555 = component as Timer555;
+        const tp = t555.getCircuitProperties() as Timer555Properties;
+
+        const hint = document.createElement("div");
+        hint.className = "property-field";
+        hint.style.cssText =
+          "font-size:11px;color:#888;margin-bottom:4px;line-height:1.45;";
+        hint.textContent =
+          "Like Falstad: place resistors and a capacitor. R1 between Vcc and DIS (pin 7), R2 between DIS and the node where TRIG (2) and THRESH (6) are tied, C from that node to GND. Parallel parts on the same two nets combine (1/R, sum C).";
+        content.appendChild(hint);
+
+        const fmtR = (r: number) =>
+          r >= 1000 ? `${(r / 1000).toFixed(2)} kΩ` : `${r.toFixed(1)} Ω`;
+        const fmtC = (c: number) =>
+          c >= 1e-6 ? `${(c * 1e6).toFixed(1)} µF` : `${(c * 1e9).toFixed(1)} nF`;
+        const rcBlock = document.createElement("div");
+        rcBlock.className = "property-field";
+        rcBlock.style.cssText =
+          "background:#1a1a1a;padding:10px;border-radius:4px;font-size:12px;color:#ccc;";
+        if (tp.r1Ohms > 0 && tp.r2Ohms > 0 && tp.cFarads > 0) {
+          rcBlock.innerHTML = `
+            <div style="margin-bottom:6px;color:#aaa;">From schematic</div>
+            <div>R1 ${fmtR(tp.r1Ohms)}</div>
+            <div>R2 ${fmtR(tp.r2Ohms)}</div>
+            <div>C ${fmtC(tp.cFarads)}</div>
+            <div style="margin-top:8px;color:#aaa;">Derived</div>
+            <div>≈ ${tp.frequency >= 1 ? tp.frequency.toFixed(2) : tp.frequency.toExponential(2)} Hz</div>
+            <div>Duty ≈ ${(tp.dutyCycle * 100).toFixed(1)}%</div>
+          `;
+        } else {
+          rcBlock.innerHTML = `
+            <div style="color:#888;">No valid R1/R2/C detected on the nets. Wire discrete passives as above (pins 2 & 6 tied together; pin 7 separate).</div>
+          `;
+        }
+        content.appendChild(rcBlock);
+        break;
+      }
     }
 
     // Add action buttons
@@ -3218,10 +3484,27 @@ export class CircuitScene extends BaseScene {
         return;
       }
 
-      // Special handling for Switch components - toggle on click, don't drag
-      if (component.getComponentType() === "switch") {
+      // Special handling for Switch / SPDT - toggle on click, don't drag
+      if (
+        component.getComponentType() === "switch" ||
+        component.getComponentType() === "spdt_switch"
+      ) {
         console.log(`🔘 Toggling switch: ${component.getName()}`);
-        (component as any).toggleSwitch();
+        (component as Switch | SpdtSwitch).toggleSwitch();
+        e.stopPropagation();
+        return; // Don't start dragging
+      }
+      // Special handling for Push Button components - momentary press on hold
+      if (component.getComponentType() === "push_button") {
+        console.log(`🟦 Pressing push button: ${component.getName()}`);
+        (component as any).pressButton?.();
+        const release = () => {
+          (component as any).releaseButton?.();
+          window.removeEventListener("pointerup", release);
+          window.removeEventListener("pointercancel", release);
+        };
+        window.addEventListener("pointerup", release);
+        window.addEventListener("pointercancel", release);
         e.stopPropagation();
         return; // Don't start dragging
       }
@@ -3497,6 +3780,7 @@ export class CircuitScene extends BaseScene {
    */
   private startSimulation(): void {
     this.isSimulationRunning = true;
+    setTransientSimulationRunning(true);
 
     this.simulationInterval = window.setInterval(() => {
       // Update AC sources voltage based on current time
@@ -3560,6 +3844,7 @@ export class CircuitScene extends BaseScene {
    */
   private stopSimulation(): void {
     this.isSimulationRunning = false;
+    setTransientSimulationRunning(false);
 
     if (this.simulationInterval) {
       clearInterval(this.simulationInterval);
@@ -3575,6 +3860,9 @@ export class CircuitScene extends BaseScene {
         gameObject.updateCircuitState(0, 0);
       }
     });
+
+    // Clear wire flow debug visuals (particles + arrows + glow) immediately.
+    this.wireParticleSystem?.clearVisuals();
 
     // Update UI
     const playStopButton = this.toolbar.querySelector(
@@ -3612,13 +3900,14 @@ export class CircuitScene extends BaseScene {
 
     if (success) {
       const results = this.circuitSolver.getAnalysisResults();
+      const snapshot = this.circuitSolver.getSimulationSnapshot();
       console.log("⚡ DC Analysis Results:", results);
 
-      // Update wire systems with results
-      this.wireSystem.updateWireStates(results);
-      this.interactiveWireIntegration.updateWireStates(results);
+      // Update wire systems with typed snapshot data (includes terminal currents)
+      const snapshotResults = { ...results, ...snapshot };
+      this.wireSystem.updateWireStates(snapshotResults);
+      this.interactiveWireIntegration.updateWireStates(snapshotResults);
 
-      // Show results in UI (could create a results panel)
       this.showAnalysisResults(results);
     } else {
       console.error("❌ DC analysis failed");
@@ -3716,8 +4005,135 @@ export class CircuitScene extends BaseScene {
    */
   private updateVisualEffects(): void {
     const results = this.circuitSolver.getAnalysisResults();
-    this.wireSystem.updateWireStates(results);
-    this.interactiveWireIntegration.updateWireStates(results);
+    const snapshot = this.circuitSolver.getSimulationSnapshot();
+    const combined = { ...results, ...snapshot };
+    this.wireSystem.updateWireStates(combined);
+    this.interactiveWireIntegration.updateWireStates(combined);
+
+    // Update component runtime states and education badges
+    this.gameObjects.forEach((obj) => {
+      if (obj instanceof CircuitComponent) {
+        const compType = obj.getComponentType();
+        const compId = obj.getName();
+        const props = obj.getCircuitProperties();
+        obj.runtimeState = resolveComponentState(
+          compType,
+          compId,
+          props as Record<string, unknown>,
+          snapshot
+        );
+
+        // Update warning badges
+        if (this.educationOverlays) {
+          const pos = obj.getPosition();
+          this.educationOverlays.updateBadges(
+            compId,
+            pos.x,
+            pos.y,
+            obj.runtimeState
+          );
+        }
+      }
+    });
+
+    // Update EveryCircuit-style wire particle animation
+    if (this.wireParticleSystem) {
+      const wireStates = new Map<string, import("./types/WireTypes").WireVisualState>();
+
+      // Get wires from the interactive wire system (where all user-created wires live)
+      const interactiveWires = this.interactiveWireIntegration.getWires();
+
+      interactiveWires.forEach((wire, wireId) => {
+        const absI = Math.abs(wire.current);
+        const threshold = 0.001;
+        const energized = absI > threshold;
+        const normalizedI = Math.min(absI / 1.0, 1.0);
+
+        // Single source of truth: source/sink endpoints resolved by
+        // InteractiveWireIntegration.updateWireStates().
+        const endpoints = wire.nodes.filter((n: any) => n.type === "component");
+        const startEp = endpoints[0];
+        const endEp = endpoints[1];
+        // wire.current sign (InteractiveWireIntegration): +1 => endpoints[0]->[1], -1 => reverse.
+        const logicalDir =
+          wire.current > threshold ? 1 : wire.current < -threshold ? -1 : 0;
+
+        // Map conventional current onto Pixi path progress (0 = pathStart, 1 = pathEnd).
+        // Prefer flowSource/flowSink: they are the terminals where current *leaves* / *enters* the
+        // wire (see InteractiveWireIntegration), so flow is always source → sink along the wire.
+        const flowSource = (wire as any).flowSource as
+          | { x: number; y: number }
+          | null
+          | undefined;
+        const flowSink = (wire as any).flowSink as
+          | { x: number; y: number }
+          | null
+          | undefined;
+
+        const dist2 = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+          (a.x - b.x) ** 2 + (a.y - b.y) ** 2;
+
+        // Map solver edge sign onto Pixi path parameter (segment[0].start → last.end).
+        // pathFlip: +1 iff the routed polyline follows abstract endpoints[0]→[1]; −1 if it runs [1]→[0].
+        // Using only pathStart vs endpoints breaks on L-routes (first vertex near a bend). Compare
+        // *both* polyline ends to both component endpoints (minimal total wiring).
+        let renderDir: 0 | 1 | -1 = 0;
+        if (logicalDir !== 0 && wire.segments && wire.segments.length > 0 && startEp && endEp) {
+          const pathStart = wire.segments[0].start;
+          const pathEnd = wire.segments[wire.segments.length - 1].end;
+
+          const sum01 = dist2(pathStart, startEp) + dist2(pathEnd, endEp);
+          const sum10 = dist2(pathStart, endEp) + dist2(pathEnd, startEp);
+          const sumDiff = Math.abs(sum01 - sum10);
+          const maxSum = Math.max(sum01, sum10, 1e-9);
+          const ambiguousOrientation = sumDiff / maxSum < 0.002;
+          let pathFlip: 1 | -1;
+          if (ambiguousOrientation) {
+            // Degenerate tie: use flowSource vs path ends if available, else single-end heuristic.
+            if (flowSource && flowSink) {
+              const dSrcS = dist2(flowSource, pathStart);
+              const dSrcE = dist2(flowSource, pathEnd);
+              const dSnkS = dist2(flowSink, pathStart);
+              const dSnkE = dist2(flowSink, pathEnd);
+              if (dSrcS <= dSrcE && dSnkE <= dSnkS) pathFlip = 1;
+              else if (dSrcE < dSrcS && dSnkS < dSnkE) pathFlip = -1;
+              else
+                pathFlip =
+                  dist2(pathStart, startEp) <= dist2(pathStart, endEp) ? 1 : -1;
+            } else {
+              pathFlip =
+                dist2(pathStart, startEp) <= dist2(pathStart, endEp) ? 1 : -1;
+            }
+          } else {
+            pathFlip = sum01 <= sum10 ? 1 : -1;
+          }
+
+          renderDir = (logicalDir * pathFlip) as 1 | -1;
+        } else if (logicalDir !== 0) {
+          renderDir = logicalDir as 1 | -1;
+        }
+
+        wireStates.set(wireId, {
+          currentMagnitude: absI,
+          currentDirection: renderDir as 1 | -1 | 0,
+          energized,
+          particleRate: energized ? 0.2 + normalizedI * 0.8 : 0,
+          glowLevel: energized ? normalizedI * 0.8 : 0,
+          debugText: `I=${wire.current.toFixed(4)} R=${renderDir}`,
+        });
+
+        // Update path cache from interactive wire segments
+        if (wire.segments && wire.segments.length > 0) {
+          const pathSegments = wire.segments.map((seg: any) => ({
+            start: { x: seg.start.x, y: seg.start.y },
+            end: { x: seg.end.x, y: seg.end.y },
+          }));
+          this.wireParticleSystem!.updateWirePaths(wireId, pathSegments);
+        }
+      });
+
+      this.wireParticleSystem.update(16, wireStates);
+    }
   }
 
   /**
@@ -3733,6 +4149,23 @@ export class CircuitScene extends BaseScene {
       event.preventDefault();
       event.stopPropagation();
       this.updateWirePreview(event.clientX, event.clientY);
+      return;
+    }
+
+    // Hover tooltip for components
+    if (this.educationOverlays && this.isSimulationRunning) {
+      const worldPos = this.screenToWorldCoordinates(event.clientX, event.clientY);
+      const hovered = this.findComponentAt(worldPos.x, worldPos.y);
+      if (hovered) {
+        const lines = this.educationOverlays.getComponentTooltipLines(
+          hovered.getComponentType(),
+          hovered.getName(),
+          hovered.runtimeState
+        );
+        this.educationOverlays.showTooltip(event.clientX, event.clientY, lines);
+      } else {
+        this.educationOverlays.hideTooltip();
+      }
     }
   }
 
@@ -3839,6 +4272,14 @@ export class CircuitScene extends BaseScene {
     }
     if ((this as any).resizeObserver) {
       (this as any).resizeObserver.disconnect();
+    }
+
+    // Clean up drag-and-drop document listeners
+    if ((this as any)._dragMoveHandler) {
+      document.removeEventListener("mousemove", (this as any)._dragMoveHandler);
+    }
+    if ((this as any)._dragUpHandler) {
+      document.removeEventListener("mouseup", (this as any)._dragUpHandler);
     }
   }
 
@@ -4687,5 +5128,36 @@ export class CircuitScene extends BaseScene {
     console.log(`   - A* Available: ${stats.aStarAvailable}`);
 
     console.log("\n🎉 Open-Source Routing Test Complete!");
+  }
+
+  /**
+   * Toggle between beginner (safe-learning) and advanced (realistic) mode.
+   */
+  public toggleSimulatorMode(): void {
+    this.simulatorMode.toggle();
+    if (this.educationOverlays) {
+      this.educationOverlays.setBeginnerMode(
+        this.simulatorMode.isSafeLearning()
+      );
+    }
+  }
+
+  /**
+   * Set simulator mode explicitly.
+   */
+  public setSimulatorMode(mode: "safe-learning" | "realistic"): void {
+    this.simulatorMode.setMode(mode);
+    if (this.educationOverlays) {
+      this.educationOverlays.setBeginnerMode(
+        this.simulatorMode.isSafeLearning()
+      );
+    }
+  }
+
+  /**
+   * Get the current simulator mode.
+   */
+  public getSimulatorMode(): "safe-learning" | "realistic" {
+    return this.simulatorMode.getMode();
   }
 }

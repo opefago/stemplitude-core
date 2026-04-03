@@ -58,94 +58,70 @@ export class Resistor extends CircuitComponent {
   protected createVisuals(): void {
     this.componentGraphics.clear();
 
-    // Enhanced resistor drawing from reference implementation
-    const width = 80;
-    const height = 60;
+    const g = this.componentGraphics;
+    const isBurnt = this.circuitProps?.burnt ?? false;
+    const power = this.circuitProps?.power ?? 0;
+    const rating = this.circuitProps?.powerRating ?? 0.25;
+    const ratio = rating > 0 ? power / rating : 0;
 
-    // Resistor outline - REMOVED dark fill for visibility on black canvas
-    // this.componentGraphics.rect(-width / 2, -height / 2, width, height);
-    // this.componentGraphics.fill(0x333333);
-
-    // Draw continuous path with visual extension to compensate for stroke rendering
-    // Extend slightly beyond node positions so stroke visually reaches the nodes
-    this.componentGraphics.moveTo(-32, 0);
-
-    // Zigzag pattern points (resistor body)
-    this.componentGraphics.lineTo(-20, 0);
-    this.componentGraphics.lineTo(-15, -10);
-    this.componentGraphics.lineTo(-5, 10);
-    this.componentGraphics.lineTo(0, -10);
-    this.componentGraphics.lineTo(5, 10);
-    this.componentGraphics.lineTo(15, -10);
-    this.componentGraphics.lineTo(20, 0);
-
-    // Right lead to node (extend slightly beyond)
-    this.componentGraphics.lineTo(32, 0);
-    this.componentGraphics.stroke({ width: 3, color: 0x44ff44 });
-
-    // Update text labels
-    this.updateLabels();
-  }
-
-  protected updateVisuals(deltaTime: number): void {
-    // Update resistor color based on power dissipation and burn state
-    let color = 0x8b4513; // Brown (normal)
-
-    if (this.circuitProps.burnt) {
-      // Burnt resistor - black with red glow
-      color = 0x000000;
-      this.componentGraphics.tint = 0x000000;
-
-      if (this.burnAnimation > 0) {
-        // Add red glow effect during burn animation
-        this.componentGraphics.filters = []; // Add glow filter if available
-      }
-    } else if (this.circuitProps.power > this.circuitProps.powerRating * 0.8) {
-      // High power - getting hot (reddish)
-      color = 0xcd853f;
-    } else if (this.circuitProps.power > this.circuitProps.powerRating * 0.5) {
-      // Medium power - warm (darker brown)
-      color = 0xa0522d;
+    let color = 0x44ff44;
+    if (isBurnt) {
+      color = 0x444444;
+    } else if (ratio > 1.0) {
+      color = 0xff4444;
+    } else if (ratio > 0.8) {
+      color = 0xffaa00;
     }
 
-    // Current flow animation
-    if (
-      this.currentFlowAnimation > 0 &&
-      Math.abs(this.circuitProps.current) > 0.001
-    ) {
-      // Add current flow visualization (moving dots or glow)
-      this.drawCurrentFlow();
+    const sw = 3;
+
+    // Left lead
+    g.moveTo(-32, 0);
+    g.lineTo(-20, 0);
+    g.stroke({ width: sw, color });
+
+    // Smooth wave body using quadratic curves (5 humps)
+    g.moveTo(-20, 0);
+    g.quadraticCurveTo(-16, -12, -12, 0);
+    g.quadraticCurveTo(-8, 12, -4, 0);
+    g.quadraticCurveTo(0, -12, 4, 0);
+    g.quadraticCurveTo(8, 12, 12, 0);
+    g.quadraticCurveTo(16, -12, 20, 0);
+    g.stroke({ width: sw, color });
+
+    // Right lead
+    g.moveTo(20, 0);
+    g.lineTo(32, 0);
+    g.stroke({ width: sw, color });
+
+    // Draw "X" if burnt
+    if (isBurnt) {
+      g.moveTo(-10, -8);
+      g.lineTo(10, 8);
+      g.moveTo(-10, 8);
+      g.lineTo(10, -8);
+      g.stroke({ width: 3, color: 0xff0000 });
     }
 
     this.updateLabels();
   }
 
-  private drawCurrentFlow(): void {
-    // Draw animated current flow indicators
-    const flowGraphics = new Graphics();
-    flowGraphics.beginFill(0x00ffff, 0.6);
+  protected updateVisuals(_deltaTime: number): void {
+    if (!this.resistorProps) return;
 
-    // Calculate flow direction based on current sign
-    const flowDirection = this.circuitProps.current > 0 ? 1 : -1;
-    const animationOffset = (Date.now() / 200) % 1; // 200ms cycle
+    const power = Math.abs(this.circuitProps.voltage * this.circuitProps.current);
+    this.circuitProps.power = power;
 
-    // Draw moving dots along the resistor
-    for (let i = 0; i < 3; i++) {
-      const progress = (i / 3 + animationOffset * flowDirection) % 1;
-      const x = -20 + progress * 40; // Move along resistor body
-      flowGraphics.drawCircle(x, 0, 1);
+    // Burn out when power exceeds 2x the rating (like a fuse wire melting)
+    if (!this.circuitProps.burnt && power > this.circuitProps.powerRating * 2) {
+      this.circuitProps.burnt = true;
+      console.log(
+        `⚠️ Resistor ${this.name} BURNT! Power: ${power.toFixed(4)}W exceeded ${(this.circuitProps.powerRating * 2).toFixed(4)}W`
+      );
     }
 
-    flowGraphics.endFill();
-    this.displayContainer.addChild(flowGraphics);
-
-    // Remove after animation frame
-    setTimeout(() => {
-      if (flowGraphics.parent) {
-        flowGraphics.parent.removeChild(flowGraphics);
-      }
-      flowGraphics.destroy();
-    }, 16); // ~60fps
+    this.createVisuals();
+    this.updateLabels();
   }
 
   private updateLabels(): void {
@@ -204,8 +180,8 @@ export class Resistor extends CircuitComponent {
     this.nodes[1].current = -this.circuitProps.current;
   }
 
-  public getImpedance(frequency: number = 0): number {
-    // Pure resistance - frequency independent
+  public getImpedance(_frequency: number = 0): number {
+    if (this.circuitProps.burnt) return 1e9;
     return this.resistorProps.resistance;
   }
 

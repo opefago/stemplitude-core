@@ -1,4 +1,7 @@
+import * as PIXI from "pixi.js";
 import { CircuitComponent } from "../CircuitComponent";
+import { BJT_SVG_PIVOT, BJT_SVG_SCALE } from "../rendering/bjtSchematicSvg";
+import { drawLogicXorIEC } from "../rendering/logicGateAndZenerSchematicDraw";
 import { LogicGateProperties } from "./AndGate";
 
 export class XorGate extends CircuitComponent {
@@ -28,21 +31,21 @@ export class XorGate extends CircuitComponent {
     this.nodes = [
       {
         id: "inputA",
-        position: { x: -40, y: -15 },
+        position: { x: -30, y: -10 },
         voltage: 0,
         current: 0,
         connections: [],
       },
       {
         id: "inputB",
-        position: { x: -40, y: 15 },
+        position: { x: -30, y: 10 },
         voltage: 0,
         current: 0,
         connections: [],
       },
       {
         id: "output",
-        position: { x: 40, y: 0 },
+        position: { x: 30, y: 0 },
         voltage: 0,
         current: 0,
         connections: [],
@@ -50,66 +53,30 @@ export class XorGate extends CircuitComponent {
     ];
   }
 
+  protected getTerminalPinRadius(): number {
+    return 5;
+  }
+
   protected createVisuals(): void {
-    this.componentGraphics.clear();
-
-    // Enhanced XOR gate drawing from reference implementation
-    const width = 80;
-    const height = 60;
-
-    // XOR gate outline - REMOVED dark fill for visibility on black canvas
-    // this.componentGraphics.rect(-width / 2, -height / 2, width, height);
-    // this.componentGraphics.fill(0x333333);
-
-    // XOR gate symbol (OR gate with additional curved line)
-    // First curved line (inner)
-    this.componentGraphics.moveTo(-35, -20);
-    this.componentGraphics.quadraticCurveTo(-25, 0, -35, 20);
-    this.componentGraphics.stroke({ width: 2, color: 0xffff44 });
-
-    // Second curved line (outer)
-    this.componentGraphics.moveTo(-30, -20);
-    this.componentGraphics.quadraticCurveTo(-20, 0, -30, 20);
-
-    // Right curved side (output)
-    this.componentGraphics.moveTo(-30, -20);
-    this.componentGraphics.quadraticCurveTo(10, -10, 30, 0);
-    this.componentGraphics.quadraticCurveTo(10, 10, -30, 20);
-
-    this.componentGraphics.fill(0xffff44);
-    this.componentGraphics.stroke({ width: 2, color: 0xffff66 });
-
-    // Input lines
-    this.componentGraphics.moveTo(-40, -15);
-    this.componentGraphics.lineTo(-35, -15);
-    this.componentGraphics.moveTo(-40, 15);
-    this.componentGraphics.lineTo(-35, 15);
-    this.componentGraphics.stroke({ width: 2, color: 0xffffff });
-
-    // Output line
-    this.componentGraphics.moveTo(30, 0);
-    this.componentGraphics.lineTo(40, 0);
-    this.componentGraphics.stroke({ width: 2, color: 0xffffff });
-
-    // Update text labels
+    const g = this.componentGraphics;
+    g.clear();
+    drawLogicXorIEC(g);
+    g.pivot.set(BJT_SVG_PIVOT, BJT_SVG_PIVOT);
+    const flipSign = Math.sign(g.scale.x) || 1;
+    g.scale.set(flipSign * BJT_SVG_SCALE, BJT_SVG_SCALE);
+    g.tint = this.gateProps?.output ? 0xaaffaa : 0xffffff;
+    g.hitArea = new PIXI.Rectangle(0, 0, 150, 150);
     this.updateLabels();
   }
 
   protected updateVisuals(_deltaTime: number): void {
-    // Only update if gateProps is initialized
     if (!this.gateProps) return;
 
-    // Update gate output based on inputs (XOR logic)
     this.gateProps.output = this.gateProps.inputA !== this.gateProps.inputB;
 
-    // Update output voltage
     this.circuitProps.voltage = this.gateProps.output ? 5 : 0;
 
-    // Visual feedback for gate state
-    if (this.gateProps.output !== (this.nodes[2].voltage > 2.5)) {
-      this.createVisuals();
-    }
-
+    this.componentGraphics.tint = this.gateProps.output ? 0xaaffaa : 0xffffff;
     this.updateLabels();
   }
 
@@ -149,17 +116,14 @@ export class XorGate extends CircuitComponent {
     const cos = Math.cos((this.orientation * Math.PI) / 180);
     const sin = Math.sin((this.orientation * Math.PI) / 180);
 
-    // Input A (top-left when orientation = 0)
-    this.nodes[0].position.x = -40 * cos - -15 * sin;
-    this.nodes[0].position.y = -40 * sin + -15 * cos;
+    this.nodes[0].position.x = -30 * cos - -10 * sin;
+    this.nodes[0].position.y = -30 * sin + -10 * cos;
 
-    // Input B (bottom-left when orientation = 0)
-    this.nodes[1].position.x = -40 * cos - 15 * sin;
-    this.nodes[1].position.y = -40 * sin + 15 * cos;
+    this.nodes[1].position.x = -30 * cos - 10 * sin;
+    this.nodes[1].position.y = -30 * sin + 10 * cos;
 
-    // Output (right when orientation = 0)
-    this.nodes[2].position.x = 40 * cos - 0 * sin;
-    this.nodes[2].position.y = 40 * sin + 0 * cos;
+    this.nodes[2].position.x = 30 * cos;
+    this.nodes[2].position.y = 30 * sin;
   }
 
   protected updateNodeVoltages(): void {

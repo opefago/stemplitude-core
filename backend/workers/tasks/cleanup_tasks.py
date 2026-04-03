@@ -100,6 +100,54 @@ def cleanup_orphan_blobs():
 
 
 @celery_app.task
+def cleanup_expired_session_recordings():
+    """Delete session recording blobs/metadata past retention expiry."""
+    logger.info("cleanup_expired_session_recordings started")
+    from datetime import datetime, timezone
+    from sqlalchemy import select
+
+    from app.classrooms.models import SessionRecording
+    from app.config import settings
+    from app.core import blob_storage
+
+    async def _cleanup():
+        import app.database as db_mod
+
+        now = datetime.now(timezone.utc)
+        deleted = 0
+        async with db_mod.async_session_factory() as db:
+            rows = (
+                await db.execute(
+                    select(SessionRecording).where(
+                        SessionRecording.deleted_at.is_(None),
+                        SessionRecording.retention_expires_at.isnot(None),
+                        SessionRecording.retention_expires_at <= now,
+                    )
+                )
+            ).scalars().all()
+            for row in rows:
+                if row.blob_key:
+                    try:
+                        blob_storage.delete_file(row.blob_key)
+                    except Exception:
+                        logger.exception("Failed deleting expired recording blob key=%s", row.blob_key)
+                row.deleted_at = now
+                row.status = "deleted"
+                deleted += 1
+            if deleted:
+                await db.commit()
+        return deleted
+
+    removed = run_async_db(_cleanup)
+    logger.info(
+        "cleanup_expired_session_recordings completed deleted=%d retention_days=%d",
+        removed,
+        int(settings.SESSION_RECORDING_RETENTION_DAYS or 0),
+    )
+    return {"deleted": removed}
+
+
+@celery_app.task
 def cleanup_expired_support_grants():
     """Mark expired support access grants as expired."""
     logger.info("cleanup_expired_support_grants started")

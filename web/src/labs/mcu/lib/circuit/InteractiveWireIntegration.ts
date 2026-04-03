@@ -254,16 +254,165 @@ export class InteractiveWireIntegration {
    * Update wire states with analysis results
    */
   public updateWireStates(results: any): void {
-    this.wireSystem.getWires().forEach((wire, wireId) => {
-      // Update wire current and voltage from analysis results
-      // This would be implemented based on your specific analysis result format
-      wire.current = 0; // Placeholder
-      wire.voltage = 0; // Placeholder
+    const componentCurrents: Record<string, Record<string, number>> =
+      results?.componentTerminalCurrents ?? {};
+    const componentVoltages: Record<string, Record<string, number>> =
+      results?.componentTerminalVoltages ?? {};
+    const components: Array<{ id: string; current: number }> =
+      results?.components ?? [];
 
-      // Redraw wire with updated state
-      this.wireSystem.getContainer().removeChild(wire.graphics);
-      this.wireSystem.getContainer().addChild(wire.graphics);
+    this.wireSystem.getWires().forEach((wire, wireId) => {
+      const endpoints = wire.nodes.filter((n) => n.type === "component");
+      const startEndpoint = endpoints[0];
+      const endEndpoint = endpoints[1];
+      const startCompId = startEndpoint?.componentId;
+      const startNodeId = startEndpoint?.nodeId;
+      const endCompId = endEndpoint?.componentId;
+      const endNodeId = endEndpoint?.nodeId;
+
+      // Get current magnitude from either endpoint
+      let currentMagnitude = 0;
+      if (startCompId && componentCurrents[startCompId]) {
+        const termId = startNodeId ?? Object.keys(componentCurrents[startCompId])[0];
+        currentMagnitude = Math.abs(componentCurrents[startCompId][termId] ?? 0);
+      }
+      if (currentMagnitude < 1e-9 && endCompId && componentCurrents[endCompId]) {
+        const termId = endNodeId ?? Object.keys(componentCurrents[endCompId])[0];
+        currentMagnitude = Math.abs(componentCurrents[endCompId][termId] ?? 0);
+      }
+      if (currentMagnitude < 1e-9) {
+        const comp = components.find((c: any) => c.id === (startCompId ?? endCompId));
+        if (comp) currentMagnitude = Math.abs(comp.current ?? 0);
+      }
+
+      const eps = 1e-9;
+      if (currentMagnitude < eps) {
+        wire.current = 0;
+        wire.voltage = componentVoltages[startCompId ?? ""]?.[startNodeId ?? ""] ?? 0;
+        return;
+      }
+
+      // Determine direction from endpoint terminal-current directions.
+      // +1 = current exits terminal into wire, -1 = current enters terminal from wire.
+      // Wire sign convention: +1 means start->end, -1 means end->start.
+      let sign = Math.abs(wire.current) > eps ? (wire.current >= 0 ? 1 : -1) : 1;
+      let sourceEndpoint: any | null = null;
+      let sinkEndpoint: any | null = null;
+      const startDir = this.getExternalCurrentDirection(
+        startCompId, startNodeId, componentCurrents, componentVoltages
+      );
+      const endDir = this.getExternalCurrentDirection(
+        endCompId, endNodeId, componentCurrents, componentVoltages
+      );
+
+      if (startDir !== 0 && endDir !== 0) {
+        // Ideal physically consistent pair:
+        // start exits (+1), end enters (-1) => start->end
+        if (startDir === 1 && endDir === -1) {
+          sign = 1;
+          sourceEndpoint = startEndpoint;
+          sinkEndpoint = endEndpoint;
+        // end exits (+1), start enters (-1) => end->start
+        } else if (startDir === -1 && endDir === 1) {
+          sign = -1;
+          sourceEndpoint = endEndpoint;
+          sinkEndpoint = startEndpoint;
+        } else {
+          // Conflicting pair (both enter or both exit): fall back to stronger endpoint current.
+          const startI = Math.abs(
+            (startCompId && startNodeId && componentCurrents[startCompId]?.[startNodeId]) ?? 0
+          );
+          const endI = Math.abs(
+            (endCompId && endNodeId && componentCurrents[endCompId]?.[endNodeId]) ?? 0
+          );
+          sign = startI >= endI ? startDir : -endDir;
+          if (sign > 0) {
+            sourceEndpoint = startEndpoint;
+            sinkEndpoint = endEndpoint;
+          } else {
+            sourceEndpoint = endEndpoint;
+            sinkEndpoint = startEndpoint;
+          }
+        }
+      } else if (startDir !== 0) {
+        sign = startDir;
+        if (startDir > 0) {
+          sourceEndpoint = startEndpoint;
+          sinkEndpoint = endEndpoint;
+        } else {
+          sourceEndpoint = endEndpoint;
+          sinkEndpoint = startEndpoint;
+        }
+      } else if (endDir !== 0) {
+        sign = -endDir;
+        if (endDir > 0) {
+          sourceEndpoint = endEndpoint;
+          sinkEndpoint = startEndpoint;
+        } else {
+          sourceEndpoint = startEndpoint;
+          sinkEndpoint = endEndpoint;
+        }
+      } else {
+        // Both ambiguous (common around ideal nodes like ground): keep previous sign.
+        sign = Math.abs(wire.current) > eps ? (wire.current >= 0 ? 1 : -1) : 1;
+        if (sign > 0) {
+          sourceEndpoint = startEndpoint;
+          sinkEndpoint = endEndpoint;
+        } else {
+          sourceEndpoint = endEndpoint;
+          sinkEndpoint = startEndpoint;
+        }
+      }
+
+      wire.current = sign * currentMagnitude;
+      wire.voltage = componentVoltages[startCompId ?? ""]?.[startNodeId ?? ""] ?? 0;
+      (wire as any).flowSource = sourceEndpoint
+        ? {
+            componentId: sourceEndpoint.componentId,
+            nodeId: sourceEndpoint.nodeId,
+            x: sourceEndpoint.x,
+            y: sourceEndpoint.y,
+          }
+        : null;
+      (wire as any).flowSink = sinkEndpoint
+        ? {
+            componentId: sinkEndpoint.componentId,
+            nodeId: sinkEndpoint.nodeId,
+            x: sinkEndpoint.x,
+            y: sinkEndpoint.y,
+          }
+        : null;
+      (wire as any).startDir = startDir;
+      (wire as any).endDir = endDir;
     });
+  }
+
+  /**
+   * Determine if external current exits (+1) or enters (-1) a component terminal.
+   * Returns 0 if ambiguous (component current ≈ 0).
+   *
+   * Convention: terminal current positive = enters component from wire,
+   *             terminal current negative = exits component into wire.
+   * All components must set node.current following this convention.
+   */
+  private getExternalCurrentDirection(
+    compId: string | undefined,
+    nodeId: string | undefined,
+    componentCurrents: Record<string, Record<string, number>>,
+    _componentVoltages: Record<string, Record<string, number>>
+  ): number {
+    if (!compId || !nodeId) return 0;
+
+    const termCurrents = componentCurrents[compId];
+    if (!termCurrents) return 0;
+
+    const termCurrent = termCurrents[nodeId] ?? 0;
+    if (Math.abs(termCurrent) < 1e-9) return 0;
+
+    // Snapshot / node.current: positive = enters terminal from wire (see EnhancedCircuitSolver).
+    // Wire direction helper: +1 = exits terminal into wire, -1 = enters from wire.
+    // So positive terminal current → -1; negative → +1.
+    return termCurrent < 0 ? 1 : -1;
   }
 
   /**
