@@ -2473,6 +2473,13 @@ export class InteractiveWireSystem {
   }
 
   /**
+   * Component type for a placed component id (wires use this for flow conventions).
+   */
+  public getComponentType(componentId: string): string | undefined {
+    return this.components.get(componentId)?.getComponentType();
+  }
+
+  /**
    * Get all nodes
    */
   public getNodes(): Map<string, WireNode> {

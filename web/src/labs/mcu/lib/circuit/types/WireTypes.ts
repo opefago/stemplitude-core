@@ -8,6 +8,8 @@ export type WireVisualState = {
   particleRate: number;
   glowLevel: number;
   debugText?: string;
+  /** Fract aligned phase from merged-net coupling so branches on the same bus stay visually in sync */
+  phaseShift?: number;
 };
 
 export type WireParticle = {

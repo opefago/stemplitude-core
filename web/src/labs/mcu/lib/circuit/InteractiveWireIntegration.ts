@@ -584,6 +584,75 @@ export class InteractiveWireIntegration {
       (wire as any).startDir = startDir;
       (wire as any).endDir = endDir;
     });
+
+    this.wireSystem.getWires().forEach((wire) => {
+      this.applyEducationalWireDirectionCorrections(wire);
+    });
+  }
+
+  /** Flip signed wire.current + flow metadata (used by scene net coherency pass). */
+  public flipDisplayedWireCurrent(wire: InteractiveWireConnection): void {
+    this.invertWireFlowVisual(wire);
+  }
+
+  private invertWireFlowVisual(wire: InteractiveWireConnection): void {
+    const eps = InteractiveWireIntegration.CURRENT_EPS;
+    if (Math.abs(wire.current) < eps) return;
+    wire.current = -wire.current;
+    const fd = (wire as any).flowDirEndpoint as EndpointFlowDirection | undefined;
+    if (fd === "startToEnd") (wire as any).flowDirEndpoint = "endToStart";
+    else if (fd === "endToStart") (wire as any).flowDirEndpoint = "startToEnd";
+    const fs = (wire as any).flowSource;
+    (wire as any).flowSource = (wire as any).flowSink;
+    (wire as any).flowSink = fs;
+    const s = (wire as any).flowDirSign;
+    if (s === 1 || s === -1) (wire as any).flowDirSign = -s;
+  }
+
+  /**
+   * Battery +: conventional current leaves + toward the opposite pin.
+   * Ground ↔ battery− direct jumper: solver reports 0 A on ground; single-end inference
+   * reads as GND → −. Flip so animation matches “return toward the ground symbol”.
+   */
+  private applyEducationalWireDirectionCorrections(
+    wire: InteractiveWireConnection,
+  ): void {
+    const eps = InteractiveWireIntegration.CURRENT_EPS;
+    if (Math.abs(wire.current) < eps) return;
+
+    const endpoints = wire.nodes.filter((n) => n.type === "component");
+    if (endpoints.length !== 2) return;
+    const a = endpoints[0];
+    const b = endpoints[1];
+    if (!a.componentId || !b.componentId) return;
+
+    const type = (cid: string) => this.wireSystem.getComponentType(cid);
+    const isGroundPin = (n: WireNode) => n.nodeId === "ground";
+    const isBatPlus = (n: WireNode) =>
+      n.nodeId === "positive" && type(n.componentId!) === "battery";
+    const isBatNeg = (n: WireNode) =>
+      n.nodeId === "negative" && type(n.componentId!) === "battery";
+
+    const aPlus = isBatPlus(a);
+    const bPlus = isBatPlus(b);
+    if (aPlus !== bPlus) {
+      const wantPositiveStartToEnd = aPlus && !bPlus;
+      const ok =
+        (wantPositiveStartToEnd && wire.current > eps) ||
+        (!wantPositiveStartToEnd && wire.current < -eps);
+      if (!ok) this.invertWireFlowVisual(wire);
+    }
+
+    const ga = isGroundPin(a);
+    const gb = isGroundPin(b);
+    if (ga !== gb) {
+      const other = ga ? b : a;
+      const otherIsBatPlus =
+        other.nodeId === "positive" && type(other.componentId!) === "battery";
+      if (otherIsBatPlus) return;
+      if (!isBatNeg(other)) return;
+      this.invertWireFlowVisual(wire);
+    }
   }
 
   /**

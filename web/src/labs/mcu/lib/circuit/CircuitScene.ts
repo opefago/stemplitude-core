@@ -45,6 +45,8 @@ import { Relay } from "./components/Relay";
 import { NorGate } from "./components/NorGate";
 import { NandGate } from "./components/NandGate";
 import { WireParticleSystem } from "./rendering/WireParticleSystem";
+import { resolveInteractiveWireDisplayCurrents } from "./wireDisplayCurrents";
+import type { InteractiveWireConnection } from "./InteractiveWireSystem";
 import { resolveComponentState } from "./state/DerivedStateResolvers";
 import { EducationOverlays } from "./rendering/EducationOverlays";
 import { SimulatorMode } from "./state/SimulatorMode";
@@ -168,6 +170,8 @@ export class CircuitScene extends BaseScene {
   private wirePathSignatures: Map<string, string> = new Map();
   private wirePathOrientations: Map<string, 1 | -1> = new Map();
   private wireDirectionHistory: Map<string, 1 | -1 | 0> = new Map();
+  private wireDisplayTopologySig: string = "";
+  private mergedNetVisualPhase: Map<number, number> = new Map();
   private lastWireInvariantWarningMs: number = 0;
   private educationOverlays: EducationOverlays | null = null;
   private simulatorMode: SimulatorMode = new SimulatorMode();
@@ -4234,6 +4238,36 @@ export class CircuitScene extends BaseScene {
     this.wireSystem.updateWireStates(combined);
     this.interactiveWireIntegration.updateWireStates(combined);
 
+    const interactiveWires = this.interactiveWireIntegration.getWires();
+    this.coerceWireRenderDirectionsOnEquipotentialNets(interactiveWires, 0.001);
+    const displaySolve = resolveInteractiveWireDisplayCurrents(
+      interactiveWires,
+      snapshot,
+      (cid, nid) => this.circuitSolver.getMergedNodeIndex(cid, nid),
+    );
+
+    if (displaySolve.topologySignature !== this.wireDisplayTopologySig) {
+      this.wireDisplayTopologySig = displaySolve.topologySignature;
+      const keep = new Set(displaySolve.netMaxAbsByMerged.keys());
+      for (const k of this.mergedNetVisualPhase.keys()) {
+        if (!keep.has(k)) this.mergedNetVisualPhase.delete(k);
+      }
+    }
+
+    const dtPhase = 0.016;
+    const phaseK = 0.12;
+    displaySolve.netMaxAbsByMerged.forEach((imax, net) => {
+      const omega = Math.log(1 + imax / 0.008);
+      this.mergedNetVisualPhase.set(
+        net,
+        (this.mergedNetVisualPhase.get(net) ?? 0) + dtPhase * phaseK * omega,
+      );
+    });
+
+    // Per-wire signedAmps and flowDirEndpoint: keep InteractiveWireIntegration
+    // (terminal-current-based); global KCL-on-drawn-graph least-squares was ill-posed
+    // on ideal nets and disagreed with sources/ground.
+
     // Update component runtime states and education badges
     this.gameObjects.forEach((obj) => {
       if (obj instanceof CircuitComponent) {
@@ -4267,9 +4301,6 @@ export class CircuitScene extends BaseScene {
         import("./types/WireTypes").WireVisualState
       >();
 
-      // Get wires from the interactive wire system (where all user-created wires live)
-      const interactiveWires = this.interactiveWireIntegration.getWires();
-
       interactiveWires.forEach((wire, wireId) => {
         const absI = Math.abs(wire.current);
         const threshold = 0.001;
@@ -4289,15 +4320,20 @@ export class CircuitScene extends BaseScene {
           | "endToStart"
           | "unknown"
           | undefined;
-        const canonicalFlowDir =
+        const endpointFlowDir =
           flowDirEndpoint === "startToEnd"
             ? 1
             : flowDirEndpoint === "endToStart"
               ? -1
-              : logicalDir;
+              : 0;
 
-        // Map canonical endpoint direction to Pixi path parameter (0..1) using
-        // path orientation cached per routed wire geometry.
+        // Signed wire.current is authoritative when definite; flowDirEndpoint can lag
+        // after edits or special cases (e.g. ground / source legs).
+        const flowAlongEndpoints =
+          logicalDir !== 0 ? logicalDir : endpointFlowDir;
+
+        // Map endpoint-ordered flow to Pixi path parameter (0..1) using path
+        // orientation cached per routed wire geometry.
         let renderDir: 0 | 1 | -1 = 0;
         if (wire.segments && wire.segments.length > 0) {
           const pathOrientation = this.updateWirePathCacheAndOrientation(
@@ -4306,9 +4342,23 @@ export class CircuitScene extends BaseScene {
             startEp,
             endEp,
           );
-          if (canonicalFlowDir !== 0) {
-            renderDir = (canonicalFlowDir * pathOrientation) as 1 | -1;
+          if (flowAlongEndpoints !== 0) {
+            renderDir = (flowAlongEndpoints * pathOrientation) as 1 | -1;
           }
+        }
+
+        const ep = wire.nodes.filter((n: { type: string }) => n.type === "component") as Array<{
+          componentId?: string;
+          nodeId?: string;
+        }>;
+        let phaseShift = 0;
+        if (ep.length >= 2 && ep[0].componentId && ep[0].nodeId && ep[1].componentId && ep[1].nodeId) {
+          const ma = this.circuitSolver.getMergedNodeIndex(ep[0].componentId, ep[0].nodeId);
+          const mb = this.circuitSolver.getMergedNodeIndex(ep[1].componentId, ep[1].nodeId);
+          const pa = ma !== undefined ? this.mergedNetVisualPhase.get(ma) ?? 0 : 0;
+          const pb = mb !== undefined ? this.mergedNetVisualPhase.get(mb) ?? 0 : 0;
+          const blend = (pa + pb) * 0.5;
+          phaseShift = blend - Math.floor(blend);
         }
 
         wireStates.set(wireId, {
@@ -4317,6 +4367,7 @@ export class CircuitScene extends BaseScene {
           energized,
           particleRate: energized ? 0.2 + normalizedI * 0.8 : 0,
           glowLevel: energized ? normalizedI * 0.8 : 0,
+          phaseShift,
           debugText: `I=${wire.current.toFixed(4)} R=${renderDir} F=${flowDirEndpoint ?? "na"}`,
         });
       });
@@ -4326,6 +4377,131 @@ export class CircuitScene extends BaseScene {
       }
       this.wireParticleSystem.update(16, wireStates);
     }
+  }
+
+  /**
+   * Ideal wires on one merged node are independent in the UI; per-wire inference can
+   * disagree on Pixi render direction along a shared return rail. Align segments that
+   * carry the same |I| so particles/arrows match KCL on that net (loop current sense).
+   * Tie-break with a wire that touches battery (−), else majority vote on renderDir.
+   */
+  private coerceWireRenderDirectionsOnEquipotentialNets(
+    interactiveWires: Map<string, InteractiveWireConnection>,
+    currentThreshold: number,
+  ): void {
+    type Entry = {
+      wireId: string;
+      wire: InteractiveWireConnection;
+      m: number;
+      renderDir: 1 | -1;
+      absI: number;
+      touchesBatNeg: boolean;
+    };
+
+    const entries: Entry[] = [];
+
+    for (const [wireId, wire] of interactiveWires) {
+      const endpoints = wire.nodes.filter((n: any) => n.type === "component");
+      if (endpoints.length < 2 || !wire.segments?.length) continue;
+
+      const startEp = endpoints[0];
+      const endEp = endpoints[1];
+      if (!startEp.componentId || !endEp.componentId) continue;
+      if (!startEp.nodeId || !endEp.nodeId) continue;
+
+      const ma = this.circuitSolver.getMergedNodeIndex(
+        startEp.componentId,
+        startEp.nodeId,
+      );
+      const mb = this.circuitSolver.getMergedNodeIndex(
+        endEp.componentId,
+        endEp.nodeId,
+      );
+      if (ma === undefined || mb === undefined || ma !== mb) continue;
+
+      const absI = Math.abs(wire.current);
+      if (absI < currentThreshold) continue;
+
+      const pathOrientation = this.updateWirePathCacheAndOrientation(
+        wireId,
+        wire,
+        startEp,
+        endEp,
+      );
+
+      const logicalDir =
+        wire.current > currentThreshold
+          ? 1
+          : wire.current < -currentThreshold
+            ? -1
+            : 0;
+      const flowDirEndpoint = (wire as any).flowDirEndpoint as
+        | "startToEnd"
+        | "endToStart"
+        | "unknown"
+        | undefined;
+      const endpointFlowDir =
+        flowDirEndpoint === "startToEnd"
+          ? 1
+          : flowDirEndpoint === "endToStart"
+            ? -1
+            : 0;
+      const flowAlongEndpoints =
+        logicalDir !== 0 ? logicalDir : endpointFlowDir;
+      if (flowAlongEndpoints === 0) continue;
+
+      const renderDir = (flowAlongEndpoints * pathOrientation) as 1 | -1;
+
+      const touchesBatNeg = endpoints.some(
+        (p: any) =>
+          p.nodeId === "negative" &&
+          this.getGameObjectComponentType(p.componentId) === "battery",
+      );
+
+      entries.push({ wireId, wire, m: ma, renderDir, absI, touchesBatNeg });
+    }
+
+    const byNet = new Map<number, Entry[]>();
+    for (const e of entries) {
+      if (!byNet.has(e.m)) byNet.set(e.m, []);
+      byNet.get(e.m)!.push(e);
+    }
+
+    for (const [, list] of byNet) {
+      if (list.length < 2) continue;
+
+      const sorted = [...list.map((l) => l.absI)].sort((a, b) => a - b);
+      const med = sorted[Math.floor(sorted.length / 2)]!;
+      const tol = Math.max(1e-9, med * 0.08);
+      const coherent = list.filter((e) => Math.abs(e.absI - med) <= tol);
+      if (coherent.length < 2) continue;
+
+      let nPos = 0;
+      let nNeg = 0;
+      for (const e of coherent) {
+        if (e.renderDir === 1) nPos++;
+        else nNeg++;
+      }
+
+      let target: 1 | -1;
+      if (nPos > nNeg) target = 1;
+      else if (nNeg > nPos) target = -1;
+      else {
+        const anchor = coherent.find((e) => e.touchesBatNeg);
+        target = anchor?.renderDir ?? 1;
+      }
+
+      for (const e of coherent) {
+        if (e.renderDir !== target) {
+          this.interactiveWireIntegration.flipDisplayedWireCurrent(e.wire);
+        }
+      }
+    }
+  }
+
+  private getGameObjectComponentType(componentId: string): string | undefined {
+    const obj = this.gameObjects.get(componentId);
+    return obj instanceof CircuitComponent ? obj.getComponentType() : undefined;
   }
 
   /**
@@ -4414,9 +4590,17 @@ export class CircuitScene extends BaseScene {
           : flowDirEndpoint === "endToStart"
             ? -1
             : 0;
+      const logicalSign =
+        wire.current > flipThreshold
+          ? 1
+          : wire.current < -flipThreshold
+            ? -1
+            : 0;
+      const expectedFlowSign =
+        logicalSign !== 0 ? logicalSign : endpointFlowSign;
       const pathOrientation = this.wirePathOrientations.get(wireId) ?? 1;
-      if (endpointFlowSign !== 0) {
-        const expectedDir = (endpointFlowSign * pathOrientation) as 1 | -1;
+      if (expectedFlowSign !== 0) {
+        const expectedDir = (expectedFlowSign * pathOrientation) as 1 | -1;
         if (
           state.currentDirection !== 0 &&
           state.currentDirection !== expectedDir
@@ -5397,6 +5581,8 @@ export class CircuitScene extends BaseScene {
     this.wirePathSignatures.clear();
     this.wirePathOrientations.clear();
     this.wireDirectionHistory.clear();
+    this.wireDisplayTopologySig = "";
+    this.mergedNetVisualPhase.clear();
 
     super.destroy();
   }
@@ -5569,6 +5755,8 @@ export class CircuitScene extends BaseScene {
       this.wirePathSignatures.clear();
       this.wirePathOrientations.clear();
       this.wireDirectionHistory.clear();
+      this.wireDisplayTopologySig = "";
+      this.mergedNetVisualPhase.clear();
       this.updateVisualEffects();
       return true;
     } catch {
@@ -5598,6 +5786,8 @@ export class CircuitScene extends BaseScene {
     this.wirePathSignatures.clear();
     this.wirePathOrientations.clear();
     this.wireDirectionHistory.clear();
+    this.wireDisplayTopologySig = "";
+    this.mergedNetVisualPhase.clear();
     this.hidePropertiesPanel();
   }
 

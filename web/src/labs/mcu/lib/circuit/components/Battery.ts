@@ -287,7 +287,11 @@ export class Battery extends CircuitComponent {
       (this.batteryProps?.chargeLevel ?? 1.0) * 100
     );
     const voltage = this.batteryProps?.voltage ?? this.circuitProps?.value ?? 9;
-    this.valueText.text = `${voltage}V (${chargePercent}%)`;
+    const vDisp =
+      typeof voltage === "number" && Number.isFinite(voltage)
+        ? voltage.toFixed(2)
+        : String(voltage);
+    this.valueText.text = `${vDisp}V (${chargePercent}%)`;
     this.valueText.style = {
       fontSize: 8,
       fill: 0xcccccc,

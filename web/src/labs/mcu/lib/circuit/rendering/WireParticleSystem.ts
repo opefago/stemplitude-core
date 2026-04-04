@@ -4,6 +4,10 @@ import { DesignTokens } from "./DesignTokens";
 
 type Point = { x: number; y: number };
 
+function fract01(x: number): number {
+  return x - Math.floor(x);
+}
+
 /**
  * EveryCircuit-style wire current animation system.
  * Renders continuous particle flow along wires proportional to current magnitude.
@@ -139,6 +143,7 @@ export class WireParticleSystem {
       // Move particles
       const direction = state.currentDirection;
       const progressDelta = (speed * dt) / pathCache.totalLength;
+      const phase = state.phaseShift ?? 0;
 
       for (const particle of particles) {
         particle.progress += progressDelta * direction;
@@ -150,8 +155,12 @@ export class WireParticleSystem {
         particle.alpha = alpha;
         particle.speed = speed;
 
+        // Same visual phase as drawDirectionArrow (0.5 + phase): keeps carrier waves
+        // aligned on merged nets so arrows don't slide opposite to dots.
+        const visProgress = fract01(particle.progress + phase);
+
         // Render particle from pool
-        const pos = this.getPositionAlongPath(pathCache, particle.progress);
+        const pos = this.getPositionAlongPath(pathCache, visProgress);
         if (pos && this.poolIndex < this.particlePool.length) {
           const g = this.particlePool[this.poolIndex++];
           g.position.set(pos.x, pos.y);
@@ -160,7 +169,7 @@ export class WireParticleSystem {
         }
       }
 
-      this.drawDirectionArrow(wireId, pathCache, direction);
+      this.drawDirectionArrow(wireId, pathCache, direction, state.phaseShift);
       this.drawDebugLabel(wireId, pathCache, state.debugText);
     }
   }
@@ -204,7 +213,8 @@ export class WireParticleSystem {
   private drawDirectionArrow(
     wireId: string,
     pathCache: WirePathCache,
-    direction: number
+    direction: number,
+    phaseShift?: number
   ): void {
     let arrow = this.arrowGraphics.get(wireId);
     if (!arrow) {
@@ -220,15 +230,15 @@ export class WireParticleSystem {
     }
     arrow.visible = true;
 
-    const midProgress = 0.5;
+    const midProgress = fract01(0.5 + (phaseShift ?? 0));
     const midPos = this.getPositionAlongPath(pathCache, midProgress);
     const aheadPos = this.getPositionAlongPath(
       pathCache,
-      Math.min(midProgress + 0.02, 1)
+      fract01(midProgress + 0.02)
     );
     const behindPos = this.getPositionAlongPath(
       pathCache,
-      Math.max(midProgress - 0.02, 0)
+      fract01(midProgress - 0.02)
     );
     if (!midPos || !aheadPos || !behindPos) return;
 
