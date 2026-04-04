@@ -611,8 +611,9 @@ export class InteractiveWireIntegration {
 
   /**
    * Battery +: conventional current leaves + toward the opposite pin.
-   * Ground ↔ battery− direct jumper: solver reports 0 A on ground; single-end inference
-   * reads as GND → −. Flip so animation matches “return toward the ground symbol”.
+   * Ground ↔ battery− jumper: show conventional current flowing *into* the − terminal
+   * (return current), i.e. toward the battery pin—not away from it toward the GND symbol.
+   * Endpoint order fixes the needed sign (invert only when the solver/visual pipeline disagrees).
    */
   private applyEducationalWireDirectionCorrections(
     wire: InteractiveWireConnection,
@@ -651,7 +652,11 @@ export class InteractiveWireIntegration {
         other.nodeId === "positive" && type(other.componentId!) === "battery";
       if (otherIsBatPlus) return;
       if (!isBatNeg(other)) return;
-      this.invertWireFlowVisual(wire);
+      // wire.current > 0 ⇒ flow component endpoint[0] → endpoint[1]. We want flow into − pin.
+      const batNegAtEnd = isBatNeg(b);
+      const wantSign: 1 | -1 = batNegAtEnd ? 1 : -1;
+      const haveSign: 1 | -1 = wire.current > eps ? 1 : -1;
+      if (haveSign !== wantSign) this.invertWireFlowVisual(wire);
     }
   }
 

@@ -1,6 +1,7 @@
 import type { Point } from "./ComponentTypes";
 
 export type WireVisualState = {
+  /** |displayCurrent| after smoothing — drives particle speed / glow */
   currentMagnitude: number;
   currentDirection: 1 | -1 | 0;
   voltageDrop?: number;
@@ -10,6 +11,8 @@ export type WireVisualState = {
   debugText?: string;
   /** Fract aligned phase from merged-net coupling so branches on the same bus stay visually in sync */
   phaseShift?: number;
+  /** 0..1 fade around zero crossing (wire animation stabilizer) */
+  visualFade?: number;
 };
 
 export type WireParticle = {

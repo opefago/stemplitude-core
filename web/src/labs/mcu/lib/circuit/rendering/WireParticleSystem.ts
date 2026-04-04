@@ -123,6 +123,7 @@ export class WireParticleSystem {
         Math.floor(pathCache.totalLength / spacing)
       );
       const alpha = this.computeAlpha(absI);
+      const fadeMul = state.visualFade ?? 1;
 
       // Get or create particle state array
       let particles = this.activeParticles.get(wireId);
@@ -155,21 +156,30 @@ export class WireParticleSystem {
         particle.alpha = alpha;
         particle.speed = speed;
 
-        // Same visual phase as drawDirectionArrow (0.5 + phase): keeps carrier waves
-        // aligned on merged nets so arrows don't slide opposite to dots.
-        const visProgress = fract01(particle.progress + phase);
+        // Phase must advance *along conventional current* on this wire. Using +phase for
+        // all directions adds forward motion along the polyline every frame and can dominate
+        // progressDelta * direction on negative-flow segments (arrow tangent flips, dots slip).
+        const visProgress = fract01(
+          particle.progress + phase * (direction === 0 ? 1 : direction),
+        );
 
         // Render particle from pool
         const pos = this.getPositionAlongPath(pathCache, visProgress);
         if (pos && this.poolIndex < this.particlePool.length) {
           const g = this.particlePool[this.poolIndex++];
           g.position.set(pos.x, pos.y);
-          g.alpha = particle.alpha;
+          g.alpha = particle.alpha * fadeMul;
           g.visible = true;
         }
       }
 
-      this.drawDirectionArrow(wireId, pathCache, direction, state.phaseShift);
+      this.drawDirectionArrow(
+        wireId,
+        pathCache,
+        direction,
+        state.phaseShift,
+        fadeMul,
+      );
       this.drawDebugLabel(wireId, pathCache, state.debugText);
     }
   }
@@ -214,7 +224,8 @@ export class WireParticleSystem {
     wireId: string,
     pathCache: WirePathCache,
     direction: number,
-    phaseShift?: number
+    phaseShift?: number,
+    fadeMul: number = 1,
   ): void {
     let arrow = this.arrowGraphics.get(wireId);
     if (!arrow) {
@@ -230,7 +241,8 @@ export class WireParticleSystem {
     }
     arrow.visible = true;
 
-    const midProgress = fract01(0.5 + (phaseShift ?? 0));
+    const dir = direction === 0 ? 1 : direction;
+    const midProgress = fract01(0.5 + (phaseShift ?? 0) * dir);
     const midPos = this.getPositionAlongPath(pathCache, midProgress);
     const aheadPos = this.getPositionAlongPath(
       pathCache,
@@ -266,8 +278,9 @@ export class WireParticleSystem {
     arrow.lineTo(baseX + perpX * size * 0.6, baseY + perpY * size * 0.6);
     arrow.lineTo(baseX - perpX * size * 0.6, baseY - perpY * size * 0.6);
     arrow.closePath();
-    arrow.fill({ color: 0xffff00, alpha: 0.9 });
-    arrow.stroke({ width: 1.5, color: 0xff8800, alpha: 1 });
+    const a = Math.min(1, Math.max(0, fadeMul));
+    arrow.fill({ color: 0xffff00, alpha: 0.9 * a });
+    arrow.stroke({ width: 1.5, color: 0xff8800, alpha: a });
   }
 
   private computeSpeed(absI: number): number {

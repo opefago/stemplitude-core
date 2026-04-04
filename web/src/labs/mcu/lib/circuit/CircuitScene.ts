@@ -45,6 +45,10 @@ import { Relay } from "./components/Relay";
 import { NorGate } from "./components/NorGate";
 import { NandGate } from "./components/NandGate";
 import { WireParticleSystem } from "./rendering/WireParticleSystem";
+import {
+  DEFAULT_WIRE_ANIM_STABILIZER_CONFIG,
+  WireAnimationStabilizer,
+} from "./rendering/WireAnimationStabilizer";
 import { resolveInteractiveWireDisplayCurrents } from "./wireDisplayCurrents";
 import type { InteractiveWireConnection } from "./InteractiveWireSystem";
 import { resolveComponentState } from "./state/DerivedStateResolvers";
@@ -172,6 +176,9 @@ export class CircuitScene extends BaseScene {
   private wireDirectionHistory: Map<string, 1 | -1 | 0> = new Map();
   private wireDisplayTopologySig: string = "";
   private mergedNetVisualPhase: Map<number, number> = new Map();
+  private wireAnimationStabilizer: WireAnimationStabilizer =
+    new WireAnimationStabilizer();
+  private lastWireAnimEffectsMs: number = 0;
   private lastWireInvariantWarningMs: number = 0;
   private educationOverlays: EducationOverlays | null = null;
   private simulatorMode: SimulatorMode = new SimulatorMode();
@@ -4239,7 +4246,32 @@ export class CircuitScene extends BaseScene {
     this.interactiveWireIntegration.updateWireStates(combined);
 
     const interactiveWires = this.interactiveWireIntegration.getWires();
-    this.coerceWireRenderDirectionsOnEquipotentialNets(interactiveWires, 0.001);
+    const nowAnim = performance.now();
+    let animDtSec = 0.016;
+    if (this.lastWireAnimEffectsMs > 0) {
+      animDtSec = Math.min(
+        0.05,
+        Math.max(0.001, (nowAnim - this.lastWireAnimEffectsMs) / 1000),
+      );
+    }
+    this.lastWireAnimEffectsMs = nowAnim;
+
+    this.wireAnimationStabilizer.syncActiveWires(interactiveWires.keys());
+    const useAcBeta = this.circuitHasAcSourceOrTransientMotion();
+
+    const iDead = DEFAULT_WIRE_ANIM_STABILIZER_CONFIG.iDead;
+    for (const [wireId, wire] of interactiveWires) {
+      const endpoints = wire.nodes.filter((n: any) => n.type === "component");
+      if (endpoints.length < 2) continue;
+      this.wireAnimationStabilizer.step(
+        wireId,
+        wire.current,
+        animDtSec,
+        nowAnim,
+        useAcBeta,
+      );
+    }
+
     const displaySolve = resolveInteractiveWireDisplayCurrents(
       interactiveWires,
       snapshot,
@@ -4302,38 +4334,22 @@ export class CircuitScene extends BaseScene {
       >();
 
       interactiveWires.forEach((wire, wireId) => {
-        const absI = Math.abs(wire.current);
-        const threshold = 0.001;
-        const energized = absI > threshold;
-        const normalizedI = Math.min(absI / 1.0, 1.0);
+        const solvedSigned = wire.current;
+        const displaySigned =
+          this.wireAnimationStabilizer.getDisplaySigned(wireId);
+        const displayMag = Math.abs(displaySigned);
+        const visualFade = this.wireAnimationStabilizer.getFade01(wireId);
+        const energized =
+          displayMag > iDead && visualFade > 0.05;
+        const normalizedI = Math.min(displayMag / 1.0, 1.0);
 
-        // Flow polarity: InteractiveWireIntegration.updateWireStates() sets
-        // flowDirEndpoint from terminal currents. Path mapping uses only
-        // wire endpoint geometry (startEp/endEp), not flowSource/flowSink.
         const endpoints = wire.nodes.filter((n: any) => n.type === "component");
         const startEp = endpoints[0];
         const endEp = endpoints[1];
-        const logicalDir =
-          wire.current > threshold ? 1 : wire.current < -threshold ? -1 : 0;
-        const flowDirEndpoint = (wire as any).flowDirEndpoint as
-          | "startToEnd"
-          | "endToStart"
-          | "unknown"
-          | undefined;
-        const endpointFlowDir =
-          flowDirEndpoint === "startToEnd"
-            ? 1
-            : flowDirEndpoint === "endToStart"
-              ? -1
-              : 0;
+        const visualSignAlong =
+          this.wireAnimationStabilizer.getVisualSignAlongEndpoints(wireId);
+        const flowAlongEndpoints = visualSignAlong;
 
-        // Signed wire.current is authoritative when definite; flowDirEndpoint can lag
-        // after edits or special cases (e.g. ground / source legs).
-        const flowAlongEndpoints =
-          logicalDir !== 0 ? logicalDir : endpointFlowDir;
-
-        // Map endpoint-ordered flow to Pixi path parameter (0..1) using path
-        // orientation cached per routed wire geometry.
         let renderDir: 0 | 1 | -1 = 0;
         if (wire.segments && wire.segments.length > 0) {
           const pathOrientation = this.updateWirePathCacheAndOrientation(
@@ -4342,7 +4358,7 @@ export class CircuitScene extends BaseScene {
             startEp,
             endEp,
           );
-          if (flowAlongEndpoints !== 0) {
+          if (energized) {
             renderDir = (flowAlongEndpoints * pathOrientation) as 1 | -1;
           }
         }
@@ -4361,14 +4377,16 @@ export class CircuitScene extends BaseScene {
           phaseShift = blend - Math.floor(blend);
         }
 
+        const flowDirEndpoint = (wire as any).flowDirEndpoint as string | undefined;
         wireStates.set(wireId, {
-          currentMagnitude: absI,
+          currentMagnitude: displayMag,
           currentDirection: renderDir as 1 | -1 | 0,
           energized,
           particleRate: energized ? 0.2 + normalizedI * 0.8 : 0,
           glowLevel: energized ? normalizedI * 0.8 : 0,
           phaseShift,
-          debugText: `I=${wire.current.toFixed(4)} R=${renderDir} F=${flowDirEndpoint ?? "na"}`,
+          visualFade,
+          debugText: `Is=${solvedSigned.toFixed(4)} Id=${displaySigned.toFixed(4)} R=${renderDir} F=${flowDirEndpoint ?? "na"}`,
         });
       });
 
@@ -4379,124 +4397,15 @@ export class CircuitScene extends BaseScene {
     }
   }
 
-  /**
-   * Ideal wires on one merged node are independent in the UI; per-wire inference can
-   * disagree on Pixi render direction along a shared return rail. Align segments that
-   * carry the same |I| so particles/arrows match KCL on that net (loop current sense).
-   * Tie-break with a wire that touches battery (−), else majority vote on renderDir.
-   */
-  private coerceWireRenderDirectionsOnEquipotentialNets(
-    interactiveWires: Map<string, InteractiveWireConnection>,
-    currentThreshold: number,
-  ): void {
-    type Entry = {
-      wireId: string;
-      wire: InteractiveWireConnection;
-      m: number;
-      renderDir: 1 | -1;
-      absI: number;
-      touchesBatNeg: boolean;
-    };
-
-    const entries: Entry[] = [];
-
-    for (const [wireId, wire] of interactiveWires) {
-      const endpoints = wire.nodes.filter((n: any) => n.type === "component");
-      if (endpoints.length < 2 || !wire.segments?.length) continue;
-
-      const startEp = endpoints[0];
-      const endEp = endpoints[1];
-      if (!startEp.componentId || !endEp.componentId) continue;
-      if (!startEp.nodeId || !endEp.nodeId) continue;
-
-      const ma = this.circuitSolver.getMergedNodeIndex(
-        startEp.componentId,
-        startEp.nodeId,
-      );
-      const mb = this.circuitSolver.getMergedNodeIndex(
-        endEp.componentId,
-        endEp.nodeId,
-      );
-      if (ma === undefined || mb === undefined || ma !== mb) continue;
-
-      const absI = Math.abs(wire.current);
-      if (absI < currentThreshold) continue;
-
-      const pathOrientation = this.updateWirePathCacheAndOrientation(
-        wireId,
-        wire,
-        startEp,
-        endEp,
-      );
-
-      const logicalDir =
-        wire.current > currentThreshold
-          ? 1
-          : wire.current < -currentThreshold
-            ? -1
-            : 0;
-      const flowDirEndpoint = (wire as any).flowDirEndpoint as
-        | "startToEnd"
-        | "endToStart"
-        | "unknown"
-        | undefined;
-      const endpointFlowDir =
-        flowDirEndpoint === "startToEnd"
-          ? 1
-          : flowDirEndpoint === "endToStart"
-            ? -1
-            : 0;
-      const flowAlongEndpoints =
-        logicalDir !== 0 ? logicalDir : endpointFlowDir;
-      if (flowAlongEndpoints === 0) continue;
-
-      const renderDir = (flowAlongEndpoints * pathOrientation) as 1 | -1;
-
-      const touchesBatNeg = endpoints.some(
-        (p: any) =>
-          p.nodeId === "negative" &&
-          this.getGameObjectComponentType(p.componentId) === "battery",
-      );
-
-      entries.push({ wireId, wire, m: ma, renderDir, absI, touchesBatNeg });
-    }
-
-    const byNet = new Map<number, Entry[]>();
-    for (const e of entries) {
-      if (!byNet.has(e.m)) byNet.set(e.m, []);
-      byNet.get(e.m)!.push(e);
-    }
-
-    for (const [, list] of byNet) {
-      if (list.length < 2) continue;
-
-      const sorted = [...list.map((l) => l.absI)].sort((a, b) => a - b);
-      const med = sorted[Math.floor(sorted.length / 2)]!;
-      const tol = Math.max(1e-9, med * 0.08);
-      const coherent = list.filter((e) => Math.abs(e.absI - med) <= tol);
-      if (coherent.length < 2) continue;
-
-      let nPos = 0;
-      let nNeg = 0;
-      for (const e of coherent) {
-        if (e.renderDir === 1) nPos++;
-        else nNeg++;
-      }
-
-      let target: 1 | -1;
-      if (nPos > nNeg) target = 1;
-      else if (nNeg > nPos) target = -1;
-      else {
-        const anchor = coherent.find((e) => e.touchesBatNeg);
-        target = anchor?.renderDir ?? 1;
-      }
-
-      for (const e of coherent) {
-        if (e.renderDir !== target) {
-          this.interactiveWireIntegration.flipDisplayedWireCurrent(e.wire);
-        }
+  /** Slower animation filtering when transient is running or an AC source is placed */
+  private circuitHasAcSourceOrTransientMotion(): boolean {
+    if (this.isSimulationRunning) return true;
+    for (const obj of this.gameObjects.values()) {
+      if (obj instanceof CircuitComponent && obj.getComponentType() === "acsource") {
+        return true;
       }
     }
+    return false;
   }
 
   private getGameObjectComponentType(componentId: string): string | undefined {
@@ -4579,34 +4488,14 @@ export class CircuitScene extends BaseScene {
         );
       }
 
-      const flowDirEndpoint = (wire as any).flowDirEndpoint as
-        | "startToEnd"
-        | "endToStart"
-        | "unknown"
-        | undefined;
-      const endpointFlowSign =
-        flowDirEndpoint === "startToEnd"
-          ? 1
-          : flowDirEndpoint === "endToStart"
-            ? -1
-            : 0;
-      const logicalSign =
-        wire.current > flipThreshold
-          ? 1
-          : wire.current < -flipThreshold
-            ? -1
-            : 0;
-      const expectedFlowSign =
-        logicalSign !== 0 ? logicalSign : endpointFlowSign;
       const pathOrientation = this.wirePathOrientations.get(wireId) ?? 1;
-      if (expectedFlowSign !== 0) {
-        const expectedDir = (expectedFlowSign * pathOrientation) as 1 | -1;
-        if (
-          state.currentDirection !== 0 &&
-          state.currentDirection !== expectedDir
-        ) {
+      if (state.currentDirection !== 0) {
+        const visualSign =
+          this.wireAnimationStabilizer.getVisualSignAlongEndpoints(wireId);
+        const expectedDir = (visualSign * pathOrientation) as 1 | -1;
+        if (state.currentDirection !== expectedDir) {
           issues.push(
-            `render/sign mismatch on ${wireId}: expected ${expectedDir} got ${state.currentDirection}`,
+            `render/stabilizer mismatch on ${wireId}: expected ${expectedDir} got ${state.currentDirection}`,
           );
         }
       }
@@ -5583,6 +5472,8 @@ export class CircuitScene extends BaseScene {
     this.wireDirectionHistory.clear();
     this.wireDisplayTopologySig = "";
     this.mergedNetVisualPhase.clear();
+    this.wireAnimationStabilizer.clear();
+    this.lastWireAnimEffectsMs = 0;
 
     super.destroy();
   }
@@ -5757,6 +5648,8 @@ export class CircuitScene extends BaseScene {
       this.wireDirectionHistory.clear();
       this.wireDisplayTopologySig = "";
       this.mergedNetVisualPhase.clear();
+      this.wireAnimationStabilizer.clear();
+      this.lastWireAnimEffectsMs = 0;
       this.updateVisualEffects();
       return true;
     } catch {
@@ -5788,6 +5681,8 @@ export class CircuitScene extends BaseScene {
     this.wireDirectionHistory.clear();
     this.wireDisplayTopologySig = "";
     this.mergedNetVisualPhase.clear();
+    this.wireAnimationStabilizer.clear();
+    this.lastWireAnimEffectsMs = 0;
     this.hidePropertiesPanel();
   }
 
