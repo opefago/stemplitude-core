@@ -77,10 +77,7 @@ export class AndGate extends CircuitComponent {
 
   protected updateVisuals(_deltaTime: number): void {
     if (!this.gateProps) return;
-
-    this.gateProps.output = this.gateProps.inputA && this.gateProps.inputB;
-
-    this.circuitProps.voltage = this.gateProps.output ? 5 : 0;
+    this.circuitProps.voltage = this.nodes[2].voltage;
 
     this.componentGraphics.tint = this.gateProps.output ? 0xaaffaa : 0xffffff;
     this.updateLabels();
@@ -136,12 +133,7 @@ export class AndGate extends CircuitComponent {
     // Update input states based on node voltages
     this.gateProps.inputA = this.nodes[0].voltage > 2.5; // TTL logic threshold
     this.gateProps.inputB = this.nodes[1].voltage > 2.5;
-
-    // Calculate output
-    this.gateProps.output = this.gateProps.inputA && this.gateProps.inputB;
-
-    // Set output voltage
-    this.nodes[2].voltage = this.gateProps.output ? 5.0 : 0.0;
+    this.gateProps.output = this.nodes[2].voltage > 2.5;
 
     // Very low current consumption for logic gates
     this.nodes[0].current = 0.0001; // 0.1mA input current

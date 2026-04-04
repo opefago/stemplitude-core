@@ -15,6 +15,12 @@ import { CircuitComponent } from "./CircuitComponent";
 import { GridCanvas } from "./GridCanvas";
 import { emitLabEventThrottled } from "../../../../lib/api/gamification";
 
+// Keep warnings/errors, silence verbose dev logs for this module.
+const console = {
+  ...globalThis.console,
+  log: (..._args: unknown[]) => {},
+};
+
 export interface WireEditMode {
   enabled: boolean;
   selectedWire: string | null;
@@ -31,6 +37,8 @@ export interface WireEditOptions {
   snapThreshold: number;
 }
 
+type EndpointFlowDirection = "startToEnd" | "endToStart" | "unknown";
+
 /**
  * Integration layer for interactive wire editing
  */
@@ -41,6 +49,9 @@ export class InteractiveWireIntegration {
 
   private editMode: WireEditMode;
   private options: WireEditOptions;
+  private static readonly CURRENT_EPS = 1e-9;
+  private static readonly VOLTAGE_EPS = 1e-5;
+  private static readonly FLIP_HOLD_CURRENT_A = 2e-4;
 
   constructor(circuitScene: CircuitScene, gridCanvas: GridCanvas) {
     this.circuitScene = circuitScene;
@@ -81,7 +92,6 @@ export class InteractiveWireIntegration {
     // Setup keyboard shortcuts
     this.setupKeyboardShortcuts();
 
-    console.log("🔌 Interactive wire system integrated with CircuitScene");
   }
 
   /**
@@ -215,7 +225,6 @@ export class InteractiveWireIntegration {
     );
 
     if (success) {
-      console.log(`🔌 Created interactive wire ${wireId}`);
       emitLabEventThrottled({
         lab_id: "circuit-maker",
         lab_type: "circuit-maker",
@@ -230,8 +239,6 @@ export class InteractiveWireIntegration {
       }, 600);
 
       // Get routing statistics
-      const stats = this.getRoutingStats();
-      console.log(`📊 Routing Stats:`, stats);
     }
 
     return success;
@@ -244,7 +251,6 @@ export class InteractiveWireIntegration {
     const success = this.wireSystem.removeWire(wireId);
 
     if (success) {
-      console.log(`🗑️ Removed wire ${wireId}`);
     }
 
     return success;
@@ -265,37 +271,50 @@ export class InteractiveWireIntegration {
       const endpoints = wire.nodes.filter((n) => n.type === "component");
       const startEndpoint = endpoints[0];
       const endEndpoint = endpoints[1];
+      const nonComponentNode = wire.nodes.find((n) => n.type !== "component");
       const startCompId = startEndpoint?.componentId;
       const startNodeId = startEndpoint?.nodeId;
       const endCompId = endEndpoint?.componentId;
       const endNodeId = endEndpoint?.nodeId;
 
-      // Get current magnitude from either endpoint
+      // Get current magnitude from exact endpoint terminal currents only.
+      // Avoid falling back to whole-component current, which can misreport branch wires.
+      const startMag =
+        startCompId && startNodeId
+          ? Math.abs(componentCurrents[startCompId]?.[startNodeId] ?? 0)
+          : 0;
+      const endMag =
+        endCompId && endNodeId
+          ? Math.abs(componentCurrents[endCompId]?.[endNodeId] ?? 0)
+          : 0;
       let currentMagnitude = 0;
-      if (startCompId && componentCurrents[startCompId]) {
-        const termId = startNodeId ?? Object.keys(componentCurrents[startCompId])[0];
-        currentMagnitude = Math.abs(componentCurrents[startCompId][termId] ?? 0);
-      }
-      if (currentMagnitude < 1e-9 && endCompId && componentCurrents[endCompId]) {
-        const termId = endNodeId ?? Object.keys(componentCurrents[endCompId])[0];
-        currentMagnitude = Math.abs(componentCurrents[endCompId][termId] ?? 0);
-      }
-      if (currentMagnitude < 1e-9) {
-        const comp = components.find((c: any) => c.id === (startCompId ?? endCompId));
-        if (comp) currentMagnitude = Math.abs(comp.current ?? 0);
+      if (startMag > 1e-12 && endMag > 1e-12) {
+        // Use average of both terminals for robustness to tiny solve noise.
+        currentMagnitude = 0.5 * (startMag + endMag);
+      } else {
+        currentMagnitude = Math.max(startMag, endMag);
       }
 
-      const eps = 1e-9;
+      const eps = InteractiveWireIntegration.CURRENT_EPS;
       if (currentMagnitude < eps) {
         wire.current = 0;
         wire.voltage = componentVoltages[startCompId ?? ""]?.[startNodeId ?? ""] ?? 0;
+        (wire as any).flowDirEndpoint = "unknown";
+        (wire as any).flowDirSign = 0;
+        (wire as any).flowConfidence = 0;
+        (wire as any).flowSource = null;
+        (wire as any).flowSink = null;
         return;
       }
 
       // Determine direction from endpoint terminal-current directions.
       // +1 = current exits terminal into wire, -1 = current enters terminal from wire.
       // Wire sign convention: +1 means start->end, -1 means end->start.
-      let sign = Math.abs(wire.current) > eps ? (wire.current >= 0 ? 1 : -1) : 1;
+      const prevSign = Math.abs(wire.current) > eps ? (wire.current >= 0 ? 1 : -1) : 0;
+      const prevFlow = (wire as any).flowDirEndpoint as EndpointFlowDirection | undefined;
+      let sign = prevSign !== 0 ? prevSign : 1;
+      let flowDir: EndpointFlowDirection = "unknown";
+      let flowConfidence = 0;
       let sourceEndpoint: any | null = null;
       let sinkEndpoint: any | null = null;
       const startDir = this.getExternalCurrentDirection(
@@ -305,37 +324,160 @@ export class InteractiveWireIntegration {
         endCompId, endNodeId, componentCurrents, componentVoltages
       );
 
+      const startV =
+        startCompId && startNodeId
+          ? componentVoltages[startCompId]?.[startNodeId]
+          : undefined;
+      const endV =
+        endCompId && endNodeId ? componentVoltages[endCompId]?.[endNodeId] : undefined;
+
+      // SPICE/MNA-style direction:
+      // use solved terminal branch-current signs as the primary source of truth.
+      // Convention in solver snapshot:
+      //   terminal current > 0 => current enters component from wire
+      // Therefore, wire start->end signed current candidates are:
+      //   -startTerminalCurrent (at start endpoint), +endTerminalCurrent (at end endpoint).
+      const signedCurrentCandidates: number[] = [];
+      const startTermCurrent =
+        startCompId && startNodeId
+          ? componentCurrents[startCompId]?.[startNodeId]
+          : undefined;
+      const endTermCurrent =
+        endCompId && endNodeId ? componentCurrents[endCompId]?.[endNodeId] : undefined;
+      if (Number.isFinite(startTermCurrent) && Math.abs(startTermCurrent as number) > eps) {
+        signedCurrentCandidates.push(-(startTermCurrent as number));
+      }
+      if (Number.isFinite(endTermCurrent) && Math.abs(endTermCurrent as number) > eps) {
+        signedCurrentCandidates.push(endTermCurrent as number);
+      }
+      if (signedCurrentCandidates.length > 0) {
+        const signedAverage =
+          signedCurrentCandidates.reduce((sum, value) => sum + value, 0) /
+          signedCurrentCandidates.length;
+        const averageMagnitude =
+          signedCurrentCandidates.reduce((sum, value) => sum + Math.abs(value), 0) /
+          signedCurrentCandidates.length;
+
+        let sign = signedAverage >= 0 ? 1 : -1;
+        const prevFlow = (wire as any).flowDirEndpoint as EndpointFlowDirection | undefined;
+        if (
+          Math.abs(signedAverage) < eps &&
+          (prevFlow === "startToEnd" || prevFlow === "endToStart")
+        ) {
+          sign = prevFlow === "startToEnd" ? 1 : -1;
+        }
+
+        const flowDir: EndpointFlowDirection = sign > 0 ? "startToEnd" : "endToStart";
+        const sourceEndpoint =
+          sign > 0
+            ? startEndpoint ?? nonComponentNode ?? null
+            : endEndpoint ?? nonComponentNode ?? null;
+        const sinkEndpoint =
+          sign > 0
+            ? endEndpoint ?? nonComponentNode ?? null
+            : startEndpoint ?? nonComponentNode ?? null;
+
+        wire.current = sign * Math.max(averageMagnitude, currentMagnitude);
+        wire.voltage =
+          componentVoltages[startCompId ?? ""]?.[startNodeId ?? ""] ?? 0;
+        (wire as any).flowDirEndpoint = flowDir;
+        (wire as any).flowDirSign = sign;
+        (wire as any).flowConfidence =
+          signedCurrentCandidates.length === 2 ? 3 : 2;
+        (wire as any).flowSource = sourceEndpoint
+          ? {
+              componentId: sourceEndpoint.componentId,
+              nodeId: sourceEndpoint.nodeId,
+              x: sourceEndpoint.x,
+              y: sourceEndpoint.y,
+            }
+          : null;
+        (wire as any).flowSink = sinkEndpoint
+          ? {
+              componentId: sinkEndpoint.componentId,
+              nodeId: sinkEndpoint.nodeId,
+              x: sinkEndpoint.x,
+              y: sinkEndpoint.y,
+            }
+          : null;
+        (wire as any).startDir = startDir;
+        (wire as any).endDir = endDir;
+        return;
+      }
+
       if (startDir !== 0 && endDir !== 0) {
         // Ideal physically consistent pair:
         // start exits (+1), end enters (-1) => start->end
         if (startDir === 1 && endDir === -1) {
           sign = 1;
+          flowDir = "startToEnd";
+          flowConfidence = 3;
           sourceEndpoint = startEndpoint;
           sinkEndpoint = endEndpoint;
-        // end exits (+1), start enters (-1) => end->start
+          // end exits (+1), start enters (-1) => end->start
         } else if (startDir === -1 && endDir === 1) {
           sign = -1;
+          flowDir = "endToStart";
+          flowConfidence = 3;
           sourceEndpoint = endEndpoint;
           sinkEndpoint = startEndpoint;
         } else {
-          // Conflicting pair (both enter or both exit): fall back to stronger endpoint current.
+          // Conflicting pair (both enter or both exit): prefer deterministic endpoint rules
+          // over tiny current-magnitude differences (common around ground nodes).
           const startI = Math.abs(
             (startCompId && startNodeId && componentCurrents[startCompId]?.[startNodeId]) ?? 0
           );
           const endI = Math.abs(
             (endCompId && endNodeId && componentCurrents[endCompId]?.[endNodeId]) ?? 0
           );
-          sign = startI >= endI ? startDir : -endDir;
-          if (sign > 0) {
-            sourceEndpoint = startEndpoint;
-            sinkEndpoint = endEndpoint;
+          const startIsGround = startNodeId === "ground";
+          const endIsGround = endNodeId === "ground";
+
+          if (startIsGround !== endIsGround) {
+            // Prefer the non-ground endpoint as direction authority.
+            sign = startIsGround ? -endDir : startDir;
+            flowDir = sign > 0 ? "startToEnd" : "endToStart";
+            flowConfidence = 2;
+            if (sign > 0) {
+              sourceEndpoint = startEndpoint;
+              sinkEndpoint = endEndpoint;
+            } else {
+              sourceEndpoint = endEndpoint;
+              sinkEndpoint = startEndpoint;
+            }
+          } else if (prevSign !== 0) {
+            // Preserve previous direction when available to avoid chatter.
+            sign = prevSign;
+            flowDir = sign > 0 ? "startToEnd" : "endToStart";
+            flowConfidence = 1;
+            if (sign > 0) {
+              sourceEndpoint = startEndpoint;
+              sinkEndpoint = endEndpoint;
+            } else {
+              sourceEndpoint = endEndpoint;
+              sinkEndpoint = startEndpoint;
+            }
           } else {
-            sourceEndpoint = endEndpoint;
-            sinkEndpoint = startEndpoint;
+            // Last resort: stronger endpoint only when meaningfully different.
+            const imbalance = Math.abs(startI - endI);
+            if (imbalance > 5 * eps) {
+              sign = startI >= endI ? startDir : -endDir;
+              flowDir = sign > 0 ? "startToEnd" : "endToStart";
+              flowConfidence = 1;
+              if (sign > 0) {
+                sourceEndpoint = startEndpoint;
+                sinkEndpoint = endEndpoint;
+              } else {
+                sourceEndpoint = endEndpoint;
+                sinkEndpoint = startEndpoint;
+              }
+            }
           }
         }
       } else if (startDir !== 0) {
         sign = startDir;
+        flowDir = startDir > 0 ? "startToEnd" : "endToStart";
+        flowConfidence = 2;
         if (startDir > 0) {
           sourceEndpoint = startEndpoint;
           sinkEndpoint = endEndpoint;
@@ -345,6 +487,8 @@ export class InteractiveWireIntegration {
         }
       } else if (endDir !== 0) {
         sign = -endDir;
+        flowDir = sign > 0 ? "startToEnd" : "endToStart";
+        flowConfidence = 2;
         if (endDir > 0) {
           sourceEndpoint = endEndpoint;
           sinkEndpoint = startEndpoint;
@@ -352,9 +496,61 @@ export class InteractiveWireIntegration {
           sourceEndpoint = startEndpoint;
           sinkEndpoint = endEndpoint;
         }
-      } else {
-        // Both ambiguous (common around ideal nodes like ground): keep previous sign.
-        sign = Math.abs(wire.current) > eps ? (wire.current >= 0 ? 1 : -1) : 1;
+      }
+
+      // Voltage-based fallback only when terminal current directions are ambiguous.
+      if (
+        flowDir === "unknown" &&
+        Number.isFinite(startV) &&
+        Number.isFinite(endV) &&
+        Math.abs((startV as number) - (endV as number)) > InteractiveWireIntegration.VOLTAGE_EPS
+      ) {
+        sign = (startV as number) >= (endV as number) ? 1 : -1;
+        flowDir = sign > 0 ? "startToEnd" : "endToStart";
+        flowConfidence = 1;
+        if (sign > 0) {
+          sourceEndpoint = startEndpoint;
+          sinkEndpoint = endEndpoint;
+        } else {
+          sourceEndpoint = endEndpoint;
+          sinkEndpoint = startEndpoint;
+        }
+      }
+
+      // Ambiguous fallback: preserve previous stable direction to avoid flicker.
+      if (flowDir === "unknown") {
+        if (prevFlow === "startToEnd" || prevFlow === "endToStart") {
+          flowDir = prevFlow;
+          sign = prevFlow === "startToEnd" ? 1 : -1;
+          flowConfidence = 0;
+        } else if (prevSign !== 0) {
+          sign = prevSign;
+          flowDir = prevSign > 0 ? "startToEnd" : "endToStart";
+          flowConfidence = 0;
+        } else {
+          sign = 1;
+          flowDir = "startToEnd";
+          flowConfidence = 0;
+        }
+        if (sign > 0) {
+          sourceEndpoint = startEndpoint;
+          sinkEndpoint = endEndpoint;
+        } else {
+          sourceEndpoint = endEndpoint;
+          sinkEndpoint = startEndpoint;
+        }
+      }
+
+      // Hysteresis: don't flip direction on weak evidence and tiny current.
+      if (
+        prevFlow &&
+        prevFlow !== "unknown" &&
+        flowDir !== prevFlow &&
+        flowConfidence <= 1 &&
+        currentMagnitude < InteractiveWireIntegration.FLIP_HOLD_CURRENT_A
+      ) {
+        flowDir = prevFlow;
+        sign = prevFlow === "startToEnd" ? 1 : -1;
         if (sign > 0) {
           sourceEndpoint = startEndpoint;
           sinkEndpoint = endEndpoint;
@@ -366,6 +562,9 @@ export class InteractiveWireIntegration {
 
       wire.current = sign * currentMagnitude;
       wire.voltage = componentVoltages[startCompId ?? ""]?.[startNodeId ?? ""] ?? 0;
+      (wire as any).flowDirEndpoint = flowDir;
+      (wire as any).flowDirSign = sign;
+      (wire as any).flowConfidence = flowConfidence;
       (wire as any).flowSource = sourceEndpoint
         ? {
             componentId: sourceEndpoint.componentId,

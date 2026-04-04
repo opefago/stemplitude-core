@@ -1,4 +1,5 @@
-import { Container, Graphics, Text } from "pixi.js";
+import { Container, Graphics, ParticleContainer, Text, Texture } from "pixi.js";
+import { Emitter } from "@spd789562/particle-emitter";
 import GameObject from "../shared/GameObject";
 import type { ComponentRuntimeState } from "./types/RuntimeState";
 import { createDefaultRuntimeState } from "./types/RuntimeState";
@@ -148,6 +149,9 @@ export abstract class CircuitComponent extends GameObject {
   protected currentFlowAnimation: number = 0;
   protected burnAnimation: number = 0;
   protected glowAnimation: number = 0;
+  protected burnSmokeContainer: ParticleContainer | null = null;
+  protected burnSmokeEmitter: Emitter | null = null;
+  protected burnSmokeTimeLeft: number = 0;
 
   // Interactive state
   protected _isSelected: boolean = false;
@@ -327,6 +331,11 @@ export abstract class CircuitComponent extends GameObject {
    */
   protected startBurnAnimation(): void {
     this.burnAnimation = 1.0;
+    this.ensureBurnSmokeEmitter();
+    if (this.burnSmokeEmitter) {
+      this.burnSmokeEmitter.emit = true;
+      this.burnSmokeTimeLeft = 3.0;
+    }
   }
 
   protected startCurrentFlowAnimation(): void {
@@ -359,6 +368,22 @@ export abstract class CircuitComponent extends GameObject {
       this.burnAnimation = Math.max(0, this.burnAnimation);
     }
 
+    if (this.burnSmokeEmitter) {
+      // `deltaTime` here is already in seconds in this simulation loop.
+      this.burnSmokeEmitter.update(Math.max(0, deltaTime));
+      if (this.circuitProps.burnt) {
+        this.burnSmokeEmitter.emit = true;
+        this.burnSmokeTimeLeft = Math.max(this.burnSmokeTimeLeft, 0.2);
+      } else if (this.burnSmokeTimeLeft > 0) {
+        this.burnSmokeTimeLeft = Math.max(0, this.burnSmokeTimeLeft - deltaTime);
+        if (this.burnSmokeTimeLeft <= 0) {
+          this.burnSmokeEmitter.emit = false;
+        }
+      } else {
+        this.burnSmokeEmitter.emit = false;
+      }
+    }
+
     if (this.glowAnimation > 0 && !this.circuitProps.glowing) {
       this.glowAnimation -= deltaTime * 3; // 0.33 second fade
       this.glowAnimation = Math.max(0, this.glowAnimation);
@@ -367,6 +392,92 @@ export abstract class CircuitComponent extends GameObject {
     // Start animations based on current state
     this.startCurrentFlowAnimation();
     this.startGlowAnimation();
+  }
+
+  private ensureBurnSmokeEmitter(): void {
+    if (this.burnSmokeEmitter || !this.displayContainer) return;
+
+    const smokeContainer = new ParticleContainer();
+    smokeContainer.eventMode = "none";
+    this.displayContainer.addChild(smokeContainer);
+    this.burnSmokeContainer = smokeContainer;
+
+    // Based on Pixi particle-emitter "cartoon smoke" behavior profile:
+    // slow upward drift, expanding puffs, fading alpha.
+    this.burnSmokeEmitter = new Emitter(smokeContainer, {
+      lifetime: { min: 0.9, max: 1.8 },
+      frequency: 0.045,
+      spawnChance: 1,
+      particlesPerWave: 2,
+      emitterLifetime: -1,
+      maxParticles: 220,
+      addAtBack: false,
+      pos: { x: 0, y: -8 },
+      behaviors: [
+        {
+          type: "alpha",
+          config: {
+            alpha: {
+              list: [
+                { value: 0.0, time: 0 },
+                { value: 0.52, time: 0.12 },
+                { value: 0.0, time: 1 },
+              ],
+            },
+          },
+        },
+        {
+          type: "scale",
+          config: {
+            scale: {
+              list: [
+                { value: 0.08, time: 0 },
+                { value: 0.9, time: 1 },
+              ],
+            },
+          },
+        },
+        {
+          type: "color",
+          config: {
+            color: {
+              list: [
+                { value: "666666", time: 0 },
+                { value: "4d4d4d", time: 0.5 },
+                { value: "2b2b2b", time: 1 },
+              ],
+            },
+          },
+        },
+        {
+          type: "moveSpeed",
+          config: {
+            speed: {
+              list: [
+                { value: 30, time: 0 },
+                { value: 10, time: 1 },
+              ],
+            },
+          },
+        },
+        {
+          type: "rotationStatic",
+          config: { min: 250, max: 290 },
+        },
+        {
+          type: "spawnShape",
+          config: {
+            type: "torus",
+            data: { x: 0, y: -10, radius: 8, innerRadius: 2, affectRotation: false },
+          },
+        },
+        {
+          type: "textureSingle",
+          config: { texture: Texture.WHITE },
+        },
+      ],
+    } as any);
+    this.burnSmokeEmitter.emit = false;
   }
 
   /**

@@ -11,6 +11,7 @@ export interface CapacitorProperties extends CircuitProperties {
   voltageRating: number; // Maximum voltage
   dielectric: string; // Dielectric material
   esr: number; // Equivalent Series Resistance (Ohms)
+  leakageResistance: number; // Equivalent parallel leakage resistance (Ohms)
   charge: number; // Current charge (Coulombs)
 }
 
@@ -37,6 +38,7 @@ export class Capacitor extends CircuitComponent {
       voltageRating,
       dielectric: "electrolytic",
       esr: 0.1, // 0.1Ω typical ESR
+      leakageResistance: 1e9, // 1GΩ default leakage path
       charge: 0,
       initialCondition: 0, // Initial voltage
     };
@@ -242,11 +244,7 @@ export class Capacitor extends CircuitComponent {
   }
 
   protected updateNodeVoltages(): void {
-    // For a capacitor, voltage across plates equals stored voltage
-    this.nodes[0].voltage = this.circuitProps.voltage;
-    this.nodes[1].voltage = 0; // Reference
-
-    // Update node currents (same for both terminals)
+    // Node voltages are solver-driven; only sync terminal currents for display.
     this.nodes[0].current = this.circuitProps.current;
     this.nodes[1].current = -this.circuitProps.current;
   }

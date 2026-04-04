@@ -179,22 +179,7 @@ export class Inductor extends CircuitComponent {
   }
 
   protected updateNodeVoltages(): void {
-    // For an inductor, voltage is L * di/dt
-    // In steady state, inductor acts as short circuit (only DC resistance)
-    const voltageDrop =
-      this.circuitProps.current * this.inductorProps.dcResistance;
-
-    if (this.circuitProps.current > 0) {
-      // Current flows from terminal1 to terminal2
-      this.nodes[0].voltage = this.circuitProps.voltage;
-      this.nodes[1].voltage = this.circuitProps.voltage - voltageDrop;
-    } else {
-      // Current flows from terminal2 to terminal1
-      this.nodes[1].voltage = this.circuitProps.voltage;
-      this.nodes[0].voltage = this.circuitProps.voltage - voltageDrop;
-    }
-
-    // Update node currents
+    // Node voltages are solver-driven; only sync terminal currents for display.
     this.nodes[0].current = this.circuitProps.current;
     this.nodes[1].current = -this.circuitProps.current;
   }

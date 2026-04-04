@@ -3,6 +3,12 @@ import { OptimizedWireRouter } from "./OptimizedWireRouter";
 import { CircuitComponent } from "./CircuitComponent";
 import { WirePath, RoutingPoint, WireSegment } from "./OptimizedWireRouter";
 
+// Keep warnings/errors, silence verbose dev logs for this module.
+const console = {
+  ...globalThis.console,
+  log: (..._args: unknown[]) => {},
+};
+
 /**
  * Hybrid wire routing system that combines multiple algorithms
  * Uses OrthogonalWireRouter for clean L/Z-shaped routing and A* for complex obstacle avoidance

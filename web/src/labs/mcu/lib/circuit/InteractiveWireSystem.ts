@@ -21,6 +21,12 @@ import {
 import { HybridWireRouter } from "./HybridWireRouter";
 import { GridCanvas } from "./GridCanvas";
 
+// Keep warnings/errors, silence verbose dev logs for this module.
+const console = {
+  ...globalThis.console,
+  log: (..._args: unknown[]) => {},
+};
+
 export interface WireNode {
   id: string;
   x: number;
@@ -1131,9 +1137,6 @@ export class InteractiveWireSystem {
     endComponent: string,
     endNode: string
   ): boolean {
-    console.log(
-      `🔗 Creating wire: ${wireId} from ${startComponent}.${startNode} to ${endComponent}.${endNode}`
-    );
     const startComp = this.components.get(startComponent);
     const endComp = this.components.get(endComponent);
 
@@ -1141,7 +1144,6 @@ export class InteractiveWireSystem {
       console.warn(
         `⚠️ Components not found: ${startComponent} or ${endComponent}`
       );
-      console.log(`Available components:`, Array.from(this.components.keys()));
       return false;
     }
 
@@ -1200,19 +1202,6 @@ export class InteractiveWireSystem {
     this.nodes.set(endWireNode.id, endWireNode);
 
     this.drawWire(wire);
-
-    // Debug wire container position
-    console.log(
-      `🔍 Wire container position: x=${this.wireContainer.x}, y=${this.wireContainer.y}`
-    );
-    console.log(
-      `🔍 Wire container scale: x=${this.wireContainer.scale.x}, y=${this.wireContainer.scale.y}`
-    );
-    console.log(`🔍 Wire graphics position: x=${graphics.x}, y=${graphics.y}`);
-    console.log(`✅ Wire ${wireId} created successfully`);
-    console.log(`🔍 Wire segments:`, wire.segments);
-    console.log(`🔍 Wire graphics visible:`, graphics.visible);
-    console.log(`🔍 Wire graphics alpha:`, graphics.alpha);
     return true;
   }
 
@@ -1268,13 +1257,6 @@ export class InteractiveWireSystem {
     nodeId: string
   ): RoutingPoint | null {
     const nodes = component.getNodes();
-    console.log(
-      `🔍 getNodePosition: component=${component.getName()}, nodeId=${nodeId}`
-    );
-    console.log(
-      `🔍 Available nodes:`,
-      nodes.map((n) => ({ id: n.id, x: n.position.x, y: n.position.y }))
-    );
 
     const node = nodes.find((n) => n.id === nodeId);
 
@@ -1289,10 +1271,6 @@ export class InteractiveWireSystem {
     const componentPos = component.getPosition();
     const worldX = componentPos.x + node.position.x;
     const worldY = componentPos.y + node.position.y;
-
-    console.log(
-      `🔍 Found node: relative=(${node.position.x}, ${node.position.y}), world=(${worldX}, ${worldY})`
-    );
     return { x: worldX, y: worldY, layer: 0 };
   }
 
@@ -1823,10 +1801,6 @@ export class InteractiveWireSystem {
     const graphics = wire.graphics;
     graphics.clear();
 
-    console.log(
-      `🎨 Drawing wire ${wire.id} with ${wire.segments.length} segments`
-    );
-
     // Set wire color based on state
     let color = this.wireColor;
     if (wire.isSelected) {
@@ -1834,8 +1808,6 @@ export class InteractiveWireSystem {
     } else if (wire.id === this.interactionState.hoveredWire) {
       color = this.hoveredWireColor;
     }
-
-    console.log(`🎨 Wire color: ${color}, thickness: ${this.wireThickness}`);
 
     // Draw each segment independently to avoid any polygon artifacts
     if (wire.segments.length > 0) {
@@ -1866,23 +1838,6 @@ export class InteractiveWireSystem {
     // Force graphics to be visible
     graphics.visible = true;
     graphics.alpha = 1.0;
-
-    // Debug wire container and graphics properties
-    console.log(
-      `🎨 Wire graphics visible: ${graphics.visible}, alpha: ${graphics.alpha}`
-    );
-    console.log(`🎨 Wire graphics position: x=${graphics.x}, y=${graphics.y}`);
-    console.log(
-      `🎨 Wire graphics scale: x=${graphics.scale.x}, y=${graphics.scale.y}`
-    );
-    console.log(
-      `🎨 Wire container children count: ${this.wireContainer.children.length}`
-    );
-    console.log(`🎨 Wire container visible: ${this.wireContainer.visible}`);
-    console.log(`🎨 Wire container alpha: ${this.wireContainer.alpha}`);
-    console.log(
-      `🎨 Wire container position: x=${this.wireContainer.x}, y=${this.wireContainer.y}`
-    );
   }
 
   /**

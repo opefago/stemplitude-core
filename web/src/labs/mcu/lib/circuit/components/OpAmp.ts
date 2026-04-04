@@ -1,4 +1,3 @@
-import { Graphics } from "pixi.js";
 import * as PIXI from "pixi.js";
 import { CircuitComponent, CircuitProperties } from "../CircuitComponent";
 
@@ -36,6 +35,8 @@ export class OpAmp extends CircuitComponent {
 
     super(name, "opamp", props, gridX, gridY);
     this.opAmpProps = props as OpAmpProperties;
+    // Ensure labels are initialized after subclass props are available.
+    this.createVisuals();
   }
 
   protected initializeNodes(): void {
@@ -46,7 +47,7 @@ export class OpAmp extends CircuitComponent {
         voltage: 0,
         current: 0,
         connections: [],
-        role: "terminal",
+        role: "control",
       },
       {
         id: "nonInverting",
@@ -54,7 +55,7 @@ export class OpAmp extends CircuitComponent {
         voltage: 0,
         current: 0,
         connections: [],
-        role: "terminal",
+        role: "control",
       },
       {
         id: "output",
@@ -70,74 +71,82 @@ export class OpAmp extends CircuitComponent {
   protected createVisuals(): void {
     this.componentGraphics.clear();
     const g = this.componentGraphics;
-    const sw = 3;
     const strokeColor = 0xffffff;
-    const fillColor = 0x222222;
+    const leadColor = 0xffffff;
+    const bodyFill = 0x202020;
+    const sw = 3;
+    const outColor = Math.abs(this.circuitProps.current) > 1e-5 ? 0x88ff88 : leadColor;
 
-    // Leads to triangle edges
+    // SVG-inspired proportions, drawn directly in local Pixi coordinates.
+    // Input leads
     g.moveTo(-30, -15);
-    g.lineTo(-20, -15);
-    g.stroke({ width: sw, color: strokeColor });
-
+    g.lineTo(-21, -15);
+    g.stroke({ width: sw, color: leadColor, cap: "round", join: "round" });
     g.moveTo(-30, 15);
-    g.lineTo(-20, 15);
-    g.stroke({ width: sw, color: strokeColor });
+    g.lineTo(-21, 15);
+    g.stroke({ width: sw, color: leadColor, cap: "round", join: "round" });
 
-    g.moveTo(25, 0);
+    // Output lead
+    g.moveTo(21, 0);
     g.lineTo(30, 0);
-    g.stroke({ width: sw, color: strokeColor });
+    g.stroke({ width: sw, color: outColor, cap: "round", join: "round" });
 
-    // Triangle body
-    g.moveTo(-20, -25);
-    g.lineTo(-20, 25);
-    g.lineTo(25, 0);
-    g.lineTo(-20, -25);
-    g.fill(fillColor);
-    g.stroke({ width: sw, color: strokeColor });
+    // Body triangle
+    g.moveTo(-21, -22);
+    g.lineTo(-21, 22);
+    g.lineTo(21, 0);
+    g.closePath();
+    g.fill({ color: bodyFill });
+    g.stroke({ width: sw, color: strokeColor, cap: "round", join: "round" });
 
-    // +/- markers near inputs
-    g.moveTo(-18, -10);
-    g.lineTo(-12, -10);
-    g.stroke({ width: 2, color: strokeColor });
+    // Inverting marker (-)
+    g.moveTo(-16, -15);
+    g.lineTo(-10, -15);
+    g.stroke({ width: 2, color: strokeColor, cap: "round", join: "round" });
 
-    g.moveTo(-15, 7);
-    g.lineTo(-15, 13);
-    g.moveTo(-18, 10);
-    g.lineTo(-12, 10);
-    g.stroke({ width: 2, color: strokeColor });
+    // Non-inverting marker (+)
+    g.moveTo(-13, 12);
+    g.lineTo(-13, 18);
+    g.stroke({ width: 2, color: strokeColor, cap: "round", join: "round" });
+    g.moveTo(-16, 15);
+    g.lineTo(-10, 15);
+    g.stroke({ width: 2, color: strokeColor, cap: "round", join: "round" });
 
-    g.hitArea = new PIXI.Polygon(-20, -25, -20, 25, 25, 0);
+    g.hitArea = new PIXI.Polygon(-21, -22, -21, 22, 21, 0);
     this.updateLabels();
   }
 
   protected getDefaultLabelPositions(): { labelY: number; valueY: number } {
-    return { labelY: -32, valueY: 28 };
+    return { labelY: -36, valueY: 34 };
   }
 
   protected updateVisuals(_deltaTime: number): void {
-    this.updateLabels();
+    this.createVisuals();
   }
 
   private updateLabels(): void {
-    if (!this.opAmpProps) return;
+    const p = this.opAmpProps ?? (this.circuitProps as unknown as OpAmpProperties);
     const { labelY, valueY } = this.getDefaultLabelPositions();
     this.labelText.text = this.name;
     this.labelText.style = {
-      fontSize: 10,
+      fontSize: 12,
       fill: 0xffffff,
       fontFamily: "Arial",
+      fontWeight: "bold",
     };
     this.labelText.anchor.set(0.5);
     this.labelText.position.set(0, labelY);
 
-    const av = this.opAmpProps.openLoopGain;
+    const av = p.openLoopGain ?? 100000;
     const avStr =
       av >= 1e6 ? `${(av / 1e6).toFixed(1)}M` : `${(av / 1e3).toFixed(0)}k`;
-    this.valueText.text = `Av=${avStr} Zin=${this.formatOhms(this.opAmpProps.inputImpedance)}`;
+    this.valueText.text = `Av=${avStr}\nZin=${this.formatOhms(p.inputImpedance ?? 1e6)}`;
     this.valueText.style = {
-      fontSize: 8,
-      fill: 0xcccccc,
+      fontSize: 10,
+      fill: 0xe0e0e0,
       fontFamily: "Arial",
+      lineHeight: 11,
+      align: "center",
     };
     this.valueText.anchor.set(0.5);
     this.valueText.position.set(0, valueY);
@@ -167,18 +176,8 @@ export class OpAmp extends CircuitComponent {
   }
 
   protected updateNodeVoltages(): void {
-    const vInv = this.nodes[0].voltage;
-    const vNi = this.nodes[1].voltage;
-    const diff = vNi - vInv;
-    let vOut = this.opAmpProps.openLoopGain * diff;
-    vOut = Math.max(
-      this.opAmpProps.vSatNegative,
-      Math.min(this.opAmpProps.vSatPositive, vOut)
-    );
-
-    this.nodes[2].voltage = vOut;
-    this.circuitProps.voltage = vOut;
-
+    // Solver owns node voltages; component only mirrors currents/voltage for UI.
+    this.circuitProps.voltage = this.nodes[2].voltage;
     this.nodes[0].current = 0;
     this.nodes[1].current = 0;
     this.nodes[2].current = this.circuitProps.current;

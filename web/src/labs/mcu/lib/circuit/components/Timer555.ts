@@ -21,6 +21,10 @@ export interface Timer555Properties extends CircuitProperties {
   frequency: number;
   dutyCycle: number;
   outputHigh: boolean;
+  /** Current operation status, mostly for UI diagnostics. */
+  status?: string;
+  /** Last discrete RC extraction reason from netlist resolver. */
+  discreteReason?: AstableDiscreteRcResult["reason"];
 }
 
 /** Body half-size — enlarged so pin spacing clears terminal discs (grid ~20px). */
@@ -35,7 +39,6 @@ export class Timer555 extends CircuitComponent {
   protected timerProps: Timer555Properties;
   private pinLabelTexts: Text[] = [];
   private centerLabel: Text | null = null;
-  private astablePhase: number = 0;
   /** Last evaluated reason when not oscillating (for status line). */
   private statusReason: string = "—";
   /** Last discrete R/C scan (same nets as solver). */
@@ -213,6 +216,10 @@ export class Timer555 extends CircuitComponent {
     }
   }
 
+  private getDiscreteReason(): AstableDiscreteRcResult["reason"] {
+    return this.lastDiscrete?.reason ?? "no_solver";
+  }
+
   private refreshOperationalStatus(): void {
     const vSupply = this.nodes[0].voltage - this.nodes[1].voltage;
     const vRst = this.nodes[7].voltage - this.nodes[1].voltage;
@@ -365,25 +372,18 @@ export class Timer555 extends CircuitComponent {
   }
 
   protected updateNodeVoltages(): void {
-    const vOut = this.timerProps.outputHigh ? 5 : 0;
-    this.nodes[2].voltage = vOut;
-    this.circuitProps.voltage = vOut;
+    // Solver owns node voltages; keep component-level voltage as OUT-to-GND.
+    this.circuitProps.voltage = this.nodes[2].voltage - this.nodes[1].voltage;
   }
 
   protected updateVisuals(deltaTime: number): void {
     this.recomputeDerivedTiming();
     this.refreshOperationalStatus();
-
-    if (this.timerProps.mode === "astable" && this.statusReason === "run") {
-      const freq = this.timerProps.frequency;
-      this.astablePhase += deltaTime * freq * Math.PI * 2;
-      const p = (this.astablePhase / (Math.PI * 2)) % 1;
-      this.timerProps.outputHigh = p < this.timerProps.dutyCycle;
-    } else {
-      this.timerProps.outputHigh = false;
-    }
-
-    this.nodes[2].voltage = this.timerProps.outputHigh ? 5 : 0;
+    const vOut = this.nodes[2].voltage - this.nodes[1].voltage;
+    const vSupply = this.nodes[0].voltage - this.nodes[1].voltage;
+    this.timerProps.outputHigh =
+      this.statusReason === "run" && vSupply > 0 ? vOut > vSupply * 0.5 : false;
+    this.circuitProps.voltage = vOut;
 
     this.updateLabels();
 
@@ -412,6 +412,8 @@ export class Timer555 extends CircuitComponent {
       frequency: this.timerProps.frequency,
       dutyCycle: this.timerProps.dutyCycle,
       outputHigh: this.timerProps.outputHigh,
+      status: this.statusReason,
+      discreteReason: this.getDiscreteReason(),
     } as Timer555Properties & CircuitProperties;
   }
 

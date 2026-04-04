@@ -12,6 +12,12 @@
 import { Graphics } from "pixi.js";
 import { CircuitComponent } from "./CircuitComponent";
 
+// Keep warnings/errors, silence verbose dev logs for this module.
+const console = {
+  ...globalThis.console,
+  log: (..._args: unknown[]) => {},
+};
+
 export interface RoutingPoint {
   x: number;
   y: number;

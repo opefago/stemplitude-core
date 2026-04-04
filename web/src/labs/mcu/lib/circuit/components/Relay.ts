@@ -134,22 +134,19 @@ export class Relay extends CircuitComponent {
   }
 
   protected updateNodeVoltages(): void {
-    const vCoil = Math.abs(this.nodes[0].voltage - this.nodes[1].voltage);
-    this.relayProps.isActivated = vCoil >= this.relayProps.activationVoltage - 1e-6;
+    const solverActivated =
+      ((this.circuitProps as Record<string, unknown>).isActivated as boolean) ?? false;
+    this.relayProps.isActivated = solverActivated;
 
     const rCoil = this.relayProps.coilResistance;
     this.circuitProps.value = rCoil;
     this.circuitProps.resistance = rCoil;
 
-    if (this.relayProps.isActivated) {
-      const v = this.nodes[2].voltage;
-      this.nodes[3].voltage = v;
-    }
-
-    this.nodes[0].current = this.circuitProps.current * 0.25;
-    this.nodes[1].current = -this.nodes[0].current;
-    this.nodes[2].current = this.relayProps.isActivated ? this.circuitProps.current : 0;
-    this.nodes[3].current = this.relayProps.isActivated ? -this.circuitProps.current : 0;
+    // `circuitProps.current` tracks coil current from solver.
+    this.nodes[0].current = this.circuitProps.current;
+    this.nodes[1].current = -this.circuitProps.current;
+    this.nodes[2].current = 0;
+    this.nodes[3].current = 0;
   }
 
   protected updateVisuals(_deltaTime: number): void {

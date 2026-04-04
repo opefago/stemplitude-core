@@ -88,7 +88,7 @@ export class NMOSTransistor extends CircuitComponent {
   protected updateNodePositions(): void {
     const cos = Math.cos((this.orientation * Math.PI) / 180);
     const sin = Math.sin((this.orientation * Math.PI) / 180);
-    const flipX = this.componentGraphics.scale.x;
+    const flipX = Math.sign(this.componentGraphics.scale.x) || 1;
 
     if (!this.baseNodePositions) {
       this.baseNodePositions = {

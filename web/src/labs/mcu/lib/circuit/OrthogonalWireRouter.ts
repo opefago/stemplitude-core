@@ -1,6 +1,12 @@
 import { CircuitComponent } from "./CircuitComponent";
 import { WirePath, RoutingPoint, WireSegment } from "./OptimizedWireRouter";
 
+// Keep warnings/errors, silence verbose dev logs for this module.
+const console = {
+  ...globalThis.console,
+  log: (..._args: unknown[]) => {},
+};
+
 /**
  * Custom Orthogonal Wire Router
  * Creates clean L-shaped and Z-shaped wires with collision detection

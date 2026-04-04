@@ -31,8 +31,8 @@ export class PushButton extends CircuitComponent {
   ) {
     const initialClosed = normallyClosed;
     const props: PushButtonProperties = {
-      value: initialClosed ? 0.001 : 1e12,
-      resistance: initialClosed ? 0.001 : 1e12,
+      value: initialClosed ? 0.001 : 1e15,
+      resistance: initialClosed ? 0.001 : 1e15,
       tolerance: 0,
       powerRating: 100,
       voltage: 0,
@@ -133,8 +133,8 @@ export class PushButton extends CircuitComponent {
     // NO button: closed while pressed; NC button: closed while released.
     const closed = normallyClosed ? !pressed : pressed;
     this.buttonProps.isClosed = closed;
-    this.buttonProps.value = closed ? 0.001 : 1e12;
-    this.buttonProps.resistance = closed ? 0.001 : 1e12;
+    this.buttonProps.value = closed ? 0.001 : 1e15;
+    this.buttonProps.resistance = closed ? 0.001 : 1e15;
     this.createVisuals();
     this.emitStateChanged(closed);
   }

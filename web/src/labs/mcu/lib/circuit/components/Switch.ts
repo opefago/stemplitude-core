@@ -25,8 +25,8 @@ export class Switch extends CircuitComponent {
     gridY: number = 0
   ) {
     const props: SwitchProperties = {
-      value: isClosed ? 0.001 : 1e12, // 1mΩ when closed, 1TΩ when open
-      resistance: isClosed ? 0.001 : 1e12,
+      value: isClosed ? 0.001 : 1e15, // 1mΩ when closed; open must track solver SPST_R_OFF
+      resistance: isClosed ? 0.001 : 1e15,
       tolerance: 0,
       powerRating: 100,
       voltage: 0,
@@ -134,8 +134,8 @@ export class Switch extends CircuitComponent {
       this.switchProps.resistance = 0.001; // 1mΩ (closed)
       this.switchProps.value = 0.001;
     } else {
-      this.switchProps.resistance = 1e12; // 1TΩ (open, effectively infinite)
-      this.switchProps.value = 1e12;
+      this.switchProps.resistance = 1e15;
+      this.switchProps.value = 1e15;
     }
 
     // Update visuals

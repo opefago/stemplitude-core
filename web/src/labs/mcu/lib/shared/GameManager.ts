@@ -1,6 +1,12 @@
 import { Application, Container } from "pixi.js";
 import { BaseScene } from "./BaseScene";
 
+// Keep warnings/errors, silence verbose dev logs for this module.
+const console = {
+  ...globalThis.console,
+  log: (..._args: unknown[]) => {},
+};
+
 /**
  * Shared game manager for both mechanical and circuit simulations
  */

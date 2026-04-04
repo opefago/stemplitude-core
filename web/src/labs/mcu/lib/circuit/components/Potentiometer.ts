@@ -4,10 +4,6 @@ import {
   CircuitProperties,
 } from "../CircuitComponent";
 import { applyIECSchematicTransform } from "../rendering/iecSchematicDraw";
-import { loadSchematicSvgTextureForCanvas } from "../rendering/loadSchematicSvgTexture";
-
-/** Vendored from chris-pikul/electronic-symbols (MIT): SVG/Resistor-IEC-Potentiometer.svg */
-const POTENTIOMETER_SVG_URL = "/assets/circuit-symbols/potentiometer-iec.svg";
 
 export interface PotentiometerProperties extends CircuitProperties {
   totalResistance: number;
@@ -20,8 +16,6 @@ export class Potentiometer extends CircuitComponent {
   protected get potProps(): PotentiometerProperties {
     return this.circuitProps as PotentiometerProperties;
   }
-
-  private potVisualGeneration = 0;
 
   constructor(
     name: string,
@@ -82,41 +76,73 @@ export class Potentiometer extends CircuitComponent {
   protected updateNodePositions(): void {
     const cos = Math.cos((this.orientation * Math.PI) / 180);
     const sin = Math.sin((this.orientation * Math.PI) / 180);
+    const flipX = Math.sign(this.componentGraphics.scale.x) || 1;
     const bases = [
       { x: -30, y: 0 },
       { x: 30, y: 0 },
       { x: 0, y: 30 },
     ];
     bases.forEach((b, i) => {
-      this.nodes[i].position.x = b.x * cos - b.y * sin;
-      this.nodes[i].position.y = b.x * sin + b.y * cos;
+      const bx = b.x * flipX;
+      this.nodes[i].position.x = bx * cos - b.y * sin;
+      this.nodes[i].position.y = bx * sin + b.y * cos;
     });
   }
 
   protected createVisuals(): void {
     const g = this.componentGraphics;
-    const gen = ++this.potVisualGeneration;
-    const flipSign = Math.sign(g.scale.x) || 1;
     g.clear();
     g.removeChildren();
+    const flipSign = Math.sign(g.scale.x) || 1;
 
+    // SVG-inspired IEC potentiometer, drawn directly via Pixi primitives.
+    const line = { width: 10, color: 0xffffff, cap: "round" as const, join: "round" as const };
+
+    // End leads
+    g.moveTo(0, 75);
+    g.lineTo(22, 75);
+    g.stroke(line);
+    g.moveTo(128, 75);
+    g.lineTo(150, 75);
+    g.stroke(line);
+
+    // Resistor body (zig-zag style similar to IEC asset)
+    const zig = [
+      [22, 75],
+      [32, 65],
+      [42, 85],
+      [52, 65],
+      [62, 85],
+      [72, 65],
+      [82, 85],
+      [92, 65],
+      [102, 85],
+      [112, 65],
+      [122, 75],
+    ];
+    g.moveTo(zig[0][0], zig[0][1]);
+    for (let i = 1; i < zig.length; i++) g.lineTo(zig[i][0], zig[i][1]);
+    g.stroke(line);
+
+    // Wiper lead (terminal at bottom center to resistor body)
+    g.moveTo(75, 150);
+    g.lineTo(75, 112);
+    g.stroke(line);
+
+    // Wiper arrow pointing to resistor track
+    g.moveTo(75, 112);
+    g.lineTo(91, 94);
+    g.stroke(line);
+    g.moveTo(91, 94);
+    g.lineTo(82, 94);
+    g.lineTo(91, 85);
+    g.closePath();
+    g.fill({ color: 0xffffff });
+
+    applyIECSchematicTransform(g, flipSign);
     g.hitArea = new PIXI.Rectangle(0, 0, 150, 150);
     g.tint = 0xccaa88;
     this.updateLabels();
-
-    void loadSchematicSvgTextureForCanvas(POTENTIOMETER_SVG_URL).then((tex) => {
-      if (gen !== this.potVisualGeneration || g.destroyed) return;
-      g.clear();
-      g.removeChildren();
-      const sp = new PIXI.Sprite(tex);
-      sp.anchor.set(0.5);
-      sp.position.set(75, 75);
-      g.addChild(sp);
-      applyIECSchematicTransform(g, flipSign);
-      g.hitArea = new PIXI.Rectangle(0, 0, 150, 150);
-      g.tint = 0xccaa88;
-      this.updateLabels();
-    });
   }
 
   private updateLabels(): void {

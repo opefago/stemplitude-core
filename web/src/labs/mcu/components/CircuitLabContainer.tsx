@@ -13,7 +13,10 @@ import "tippy.js/dist/tippy.css";
 import "tippy.js/animations/shift-away.css";
 import { Application } from "pixi.js";
 import { GameManager } from "../lib/shared/GameManager";
-import { CircuitScene } from "../lib/circuit/CircuitScene";
+import {
+  CircuitScene,
+  type CircuitSceneSnapshot,
+} from "../lib/circuit/CircuitScene";
 import { emitLabEvent, emitLabEventThrottled } from "../../../lib/api/gamification";
 import {
   Zap,
@@ -141,6 +144,8 @@ export const CircuitLabContainer: React.FC<Props> = ({
       name: projectName,
       updatedAt: now,
       createdAt: idx >= 0 ? projects[idx].createdAt : now,
+      snapshot:
+        (sceneRef.current as CircuitScene | null)?.exportSnapshot?.() ?? null,
     };
     if (idx >= 0) projects[idx] = project;
     else projects.unshift(project);
@@ -153,6 +158,15 @@ export const CircuitLabContainer: React.FC<Props> = ({
   const handleLoadProject = (p: any) => {
     setProjectId(p.id);
     setProjectName(p.name);
+    if (sceneRef.current) {
+      const snapshot = p.snapshot as CircuitSceneSnapshot | null | undefined;
+      if (snapshot) {
+        sceneRef.current.importSnapshot(snapshot);
+      } else {
+        sceneRef.current.clearScene();
+      }
+      setIsSimulationRunning(false);
+    }
     setShowProjects(false);
   };
 

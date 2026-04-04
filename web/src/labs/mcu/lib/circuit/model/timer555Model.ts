@@ -9,8 +9,8 @@
  *
  * **Classic astable (datasheet Fig. 9 style):** R1 from Vcc to pin 7, R2 from pin 7
  * to the common node of pins 2 (TRIG) and 6 (THR), capacitor from that node to GND.
- * Pin 7 (DISCH) is the same timing node as pins 2 and 6 in that topology — all three
- * must be **electrically common** for that wiring.
+ * Pins 2 and 6 must be electrically common; pin 7 is connected to that node through R2
+ * (it must not be directly shorted to 2/6 in a standard astable).
  *
  * **Equations (NE555 datasheet):**
  *   t_HIGH ≈ 0.693 × (R1 + R2) × C

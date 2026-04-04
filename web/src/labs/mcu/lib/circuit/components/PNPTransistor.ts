@@ -101,7 +101,7 @@ export class PNPTransistor extends CircuitComponent {
     // Update node positions based on orientation and flip
     const cos = Math.cos((this.orientation * Math.PI) / 180);
     const sin = Math.sin((this.orientation * Math.PI) / 180);
-    const flipX = this.componentGraphics.scale.x; // Will be -1 if flipped
+    const flipX = Math.sign(this.componentGraphics.scale.x) || 1; // only ±1
 
     // If baseNodePositions isn't set yet, initialize it now
     if (!this.baseNodePositions) {

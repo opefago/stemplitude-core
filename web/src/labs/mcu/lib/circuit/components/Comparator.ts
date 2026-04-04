@@ -36,6 +36,8 @@ export class Comparator extends CircuitComponent {
 
     super(name, "comparator", props, gridX, gridY);
     this.compProps = props as ComparatorProperties;
+    // Ensure labels are initialized after subclass props are available.
+    this.createVisuals();
   }
 
   protected initializeNodes(): void {
@@ -46,7 +48,7 @@ export class Comparator extends CircuitComponent {
         voltage: 0,
         current: 0,
         connections: [],
-        role: "terminal",
+        role: "control",
       },
       {
         id: "nonInverting",
@@ -54,7 +56,7 @@ export class Comparator extends CircuitComponent {
         voltage: 0,
         current: 0,
         connections: [],
-        role: "terminal",
+        role: "control",
       },
       {
         id: "output",
@@ -67,27 +69,10 @@ export class Comparator extends CircuitComponent {
     ];
   }
 
-  /** Differential input (V+ − V−) vs threshold with hysteresis; sets output node and flags. */
-  private applyComparatorLogic(): void {
-    const vInv = this.nodes[0].voltage;
-    const vNi = this.nodes[1].voltage;
-    const diff = vNi - vInv;
-    const { threshold, hysteresis } = this.compProps;
-
-    if (this.compProps.isOutputHigh) {
-      if (diff < threshold - hysteresis) {
-        this.compProps.isOutputHigh = false;
-      }
-    } else {
-      if (diff > threshold + hysteresis) {
-        this.compProps.isOutputHigh = true;
-      }
-    }
-
-    const vOut = this.compProps.isOutputHigh
-      ? this.compProps.outputHigh
-      : this.compProps.outputLow;
-    this.nodes[2].voltage = vOut;
+  private refreshOutputStateFromNode(): void {
+    const vOut = this.nodes[2].voltage;
+    const midpoint = (this.compProps.outputHigh + this.compProps.outputLow) * 0.5;
+    this.compProps.isOutputHigh = vOut >= midpoint;
     this.circuitProps.voltage = vOut;
   }
 
@@ -96,82 +81,89 @@ export class Comparator extends CircuitComponent {
     const g = this.componentGraphics;
     const sw = 3;
     const strokeColor = 0xffffff;
-    const fillColor = 0x222222;
+    const bodyFill = 0x202020;
     const high = this.compProps?.isOutputHigh ?? false;
 
-    // Leads
+    // SVG-inspired op-amp/comparator proportions in local Pixi coordinates.
+    // Input leads
     g.moveTo(-30, -15);
-    g.lineTo(-20, -15);
-    g.stroke({ width: sw, color: strokeColor });
-
+    g.lineTo(-21, -15);
+    g.stroke({ width: sw, color: strokeColor, cap: "round", join: "round" });
     g.moveTo(-30, 15);
-    g.lineTo(-20, 15);
-    g.stroke({ width: sw, color: strokeColor });
+    g.lineTo(-21, 15);
+    g.stroke({ width: sw, color: strokeColor, cap: "round", join: "round" });
 
+    // Output lead
     const outColor = high ? 0x44ff88 : strokeColor;
-    g.moveTo(25, 0);
+    g.moveTo(21, 0);
     g.lineTo(30, 0);
-    g.stroke({ width: sw, color: outColor });
+    g.stroke({ width: sw, color: outColor, cap: "round", join: "round" });
 
-    // Triangle
-    g.moveTo(-20, -25);
-    g.lineTo(-20, 25);
-    g.lineTo(25, 0);
-    g.lineTo(-20, -25);
-    g.fill(fillColor);
-    g.stroke({ width: sw, color: strokeColor });
+    // Body triangle
+    g.moveTo(-21, -22);
+    g.lineTo(-21, 22);
+    g.lineTo(21, 0);
+    g.closePath();
+    g.fill({ color: bodyFill });
+    g.stroke({ width: sw, color: strokeColor, cap: "round", join: "round" });
 
-    // Output-side notch (distinctive tab)
-    g.moveTo(25, -6);
-    g.lineTo(32, -6);
-    g.lineTo(32, 6);
-    g.lineTo(25, 6);
-    g.stroke({ width: 2, color: strokeColor });
+    // Output-side tab (comparator identifier)
+    g.moveTo(21, -6);
+    g.lineTo(27, -6);
+    g.lineTo(27, 6);
+    g.lineTo(21, 6);
+    g.stroke({ width: 2, color: strokeColor, cap: "round", join: "round" });
 
-    // +/- markers
-    g.moveTo(-18, -10);
-    g.lineTo(-12, -10);
-    g.stroke({ width: 2, color: strokeColor });
+    // Inverting marker (-)
+    g.moveTo(-16, -15);
+    g.lineTo(-10, -15);
+    g.stroke({ width: 2, color: strokeColor, cap: "round", join: "round" });
 
-    g.moveTo(-15, 7);
-    g.lineTo(-15, 13);
-    g.moveTo(-18, 10);
-    g.lineTo(-12, 10);
-    g.stroke({ width: 2, color: strokeColor });
+    // Non-inverting marker (+)
+    g.moveTo(-13, 12);
+    g.lineTo(-13, 18);
+    g.stroke({ width: 2, color: strokeColor, cap: "round", join: "round" });
+    g.moveTo(-16, 15);
+    g.lineTo(-10, 15);
+    g.stroke({ width: 2, color: strokeColor, cap: "round", join: "round" });
 
-    g.hitArea = new PIXI.Polygon(-20, -25, -20, 25, 25, 0);
+    g.hitArea = new PIXI.Polygon(-21, -22, -21, 22, 21, 0);
     this.updateLabels();
   }
 
   protected getDefaultLabelPositions(): { labelY: number; valueY: number } {
-    return { labelY: -32, valueY: 28 };
+    return { labelY: -36, valueY: 34 };
   }
 
   protected updateVisuals(_deltaTime: number): void {
-    this.applyComparatorLogic();
+    this.refreshOutputStateFromNode();
     this.createVisuals();
   }
 
   private updateLabels(): void {
-    if (!this.compProps) return;
+    const p = this.compProps ?? (this.circuitProps as unknown as ComparatorProperties);
     const { labelY, valueY } = this.getDefaultLabelPositions();
     this.labelText.text = this.name;
     this.labelText.style = {
-      fontSize: 10,
+      fontSize: 12,
       fill: 0xffffff,
       fontFamily: "Arial",
+      fontWeight: "bold",
     };
     this.labelText.anchor.set(0.5);
     this.labelText.position.set(0, labelY);
 
-    const th = this.compProps.threshold;
-    const state = this.compProps.isOutputHigh ? "HI" : "LO";
-    const stateColor = this.compProps.isOutputHigh ? 0x44ff88 : 0x888888;
-    this.valueText.text = `Vth=${th.toFixed(2)}V ${state} (${this.compProps.outputLow}–${this.compProps.outputHigh}V)`;
+    const th = p.threshold ?? 0;
+    const isHigh = p.isOutputHigh ?? false;
+    const state = isHigh ? "HI" : "LO";
+    const stateColor = isHigh ? 0x44ff88 : 0x888888;
+    this.valueText.text = `Vth=${th.toFixed(2)}V  ${state}\nOut=${p.outputLow ?? 0}..${p.outputHigh ?? 5}V`;
     this.valueText.style = {
-      fontSize: 8,
+      fontSize: 10,
       fill: stateColor,
       fontFamily: "Arial",
+      lineHeight: 11,
+      align: "center",
     };
     this.valueText.anchor.set(0.5);
     this.valueText.position.set(0, valueY);
@@ -195,8 +187,7 @@ export class Comparator extends CircuitComponent {
   }
 
   protected updateNodeVoltages(): void {
-    this.applyComparatorLogic();
-
+    this.refreshOutputStateFromNode();
     this.nodes[0].current = 0;
     this.nodes[1].current = 0;
     this.nodes[2].current = this.circuitProps.current;

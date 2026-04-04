@@ -1,6 +1,12 @@
 import { Graphics, Text } from "pixi.js";
 import { CircuitComponent, CircuitProperties } from "../CircuitComponent";
 
+// Keep warnings/errors, silence verbose dev logs for this module.
+const console = {
+  ...globalThis.console,
+  log: (..._args: unknown[]) => {},
+};
+
 export interface BatteryProperties extends CircuitProperties {
   voltage: number; // Terminal voltage (V)
   capacity: number; // Capacity in Ah

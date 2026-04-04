@@ -2,6 +2,12 @@ import { Application, Container } from "pixi.js";
 import GameObject from "./GameObject";
 import { GameManager } from "./GameManager";
 
+// Keep warnings/errors, silence verbose dev logs for this module.
+const console = {
+  ...globalThis.console,
+  log: (..._args: unknown[]) => {},
+};
+
 /**
  * Base class for all simulation scenes (mechanical, circuit, etc.)
  */

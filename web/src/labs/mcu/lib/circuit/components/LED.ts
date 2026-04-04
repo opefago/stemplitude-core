@@ -21,8 +21,14 @@ export interface LEDSpec {
   wavelength: number; // Light wavelength (nm)
 }
 
+type LEDGlowLayerMode = "behindSymbol" | "overSymbol";
+
 export class LED extends CircuitComponent {
   protected ledProps: LEDProperties;
+  private overstressSamples: number = 0;
+  private glowBackLayer: PIXI.Graphics | null = null;
+  private glowFrontLayer: PIXI.Graphics | null = null;
+  private glowLayerMode: LEDGlowLayerMode = "overSymbol";
 
   // Standard LED specifications
   private static readonly LED_SPECS: { [key: string]: LEDSpec } = {
@@ -149,6 +155,10 @@ export class LED extends CircuitComponent {
   protected createVisuals(): void {
     const g = this.componentGraphics;
     g.clear();
+    const glowBack = this.ensureGlowLayer("back");
+    const glowFront = this.ensureGlowLayer("front");
+    glowBack.clear();
+    glowFront.clear();
 
     const isBurnt = this.circuitProps?.burnt ?? false;
     const isOn = this.ledProps?.isOn ?? false;
@@ -172,18 +182,30 @@ export class LED extends CircuitComponent {
       });
     }
 
-    if (isOn && !isBurnt) {
-      this.drawLightRays();
-    }
-
     if (isOn && !isBurnt && brightness > 0.01) {
-      this.drawGlowEffect();
+      if (this.glowLayerMode === "behindSymbol") {
+        this.drawGlowEffect(glowBack);
+        this.drawLightRays(glowFront);
+      } else {
+        this.drawGlowEffect(glowFront);
+        this.drawLightRays(glowFront);
+      }
     }
 
     g.pivot.set(BJT_SVG_PIVOT, BJT_SVG_PIVOT);
     const flipSign = Math.sign(g.scale.x) || 1;
     g.scale.set(flipSign * BJT_SVG_SCALE, BJT_SVG_SCALE);
     g.hitArea = new PIXI.Rectangle(0, 0, 150, 150);
+
+    // Keep glow layers perfectly aligned when LED rotates/flips/scales.
+    glowBack.pivot.copyFrom(g.pivot);
+    glowBack.position.copyFrom(g.position);
+    glowBack.rotation = g.rotation;
+    glowBack.scale.copyFrom(g.scale);
+    glowFront.pivot.copyFrom(g.pivot);
+    glowFront.position.copyFrom(g.position);
+    glowFront.rotation = g.rotation;
+    glowFront.scale.copyFrom(g.scale);
 
     this.updateLabels();
   }
@@ -204,7 +226,7 @@ export class LED extends CircuitComponent {
   }
 
   /** Rays in IEC SVG space (0–150), emission toward upper-right like Diode-COM-LED.svg */
-  private drawLightRays(): void {
+  private drawLightRays(target: PIXI.Graphics): void {
     const rayColor = this.getLEDColor();
     const alpha = this.ledProps?.brightness ?? 0;
     const startX = 118;
@@ -216,81 +238,114 @@ export class LED extends CircuitComponent {
       const endX = startX + len * Math.cos(angle);
       const endY = startY + len * Math.sin(angle);
 
-      this.componentGraphics.moveTo(startX, startY);
-      this.componentGraphics.lineTo(endX, endY);
-      this.componentGraphics.stroke({
+      target.moveTo(startX, startY);
+      target.lineTo(endX, endY);
+      target.stroke({
         width: 3,
         color: rayColor,
-        alpha: alpha,
+        alpha: 0.35 + 0.55 * alpha,
       });
 
       const arrowSize = 4;
       const arrowAngle = Math.atan2(endY - startY, endX - startX);
 
-      this.componentGraphics.moveTo(endX, endY);
-      this.componentGraphics.lineTo(
+      target.moveTo(endX, endY);
+      target.lineTo(
         endX - arrowSize * Math.cos(arrowAngle - 0.5),
         endY - arrowSize * Math.sin(arrowAngle - 0.5)
       );
-      this.componentGraphics.moveTo(endX, endY);
-      this.componentGraphics.lineTo(
+      target.moveTo(endX, endY);
+      target.lineTo(
         endX - arrowSize * Math.cos(arrowAngle + 0.5),
         endY - arrowSize * Math.sin(arrowAngle + 0.5)
       );
-      this.componentGraphics.stroke({
+      target.stroke({
         width: 2,
         color: rayColor,
-        alpha: alpha,
+        alpha: 0.45 + 0.5 * alpha,
       });
     }
   }
 
-  /** Glow in IEC SVG space, centered near photon arrows */
-  private drawGlowEffect(): void {
+  /** EveryCircuit-style circular bloom + pulse around the LED body. */
+  private drawGlowEffect(target: PIXI.Graphics): void {
     const glowColor = this.getLEDColor();
     const brightness = this.ledProps?.brightness ?? 0;
+    const t = Date.now() * 0.004;
+    const pulse = 0.88 + 0.12 * Math.sin(t);
+    const cx = 75;
+    const cy = 75;
+
     const auraLayers = [
-      { radius: 28, alpha: 0.1 },
-      { radius: 22, alpha: 0.16 },
-      { radius: 16, alpha: 0.25 },
-      { radius: 11, alpha: 0.34 },
-      { radius: 7, alpha: 0.52 },
+      { radius: 108, alpha: 0.05 },
+      { radius: 88, alpha: 0.07 },
+      { radius: 70, alpha: 0.1 },
+      { radius: 54, alpha: 0.14 },
+      { radius: 40, alpha: 0.2 },
+      { radius: 28, alpha: 0.28 },
+      { radius: 18, alpha: 0.36 },
     ];
 
-    const cx = 118;
-    const cy = 58;
-
     for (const layer of auraLayers) {
-      this.componentGraphics.circle(
-        cx,
-        cy,
-        layer.radius * (0.75 + 0.5 * brightness)
-      );
-      this.componentGraphics.fill({
+      target.circle(cx, cy, layer.radius * pulse);
+      target.fill({
         color: glowColor,
         alpha: layer.alpha * brightness,
       });
     }
 
-    const beamLength = 30 + brightness * 16;
-    const beamHalfHeight = 7 + brightness * 3;
-    this.componentGraphics.roundRect(
-      cx,
-      cy - beamHalfHeight,
-      beamLength,
-      beamHalfHeight * 2,
-      beamHalfHeight
-    );
-    this.componentGraphics.fill({
+    // Big circular color pool centered on LED body.
+    target.circle(cx, cy, 42 + 10 * brightness * pulse);
+    target.fill({
       color: glowColor,
-      alpha: 0.12 * brightness,
+      alpha: 0.2 + 0.32 * brightness,
     });
 
-    this.componentGraphics.circle(cx + 2, cy, 3 + brightness * 3);
-    this.componentGraphics.fill({
-      color: 0xffffff,
-      alpha: 0.18 + 0.35 * brightness,
+    // Hot core to simulate sensor/camera bloom.
+    target.circle(cx, cy, 14 + 9 * brightness * pulse);
+    target.fill({
+      color: glowColor,
+      alpha: 0.55 * brightness,
     });
+    target.circle(cx, cy, 5 + 4 * brightness);
+    target.fill({
+      color: 0xffffff,
+      alpha: 0.25 + 0.45 * brightness,
+    });
+
+    // Surface halo ring around the circular glow.
+    target.circle(cx, cy, 34 + 6 * brightness * pulse);
+    target.stroke({
+      width: 3.5,
+      color: glowColor,
+      alpha: 0.45 + 0.45 * brightness,
+    });
+  }
+
+  private ensureGlowLayer(position: "back" | "front"): PIXI.Graphics {
+    const existing = position === "back" ? this.glowBackLayer : this.glowFrontLayer;
+    if (existing) return existing;
+
+    const layer = new PIXI.Graphics();
+    layer.eventMode = "none";
+    layer.blendMode = "add" as any;
+    const componentIndex = this.displayContainer.getChildIndex(this.componentGraphics);
+    if (position === "back") {
+      this.displayContainer.addChildAt(layer, Math.max(0, componentIndex));
+      this.glowBackLayer = layer;
+    } else {
+      this.displayContainer.addChildAt(
+        layer,
+        Math.min(componentIndex + 1, this.displayContainer.children.length)
+      );
+      this.glowFrontLayer = layer;
+    }
+    return layer;
+  }
+
+  public setGlowLayerMode(mode: LEDGlowLayerMode): void {
+    this.glowLayerMode = mode;
+    this.updateVisuals(0);
   }
 
   protected updateVisuals(_deltaTime: number): void {
@@ -304,11 +359,32 @@ export class LED extends CircuitComponent {
 
     // Check for overcurrent (LED burning out) using absolute current
     const absCurrent = Math.abs(this.circuitProps.current);
-    if (!this.circuitProps.burnt && absCurrent > this.ledProps.maxCurrent * 2) {
+    const voltageDrop = this.nodes[0].voltage - this.nodes[1].voltage;
+    const forwardBiased = voltageDrop > 0;
+    const reverseVoltage = Math.max(0, -voltageDrop);
+    const junctionPower = Math.abs(voltageDrop) * absCurrent;
+    const overstressed =
+      (forwardBiased &&
+        absCurrent > this.ledProps.maxCurrent * 2.5 &&
+        junctionPower >
+          this.ledProps.forwardVoltage * this.ledProps.maxCurrent * 2.2) ||
+      (!forwardBiased &&
+        reverseVoltage > 5.5 &&
+        absCurrent > this.ledProps.maxCurrent * 0.75);
+    this.overstressSamples = overstressed ? this.overstressSamples + 1 : 0;
+    if (!this.circuitProps.burnt && this.overstressSamples >= 20) {
       this.circuitProps.burnt = true;
       console.log(
-        `⚠️ LED ${this.name} BURNT! Current: ${absCurrent.toFixed(4)}A exceeded ${(this.ledProps.maxCurrent * 2).toFixed(4)}A`
+        `⚠️ LED ${this.name} BURNT! Sustained overstress detected. I=${absCurrent.toFixed(4)}A`
       );
+    }
+    // Auto-clear stale false-burn state if present conditions are clearly safe.
+    if (
+      this.circuitProps.burnt &&
+      absCurrent <= this.ledProps.maxCurrent * 1.2 &&
+      Math.abs(voltageDrop) <= this.ledProps.forwardVoltage + 1.5
+    ) {
+      this.circuitProps.burnt = false;
     }
 
     // A burnt LED is an open circuit — no conduction regardless of bias
@@ -319,8 +395,6 @@ export class LED extends CircuitComponent {
       (this.circuitProps as Record<string, unknown>).isForwardBiased = false;
       (this.circuitProps as Record<string, unknown>).isConducting = false;
     } else {
-      const forwardBiased = this.nodes[0].voltage > this.nodes[1].voltage;
-      const voltageDrop = this.nodes[0].voltage - this.nodes[1].voltage;
       const shouldTurnOn =
         forwardBiased &&
         voltageDrop >= this.ledProps.forwardVoltage &&
@@ -411,12 +485,12 @@ export class LED extends CircuitComponent {
   }
 
   protected updateNodeVoltages(): void {
-    // Node voltages are set by the circuit solver
-    // MNA voltage source convention: j_vs > 0 means current enters nodes[0] from source.
-    // Node current convention: positive = enters terminal from wire, negative = exits.
-    // For voltage-source-modeled components, negate so convention matches Battery.
-    this.nodes[0].current = -this.circuitProps.current;
-    this.nodes[1].current = this.circuitProps.current;
+    // Node voltages are set by the circuit solver.
+    // Convention used across passive devices:
+    // positive terminal current = enters component from wire.
+    // For forward LED current (anode -> cathode), anode enters (+), cathode exits (-).
+    this.nodes[0].current = this.circuitProps.current;
+    this.nodes[1].current = -this.circuitProps.current;
   }
 
   public getImpedance(_frequency: number = 0): number {

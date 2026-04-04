@@ -104,11 +104,7 @@ export class NorGate extends CircuitComponent {
 
   protected updateVisuals(_deltaTime: number): void {
     if (!this.gateProps) return;
-
-    this.gateProps.outputState = !(
-      this.gateProps.inputStates[0] || this.gateProps.inputStates[1]
-    );
-    this.circuitProps.voltage = this.gateProps.outputState ? 5 : 0;
+    this.circuitProps.voltage = this.nodes[2].voltage;
 
     this.componentGraphics.tint = this.gateProps.outputState ? 0xaaffaa : 0xffffff;
     this.updateLabels();
@@ -133,10 +129,7 @@ export class NorGate extends CircuitComponent {
       this.nodes[0].voltage > 2.5,
       this.nodes[1].voltage > 2.5,
     ];
-    this.gateProps.outputState = !(
-      this.gateProps.inputStates[0] || this.gateProps.inputStates[1]
-    );
-    this.nodes[2].voltage = this.gateProps.outputState ? 5 : 0;
+    this.gateProps.outputState = this.nodes[2].voltage > 2.5;
 
     this.nodes[0].current = 0.0001;
     this.nodes[1].current = 0.0001;
