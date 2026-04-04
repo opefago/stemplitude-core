@@ -53,6 +53,11 @@ export const DesignTokens = {
     currentThreshold: 0.001, // A — below this, no particles
     speedScale: 45, // multiplier for log(1 + |I|)
     poolSize: 500,
+    /** Scales arrow model units to screen px */
+    directionArrowScale: 0.33,
+    directionArrowFill: 0xf5d547,
+    directionArrowStroke: 0xcc6a16,
+    directionArrowStrokeWidth: 1.25,
   },
 
   // Voltage visualization

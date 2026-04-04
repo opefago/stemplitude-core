@@ -1,6 +1,20 @@
-import { Container, Graphics, Text } from "pixi.js";
+import { Container, Graphics, GraphicsPath, Text, parseSVGPath } from "pixi.js";
 import type { WireVisualState, WireParticle, WirePathCache } from "../types/WireTypes";
 import { DesignTokens } from "./DesignTokens";
+
+/** viewBox 0 0 15 15 — arrow points +X; center at (7.5, 7.5) for pivot. */
+const CURRENT_FLOW_ARROW_VIEWBOX = 15;
+const CURRENT_FLOW_ARROW_VIEWBOX_CX = CURRENT_FLOW_ARROW_VIEWBOX / 2;
+
+/** Phosphor-style “arrow” icon path (filled), from user SVG. */
+const CURRENT_FLOW_ARROW_PATH_D =
+  "M8.29289 2.29289C8.68342 1.90237 9.31658 1.90237 9.70711 2.29289L14.2071 6.79289C14.5976 7.18342 14.5976 7.81658 14.2071 8.20711L9.70711 12.7071C9.31658 13.0976 8.68342 13.0976 8.29289 12.7071C7.90237 12.3166 7.90237 11.6834 8.29289 11.2929L11 8.5H1.5C0.947715 8.5 0.5 8.05228 0.5 7.5C0.5 6.94772 0.947715 6.5 1.5 6.5H11L8.29289 3.70711C7.90237 3.31658 7.90237 2.68342 8.29289 2.29289Z";
+
+const CURRENT_FLOW_ARROW_GP: GraphicsPath = (() => {
+  const gp = new GraphicsPath();
+  parseSVGPath(CURRENT_FLOW_ARROW_PATH_D, gp);
+  return gp;
+})();
 
 type Point = { x: number; y: number };
 
@@ -230,6 +244,7 @@ export class WireParticleSystem {
     let arrow = this.arrowGraphics.get(wireId);
     if (!arrow) {
       arrow = new Graphics();
+      arrow.pivot.set(CURRENT_FLOW_ARROW_VIEWBOX_CX, CURRENT_FLOW_ARROW_VIEWBOX_CX);
       this.particleLayer.addChild(arrow);
       this.arrowGraphics.set(wireId, arrow);
     }
@@ -239,25 +254,30 @@ export class WireParticleSystem {
       arrow.visible = false;
       return;
     }
-    arrow.visible = true;
 
     const dir = direction === 0 ? 1 : direction;
     const midProgress = fract01(0.5 + (phaseShift ?? 0) * dir);
     const midPos = this.getPositionAlongPath(pathCache, midProgress);
     const aheadPos = this.getPositionAlongPath(
       pathCache,
-      fract01(midProgress + 0.02)
+      fract01(midProgress + 0.02),
     );
     const behindPos = this.getPositionAlongPath(
       pathCache,
-      fract01(midProgress - 0.02)
+      fract01(midProgress - 0.02),
     );
-    if (!midPos || !aheadPos || !behindPos) return;
+    if (!midPos || !aheadPos || !behindPos) {
+      arrow.visible = false;
+      return;
+    }
 
     let dx = aheadPos.x - behindPos.x;
     let dy = aheadPos.y - behindPos.y;
     const len = Math.sqrt(dx * dx + dy * dy);
-    if (len < 0.01) return;
+    if (len < 0.01) {
+      arrow.visible = false;
+      return;
+    }
     dx /= len;
     dy /= len;
 
@@ -266,21 +286,27 @@ export class WireParticleSystem {
       dy = -dy;
     }
 
-    const size = 10;
-    const tipX = midPos.x + dx * size;
-    const tipY = midPos.y + dy * size;
-    const perpX = -dy;
-    const perpY = dx;
-    const baseX = midPos.x - dx * size * 0.5;
-    const baseY = midPos.y - dy * size * 0.5;
+    const angle = Math.atan2(dy, dx);
+    /** ~same on-screen size as prior 48-unit hand-drawn arrow when using same token. */
+    const k =
+      DesignTokens.particle.directionArrowScale * (48 / CURRENT_FLOW_ARROW_VIEWBOX);
+    const fill = DesignTokens.particle.directionArrowFill;
+    const stroke = DesignTokens.particle.directionArrowStroke;
 
-    arrow.moveTo(tipX, tipY);
-    arrow.lineTo(baseX + perpX * size * 0.6, baseY + perpY * size * 0.6);
-    arrow.lineTo(baseX - perpX * size * 0.6, baseY - perpY * size * 0.6);
-    arrow.closePath();
+    arrow.position.set(midPos.x, midPos.y);
+    arrow.rotation = angle;
+    arrow.scale.set(k);
+
     const a = Math.min(1, Math.max(0, fadeMul));
-    arrow.fill({ color: 0xffff00, alpha: 0.9 * a });
-    arrow.stroke({ width: 1.5, color: 0xff8800, alpha: a });
+    arrow.path(CURRENT_FLOW_ARROW_GP);
+    arrow.fill({ color: fill, alpha: 0.92 * a });
+    arrow.stroke({
+      width: Math.max(0.5, DesignTokens.particle.directionArrowStrokeWidth / k),
+      color: stroke,
+      alpha: a,
+      join: "round",
+    });
+    arrow.visible = true;
   }
 
   private computeSpeed(absI: number): number {
