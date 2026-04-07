@@ -29,6 +29,10 @@ export type WirePathCache = {
   totalLength: number;
   segmentLengths: number[];
   segmentCumulativeLengths: number[];
+  /** Stable segment ids when provided by InteractiveWireSystem (animation remap). */
+  segmentIds?: string[];
+  /** Bumps when segment count / topology changes. */
+  pathRevision?: number;
 };
 
 export function createDefaultWireVisualState(): WireVisualState {

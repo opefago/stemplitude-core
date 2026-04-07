@@ -63,7 +63,8 @@ export class WireParticleSystem {
    */
   updateWirePaths(
     wireId: string,
-    segments: Array<{ start: Point; end: Point }>
+    segments: Array<{ start: Point; end: Point }>,
+    pathMeta?: { segmentIds?: string[]; revision?: number },
   ): void {
     const worldPoints: Point[] = [];
     if (segments.length > 0) {
@@ -92,6 +93,8 @@ export class WireParticleSystem {
       totalLength,
       segmentLengths,
       segmentCumulativeLengths: cumulativeLengths,
+      segmentIds: pathMeta?.segmentIds,
+      pathRevision: pathMeta?.revision,
     });
   }
 
@@ -109,6 +112,7 @@ export class WireParticleSystem {
     for (const g of this.particlePool) {
       g.visible = false;
     }
+    this.pruneStaleWireVisuals(wireStates);
 
     // Update each wire
     for (const [wireId, state] of wireStates) {
@@ -195,6 +199,40 @@ export class WireParticleSystem {
         fadeMul,
       );
       this.drawDebugLabel(wireId, pathCache, state.debugText);
+    }
+  }
+
+  /**
+   * Remove visuals/caches for wires no longer present in the current scene state.
+   * This prevents "ghost" arrows/glow/labels after delete/new-project/topology rebuild.
+   */
+  private pruneStaleWireVisuals(wireStates: Map<string, WireVisualState>): void {
+    const liveWireIds = new Set(wireStates.keys());
+
+    for (const wireId of Array.from(this.wirePathCaches.keys())) {
+      if (!liveWireIds.has(wireId)) {
+        this.removeWire(wireId);
+      }
+    }
+    for (const wireId of Array.from(this.activeParticles.keys())) {
+      if (!liveWireIds.has(wireId)) {
+        this.removeWire(wireId);
+      }
+    }
+    for (const wireId of Array.from(this.glowGraphics.keys())) {
+      if (!liveWireIds.has(wireId)) {
+        this.removeWire(wireId);
+      }
+    }
+    for (const wireId of Array.from(this.arrowGraphics.keys())) {
+      if (!liveWireIds.has(wireId)) {
+        this.removeWire(wireId);
+      }
+    }
+    for (const wireId of Array.from(this.debugLabels.keys())) {
+      if (!liveWireIds.has(wireId)) {
+        this.removeWire(wireId);
+      }
     }
   }
 

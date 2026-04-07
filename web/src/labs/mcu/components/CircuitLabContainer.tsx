@@ -3,8 +3,10 @@ import { useChildContextStudentId } from "../../../lib/childContext";
 import {
   migrateLegacyLabProjectsIfNeeded,
   readLabProjectsArray,
+  writeLabLastOpenedAt,
   writeLabProjectsArray,
 } from "../../../lib/learnerLabStorage";
+import { useLabPersistence } from "../../../features/labs/useLabPersistence";
 import { useAuth } from "../../../providers/AuthProvider";
 import type * as Y from "yjs";
 import type { WebsocketProvider } from "y-websocket";
@@ -70,11 +72,44 @@ export const CircuitLabContainer: React.FC<Props> = ({
   const [savedProjects, setSavedProjects] = useState<any[]>([]);
   const childCtx = useChildContextStudentId();
   const { user } = useAuth();
+  const lastSnapshotHashRef = useRef<string>("");
 
   useEffect(() => {
     migrateLegacyLabProjectsIfNeeded(CM_PROJECTS_BASE_KEY);
     setSavedProjects(loadProjectsFromStorage() as any[]);
   }, [childCtx, user?.id, user?.subType]);
+
+  const persistence = useLabPersistence({
+    labId: "circuit-maker",
+    localStorageKey: CM_PROJECTS_BASE_KEY,
+    title: projectName,
+    autosaveMs: 12000,
+    debounceMs: 900,
+    enabled: Boolean(user?.id),
+    getPayload: () => {
+      const snapshot =
+        (sceneRef.current as CircuitScene | null)?.exportSnapshot?.() ?? null;
+      if (!snapshot) return null;
+      const raw = JSON.stringify(snapshot);
+      return {
+        blob: new Blob([raw], { type: "application/json" }),
+        filename: `${projectName || "circuit-project"}.json`,
+        metadata: {
+          lab_type: "circuit-maker",
+          schema: "circuit-scene-snapshot-v2",
+          project_name: projectName,
+        },
+        localDraft: {
+          snapshot,
+          projectName,
+        },
+      };
+    },
+  });
+
+  useEffect(() => {
+    writeLabLastOpenedAt("circuit-maker");
+  }, []);
 
   const handleStartStop = () => {
     if (sceneRef.current) {
@@ -151,6 +186,7 @@ export const CircuitLabContainer: React.FC<Props> = ({
     else projects.unshift(project);
     writeLabProjectsArray(CM_PROJECTS_BASE_KEY, projects);
     setSavedProjects(projects);
+    void persistence.saveCheckpoint();
     setSaveStatus("saved");
     setTimeout(() => setSaveStatus(null), 1500);
   };
@@ -167,6 +203,7 @@ export const CircuitLabContainer: React.FC<Props> = ({
       }
       setIsSimulationRunning(false);
     }
+    persistence.setProjectIdentity(p.id ?? null);
     setShowProjects(false);
   };
 
@@ -229,6 +266,19 @@ export const CircuitLabContainer: React.FC<Props> = ({
       }
     };
   }, []);
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      const snapshot = sceneRef.current?.exportSnapshot?.();
+      if (!snapshot) return;
+      const hash = JSON.stringify(snapshot);
+      if (hash !== lastSnapshotHashRef.current) {
+        lastSnapshotHashRef.current = hash;
+        persistence.markDirty();
+      }
+    }, 4000);
+    return () => window.clearInterval(id);
+  }, [persistence]);
 
   const btnStyle: React.CSSProperties = {
     display: "inline-flex",

@@ -897,23 +897,51 @@ export class OrthogonalWireRouter {
     return segments;
   }
 
+  /** Shave each end of a segment before body intersection tests (matches schematic straight policy). */
+  private trimSegmentWorld(
+    a: RoutingPoint,
+    b: RoutingPoint,
+    capPx: number,
+  ): { x0: number; y0: number; x1: number; y1: number } | null {
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const L = Math.hypot(dx, dy);
+    if (L < 1) return null;
+    const ux = dx / L;
+    const uy = dy / L;
+    const c = Math.min(capPx, L * 0.45);
+    const x0 = a.x + ux * c;
+    const y0 = a.y + uy * c;
+    const x1 = b.x - ux * c;
+    const y1 = b.y - uy * c;
+    if ((x1 - x0) * ux + (y1 - y0) * uy < 2) return null;
+    return { x0, y0, x1, y1 };
+  }
+
   /**
    * Check if there are collisions between start and end points
    */
   private hasCollisions(
     start: RoutingPoint,
     end: RoutingPoint,
-    avoidComponents: string[]
+    _avoidComponents: string[],
   ): boolean {
-    // Check for collisions with components
-    for (const [componentId, component] of this.components) {
-      if (avoidComponents.includes(componentId)) continue;
+    const inner = this.trimSegmentWorld(start, end, 42);
+    if (!inner) return false;
+    const segStart = { x: inner.x0, y: inner.y0, layer: 0 } as RoutingPoint;
+    const segEnd = { x: inner.x1, y: inner.y1, layer: 0 } as RoutingPoint;
 
-      const position = component.getPosition();
+    for (const [, component] of this.components) {
       const displayObject = component.displayObject();
-      const bounds = displayObject.getBounds();
-
-      if (this.lineIntersectsRect(start, end, position, bounds)) {
+      const b = displayObject.getBounds();
+      const pad = 6;
+      const rect = {
+        x: b.x - pad,
+        y: b.y - pad,
+        width: Math.max(b.width, 8) + 2 * pad,
+        height: Math.max(b.height, 8) + 2 * pad,
+      };
+      if (this.lineIntersectsRectBounds(segStart, segEnd, rect)) {
         return true;
       }
     }
@@ -921,47 +949,36 @@ export class OrthogonalWireRouter {
     return false;
   }
 
-  /**
-   * Check if a line intersects with a rectangle
-   */
-  private lineIntersectsRect(
+  /** Axis-aligned rectangle in world space (e.g. from `getBounds()`). */
+  private lineIntersectsRectBounds(
     start: RoutingPoint,
     end: RoutingPoint,
-    rectPos: { x: number; y: number },
-    rectBounds: { width: number; height: number }
+    rect: { x: number; y: number; width: number; height: number },
   ): boolean {
-    const rect = {
-      x: rectPos.x,
-      y: rectPos.y,
-      width: rectBounds.width,
-      height: rectBounds.height,
-    };
-
-    // Check if line intersects with rectangle
     return (
       this.lineIntersectsLine(
         start,
         end,
         { x: rect.x, y: rect.y },
-        { x: rect.x + rect.width, y: rect.y }
+        { x: rect.x + rect.width, y: rect.y },
       ) ||
       this.lineIntersectsLine(
         start,
         end,
         { x: rect.x + rect.width, y: rect.y },
-        { x: rect.x + rect.width, y: rect.y + rect.height }
+        { x: rect.x + rect.width, y: rect.y + rect.height },
       ) ||
       this.lineIntersectsLine(
         start,
         end,
         { x: rect.x + rect.width, y: rect.y + rect.height },
-        { x: rect.x, y: rect.y + rect.height }
+        { x: rect.x, y: rect.y + rect.height },
       ) ||
       this.lineIntersectsLine(
         start,
         end,
         { x: rect.x, y: rect.y + rect.height },
-        { x: rect.x, y: rect.y }
+        { x: rect.x, y: rect.y },
       )
     );
   }

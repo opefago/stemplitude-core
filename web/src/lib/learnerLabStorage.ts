@@ -84,3 +84,41 @@ export function migrateLegacyLabProjectsIfNeeded(baseKey: string): void {
     /* ignore */
   }
 }
+
+function labLastOpenedBaseKey(labId: string): string {
+  return `stemplitude_lab_last_opened__${labId}`;
+}
+
+/**
+ * Persist "lab opened" timestamp per learner scope so launcher cards can show
+ * recency even when no project has been saved yet.
+ */
+export function writeLabLastOpenedAt(labId: string, timestampMs: number = Date.now()): void {
+  if (!labId) return;
+  const baseKey = labLastOpenedBaseKey(labId);
+  const scopedKey = labProjectsStorageKey(baseKey);
+  const value = String(Math.max(0, Math.floor(timestampMs)));
+  try {
+    localStorage.setItem(scopedKey, value);
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
+
+/**
+ * Read "lab opened" timestamp from scoped key first, then legacy unscoped key.
+ */
+export function readLabLastOpenedAt(labId: string): number {
+  if (!labId) return 0;
+  const baseKey = labLastOpenedBaseKey(labId);
+  const scopedKey = labProjectsStorageKey(baseKey);
+  const read = (key: string): number => {
+    const raw = localStorage.getItem(key);
+    if (!raw) return 0;
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  };
+  const scoped = read(scopedKey);
+  if (scoped > 0) return scoped;
+  return scopedKey === baseKey ? scoped : read(baseKey);
+}

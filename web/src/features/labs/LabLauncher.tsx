@@ -15,6 +15,11 @@ import { useUIMode } from "../../providers/UIModeProvider";
 import { useTenant } from "../../providers/TenantProvider";
 import { getLabLauncherAvailability } from "../../lib/api/capabilities";
 import { resolveLabRoute } from "./labRouting";
+import {
+  migrateLegacyLabProjectsIfNeeded,
+  readLabLastOpenedAt,
+  readLabProjectsArray,
+} from "../../lib/learnerLabStorage";
 import "./labs.css";
 
 interface LabItem {
@@ -70,6 +75,76 @@ const LABS: LabItem[] = [
   },
 ];
 
+const LAB_STORAGE_BY_ID: Record<string, string> = {
+  "circuit-maker": "stemplitude_circuitmaker_projects",
+  "micro-maker": "stemplitude_micromaker_projects",
+  "python-game": "stemplitude_pygame_projects",
+  "game-maker": "stemplitude_gamemaker_projects",
+  "design-maker": "dml-projects-meta",
+};
+
+function coerceProjectTimestamp(raw: unknown): number {
+  if (!raw || typeof raw !== "object") return 0;
+  const row = raw as { updatedAt?: unknown; createdAt?: unknown };
+  const stamp = row.updatedAt ?? row.createdAt;
+  if (typeof stamp === "number") return Number.isFinite(stamp) ? stamp : 0;
+  if (typeof stamp === "string") {
+    const t = new Date(stamp).getTime();
+    return Number.isFinite(t) ? t : 0;
+  }
+  return 0;
+}
+
+function formatLastOpened(lastOpenedMs: number): string {
+  if (!lastOpenedMs) return "Never";
+  const deltaMs = Date.now() - lastOpenedMs;
+  if (deltaMs < 60_000) return "Just now";
+  const mins = Math.floor(deltaMs / 60_000);
+  if (mins < 60) return `${mins} minute${mins === 1 ? "" : "s"} ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days} day${days === 1 ? "" : "s"} ago`;
+  return new Date(lastOpenedMs).toLocaleDateString([], {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function getLabProjectStats(labId: string): {
+  projectCount: number;
+  lastOpenedLabel: string;
+} {
+  const storageKey = LAB_STORAGE_BY_ID[labId];
+  if (!storageKey) return { projectCount: 0, lastOpenedLabel: "Never" };
+  migrateLegacyLabProjectsIfNeeded(storageKey);
+  const rows = readLabProjectsArray(storageKey);
+  const lastProjectOpenedMs = rows.reduce((max, row) => {
+    const t = coerceProjectTimestamp(row);
+    return t > max ? t : max;
+  }, 0);
+  const lastLabOpenedMs = readLabLastOpenedAt(labId);
+  const lastOpenedMs = Math.max(lastProjectOpenedMs, lastLabOpenedMs);
+  return {
+    projectCount: rows.length,
+    lastOpenedLabel: formatLastOpened(lastOpenedMs),
+  };
+}
+
+function getMostRecentlyOpenedLabId(labIds: string[]): string | null {
+  let bestLabId: string | null = null;
+  let bestTs = 0;
+  for (const labId of labIds) {
+    const ts = readLabLastOpenedAt(labId);
+    if (ts > bestTs) {
+      bestTs = ts;
+      bestLabId = labId;
+    }
+  }
+  return bestLabId;
+}
+
 export function LabLauncher() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -90,6 +165,30 @@ export function LabLauncher() {
     params.set("lab", match.id);
     navigate(`${match.route}?${params.toString()}`, { replace: true });
   }, [navigate, searchParams]);
+
+  useEffect(() => {
+    // Explicit lab query always wins.
+    if (searchParams.get("lab")) return;
+    // Wait for availability check so we don't auto-open a blocked lab.
+    if (!availabilityReady || availabilityError) return;
+
+    const candidateLabIds = LABS.filter((lab) => Boolean(allowedById[lab.id])).map(
+      (lab) => lab.id,
+    );
+    if (candidateLabIds.length === 0) return;
+
+    const lastOpenedLabId = getMostRecentlyOpenedLabId(candidateLabIds);
+    if (!lastOpenedLabId) return;
+    const match = resolveLabRoute(lastOpenedLabId);
+    if (!match) return;
+    navigate(match.route, { replace: true });
+  }, [
+    allowedById,
+    availabilityError,
+    availabilityReady,
+    navigate,
+    searchParams,
+  ]);
 
   useEffect(() => {
     if (!tenant?.id) {
@@ -161,6 +260,7 @@ export function LabLauncher() {
         ) : null}
         {LABS.map((lab) => {
           const Icon = lab.icon;
+          const stats = getLabProjectStats(lab.id);
           const allowed = availabilityError
             ? false
             : availabilityReady
@@ -203,11 +303,11 @@ export function LabLauncher() {
               ) : null}
               <p className="lab-launcher__card-meta" aria-label="Last opened">
                 <Clock size={14} aria-hidden />
-                Last opened: 2 days ago
+                Last opened: {stats.lastOpenedLabel}
               </p>
               <p className="lab-launcher__card-meta" aria-label="Project count">
                 <FolderOpen size={14} aria-hidden />
-                3 projects
+                {stats.projectCount} project{stats.projectCount === 1 ? "" : "s"}
               </p>
               {allowed ? (
                 <Link

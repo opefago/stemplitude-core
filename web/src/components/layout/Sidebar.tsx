@@ -67,11 +67,16 @@ const PARENT_NAV: NavItem[] = [
     section: "Stay in touch",
   },
   {
-    path: "/app/messages",
+    path: "/app/attendance",
     label: "Attendance",
     iconSrc: "/assets/cartoon-icons/Callendar.png",
     section: "Stay in touch",
-    messagesHub: "attendance",
+  },
+  {
+    path: "/app/child-analytics",
+    label: "Child analytics",
+    iconSrc: "/assets/cartoon-icons/Trail.png",
+    section: "Stay in touch",
   },
   {
     path: "/app/notifications",
@@ -113,11 +118,16 @@ const HOMESCHOOL_NAV: NavItem[] = [
     section: "Stay in touch",
   },
   {
-    path: "/app/messages",
+    path: "/app/attendance",
     label: "Attendance",
     iconSrc: "/assets/cartoon-icons/Callendar.png",
     section: "Stay in touch",
-    messagesHub: "attendance",
+  },
+  {
+    path: "/app/child-analytics",
+    label: "Child analytics",
+    iconSrc: "/assets/cartoon-icons/Trail.png",
+    section: "Stay in touch",
   },
   { path: "/app/billing", label: "Billing", iconSrc: "/assets/cartoon-icons/coin.png" },
   { path: "/app/settings/member-billing", label: "Membership admin", iconSrc: "/assets/cartoon-icons/Papyrus.png" },
@@ -133,6 +143,7 @@ const INSTRUCTOR_NAV: NavItem[] = [
   { path: "/app/gamification", label: "Gamification", iconSrc: "/assets/cartoon-icons/Gift1.png" },
   { path: "/app/settings/member-billing", label: "Membership", iconSrc: "/assets/cartoon-icons/Papyrus.png" },
   { path: "/app/messages", label: "Messages", iconSrc: "/assets/cartoon-icons/Information.png" },
+  { path: "/app/excusals", label: "Excusals", iconSrc: "/assets/cartoon-icons/Callendar.png" },
 ];
 
 const ADMIN_NAV: NavItem[] = [
@@ -150,6 +161,7 @@ const ADMIN_NAV: NavItem[] = [
   { path: "/app/integrations", label: "Integrations", iconSrc: "/assets/cartoon-icons/Thunder.png", section: "Organization" },
   { path: "/app/billing", label: "Billing", iconSrc: "/assets/cartoon-icons/coin.png" },
   { path: "/app/settings/member-billing", label: "Membership", iconSrc: "/assets/cartoon-icons/Papyrus.png" },
+  { path: "/app/excusals", label: "Excusals", iconSrc: "/assets/cartoon-icons/Callendar.png" },
 ];
 
 /** Platform Administration nav - super admin in platform view.

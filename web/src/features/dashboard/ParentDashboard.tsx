@@ -2,14 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Award,
-  Bell,
   BookOpen,
   CalendarDays,
   ChevronRight,
   ClipboardList,
   CreditCard,
   MessageSquareText,
-  Receipt,
   Settings,
   Sparkles,
   WalletCards,
@@ -19,11 +17,14 @@ import { useTenant } from "../../providers/TenantProvider";
 import { useTenantRealtime } from "../../hooks/useTenantRealtime";
 import {
   getParentChildActivity,
+  getParentChildAttendanceOverview,
   getParentChildAssignmentGrades,
-  getMyAssignments,
+  getParentChildAssignments,
   getParentChildren,
   getParentChildrenSessions,
   sessionStartBeforeExclusiveRollingDaysFromNow,
+  type GuardianAttendanceOverview,
+  type GuardianExcusalSummary,
   type ParentChildActivity,
   type ParentChildAssignmentGrades,
   type SessionResponse,
@@ -35,7 +36,7 @@ import {
   getStudentGamificationProfile,
   type GamificationProfile,
 } from "../../lib/api/gamification";
-import { ProgressBar } from "../../components/ui";
+import { AppTooltip, ProgressBar } from "../../components/ui";
 import { ParentChildSwitcherDropdown } from "../parent/ParentChildSwitcherDropdown";
 import {
   GuardianExcusalRequestModal,
@@ -84,6 +85,7 @@ const ACTIVITY_PREVIEW = 4;
 const UPCOMING_CLASSES_WEEK_DAYS = 7;
 const UPCOMING_CLASSES_MAX = 3;
 const UPCOMING_ASSIGNMENTS_MAX = 5;
+const ATTENDANCE_SNAPSHOT_MAX = 5;
 
 function formatSessionRow(s: SessionResponse): string {
   try {
@@ -123,6 +125,66 @@ function assignmentStatusShort(status?: string | null): string {
   return "To do";
 }
 
+function assignmentDueTs(item: StudentAssignment): number {
+  return item.due_at
+    ? new Date(item.due_at).getTime()
+    : new Date(item.session_end).getTime();
+}
+
+function excusalStatusLabel(status: string): string {
+  if (status === "pending") return "Excuse sent";
+  if (status === "approved") return "Excusal approved";
+  if (status === "denied") return "Excusal denied";
+  return "Excusal sent";
+}
+
+function attendanceStatusLabel(status?: string | null): string {
+  if (!status) return "No mark yet";
+  return status.replace(/_/g, " ");
+}
+
+function formatAttendanceSessionMeta(startIso: string, endIso: string): string {
+  try {
+    const start = new Date(startIso);
+    const end = new Date(endIso);
+    const day = start.toLocaleDateString(undefined, {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+    });
+    const startTime = start.toLocaleTimeString(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+    const endTime = end.toLocaleTimeString(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+    return `${day} · ${startTime} - ${endTime}`;
+  } catch {
+    return startIso;
+  }
+}
+
+function attendanceStatusTone(status?: string | null): string {
+  const v = (status ?? "").trim().toLowerCase();
+  if (!v) return "unmarked";
+  if (v === "present") return "present";
+  if (v === "excused") return "excused";
+  if (v === "late") return "late";
+  if (v === "absent") return "absent";
+  return "unmarked";
+}
+
+function formatExcusalDetail(excusal: GuardianExcusalSummary): string {
+  const sentAt = formatActivityWhen(excusal.created_at);
+  const reason = excusal.reason?.trim() || "No reason provided";
+  if (excusal.review_notes?.trim()) {
+    return `Sent ${sentAt}. Reason: ${reason}. Staff note: ${excusal.review_notes.trim()}`;
+  }
+  return `Sent ${sentAt}. Reason: ${reason}`;
+}
+
 export function ParentDashboard() {
   const { user } = useAuth();
   const isHomeschool = user?.role === "homeschool_parent";
@@ -149,6 +211,8 @@ export function ParentDashboard() {
   const [assignmentGrades, setAssignmentGrades] =
     useState<ParentChildAssignmentGrades | null>(null);
   const [gradesLoading, setGradesLoading] = useState(false);
+  const [attendanceOverview, setAttendanceOverview] =
+    useState<GuardianAttendanceOverview | null>(null);
   const activeChildIdRef = useRef<string | null>(null);
   const [progress, setProgress] = useState<ProgressSummary | null>(null);
   const [gProfile, setGProfile] = useState<GamificationProfile | null>(null);
@@ -241,7 +305,7 @@ export function ParentDashboard() {
     setAssignmentsLoading(true);
     setAssignmentsError(null);
     try {
-      const rows = await getMyAssignments(200, { childContextOverride: childId });
+      const rows = await getParentChildAssignments(childId, 200);
       setAssignments(rows);
     } catch (e) {
       setAssignments([]);
@@ -284,6 +348,15 @@ export function ParentDashboard() {
     }
   }, []);
 
+  const loadAttendanceOverviewForChild = useCallback(async (childId: string) => {
+    try {
+      const data = await getParentChildAttendanceOverview(childId);
+      setAttendanceOverview(data);
+    } catch {
+      setAttendanceOverview(null);
+    }
+  }, []);
+
   useEffect(() => {
     if (!activeChildId) {
       setSessions([]);
@@ -296,18 +369,21 @@ export function ParentDashboard() {
       setActivityLoading(false);
       setAssignmentGrades(null);
       setGradesLoading(false);
+      setAttendanceOverview(null);
       return;
     }
     void loadSessionsForChild(activeChildId);
     void loadActivityForChild(activeChildId);
     void loadAssignmentsForChild(activeChildId);
     void loadGradesForChild(activeChildId);
+    void loadAttendanceOverviewForChild(activeChildId);
   }, [
     activeChildId,
     loadSessionsForChild,
     loadActivityForChild,
     loadAssignmentsForChild,
     loadGradesForChild,
+    loadAttendanceOverviewForChild,
   ]);
 
   useEffect(() => {
@@ -352,9 +428,25 @@ export function ParentDashboard() {
         void loadActivityForChild(id);
         void loadGradesForChild(id);
         void loadAssignmentsForChild(id);
+        void loadAttendanceOverviewForChild(id);
       }
     },
   });
+
+  const excusalBySessionId = useMemo(() => {
+    const map: Record<string, GuardianExcusalSummary> = {};
+    for (const row of attendanceOverview?.rows ?? []) {
+      if (row.excusal?.status) {
+        map[row.session_id] = row.excusal;
+      }
+    }
+    return map;
+  }, [attendanceOverview]);
+
+  const recentAttendanceRows = useMemo(
+    () => (attendanceOverview?.rows ?? []).slice(0, ATTENDANCE_SNAPSHOT_MAX),
+    [attendanceOverview],
+  );
 
   const progressPct = overallProgressPercent(progress);
   const streakDays = gProfile?.streak?.current_streak ?? 0;
@@ -366,24 +458,18 @@ export function ParentDashboard() {
     const weekEndMs =
       ref.getTime() + UPCOMING_CLASSES_WEEK_DAYS * 24 * 60 * 60 * 1000;
     const nowMs = ref.getTime();
-    return assignments
-      .filter((item) => {
-        if (item.submission_status === "submitted") return false;
-        const due = item.due_at
-          ? new Date(item.due_at).getTime()
-          : new Date(item.session_end).getTime();
-        return due > nowMs && due < weekEndMs;
-      })
-      .sort((a, b) => {
-        const ad = a.due_at
-          ? new Date(a.due_at).getTime()
-          : new Date(a.session_end).getTime();
-        const bd = b.due_at
-          ? new Date(b.due_at).getTime()
-          : new Date(b.session_end).getTime();
-        return ad - bd;
-      })
-      .slice(0, UPCOMING_ASSIGNMENTS_MAX);
+    const openAssignments = assignments
+      .filter((item) => item.submission_status !== "submitted")
+      .sort((a, b) => assignmentDueTs(a) - assignmentDueTs(b));
+
+    const dueThisWeek = openAssignments.filter((item) => {
+      const due = assignmentDueTs(item);
+      return due >= nowMs && due <= weekEndMs;
+    });
+
+    // Keep "This week" focused, but fall back to open items so parents still see assigned work.
+    const source = dueThisWeek.length > 0 ? dueThisWeek : openAssignments;
+    return source.slice(0, UPCOMING_ASSIGNMENTS_MAX);
   }, [assignments]);
 
   return (
@@ -439,13 +525,15 @@ export function ParentDashboard() {
                   to={
                     upcomingTab === "assignments" && activeChildId
                       ? `/app/assignments?studentId=${encodeURIComponent(activeChildId)}`
-                      : "/app/classrooms"
+                      : activeChildId
+                        ? `/app/messages?hub=events&studentId=${encodeURIComponent(activeChildId)}`
+                        : "/app/messages?hub=events"
                   }
                   className="dashboard-bento__card-action parent-dashboard__card-action--header"
                   aria-label={
                     upcomingTab === "assignments"
                       ? "View all assignments for this learner"
-                      : "View all classes"
+                      : "View all class days"
                   }
                 >
                   View all <ChevronRight size={14} aria-hidden />
@@ -525,15 +613,42 @@ export function ParentDashboard() {
                         </span>
                       </li>
                     ) : (
-                      sessions.map((session) => (
-                        <li
-                          key={session.id}
-                          className="parent-dashboard__session-row"
-                          role="listitem"
-                        >
-                          <img src="/assets/cartoon-icons/Callendar.png" alt="" className="dashboard-bento__card-icon-img" aria-hidden />
+                      sessions.map((session) => {
+                        const excusal = excusalBySessionId[session.id];
+                        const showExcusalTooltip =
+                          excusal?.status === "pending" || excusal?.status === "approved";
+                        return (
+                        <li key={session.id} className="parent-dashboard__session-row" role="listitem">
+                          <img
+                            src="/assets/cartoon-icons/Callendar.png"
+                            alt=""
+                            className="dashboard-bento__card-icon-img"
+                            aria-hidden
+                          />
                           <span className="parent-dashboard__session-text">
                             {formatSessionRow(session)}
+                            {excusal ? (
+                              showExcusalTooltip ? (
+                                <AppTooltip
+                                  title={excusalStatusLabel(excusal.status)}
+                                  description={formatExcusalDetail(excusal)}
+                                  placement="top"
+                                  forceCustomInReact19
+                                >
+                                  <span
+                                    className={`parent-dashboard__excusal-state parent-dashboard__excusal-state--${excusal.status} parent-dashboard__excusal-state--with-tooltip`}
+                                  >
+                                    {excusalStatusLabel(excusal.status)}
+                                  </span>
+                                </AppTooltip>
+                              ) : (
+                                <span
+                                  className={`parent-dashboard__excusal-state parent-dashboard__excusal-state--${excusal.status}`}
+                                >
+                                  {excusalStatusLabel(excusal.status)}
+                                </span>
+                              )
+                            ) : null}
                           </span>
                           <button
                             type="button"
@@ -543,16 +658,20 @@ export function ParentDashboard() {
                               setExcusalPreset({
                                 sessionId: session.id,
                                 classroomId: session.classroom_id,
+                                sessionStart: session.session_start,
+                                sessionEnd: session.session_end,
                                 summaryLabel: formatSessionRow(session),
                               });
                               setExcusalOpen(true);
                             }}
                             aria-label="Request excusal for this session"
                           >
-                            <ClipboardList size={12} aria-hidden /> Excuse
+                            <ClipboardList size={12} aria-hidden />{" "}
+                            {excusal ? "Excuse again" : "Excuse"}
                           </button>
                         </li>
-                      ))
+                        );
+                      })
                     )}
                   </ul>
                 </div>
@@ -585,8 +704,8 @@ export function ParentDashboard() {
                     ) : upcomingWeekAssignments.length === 0 ? (
                       <li className="parent-dashboard__session-row" role="listitem">
                         <span className="parent-dashboard__session-text">
-                          No assignments due in the next {UPCOMING_CLASSES_WEEK_DAYS} days. Open
-                          Assignments for the full list and past work.
+                          No open assignments right now. Open Assignments for the full list and
+                          past work.
                         </span>
                       </li>
                     ) : (
@@ -604,13 +723,9 @@ export function ParentDashboard() {
                               {assignmentStatusShort(item.submission_status)}
                             </span>
                           </span>
-                          <Link
-                            to={`/app/classrooms/${item.classroom_id}?tab=assignments`}
-                            className="parent-dashboard__session-excusal parent-dashboard__assignment-open"
-                            aria-label={`Open assignment ${item.title} in classroom`}
-                          >
-                            Open <ChevronRight size={12} aria-hidden />
-                          </Link>
+                          <span className="parent-dashboard__assignment-state">
+                            {assignmentStatusShort(item.submission_status)}
+                          </span>
                         </li>
                       ))
                     )}
@@ -687,6 +802,24 @@ export function ParentDashboard() {
                     </span>
                   </Link>
                   <Link
+                    to={
+                      activeChildId
+                        ? `/app/child-analytics?studentId=${encodeURIComponent(activeChildId)}`
+                        : "/app/child-analytics"
+                    }
+                    className="parent-dashboard__quick-link parent-dashboard__quick-link--analytics"
+                  >
+                    <span className="parent-dashboard__quick-link-icon" aria-hidden>
+                      <Sparkles size={22} strokeWidth={2} />
+                    </span>
+                    <span className="parent-dashboard__quick-link-text">
+                      <span className="parent-dashboard__quick-link-label">Child analytics</span>
+                      <span className="parent-dashboard__quick-link-hint">
+                        Trends, activity, and progress
+                      </span>
+                    </span>
+                  </Link>
+                  <Link
                     to="/app/messages"
                     className="parent-dashboard__quick-link parent-dashboard__quick-link--messages"
                   >
@@ -699,22 +832,6 @@ export function ParentDashboard() {
                       </span>
                       <span className="parent-dashboard__quick-link-hint">
                         School inbox &amp; threads
-                      </span>
-                    </span>
-                  </Link>
-                  <Link
-                    to="/app/notifications"
-                    className="parent-dashboard__quick-link parent-dashboard__quick-link--notifications"
-                  >
-                    <span className="parent-dashboard__quick-link-icon" aria-hidden>
-                      <Bell size={22} strokeWidth={2} />
-                    </span>
-                    <span className="parent-dashboard__quick-link-text">
-                      <span className="parent-dashboard__quick-link-label">
-                        Notifications
-                      </span>
-                      <span className="parent-dashboard__quick-link-hint">
-                        Alerts from your school
                       </span>
                     </span>
                   </Link>
@@ -768,21 +885,47 @@ export function ParentDashboard() {
                       </span>
                     </Link>
                   ) : null}
-                  <Link
-                    to="/app/member-billing/invoices"
-                    className="parent-dashboard__quick-link parent-dashboard__quick-link--invoices"
-                  >
-                    <span className="parent-dashboard__quick-link-icon" aria-hidden>
-                      <Receipt size={22} strokeWidth={2} />
-                    </span>
-                    <span className="parent-dashboard__quick-link-text">
-                      <span className="parent-dashboard__quick-link-label">My invoices</span>
-                      <span className="parent-dashboard__quick-link-hint">
-                        Receipts &amp; history
-                      </span>
-                    </span>
-                  </Link>
               </nav>
+              <div className="parent-dashboard__attendance-preview">
+                <div className="parent-dashboard__attendance-preview-head">
+                  <span>Attendance snapshot</span>
+                  <Link
+                    to={
+                      activeChildId
+                        ? `/app/attendance?studentId=${encodeURIComponent(activeChildId)}`
+                        : "/app/attendance"
+                    }
+                    className="dashboard-bento__card-action parent-dashboard__card-action--header"
+                  >
+                    View all <ChevronRight size={14} aria-hidden />
+                  </Link>
+                </div>
+                {recentAttendanceRows.length === 0 ? (
+                  <p className="parent-dashboard__message-text">
+                    No recent attendance records yet.
+                  </p>
+                ) : (
+                  <ul className="parent-dashboard__attendance-list" role="list">
+                    {recentAttendanceRows.map((row) => (
+                      <li key={row.session_id} className="parent-dashboard__attendance-row" role="listitem">
+                        <span className="parent-dashboard__attendance-main">
+                          <span className="parent-dashboard__attendance-class">
+                            {row.classroom_name}
+                          </span>
+                          <span className="parent-dashboard__attendance-meta">
+                            {formatAttendanceSessionMeta(row.session_start, row.session_end)}
+                          </span>
+                        </span>
+                        <span
+                          className={`parent-dashboard__attendance-status parent-dashboard__attendance-status--${attendanceStatusTone(row.attendance_status)}`}
+                        >
+                          {attendanceStatusLabel(row.attendance_status)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             </div>
 
             <div className="parent-dashboard__progress-activity-stack">
@@ -885,13 +1028,13 @@ export function ParentDashboard() {
                       <Link
                         to={
                           activeChildId
-                            ? `/app/activity?studentId=${encodeURIComponent(activeChildId)}`
-                            : "/app/activity"
+                            ? `/app/child-analytics?studentId=${encodeURIComponent(activeChildId)}`
+                            : "/app/child-analytics"
                         }
                         className="dashboard-bento__card-action parent-dashboard__card-action--header parent-dashboard__insights-panel-link"
-                        aria-label="View full activity"
+                        aria-label="View learner analytics"
                       >
-                        View all <ChevronRight size={14} aria-hidden />
+                        View analytics <ChevronRight size={14} aria-hidden />
                       </Link>
                     </div>
                     {childActivity?.weekly_digest ? (
@@ -1093,7 +1236,10 @@ export function ParentDashboard() {
           studentId={activeChildId}
           preset={excusalPreset}
           rangeOnly={excusalRangeOnly}
-          onSuccess={() => void loadSessionsForChild(activeChildId)}
+          onSuccess={() => {
+            void loadSessionsForChild(activeChildId);
+            void loadAttendanceOverviewForChild(activeChildId);
+          }}
         />
       ) : null}
     </div>

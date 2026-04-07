@@ -90,6 +90,16 @@ export async function getMyAssignments(
   });
 }
 
+export async function getParentChildAssignments(
+  studentId: string,
+  limit?: number,
+): Promise<StudentAssignment[]> {
+  const params = limit != null ? `?limit=${limit}` : "";
+  return apiFetch<StudentAssignment[]>(
+    `/students/parent/children/${encodeURIComponent(studentId)}/assignments${params}`,
+  );
+}
+
 export async function getMyClassrooms(): Promise<ClassroomRecord[]> {
   return apiFetch<ClassroomRecord[]>("/students/me/classrooms");
 }
@@ -401,7 +411,13 @@ export async function getParentChildAttendanceOverview(
 
 export async function createParentExcusalRequest(
   studentId: string,
-  body: { session_id: string; classroom_id: string; reason: string },
+  body: {
+    session_id: string;
+    classroom_id: string;
+    session_start?: string;
+    session_end?: string;
+    reason: string;
+  },
 ): Promise<unknown> {
   return apiFetch(
     `/students/parent/children/${encodeURIComponent(studentId)}/excusal-requests`,

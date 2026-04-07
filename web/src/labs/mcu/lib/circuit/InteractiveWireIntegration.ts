@@ -14,6 +14,7 @@ import {
 import { CircuitComponent } from "./CircuitComponent";
 import { GridCanvas } from "./GridCanvas";
 import { emitLabEventThrottled } from "../../../../lib/api/gamification";
+import { orderedComponentEndpointsForWire } from "./wireEndpointTopology";
 
 // Keep warnings/errors, silence verbose dev logs for this module.
 const console = {
@@ -56,7 +57,11 @@ export class InteractiveWireIntegration {
   constructor(circuitScene: CircuitScene, gridCanvas: GridCanvas) {
     this.circuitScene = circuitScene;
     this.gridCanvas = gridCanvas;
-    this.wireSystem = new InteractiveWireSystem(gridCanvas);
+    this.wireSystem = new InteractiveWireSystem(gridCanvas, {
+      onTopologyChanged: () => {
+        this.circuitScene.syncInteractiveWireGraphToSolver();
+      },
+    });
 
     this.editMode = {
       enabled: true, // Enable by default
@@ -268,9 +273,8 @@ export class InteractiveWireIntegration {
       results?.components ?? [];
 
     this.wireSystem.getWires().forEach((wire, wireId) => {
-      const endpoints = wire.nodes.filter((n) => n.type === "component");
-      const startEndpoint = endpoints[0];
-      const endEndpoint = endpoints[1];
+      const { first: startEndpoint, second: endEndpoint } =
+        orderedComponentEndpointsForWire(wire);
       const nonComponentNode = wire.nodes.find((n) => n.type !== "component");
       const startCompId = startEndpoint?.componentId;
       const startNodeId = startEndpoint?.nodeId;
@@ -621,10 +625,8 @@ export class InteractiveWireIntegration {
     const eps = InteractiveWireIntegration.CURRENT_EPS;
     if (Math.abs(wire.current) < eps) return;
 
-    const endpoints = wire.nodes.filter((n) => n.type === "component");
-    if (endpoints.length !== 2) return;
-    const a = endpoints[0];
-    const b = endpoints[1];
+    const { first: a, second: b } = orderedComponentEndpointsForWire(wire);
+    if (!a || !b) return;
     if (!a.componentId || !b.componentId) return;
 
     const type = (cid: string) => this.wireSystem.getComponentType(cid);
@@ -915,6 +917,13 @@ export class InteractiveWireIntegration {
    */
   public updateWirePositions(componentId: string): void {
     this.wireSystem.updateWirePositions(componentId);
+  }
+
+  /**
+   * Full reroute of all wires (e.g. after importing a saved circuit).
+   */
+  public refreshAllWireGeometry(): void {
+    this.wireSystem.refreshAllWireGeometry();
   }
 
   /**

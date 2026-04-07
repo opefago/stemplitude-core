@@ -115,19 +115,11 @@ export class Resistor extends CircuitComponent {
     // Burn out when power exceeds 2x the rating (like a fuse wire melting)
     if (!this.circuitProps.burnt && power > this.circuitProps.powerRating * 2) {
       this.circuitProps.burnt = true;
+      this.startBurnAnimation();
       console.log(
         `⚠️ Resistor ${this.name} BURNT! Power: ${power.toFixed(4)}W exceeded ${(this.circuitProps.powerRating * 2).toFixed(4)}W`
       );
     }
-    // Auto-clear stale burn state once operating safely again.
-    if (
-      this.circuitProps.burnt &&
-      power <= this.circuitProps.powerRating * 0.5 &&
-      Math.abs(this.circuitProps.current) < 0.2
-    ) {
-      this.circuitProps.burnt = false;
-    }
-
     this.createVisuals();
     this.updateLabels();
   }

@@ -13,6 +13,7 @@
 
 import { Graphics, Container, Point, FederatedPointerEvent } from "pixi.js";
 import { CircuitComponent } from "./CircuitComponent";
+import { DesignTokens } from "./rendering/DesignTokens";
 import {
   OptimizedWireRouter,
   RoutingPoint,
@@ -20,6 +21,32 @@ import {
 } from "./OptimizedWireRouter";
 import { HybridWireRouter } from "./HybridWireRouter";
 import { GridCanvas } from "./GridCanvas";
+import { WireRouterFacade } from "./wire/editor/WireRouterFacade";
+import {
+  finalizeOrthogonalWireSegments,
+  mergeCollinearOrthoSegments,
+  wirePathCost,
+} from "./wire/editor/RouteNormalizer";
+import { splitSegmentAtPoint } from "./wire/editor/splitWireSegment";
+import {
+  drawRoundedOrthoWire,
+  drawWireHitPath,
+  schematicHitStrokeWidth,
+  schematicCornerRadius,
+} from "./wire/editor/SchematicWireRenderer";
+import {
+  assignStableSegmentIds,
+  buildAnimationPathMeta,
+  type WireAnimationPathMeta,
+} from "./wire/editor/wirePathAnimationCache";
+import { SnapEngine } from "./wire/editor/SnapEngine";
+import { WireInteractionController } from "./wire/editor/WireInteractionController";
+import { WireGraph } from "./wire/editor/WireGraph";
+import type { SnapCandidate, HoverTarget } from "./wire/editor/SchematicWireTypes";
+import {
+  computeSchematicRoute,
+  straightExcludeForEndpointNodes,
+} from "./wire/editor/SchematicRouteComputer";
 
 // Keep warnings/errors, silence verbose dev logs for this module.
 const console = {
@@ -42,12 +69,18 @@ export interface InteractiveWireConnection {
   nodes: WireNode[];
   segments: WireSegment[];
   graphics: Graphics;
+  /** Wide invisible pick path drawn under `graphics` (stroke layer). */
+  hitGraphics?: Graphics;
   isSelected: boolean;
   isDragging: boolean;
   dragPoint?: { x: number; y: number };
   current: number;
   voltage: number;
   cachedRoutes: Map<string, WirePath>; // Cache for different routing options
+  /** Stable ids per segment for animation / edit bookkeeping */
+  segmentStableIds?: string[];
+  routeRevision?: number;
+  animationPathMeta?: WireAnimationPathMeta;
 }
 
 export interface WireSegment {
@@ -56,6 +89,12 @@ export interface WireSegment {
   isHorizontal: boolean;
   layer: number;
 }
+
+/** Component terminal used for schematic escape stubs (pin → routing anchor). */
+export type SchematicEndpointPinRef = {
+  componentId: string;
+  nodeId: string;
+};
 
 export interface WireInteractionState {
   selectedWire: string | null;
@@ -73,18 +112,35 @@ export interface WireInteractionState {
   activeSegmentIndex?: number | null;
 }
 
+export type InteractiveWireSystemOptions = {
+  /** After create/remove/join/tap — rebuild solver connectivity from `nodes` graph. */
+  onTopologyChanged?: () => void;
+};
+
 /**
  * Interactive wire system with advanced editing capabilities
  */
 export class InteractiveWireSystem {
   private router: OptimizedWireRouter;
   private hybridRouter: HybridWireRouter;
+  private wireRouter: WireRouterFacade;
   private wires: Map<string, InteractiveWireConnection>;
   private wireContainer: Container;
   private gridCanvas: GridCanvas;
   private components: Map<string, CircuitComponent>;
   private nodes: Map<string, WireNode>;
   private nextNodeId: number = 0;
+  private gridCellSize: number;
+  private readonly onTopologyChanged?: () => void;
+  private wireGraphView = new WireGraph();
+  private snapEngine = new SnapEngine();
+  private wireEditFsm = new WireInteractionController();
+  private componentRerouteTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly componentRerouteDebounceMs = 65;
+  /** Polyline token → refresh segment ids / animation meta only when geometry changes. */
+  private wireGeometryTokens = new Map<string, string>();
+  /** Orthogonal rubber-band preview while rerouting (not endpoint/s segment drag). */
+  private reroutePreviewGraphics!: Graphics;
 
   // Interaction state
   private interactionState: WireInteractionState;
@@ -103,8 +159,12 @@ export class InteractiveWireSystem {
   private snapGraphics: Graphics;
   private junctionGraphics: Graphics;
 
-  constructor(gridCanvas: GridCanvas) {
+  constructor(
+    gridCanvas: GridCanvas,
+    options?: InteractiveWireSystemOptions,
+  ) {
     this.gridCanvas = gridCanvas;
+    this.onTopologyChanged = options?.onTopologyChanged;
     this.wires = new Map();
     this.wireContainer = new Container();
     this.components = new Map();
@@ -113,12 +173,18 @@ export class InteractiveWireSystem {
     // Start continuous update loop for wire position updates
     // this.startUpdateLoop(); // DISABLED - causing continuous getNodePosition calls
 
-    // Initialize router
+    // Initialize router — cell size must match GridCanvas spacing used for gridDims
+    // (worldToGrid = world / cellSize). A mismatch collapses A* into bogus "direct" diagonals.
     const gridDims = gridCanvas.getGridDimensions();
+    this.gridCellSize = gridCanvas.getSettings().size;
     console.log(
       `🔍 Grid dimensions: width=${gridDims.width}, height=${gridDims.height}`
     );
-    this.router = new OptimizedWireRouter(gridDims.width, gridDims.height, 10, {
+    this.router = new OptimizedWireRouter(
+      gridDims.width,
+      gridDims.height,
+      this.gridCellSize,
+      {
       preferOrthogonal: true,
       minimizeBends: true,
       avoidComponents: true,
@@ -126,14 +192,19 @@ export class InteractiveWireSystem {
       mergeCollinearSegments: true,
       enableCaching: true,
       maxSearchIterations: 8000,
-    });
+      },
+    );
 
     // Initialize hybrid router with open-source algorithms
     this.hybridRouter = new HybridWireRouter(
       gridDims.width,
       gridDims.height,
-      10
+      this.gridCellSize,
     );
+    this.wireRouter = new WireRouterFacade(this.router, this.hybridRouter, {
+      gridCellSize: this.gridCellSize,
+      maxCostIncreaseRatio: 1.15,
+    });
     console.log(
       "🚀 Initialized HybridWireRouter with Dagre.js and A* algorithms"
     );
@@ -161,7 +232,18 @@ export class InteractiveWireSystem {
     this.wireContainer.addChild(this.snapGraphics);
     this.wireContainer.addChild(this.junctionGraphics);
 
+    this.reroutePreviewGraphics = new Graphics();
+    this.wireContainer.addChild(this.reroutePreviewGraphics);
+
     this.setupEventListeners();
+  }
+
+  private notifyTopologyChanged(): void {
+    try {
+      this.onTopologyChanged?.();
+    } catch (e) {
+      console.warn("InteractiveWireSystem onTopologyChanged failed:", e);
+    }
   }
 
   /**
@@ -263,6 +345,14 @@ export class InteractiveWireSystem {
           // Start dragging now
           wire.isDragging = true;
           this.interactionState.dragMode = "reroute";
+          const op = this.interactionState.dragOperation;
+          this.wireEditFsm.beginSession(
+            op === "segment"
+              ? "movingWholeSegment"
+              : op === "endpoint_start" || op === "endpoint_end"
+                ? "movingEndpoint"
+                : "draggingFromWire"
+          );
           // Snapshot original path (for memory/restore)
           wire.cachedRoutes.set("preDrag", {
             segments: wire.segments.map((s) => ({
@@ -282,33 +372,29 @@ export class InteractiveWireSystem {
         // Show snap indicators
         this.showSnapIndicators(event.global);
 
-        // Preview new route
+        // Preview new route (same solver + obstacles as committed wires)
+        const avoid = this.collectWireAvoidComponentIds(wire);
+        const g = this.gridCellSize;
+        const snap = (x: number, y: number) => ({
+          x: Math.round(x / g) * g,
+          y: Math.round(y / g) * g,
+        });
         if ((wire.dragPoint as any).__endpoint === "start") {
-          // Grow/shrink from start endpoint
-          const newStart: RoutingPoint = {
-            x: event.global.x,
-            y: event.global.y,
-            layer: 0,
-          };
+          const sn = snap(event.global.x, event.global.y);
+          const newStart: RoutingPoint = { x: sn.x, y: sn.y, layer: 0 };
           const end = wire.segments[wire.segments.length - 1].end;
-          const preview = this.routeWireWithBends(newStart, end, []);
+          const preview = this.routeWireWithBends(newStart, end, avoid);
           wire.segments = preview.segments;
-          // Keep original end node
           wire.segments[wire.segments.length - 1].end = { ...end };
           this.drawWire(wire);
           this.updateSelectionGraphics();
           this.updateJunctionGraphics();
         } else if ((wire.dragPoint as any).__endpoint === "end") {
-          // Grow/shrink from end endpoint
           const start = wire.segments[0].start;
-          const newEnd: RoutingPoint = {
-            x: event.global.x,
-            y: event.global.y,
-            layer: 0,
-          };
-          const preview = this.routeWireWithBends(start, newEnd, []);
+          const sn = snap(event.global.x, event.global.y);
+          const newEnd: RoutingPoint = { x: sn.x, y: sn.y, layer: 0 };
+          const preview = this.routeWireWithBends(start, newEnd, avoid);
           wire.segments = preview.segments;
-          // Keep original start node
           wire.segments[0].start = { ...start };
           this.drawWire(wire);
           this.updateSelectionGraphics();
@@ -323,6 +409,7 @@ export class InteractiveWireSystem {
               -1;
           }
           if (idx >= 0 && idx < wire.segments.length) {
+            this.reroutePreviewGraphics.clear();
             this.moveSegmentWithMouse(
               wire,
               idx,
@@ -407,6 +494,7 @@ export class InteractiveWireSystem {
     this.interactionState.dragMode = "none";
     this.interactionState.pointerDown = null;
     this.interactionState.dragOperation = "none";
+    this.wireEditFsm.transition("idle");
     this.clearSnapIndicators();
     this.updateVisuals();
   }
@@ -449,7 +537,7 @@ export class InteractiveWireSystem {
     wire: InteractiveWireConnection,
     point: Point
   ): boolean {
-    const threshold = 8; // Click tolerance
+    const threshold = Math.max(8, schematicHitStrokeWidth() * 0.45);
 
     for (const segment of wire.segments) {
       const distance = this.distanceToLineSegment(
@@ -543,33 +631,110 @@ export class InteractiveWireSystem {
     return Math.sqrt(dx * dx + dy * dy);
   }
 
-  /**
-   * Show snap indicators for wire joining
-   */
-  private showSnapIndicators(point: Point): void {
-    this.snapGraphics.clear();
+  private snapWorldFromTarget(t: HoverTarget): { x: number; y: number } {
+    if (t.kind === "empty") return t.world;
+    return t.snap;
+  }
 
-    // Find nearby wires for joining
-    const nearbyWires = this.findNearbyWires(
-      point,
-      this.interactionState.snapThreshold
-    );
+  private projectPointToOrthoSegment(
+    point: Point,
+    segment: WireSegment
+  ): { x: number; y: number } {
+    if (segment.isHorizontal) {
+      const minX = Math.min(segment.start.x, segment.end.x);
+      const maxX = Math.max(segment.start.x, segment.end.x);
+      const x = Math.max(minX, Math.min(point.x, maxX));
+      return { x, y: segment.start.y };
+    }
+    const minY = Math.min(segment.start.y, segment.end.y);
+    const maxY = Math.max(segment.start.y, segment.end.y);
+    const y = Math.max(minY, Math.min(point.y, maxY));
+    return { x: segment.start.x, y };
+  }
 
-    for (const wire of nearbyWires) {
-      for (const segment of wire.segments) {
-        const distance = this.distanceToLineSegment(
-          point,
-          { x: segment.start.x, y: segment.start.y },
-          { x: segment.end.x, y: segment.end.y }
-        );
+  private buildSnapCandidates(point: Point): SnapCandidate[] {
+    const out: SnapCandidate[] = [];
+    const sel = this.interactionState.selectedWire;
 
-        if (distance <= this.interactionState.snapThreshold) {
-          // Draw snap indicator
-          this.snapGraphics.circle(point.x, point.y, 6);
-          this.snapGraphics.stroke({ width: 2, color: this.snapColor });
+    for (const c of this.components.values()) {
+      const cid = c.getName();
+      for (const n of c.getNodes()) {
+        const p = this.getNodePosition(c, n.id);
+        if (!p) continue;
+        const d = Math.hypot(p.x - point.x, p.y - point.y);
+        if (d < 48) {
+          out.push({
+            target: {
+              kind: "pin",
+              pinId: `${cid}:${n.id}`,
+              snap: { x: p.x, y: p.y },
+            },
+            priority: 0,
+            distPx: d,
+          });
         }
       }
     }
+
+    for (const j of this.nodes.values()) {
+      if (j.type !== "junction") continue;
+      const d = Math.hypot(j.x - point.x, j.y - point.y);
+      if (d < 48) {
+        out.push({
+          target: {
+            kind: "junction",
+            junctionId: j.id,
+            snap: { x: j.x, y: j.y },
+          },
+          priority: 1,
+          distPx: d,
+        });
+      }
+    }
+
+    for (const w of this.wires.values()) {
+      if (w.id === sel) continue;
+      for (let si = 0; si < w.segments.length; si++) {
+        const seg = w.segments[si]!;
+        const proj = this.projectPointToOrthoSegment(point, seg);
+        const d = Math.hypot(proj.x - point.x, proj.y - point.y);
+        if (d < 28) {
+          const sid = w.segmentStableIds?.[si] ?? `${w.id}:seg${si}:legacy`;
+          out.push({
+            target: {
+              kind: "segment",
+              wireId: w.id,
+              segmentId: sid,
+              t: 0,
+              snap: proj,
+            },
+            priority: 2,
+            distPx: d,
+          });
+        }
+      }
+    }
+
+    out.push({
+      target: { kind: "empty", world: { x: point.x, y: point.y } },
+      priority: 9,
+      distPx: 0,
+    });
+    return out;
+  }
+
+  /**
+   * Show snap indicators for wire joining (tiered targets + hysteresis).
+   */
+  private showSnapIndicators(point: Point): void {
+    this.snapGraphics.clear();
+    const resolved = this.snapEngine.resolve(this.buildSnapCandidates(point));
+    if (!resolved || resolved.target.kind === "empty") return;
+    const s = this.snapWorldFromTarget(resolved.target);
+    this.snapGraphics.circle(s.x, s.y, 7);
+    this.snapGraphics.stroke({ width: 2, color: this.snapColor, alpha: 0.9 });
+    this.snapGraphics.circle(s.x, s.y, 3);
+    this.snapGraphics.fill({ color: this.snapColor, alpha: 0.35 });
   }
 
   /**
@@ -606,31 +771,68 @@ export class InteractiveWireSystem {
    */
   private clearSnapIndicators(): void {
     this.snapGraphics.clear();
+    this.snapEngine.reset();
+    this.reroutePreviewGraphics.clear();
   }
 
   /**
    * Preview wire rerouting
    */
   private previewReroute(wire: InteractiveWireConnection, point: Point): void {
-    if (!wire.dragPoint) return;
+    const start = wire.segments[0]?.start;
+    const end = wire.segments[wire.segments.length - 1]?.end;
+    if (!start || !end) return;
 
-    // Create preview graphics
-    const previewGraphics = new Graphics();
-    previewGraphics.moveTo(wire.dragPoint.x, wire.dragPoint.y);
-    previewGraphics.lineTo(point.x, point.y);
-    previewGraphics.stroke({
+    const g = this.gridCellSize;
+    const through = {
+      x: Math.round(point.x / g) * g,
+      y: Math.round(point.y / g) * g,
+    };
+    const avoid = this.collectWireAvoidComponentIds(wire);
+    const s0: RoutingPoint = { x: start.x, y: start.y, layer: 0 };
+    const t: RoutingPoint = { x: through.x, y: through.y, layer: 0 };
+    const e0: RoutingPoint = { x: end.x, y: end.y, layer: 0 };
+    const headN = wire.nodes[0];
+    const tailN = wire.nodes[wire.nodes.length - 1];
+    const leg1p = this.routeSchematicPath(s0, t, avoid, {
+      straightExcludeComponentIds: straightExcludeForEndpointNodes(headN),
+      endpointPins: {
+        start:
+          headN.type === "component" &&
+          headN.componentId &&
+          headN.nodeId
+            ? { componentId: headN.componentId, nodeId: headN.nodeId }
+            : undefined,
+      },
+    });
+    const leg2p = this.routeSchematicPath(t, e0, avoid, {
+      straightExcludeComponentIds: straightExcludeForEndpointNodes(tailN),
+      endpointPins: {
+        end:
+          tailN.type === "component" &&
+          tailN.componentId &&
+          tailN.nodeId
+            ? { componentId: tailN.componentId, nodeId: tailN.nodeId }
+            : undefined,
+      },
+    });
+    const merged = this.finalizeWireSegments([
+      ...leg1p.segments,
+      ...leg2p.segments.slice(1),
+    ]);
+    const pts = this.segmentsToPolylinePoints(merged);
+    if (pts.length < 2) return;
+
+    this.reroutePreviewGraphics.clear();
+    this.reroutePreviewGraphics.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) {
+      this.reroutePreviewGraphics.lineTo(pts[i].x, pts[i].y);
+    }
+    this.reroutePreviewGraphics.stroke({
       width: 2,
       color: this.selectedWireColor,
-      alpha: 0.7,
+      alpha: 0.75,
     });
-
-    // Remove previous preview
-    this.wireContainer.removeChild(
-      this.wireContainer.children.find((child) => child === previewGraphics) ||
-        new Graphics()
-    );
-
-    this.wireContainer.addChild(previewGraphics);
   }
 
   /**
@@ -655,6 +857,116 @@ export class InteractiveWireSystem {
   }
 
   /**
+   * If (x,y) is already a junction on one of these wires, reuse it so the solver sees one net.
+   */
+  private findJunctionNearPointOnWires(
+    x: number,
+    y: number,
+    nearbyWires: InteractiveWireConnection[],
+    tol: number,
+  ): WireNode | null {
+    const tol2 = tol * tol;
+    let best: WireNode | null = null;
+    let bestD = tol2 + 1;
+    for (const w of nearbyWires) {
+      for (const n of w.nodes) {
+        if (n.type !== "junction") continue;
+        const d = (n.x - x) ** 2 + (n.y - y) ** 2;
+        if (d <= tol2 && d < bestD) {
+          bestD = d;
+          best = n;
+        }
+      }
+    }
+    return best;
+  }
+
+  /** True if (x,y) lies on the orthogonal polyline within tolerance (for join snap-invariant). */
+  private pointNearWirePolyline(
+    wire: InteractiveWireConnection,
+    x: number,
+    y: number,
+    tol: number,
+  ): boolean {
+    for (const seg of wire.segments) {
+      const x1 = seg.start.x;
+      const y1 = seg.start.y;
+      const x2 = seg.end.x;
+      const y2 = seg.end.y;
+      if (seg.isHorizontal) {
+        if (Math.abs(y - y1) > tol) continue;
+        const lo = Math.min(x1, x2) - tol;
+        const hi = Math.max(x1, x2) + tol;
+        if (x >= lo && x <= hi) return true;
+      } else {
+        if (Math.abs(x - x1) > tol) continue;
+        const lo = Math.min(y1, y2) - tol;
+        const hi = Math.max(y1, y2) + tol;
+        if (y >= lo && y <= hi) return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Reorder `wire.nodes` for T-junction / tap topology without changing geometry.
+   */
+  private reorderJunctionWireNodes(
+    wire: InteractiveWireConnection,
+    junction: WireNode,
+  ): void {
+    const comps = wire.nodes.filter((n) => n.type === "component");
+    const juncs = wire.nodes.filter((n) => n.type === "junction");
+
+    if (comps.length === 2) {
+      if (juncs.length === 1) {
+        wire.nodes = this.orderTwoComponentsAndJunctionAlongWire(
+          wire,
+          comps[0]!,
+          comps[1]!,
+          juncs[0]!,
+        );
+      } else if (juncs.length > 1) {
+        wire.nodes = this.sortWireNodesByArcLength(wire, [...comps, ...juncs]);
+      } else {
+        wire.nodes = [comps[0]!, junction, comps[1]!];
+      }
+    } else if (comps.length === 1 && juncs.length >= 1) {
+      wire.nodes = this.sortWireNodesByArcLength(wire, [...comps, ...juncs]);
+    } else if (comps.length >= 2) {
+      wire.nodes = [comps[0]!, junction, comps[comps.length - 1]!];
+    } else {
+      const first = wire.nodes[0];
+      const last = wire.nodes[wire.nodes.length - 1];
+      if (first && last) {
+        wire.nodes = [first, junction, last];
+      }
+    }
+  }
+
+  /**
+   * After a join: fix node order and only re-run the router if the junction is not already on the path.
+   */
+  private mergeJoinedWireGeometry(
+    wire: InteractiveWireConnection,
+    junction: WireNode,
+  ): void {
+    this.reorderJunctionWireNodes(wire, junction);
+    const weldTol = Math.max(4, this.gridCellSize * 0.25);
+    const alreadyOnPath =
+      wire.segments.length > 0 &&
+      this.pointNearWirePolyline(wire, junction.x, junction.y, weldTol);
+    if (!alreadyOnPath) {
+      this.reroutePolylineThroughOrderedNodes(wire);
+    }
+    this.ensureBreaksAtJunctions(wire);
+    this.syncHostWireGeometryAfterTapSplit(wire);
+    this.ensureNodeAnchors(wire);
+    this.refreshWireDerivedState(wire);
+    this.drawWire(wire);
+  }
+
+  /**
    * Join two wires at a specific point
    */
   private joinWires(
@@ -662,93 +974,470 @@ export class InteractiveWireSystem {
     wire2: InteractiveWireConnection,
     joinPoint: Point
   ): void {
-    // Create a junction node
+    // `wire2` is the host net segment we're tapping (stationary); snap the junction onto
+    // its orthogonal polyline and split in-place — same model as KiCad/Falstad tap-on-wire.
+    const snap = this.getNearestPointOnWire(wire2, joinPoint);
+    const joinReuseTol = Math.max(5, this.gridCellSize * 0.45);
+    const reusable = this.findJunctionNearPointOnWires(
+      snap.x,
+      snap.y,
+      [wire1, wire2],
+      joinReuseTol,
+    );
+
+    if (reusable) {
+      if (!reusable.connectedWires.includes(wire1.id)) {
+        reusable.connectedWires.push(wire1.id);
+      }
+      if (!reusable.connectedWires.includes(wire2.id)) {
+        reusable.connectedWires.push(wire2.id);
+      }
+      if (!wire1.nodes.some((n) => n === reusable)) {
+        wire1.nodes.push(reusable);
+      }
+      if (!wire2.nodes.some((n) => n === reusable)) {
+        wire2.nodes.push(reusable);
+      }
+      this.mergeJoinedWireGeometry(wire1, reusable);
+      this.mergeJoinedWireGeometry(wire2, reusable);
+      this.updateJunctionGraphics();
+      this.notifyTopologyChanged();
+      console.log(
+        `🔗 Joined wires ${wire1.id} and ${wire2.id} reusing junction ${reusable.id}`,
+      );
+      return;
+    }
+
     const junctionId = `junction_${this.nextNodeId++}`;
     const junction: WireNode = {
       id: junctionId,
-      x: joinPoint.x,
-      y: joinPoint.y,
+      x: snap.x,
+      y: snap.y,
       type: "junction",
       connectedWires: [wire1.id, wire2.id],
     };
-
     this.nodes.set(junctionId, junction);
 
-    // Update wire connections
+    const segIdx = this.getClosestSegmentIndex(wire2, snap);
+    const split =
+      segIdx >= 0
+        ? splitSegmentAtPoint(
+            wire2.segments,
+            segIdx,
+            snap,
+            this.gridCellSize,
+          )
+        : null;
+
+    if (split) {
+      wire2.segments = split.replacement;
+      junction.x = split.junctionWorld.x;
+      junction.y = split.junctionWorld.y;
+      this.setWireNodesTwoComponentWithJunction(wire2, junction);
+      this.ensureBreaksAtJunctions(wire2);
+      this.syncHostWireGeometryAfterTapSplit(wire2);
+      this.refreshWireDerivedState(wire2);
+      this.drawWire(wire2);
+    } else {
+      wire2.nodes.push(junction);
+      this.mergeJoinedWireGeometry(wire2, junction);
+    }
+
     wire1.nodes.push(junction);
-    wire2.nodes.push(junction);
+    this.mergeJoinedWireGeometry(wire1, junction);
 
-    // Reroute both wires through the junction
-    this.rerouteWireThroughJunction(wire1, junction);
-    this.rerouteWireThroughJunction(wire2, junction);
-
+    this.updateJunctionGraphics();
+    this.notifyTopologyChanged();
     console.log(
-      `🔗 Joined wires ${wire1.id} and ${wire2.id} at junction ${junctionId}`
+      `🔗 Joined wires ${wire1.id} and ${wire2.id} at junction ${junctionId}`,
     );
   }
 
   /**
-   * Reroute wire through a junction
+   * Reroute wire through a junction (full schematic re-route).
    */
   private rerouteWireThroughJunction(
     wire: InteractiveWireConnection,
     junction: WireNode
   ): void {
-    // Identify component endpoints (assume 2 endpoints)
-    const endpoints = wire.nodes.filter((n) => n.type === "component");
-    const startNode = endpoints[0] ?? wire.nodes[0];
-    const endNode = endpoints[1] ?? wire.nodes[wire.nodes.length - 1];
+    this.reorderJunctionWireNodes(wire, junction);
+    this.reroutePolylineThroughOrderedNodes(wire);
+  }
 
-    // Route start -> junction
-    const pathA = this.router.routeWire(
-      { x: startNode.x, y: startNode.y, layer: 0 },
-      { x: junction.x, y: junction.y, layer: 0 },
-      []
+  /**
+   * Arc length along current wire polyline to the closest point to (wx, wy).
+   */
+  private arcLengthAlongWireToPoint(
+    wire: InteractiveWireConnection,
+    wx: number,
+    wy: number
+  ): number {
+    const pts = this.segmentsToPolylinePoints(wire.segments);
+    if (pts.length < 2) return 0;
+    let bestS = 0;
+    let bestD = Infinity;
+    let acc = 0;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const ax = pts[i]!.x;
+      const ay = pts[i]!.y;
+      const bx = pts[i + 1]!.x;
+      const by = pts[i + 1]!.y;
+      const dx = bx - ax;
+      const dy = by - ay;
+      const segLen = Math.hypot(dx, dy);
+      if (segLen < 1e-6) continue;
+      const t = Math.max(
+        0,
+        Math.min(1, ((wx - ax) * dx + (wy - ay) * dy) / (segLen * segLen)),
+      );
+      const px = ax + t * dx;
+      const py = ay + t * dy;
+      const d = Math.hypot(wx - px, wy - py);
+      if (d < bestD) {
+        bestD = d;
+        bestS = acc + t * segLen;
+      }
+      acc += segLen;
+    }
+    return bestS;
+  }
+
+  private sortWireNodesByArcLength(
+    wire: InteractiveWireConnection,
+    nodes: WireNode[]
+  ): WireNode[] {
+    return [...nodes].sort(
+      (a, b) =>
+        this.arcLengthAlongWireToPoint(wire, a.x, a.y) -
+        this.arcLengthAlongWireToPoint(wire, b.x, b.y),
     );
-    // Route junction -> end
-    const pathB = this.router.routeWire(
-      { x: junction.x, y: junction.y, layer: 0 },
-      { x: endNode.x, y: endNode.y, layer: 0 },
-      []
-    );
+  }
 
-    // Update node order to [start, junction, end] for clarity
-    const newNodes: WireNode[] = [];
-    if (startNode) newNodes.push(startNode);
-    newNodes.push(junction);
-    if (endNode) newNodes.push(endNode);
-    wire.nodes = newNodes;
+  /**
+   * Order [A, junction, B] using path direction: component nearer to polyline start is first.
+   */
+  private orderTwoComponentsAndJunctionAlongWire(
+    wire: InteractiveWireConnection,
+    a: WireNode,
+    b: WireNode,
+    j: WireNode
+  ): WireNode[] {
+    if (!wire.segments.length) return [a, j, b];
+    const head = wire.segments[0]!.start;
+    const da = Math.hypot(a.x - head.x, a.y - head.y);
+    const db = Math.hypot(b.x - head.x, b.y - head.y);
+    const [first, second] = da <= db ? [a, b] : [b, a];
+    return [first, j, second];
+  }
 
-    // Update segments and redraw
-    wire.segments = [...pathA.segments, ...pathB.segments];
+  private setWireNodesTwoComponentWithJunction(
+    wire: InteractiveWireConnection,
+    junction: WireNode
+  ): void {
+    const comps = wire.nodes.filter((n) => n.type === "component");
+    if (comps.length >= 2) {
+      wire.nodes = this.orderTwoComponentsAndJunctionAlongWire(
+        wire,
+        comps[0]!,
+        comps[1]!,
+        junction,
+      );
+      return;
+    }
+    wire.nodes = [...comps, junction];
+  }
+
+  /**
+   * After an in-place split at a T-tap, `ensureNodeAnchors` + `normalizeWireSegments` can
+   * reverse the polyline, re-classify nearly-axis segments, or snap pins in ways that shorten
+   * the collinear trunk and leave a visible gap at the junction.
+   * Keep the split geometry and only weld junction coordinates + segment joints.
+   */
+  private syncHostWireGeometryAfterTapSplit(wire: InteractiveWireConnection): void {
+    const TOL = 4;
+    const juncs = wire.nodes.filter((n) => n.type === "junction");
+    for (const j of juncs) {
+      for (const s of wire.segments) {
+        if (
+          Math.abs(s.start.x - j.x) <= TOL &&
+          Math.abs(s.start.y - j.y) <= TOL
+        ) {
+          s.start.x = j.x;
+          s.start.y = j.y;
+        }
+        if (
+          Math.abs(s.end.x - j.x) <= TOL &&
+          Math.abs(s.end.y - j.y) <= TOL
+        ) {
+          s.end.x = j.x;
+          s.end.y = j.y;
+        }
+      }
+    }
+    for (let i = 1; i < wire.segments.length; i++) {
+      const prev = wire.segments[i - 1]!;
+      const cur = wire.segments[i]!;
+      cur.start.x = prev.end.x;
+      cur.start.y = prev.end.y;
+      if (cur.isHorizontal) {
+        cur.end.y = cur.start.y;
+      } else {
+        cur.end.x = cur.start.x;
+      }
+    }
+  }
+
+  /**
+   * Re-run schematic routing for a short branch that terminates on a junction (e.g. after sliding a segment).
+   */
+  private rerouteBranchToJunctionSchematic(
+    branchWire: InteractiveWireConnection,
+    fixedEndpoint: WireNode,
+    junction: WireNode
+  ): void {
+    const avoid = this.collectWireAvoidComponentIds(branchWire);
+    const startPos: RoutingPoint = {
+      x: fixedEndpoint.x,
+      y: fixedEndpoint.y,
+      layer: 0,
+    };
+    const endPos: RoutingPoint = {
+      x: junction.x,
+      y: junction.y,
+      layer: 0,
+    };
+    const path = this.routeSchematicPath(startPos, endPos, avoid, {
+      straightExcludeComponentIds:
+        straightExcludeForEndpointNodes(fixedEndpoint),
+      endpointPins:
+        fixedEndpoint.type === "component" &&
+        fixedEndpoint.componentId &&
+        fixedEndpoint.nodeId
+          ? {
+              start: {
+                componentId: fixedEndpoint.componentId,
+                nodeId: fixedEndpoint.nodeId,
+              },
+            }
+          : undefined,
+    });
+    branchWire.segments = path.segments;
+  }
+
+  /** Full reroute for wires with ordered component/junction nodes. */
+  private reroutePolylineThroughOrderedNodes(
+    wire: InteractiveWireConnection
+  ): void {
+    const ordered = wire.nodes;
+    if (ordered.length < 2) return;
+
+    const avoid = new Set<string>();
+    for (const n of ordered) {
+      if (n.type === "component" && n.componentId) avoid.add(n.componentId);
+    }
+    const avoidList = [...avoid];
+
+    let allSegs: WireSegment[] = [];
+    for (let i = 0; i < ordered.length - 1; i++) {
+      const a = ordered[i]!;
+      const b = ordered[i + 1]!;
+      const legPath = this.routeSchematicPath(
+        { x: a.x, y: a.y, layer: 0 },
+        { x: b.x, y: b.y, layer: 0 },
+        avoidList,
+        {
+          straightExcludeComponentIds:
+            straightExcludeForEndpointNodes(a, b),
+          endpointPins: this.endpointPinOptionsForWireNodes(a, b),
+        },
+      );
+      if (i === 0) allSegs = allSegs.concat(legPath.segments);
+      else allSegs = allSegs.concat(legPath.segments.slice(1));
+    }
+    wire.segments = this.finalizeWireSegments(allSegs);
+    this.ensureNodeAnchors(wire);
     this.drawWire(wire);
     this.updateSelectionGraphics();
+  }
+
+  private wireGeometryToken(wire: InteractiveWireConnection): string {
+    if (wire.segments.length === 0) return "";
+    return wire.segments
+      .map(
+        (s) =>
+          `${s.start.x.toFixed(2)},${s.start.y.toFixed(2)}->${s.end.x.toFixed(2)},${s.end.y.toFixed(2)}`
+      )
+      .join("|");
+  }
+
+  private refreshWireDerivedState(wire: InteractiveWireConnection): void {
+    const prevIds = wire.segmentStableIds;
+    const topologyChanged =
+      !prevIds || prevIds.length !== wire.segments.length;
+    const revision = topologyChanged
+      ? (wire.routeRevision ?? 0) + 1
+      : (wire.routeRevision ?? 0);
+    wire.routeRevision = revision;
+    wire.segmentStableIds = assignStableSegmentIds(
+      wire.id,
+      wire.segments,
+      topologyChanged ? undefined : prevIds,
+      revision
+    );
+    wire.animationPathMeta = buildAnimationPathMeta(
+      wire.id,
+      wire.segments,
+      wire.segmentStableIds,
+      revision
+    );
+  }
+
+  private syncComponentNodesForWire(wire: InteractiveWireConnection): void {
+    for (const n of wire.nodes) {
+      if (n.type !== "component" || !n.componentId || !n.nodeId) continue;
+      const c = this.components.get(n.componentId);
+      if (!c) continue;
+      const p = this.getNodePosition(c, n.nodeId);
+      if (p) {
+        n.x = p.x;
+        n.y = p.y;
+      }
+    }
+  }
+
+  private rerouteWireAfterComponentMove(wire: InteractiveWireConnection): void {
+    const ordered = wire.nodes;
+    if (ordered.length < 2) return;
+
+    const avoid = new Set<string>();
+    for (const n of ordered) {
+      if (n.type === "component" && n.componentId) avoid.add(n.componentId);
+    }
+    const avoidList = [...avoid];
+
+    if (
+      ordered.length === 2 &&
+      ordered[0]!.type === "component" &&
+      ordered[1]!.type === "component"
+    ) {
+      const a = ordered[0]!;
+      const b = ordered[1]!;
+      const startPos = { x: a.x, y: a.y, layer: 0 };
+      const endPos = { x: b.x, y: b.y, layer: 0 };
+      const prevCost = wirePathCost(wire.segments);
+      const pinOpts = {
+        start: { componentId: a.componentId!, nodeId: a.nodeId! },
+        end: { componentId: b.componentId!, nodeId: b.nodeId! },
+      };
+      let path = this.routeWireWithBends(startPos, endPos, avoidList, pinOpts);
+      if (
+        wire.segments.length > 0 &&
+        prevCost > 0 &&
+        wirePathCost(path.segments) >
+          prevCost * InteractiveWireSystem.ROUTE_STABILITY_COST_RATIO
+      ) {
+        const fb = this.wireRouter.routeWire(
+          startPos,
+          endPos,
+          avoidList,
+        );
+        path = this.postProcessPath(fb, startPos, endPos);
+      }
+      wire.segments = path.segments;
+      this.ensureNodeAnchors(wire);
+      return;
+    }
+
+    let allSegs: WireSegment[] = [];
+    for (let i = 0; i < ordered.length - 1; i++) {
+      const a = ordered[i]!;
+      const b = ordered[i + 1]!;
+      const leg = this.routeSchematicPath(
+        { x: a.x, y: a.y, layer: 0 },
+        { x: b.x, y: b.y, layer: 0 },
+        avoidList,
+        {
+          straightExcludeComponentIds: straightExcludeForEndpointNodes(a, b),
+          endpointPins: this.endpointPinOptionsForWireNodes(a, b),
+        },
+      );
+      if (i === 0) allSegs = allSegs.concat(leg.segments);
+      else allSegs = allSegs.concat(leg.segments.slice(1));
+    }
+    wire.segments = this.finalizeWireSegments(allSegs);
+    this.ensureNodeAnchors(wire);
+  }
+
+  private flushUpdateWirePositions(componentId: string): void {
+    this.wireRouter.invalidateCaches();
+    const connectedWires = Array.from(this.wires.values()).filter((wire) =>
+      wire.nodes.some((node) => node.componentId === componentId)
+    );
+
+    for (const wire of connectedWires) {
+      this.syncComponentNodesForWire(wire);
+      this.rerouteWireAfterComponentMove(wire);
+      this.drawWire(wire);
+    }
+    this.updateSelectionGraphics();
+    this.updateJunctionGraphics();
   }
 
   /**
    * Reroute wire to a new point with proper drag-to-route functionality
    */
   private rerouteWire(wire: InteractiveWireConnection, point: Point): void {
-    // Get the start and end nodes of the wire
-    const startNode = wire.nodes[0];
-    const endNode = wire.nodes[1];
+    this.syncComponentNodesForWire(wire);
+    const ordered = wire.nodes;
+    if (ordered.length < 2) return;
+    const startNode = ordered[0]!;
+    const endNode = ordered[ordered.length - 1]!;
 
-    if (!startNode || !endNode) return;
-
-    // Create new route from start node to end node through the drag point
-    const startPos = { x: startNode.x, y: startNode.y, layer: 0 };
-    const endPos = { x: endNode.x, y: endNode.y, layer: 0 };
-
-    // Create a route that goes through the drag point
-    const newPath = this.createRouteThroughPoint(startPos, endPos, point);
-
-    // Update wire segments
-    wire.segments = newPath.segments;
+    const g = this.gridCellSize;
+    const through = {
+      x: Math.round(point.x / g) * g,
+      y: Math.round(point.y / g) * g,
+    };
+    const avoid = this.collectWireAvoidComponentIds(wire);
+    const startPos: RoutingPoint = { x: startNode.x, y: startNode.y, layer: 0 };
+    const endPos: RoutingPoint = { x: endNode.x, y: endNode.y, layer: 0 };
+    const t: RoutingPoint = { x: through.x, y: through.y, layer: 0 };
+    const leg1 = this.routeSchematicPath(startPos, t, avoid, {
+      straightExcludeComponentIds:
+        straightExcludeForEndpointNodes(startNode),
+      endpointPins: {
+        start:
+          startNode.type === "component" &&
+          startNode.componentId &&
+          startNode.nodeId
+            ? {
+                componentId: startNode.componentId,
+                nodeId: startNode.nodeId,
+              }
+            : undefined,
+      },
+    });
+    const leg2 = this.routeSchematicPath(t, endPos, avoid, {
+      straightExcludeComponentIds:
+        straightExcludeForEndpointNodes(endNode),
+      endpointPins: {
+        end:
+          endNode.type === "component" &&
+          endNode.componentId &&
+          endNode.nodeId
+            ? {
+                componentId: endNode.componentId,
+                nodeId: endNode.nodeId,
+              }
+            : undefined,
+      },
+    });
+    wire.segments = this.finalizeWireSegments([
+      ...leg1.segments,
+      ...leg2.segments.slice(1),
+    ]);
+    this.ensureNodeAnchors(wire);
     this.drawWire(wire);
-
-    console.log(
-      `🔄 Rerouted wire ${wire.id} through point (${point.x}, ${point.y})`
-    );
   }
 
   /**
@@ -1063,34 +1752,120 @@ export class InteractiveWireSystem {
     if (existingWireId) {
       const existingWire = this.wires.get(existingWireId);
       if (existingWire) {
-        // Create junction at target point
+        const snapOnWire = this.getNearestPointOnWire(
+          existingWire,
+          targetPoint as Point
+        );
+        const tapReuseTol = Math.max(5, this.gridCellSize * 0.45);
+        const reusedTap = this.findJunctionNearPointOnWires(
+          snapOnWire.x,
+          snapOnWire.y,
+          [existingWire],
+          tapReuseTol,
+        );
+        if (reusedTap) {
+          if (!reusedTap.connectedWires.includes(wireId)) {
+            reusedTap.connectedWires.push(wireId);
+          }
+          const junctionPos = { x: reusedTap.x, y: reusedTap.y, layer: 0 };
+          const path = this.routeSchematicPath(startPos, junctionPos, [
+            startComponent,
+          ], {
+            straightExcludeComponentIds: new Set([startComponent]),
+            endpointPins: {
+              start: { componentId: startComponent, nodeId: startNode },
+            },
+          });
+
+          const hitGraphics = new Graphics();
+          const graphics = new Graphics();
+          const wire: InteractiveWireConnection = {
+            id: wireId,
+            nodes: [startWireNode, reusedTap],
+            segments: path.segments,
+            graphics,
+            hitGraphics,
+            isSelected: false,
+            isDragging: false,
+            current: 0,
+            voltage: 0,
+            cachedRoutes: new Map(),
+          };
+
+          this.wires.set(wireId, wire);
+          this.wireContainer.addChild(hitGraphics);
+          this.wireContainer.addChild(graphics);
+
+          this.nodes.set(startWireNode.id, startWireNode);
+
+          this.ensureNodeAnchors(wire);
+          this.ensureBreaksAtJunctions(existingWire);
+          this.drawWire(existingWire);
+          this.drawWire(wire);
+          this.notifyTopologyChanged();
+          return true;
+        }
+
         const junctionId = `junction_${this.nextNodeId++}`;
+        const segIdx = this.getClosestSegmentIndex(
+          existingWire,
+          snapOnWire as Point
+        );
+
         const junction: WireNode = {
           id: junctionId,
-          x: targetPoint.x,
-          y: targetPoint.y,
+          x: snapOnWire.x,
+          y: snapOnWire.y,
           type: "junction",
           connectedWires: [wireId, existingWireId],
         };
 
-        this.nodes.set(junctionId, junction);
+        const split =
+          segIdx >= 0
+            ? splitSegmentAtPoint(
+                existingWire.segments,
+                segIdx,
+                snapOnWire,
+                this.gridCellSize
+              )
+            : null;
 
-        // Reuse the same junction object for both wires so moves propagate
+        if (split) {
+          existingWire.segments = split.replacement;
+          junction.x = split.junctionWorld.x;
+          junction.y = split.junctionWorld.y;
+          this.setWireNodesTwoComponentWithJunction(existingWire, junction);
+          this.ensureBreaksAtJunctions(existingWire);
+          this.syncHostWireGeometryAfterTapSplit(existingWire);
+          this.refreshWireDerivedState(existingWire);
+        } else {
+          junction.x = snapOnWire.x;
+          junction.y = snapOnWire.y;
+          existingWire.nodes.push(junction);
+          this.rerouteWireThroughJunction(existingWire, junction);
+        }
+
+        this.nodes.set(junctionId, junction);
         const endWireNode: WireNode = junction;
 
-        // Route the wire
-        const path = this.router.routeWire(startPos, targetPoint, [
+        const junctionPos = { x: junction.x, y: junction.y, layer: 0 };
+        const path = this.routeSchematicPath(startPos, junctionPos, [
           startComponent,
-        ]);
+        ], {
+          straightExcludeComponentIds: new Set([startComponent]),
+          endpointPins: {
+            start: { componentId: startComponent, nodeId: startNode },
+          },
+        });
 
-        // Create wire graphics
+        const hitGraphics = new Graphics();
         const graphics = new Graphics();
-
         const wire: InteractiveWireConnection = {
           id: wireId,
           nodes: [startWireNode, endWireNode],
           segments: path.segments,
           graphics,
+          hitGraphics,
           isSelected: false,
           isDragging: false,
           current: 0,
@@ -1099,26 +1874,15 @@ export class InteractiveWireSystem {
         };
 
         this.wires.set(wireId, wire);
+        this.wireContainer.addChild(hitGraphics);
         this.wireContainer.addChild(graphics);
 
-        // Store nodes
         this.nodes.set(startWireNode.id, startWireNode);
-        this.nodes.set(junctionId, junction);
 
-        // Update existing wire to include junction and tag for drag follow
-        existingWire.nodes.push(junction);
-        (junction as any).__locksAxis = existingWire.segments.some(
-          (s) => s.isHorizontal
-        )
-          ? existingWire.segments[0].isHorizontal
-            ? "y"
-            : null
-          : existingWire.segments[0].isHorizontal
-            ? null
-            : "x";
-        this.rerouteWireThroughJunction(existingWire, junction);
-
+        this.ensureNodeAnchors(wire);
+        this.drawWire(existingWire);
         this.drawWire(wire);
+        this.notifyTopologyChanged();
         return true;
       }
     }
@@ -1126,6 +1890,7 @@ export class InteractiveWireSystem {
     // Fallback to regular wire creation
     return this.createWire(wireId, startComponent, startNode, "", "");
   }
+
 
   /**
    * Create a new wire
@@ -1174,12 +1939,17 @@ export class InteractiveWireSystem {
     };
 
     // Route the wire with proper orthogonal bends
-    const path = this.routeWireWithBends(startPos, endPos, [
-      startComponent,
-      endComponent,
-    ]);
+    const path = this.routeWireWithBends(
+      startPos,
+      endPos,
+      [startComponent, endComponent],
+      {
+        start: { componentId: startComponent, nodeId: startNode },
+        end: { componentId: endComponent, nodeId: endNode },
+      },
+    );
 
-    // Create wire graphics
+    const hitGraphics = new Graphics();
     const graphics = new Graphics();
 
     const wire: InteractiveWireConnection = {
@@ -1187,6 +1957,7 @@ export class InteractiveWireSystem {
       nodes: [startWireNode, endWireNode],
       segments: path.segments,
       graphics,
+      hitGraphics,
       isSelected: false,
       isDragging: false,
       current: 0,
@@ -1195,13 +1966,16 @@ export class InteractiveWireSystem {
     };
 
     this.wires.set(wireId, wire);
+    this.wireContainer.addChild(hitGraphics);
     this.wireContainer.addChild(graphics);
 
     // Store nodes
     this.nodes.set(startWireNode.id, startWireNode);
     this.nodes.set(endWireNode.id, endWireNode);
 
+    this.ensureNodeAnchors(wire);
     this.drawWire(wire);
+    this.notifyTopologyChanged();
     return true;
   }
 
@@ -1212,9 +1986,14 @@ export class InteractiveWireSystem {
     const wire = this.wires.get(wireId);
     if (!wire) return false;
 
+    if (wire.hitGraphics) {
+      this.wireContainer.removeChild(wire.hitGraphics);
+      wire.hitGraphics.destroy();
+    }
     this.wireContainer.removeChild(wire.graphics);
     wire.graphics.destroy();
     this.wires.delete(wireId);
+    this.wireGeometryTokens.delete(wireId);
 
     // Clean up nodes
     for (const node of wire.nodes) {
@@ -1223,28 +2002,14 @@ export class InteractiveWireSystem {
       }
     }
 
-    // Inform solver that any implicit node connections via this wire should be removed
     try {
-      // Each component endpoint is stored as componentId_nodeId in nodes
-      const endpoints = wire.nodes.filter((n) => n.type === "component");
-      if (endpoints.length === 2) {
-        const a = endpoints[0];
-        const b = endpoints[1];
-        // Best-effort: if EnhancedCircuitSolver is integrated to listen, emit a custom event
-        // Consumers can hook this to call solver.disconnectNodes(a.componentId!, a.nodeId!, b.componentId!, b.nodeId!)
-        (window as any).dispatchEvent?.(
-          new CustomEvent("wire:disconnected", {
-            detail: {
-              a: { componentId: a.componentId, nodeId: a.nodeId },
-              b: { componentId: b.componentId, nodeId: b.nodeId },
-              wireId,
-            },
-          })
-        );
-      }
-    } catch (err) {
-      console.warn("⚠️ Failed to notify solver about wire removal:", err);
+      (window as any).dispatchEvent?.(
+        new CustomEvent("wire:disconnected", { detail: { wireId } }),
+      );
+    } catch {
+      /* ignore */
     }
+    this.notifyTopologyChanged();
 
     return true;
   }
@@ -1330,12 +2095,24 @@ export class InteractiveWireSystem {
             endNode.y = endPos.y;
 
             // Re-route the wire with better algorithm
-            const path = this.routeWireWithBends(startPos, endPos, [
-              startNode.componentId!,
-              endNode.componentId!,
-            ]);
+            const path = this.routeWireWithBends(
+              startPos,
+              endPos,
+              [startNode.componentId!, endNode.componentId!],
+              {
+                start: {
+                  componentId: startNode.componentId!,
+                  nodeId: startNode.nodeId!,
+                },
+                end: {
+                  componentId: endNode.componentId!,
+                  nodeId: endNode.nodeId!,
+                },
+              },
+            );
 
             wire.segments = path.segments;
+            this.ensureNodeAnchors(wire);
 
             // Redraw the wire
             this.drawWire(wire);
@@ -1346,54 +2123,218 @@ export class InteractiveWireSystem {
   }
 
   /**
-   * Update wire positions when components move
+   * Update wire positions when components move (debounced batch reroute).
    */
   public updateWirePositions(componentId: string): void {
-    console.log(`🔄 Updating wire positions for component: ${componentId}`);
-
-    // Find all wires connected to this component
-    const connectedWires = Array.from(this.wires.values()).filter((wire) =>
-      wire.nodes.some((node) => node.componentId === componentId)
+    const pending = this.componentRerouteTimers.get(componentId);
+    if (pending !== undefined) clearTimeout(pending);
+    this.componentRerouteTimers.set(
+      componentId,
+      setTimeout(() => {
+        this.componentRerouteTimers.delete(componentId);
+        this.flushUpdateWirePositions(componentId);
+      }, this.componentRerouteDebounceMs)
     );
+  }
 
-    console.log(`🔄 Found ${connectedWires.length} connected wires`);
-
-    for (const wire of connectedWires) {
-      // Recalculate wire positions
-      const startNode = wire.nodes[0];
-      const endNode = wire.nodes[1];
-
-      if (startNode && endNode) {
-        const startComp = this.components.get(startNode.componentId!);
-        const endComp = this.components.get(endNode.componentId!);
-
-        if (startComp && endComp) {
-          const startPos = this.getNodePosition(startComp, startNode.nodeId!);
-          const endPos = this.getNodePosition(endComp, endNode.nodeId!);
-
-          if (startPos && endPos) {
-            // Update node positions
-            startNode.x = startPos.x;
-            startNode.y = startPos.y;
-            endNode.x = endPos.x;
-            endNode.y = endPos.y;
-
-            // Re-route the wire with proper orthogonal bends
-            const path = this.routeWireWithBends(startPos, endPos, [
-              startNode.componentId!,
-              endNode.componentId!,
-            ]);
-
-            wire.segments = path.segments;
-
-            // Redraw the wire
-            this.drawWire(wire);
-
-            console.log(`🔄 Updated wire ${wire.id} with new positions`);
-          }
-        }
-      }
+  /**
+   * Re-run the router for every wire from current pin/junction positions.
+   * Used after loading a saved project so old geometry is not kept by the move-reroute cost cap
+   * and all wires match the current grid/router.
+   */
+  public refreshAllWireGeometry(): void {
+    this.wireRouter.invalidateCaches();
+    this.reroutePreviewGraphics.clear();
+    this.clearSnapIndicators();
+    for (const wire of this.wires.values()) {
+      wire.segments = [];
+      this.wireGeometryTokens.delete(wire.id);
+      this.syncComponentNodesForWire(wire);
+      this.rerouteWireAfterComponentMove(wire);
+      this.drawWire(wire);
     }
+    this.updateSelectionGraphics();
+    this.updateJunctionGraphics();
+  }
+
+  /**
+   * Restore exact persisted wire geometry (nodes/segments/path meta) for deterministic reloads.
+   * Returns false when wire id is missing or payload is invalid.
+   */
+  public restoreWireGeometry(
+    wireId: string,
+    payload: {
+      nodes?: Array<{
+        id: string;
+        x: number;
+        y: number;
+        type: "component" | "junction" | "waypoint";
+        componentId?: string;
+        nodeId?: string;
+        connectedWires: string[];
+      }>;
+      segments?: Array<{
+        start: { x: number; y: number };
+        end: { x: number; y: number };
+        isHorizontal: boolean;
+        layer: number;
+      }>;
+      segmentStableIds?: string[];
+      routeRevision?: number;
+      animationPathMeta?: { segmentIds: string[]; revision: number };
+    },
+  ): boolean {
+    const wire = this.wires.get(wireId);
+    if (!wire) return false;
+    const nodes = payload.nodes;
+    const segments = payload.segments;
+    if (!Array.isArray(nodes) || !Array.isArray(segments) || segments.length === 0) {
+      return false;
+    }
+
+    wire.nodes = nodes.map((n) => ({
+      id: n.id,
+      x: n.x,
+      y: n.y,
+      type: n.type,
+      componentId: n.componentId,
+      nodeId: n.nodeId,
+      connectedWires: Array.isArray(n.connectedWires) ? [...n.connectedWires] : [],
+    }));
+    wire.segments = segments.map((s) => ({
+      start: { x: s.start.x, y: s.start.y },
+      end: { x: s.end.x, y: s.end.y },
+      isHorizontal: Boolean(s.isHorizontal),
+      layer: Number.isFinite(s.layer) ? s.layer : 0,
+    }));
+    wire.segmentStableIds = payload.segmentStableIds
+      ? [...payload.segmentStableIds]
+      : undefined;
+    wire.routeRevision =
+      typeof payload.routeRevision === "number" ? payload.routeRevision : wire.routeRevision;
+    wire.animationPathMeta = payload.animationPathMeta
+      ? {
+          segmentIds: [...payload.animationPathMeta.segmentIds],
+          revision: payload.animationPathMeta.revision,
+        }
+      : undefined;
+    this.drawWire(wire);
+    this.updateSelectionGraphics();
+    this.updateJunctionGraphics();
+    return true;
+  }
+
+  /** Read-only schematic junction map (editor topology). */
+  public getSchematicJunctionMap() {
+    return this.wireGraphView.getJunctionsFromWires(this.wires);
+  }
+
+  /**
+   * Preview / editor helper: same router + post-process as committed wires.
+   * Returns a contiguous world-space polyline (orthogonal geometry).
+   */
+  public getPreviewRoutePolyline(
+    ax: number,
+    ay: number,
+    bx: number,
+    by: number,
+    avoidComponentIds: string[],
+    snap?: { ax?: boolean; ay?: boolean; bx?: boolean; by?: boolean },
+    endpointPins?: {
+      start?: SchematicEndpointPinRef;
+      end?: SchematicEndpointPinRef;
+    },
+  ): { x: number; y: number }[] {
+    const g = this.gridCellSize;
+    const sa = (v: number, on: boolean | undefined) =>
+      on !== false ? Math.round(v / g) * g : v;
+    const sx0 = sa(ax, snap?.ax);
+    const sy0 = sa(ay, snap?.ay);
+    const sx1 = sa(bx, snap?.bx);
+    const sy1 = sa(by, snap?.by);
+    const start: RoutingPoint = { x: sx0, y: sy0, layer: 0 };
+    const end: RoutingPoint = { x: sx1, y: sy1, layer: 0 };
+    const path = this.routeSchematicPath(start, end, avoidComponentIds, {
+      straightExcludeComponentIds: new Set(avoidComponentIds),
+      endpointPins,
+    });
+    return this.segmentsToPolylinePoints(path.segments);
+  }
+
+  private segmentsToPolylinePoints(
+    segments: WireSegment[],
+  ): { x: number; y: number }[] {
+    if (!segments.length) return [];
+    const out: { x: number; y: number }[] = [];
+    for (const s of segments) {
+      if (!out.length) out.push({ x: s.start.x, y: s.start.y });
+      out.push({ x: s.end.x, y: s.end.y });
+    }
+    return out;
+  }
+
+  private collectWireAvoidComponentIds(
+    wire: InteractiveWireConnection,
+  ): string[] {
+    const s = new Set<string>();
+    for (const n of wire.nodes) {
+      if (n.type === "component" && n.componentId) s.add(n.componentId);
+    }
+    return [...s];
+  }
+
+  private endpointPinOptionsForWireNodes(
+    a: WireNode,
+    b: WireNode,
+  ): { start?: SchematicEndpointPinRef; end?: SchematicEndpointPinRef } {
+    const start =
+      a.type === "component" && a.componentId && a.nodeId
+        ? { componentId: a.componentId, nodeId: a.nodeId }
+        : undefined;
+    const end =
+      b.type === "component" && b.componentId && b.nodeId
+        ? { componentId: b.componentId, nodeId: b.nodeId }
+        : undefined;
+    return { start, end };
+  }
+
+  private getPinEscapeStub(ref: SchematicEndpointPinRef): {
+    pin: RoutingPoint;
+    anchor: RoutingPoint;
+    isHorizontal: boolean;
+  } | null {
+    const comp = this.components.get(ref.componentId);
+    if (!comp) return null;
+    const pin = this.getNodePosition(comp, ref.nodeId);
+    if (!pin) return null;
+    const node = comp.getNode(ref.nodeId);
+    if (!node) return null;
+    const dir = comp.getWireExitDirForNode(ref.nodeId);
+    const minPx = node.wireEscapeMinPx ?? DesignTokens.wire.escapeMinPx;
+    const anchor: RoutingPoint = {
+      x: pin.x + dir.x * minPx,
+      y: pin.y + dir.y * minPx,
+      layer: 0,
+    };
+    if (Math.hypot(anchor.x - pin.x, anchor.y - pin.y) < 0.5) return null;
+    return {
+      pin,
+      anchor,
+      isHorizontal: dir.y === 0,
+    };
+  }
+
+  private wirePathMetrics(segments: WireSegment[]): WirePath {
+    let totalLength = 0;
+    let bends = 0;
+    let prevH: boolean | null = null;
+    for (const s of segments) {
+      totalLength +=
+        Math.abs(s.end.x - s.start.x) + Math.abs(s.end.y - s.start.y);
+      if (prevH !== null && prevH !== s.isHorizontal) bends++;
+      prevH = s.isHorizontal;
+    }
+    return { segments, totalLength, bendCount: bends, layer: 0 };
   }
 
   /**
@@ -1402,23 +2343,16 @@ export class InteractiveWireSystem {
   private routeWireWithBends(
     start: RoutingPoint,
     end: RoutingPoint,
-    avoidComponents: string[]
+    avoidComponents: string[],
+    endpointPins?: {
+      start?: SchematicEndpointPinRef;
+      end?: SchematicEndpointPinRef;
+    },
   ): WirePath {
-    console.log(
-      `🧭 Routing wire using open-source algorithms from (${start.x}, ${start.y}) to (${end.x}, ${end.y})`
-    );
-
-    // Use the hybrid router with Dagre.js and A* algorithms
-    let path = this.hybridRouter.routeWire(start, end, avoidComponents);
-
-    // Snap endpoints to exact node positions and clean up segments
-    path = this.postProcessPath(path, start, end);
-
-    console.log(
-      `✅ Open-source routing result: ${path.segments.length} segments, ${path.totalLength.toFixed(2)}px, ${path.bendCount} bends`
-    );
-
-    return path;
+    return this.routeSchematicPath(start, end, avoidComponents, {
+      straightExcludeComponentIds: new Set(avoidComponents),
+      endpointPins,
+    });
   }
 
   /**
@@ -1427,7 +2361,7 @@ export class InteractiveWireSystem {
   private postProcessPath(
     path: WirePath,
     start: RoutingPoint,
-    end: RoutingPoint
+    end: RoutingPoint,
   ): WirePath {
     if (!path || !path.segments || path.segments.length === 0) {
       return { segments: [], totalLength: 0, bendCount: 0, layer: 0 };
@@ -1453,22 +2387,7 @@ export class InteractiveWireSystem {
       segments[i + 1].start.y = segments[i].end.y;
     }
 
-    // Merge collinear adjacent segments
-    const merged: typeof segments = [];
-    for (const seg of segments) {
-      const last = merged[merged.length - 1];
-      if (
-        last &&
-        last.isHorizontal === seg.isHorizontal &&
-        last.end.x === seg.start.x &&
-        last.end.y === seg.start.y
-      ) {
-        last.end.x = seg.end.x;
-        last.end.y = seg.end.y;
-      } else {
-        merged.push(seg);
-      }
-    }
+    const merged = this.finalizeWireSegments(segments);
 
     // Recompute metrics
     const totalLength = merged.reduce(
@@ -1481,6 +2400,134 @@ export class InteractiveWireSystem {
     }
 
     return { segments: merged, totalLength, bendCount: bends, layer: 0 };
+  }
+
+  /** Collinear merge + prune tiny H–V–H stair steps (grid / float noise). */
+  private finalizeWireSegments(segments: WireSegment[]): WireSegment[] {
+    return finalizeOrthogonalWireSegments(
+      segments,
+      Math.max(4, this.gridCellSize * 0.45),
+    );
+  }
+
+  private static readonly ROUTE_STABILITY_COST_RATIO = 1.15;
+
+  /**
+   * Unified schematic route used for preview, commit, multi-leg, and reroute.
+   * Straight segments when aligned and clear; else obstacle orthogonal router.
+   */
+  private routeSchematicPath(
+    start: RoutingPoint,
+    end: RoutingPoint,
+    avoidComponentIds: string[],
+    options?: {
+      straightExcludeComponentIds?: Set<string>;
+      stabilizeAgainstCost?: number;
+      stabilizeActive?: boolean;
+      endpointPins?: {
+        start?: SchematicEndpointPinRef;
+        end?: SchematicEndpointPinRef;
+      };
+    },
+  ): WirePath {
+    const straightEx =
+      options?.straightExcludeComponentIds ??
+      new Set(avoidComponentIds);
+
+    let routeStart = start;
+    let routeEnd = end;
+    const prefixSegs: WireSegment[] = [];
+    const suffixSegs: WireSegment[] = [];
+
+    if (options?.endpointPins?.start) {
+      const stub = this.getPinEscapeStub(options.endpointPins.start);
+      if (stub) {
+        routeStart = stub.anchor;
+        prefixSegs.push({
+          start: { ...stub.pin, layer: 0 },
+          end: { ...stub.anchor, layer: 0 },
+          isHorizontal: stub.isHorizontal,
+          layer: 0,
+        });
+      }
+    }
+    if (options?.endpointPins?.end) {
+      const stub = this.getPinEscapeStub(options.endpointPins.end);
+      if (stub) {
+        routeEnd = stub.anchor;
+        suffixSegs.push({
+          start: { ...stub.anchor, layer: 0 },
+          end: { ...stub.pin, layer: 0 },
+          isHorizontal: stub.isHorizontal,
+          layer: 0,
+        });
+      }
+    }
+
+    const raw = computeSchematicRoute({
+      start: routeStart,
+      end: routeEnd,
+      avoidComponentIds,
+      straightExcludeComponentIds: straightEx,
+      components: this.components,
+      routeOrthogonal: (s, e, a) => this.wireRouter.routeWire(s, e, a),
+      gridPx: this.gridCellSize,
+    });
+
+    let mid = raw.segments.map((s) => ({
+      start: { ...s.start, layer: s.start.layer ?? 0 },
+      end: { ...s.end, layer: s.end.layer ?? 0 },
+      isHorizontal: s.isHorizontal,
+      layer: s.layer ?? 0,
+    }));
+
+    if (
+      mid.length === 0 &&
+      Math.hypot(routeEnd.x - routeStart.x, routeEnd.y - routeStart.y) > 0.5
+    ) {
+      const fb = this.wireRouter.routeWire(
+        routeStart,
+        routeEnd,
+        avoidComponentIds,
+      );
+      mid = fb.segments.map((s) => ({
+        start: { ...s.start, layer: s.start.layer ?? 0 },
+        end: { ...s.end, layer: s.end.layer ?? 0 },
+        isHorizontal: s.isHorizontal,
+        layer: s.layer ?? 0,
+      }));
+    }
+
+    if (prefixSegs.length && mid.length) {
+      mid[0] = {
+        ...mid[0]!,
+        start: { ...prefixSegs[0]!.end, layer: 0 },
+      };
+    }
+    if (suffixSegs.length && mid.length) {
+      const li = mid.length - 1;
+      mid[li] = {
+        ...mid[li]!,
+        end: { ...suffixSegs[0]!.start, layer: 0 },
+      };
+    }
+
+    const mergedMid = mergeCollinearOrthoSegments(mid);
+    const combined = [...prefixSegs, ...mergedMid, ...suffixSegs];
+    let path = this.wirePathMetrics(combined);
+    path = this.postProcessPath(path, start, end);
+    if (
+      options?.stabilizeActive &&
+      options.stabilizeAgainstCost !== undefined &&
+      options.stabilizeAgainstCost > 0 &&
+      wirePathCost(path.segments) >
+        options.stabilizeAgainstCost *
+          InteractiveWireSystem.ROUTE_STABILITY_COST_RATIO
+    ) {
+      const fb = this.wireRouter.routeWire(start, end, avoidComponentIds);
+      path = this.postProcessPath(fb, start, end);
+    }
+    return path;
   }
 
   /**
@@ -1798,10 +2845,16 @@ export class InteractiveWireSystem {
    * Draw a wire
    */
   private drawWire(wire: InteractiveWireConnection): void {
+    const tok = this.wireGeometryToken(wire);
+    if (this.wireGeometryTokens.get(wire.id) !== tok) {
+      this.wireGeometryTokens.set(wire.id, tok);
+      this.refreshWireDerivedState(wire);
+    }
     const graphics = wire.graphics;
+    const hit = wire.hitGraphics;
     graphics.clear();
+    if (hit) hit.clear();
 
-    // Set wire color based on state
     let color = this.wireColor;
     if (wire.isSelected) {
       color = this.selectedWireColor;
@@ -1809,33 +2862,25 @@ export class InteractiveWireSystem {
       color = this.hoveredWireColor;
     }
 
-    // Draw each segment independently to avoid any polygon artifacts
     if (wire.segments.length > 0) {
-      for (const segment of wire.segments) {
-        graphics.moveTo(segment.start.x, segment.start.y);
-        graphics.lineTo(segment.end.x, segment.end.y);
-        graphics.stroke({
-          width: this.wireThickness,
-          color,
-          alpha: 1.0,
-          cap: "square",
-          join: "bevel",
-        });
+      drawRoundedOrthoWire(
+        graphics,
+        wire.segments,
+        { width: this.wireThickness, color, alpha: 1 },
+        schematicCornerRadius()
+      );
+      if (hit) {
+        drawWireHitPath(hit, wire.segments, schematicHitStrokeWidth());
       }
-    }
 
-    // Draw connection dots at endpoints
-    if (wire.segments.length > 0) {
       const firstSegment = wire.segments[0];
       const lastSegment = wire.segments[wire.segments.length - 1];
-
       graphics.circle(firstSegment.start.x, firstSegment.start.y, 3);
       graphics.fill(color);
       graphics.circle(lastSegment.end.x, lastSegment.end.y, 3);
       graphics.fill(color);
     }
 
-    // Force graphics to be visible
     graphics.visible = true;
     graphics.alpha = 1.0;
   }
@@ -1924,14 +2969,9 @@ export class InteractiveWireSystem {
             // Other wire nodes: [component|junction, junction]
             const otherStart =
               other.nodes[0] === node ? other.nodes[1] : other.nodes[0];
-            const startPos = {
-              x: otherStart.x,
-              y: otherStart.y,
-              layer: 0,
-            } as any;
-            const endPos = { x: node.x, y: node.y, layer: 0 } as any;
-            const routed = this.router.routeWire(startPos, endPos, []);
-            other.segments = routed.segments;
+            if (!otherStart) continue;
+            this.rerouteBranchToJunctionSchematic(other, otherStart, node);
+            this.ensureNodeAnchors(other);
             this.drawWire(other);
           }
         }
@@ -1969,14 +3009,9 @@ export class InteractiveWireSystem {
             if (!other) continue;
             const otherStart =
               other.nodes[0] === node ? other.nodes[1] : other.nodes[0];
-            const startPos = {
-              x: otherStart.x,
-              y: otherStart.y,
-              layer: 0,
-            } as any;
-            const endPos = { x: node.x, y: node.y, layer: 0 } as any;
-            const routed = this.router.routeWire(startPos, endPos, []);
-            other.segments = routed.segments;
+            if (!otherStart) continue;
+            this.rerouteBranchToJunctionSchematic(other, otherStart, node);
+            this.ensureNodeAnchors(other);
             this.drawWire(other);
           }
         }
@@ -2038,16 +3073,13 @@ export class InteractiveWireSystem {
 
     const epsilon = 0.5;
 
-    // Resolve node world positions (prefer live component locations)
-    // Use first and last COMPONENT endpoints; ignore junctions in the middle
-    const componentNodes = wire.nodes.filter(
-      (n) => n && n.type === "component"
-    );
-    const startNode = componentNodes[0];
-    const endNode = componentNodes[componentNodes.length - 1];
+    const head = wire.nodes[0];
+    const tail = wire.nodes[wire.nodes.length - 1];
+    if (!head || !tail) return;
 
-    const startPos = this.resolveNodeWorldPosition(startNode as any);
-    const endPos = this.resolveNodeWorldPosition(endNode as any);
+    // Topology order: pin → … → pin | junction (junctions use stored x,y)
+    const startPos = this.resolveNodeWorldPosition(head);
+    const endPos = this.resolveNodeWorldPosition(tail);
 
     // Ensure path direction corresponds to start->end nodes
     const firstSeg = wire.segments[0];
@@ -2060,7 +3092,13 @@ export class InteractiveWireSystem {
       lastSeg.end.x - startPos.x,
       lastSeg.end.y - startPos.y
     );
-    if (distStartToLast + 0.01 < distStartToFirst) {
+    const hasJunction = wire.nodes.some((n) => n.type === "junction");
+    // Reversing a net that already has tap junctions breaks T-topology that was built
+    // from an in-place split (segments are ordered and nodes are [A, J, B]).
+    if (
+      !hasJunction &&
+      distStartToLast + 0.01 < distStartToFirst
+    ) {
       // Reverse path so it runs from startPos to endPos
       wire.segments.reverse();
       for (const s of wire.segments) {
@@ -2150,9 +3188,11 @@ export class InteractiveWireSystem {
     if (last.isHorizontal) last.start.y = last.end.y;
     else last.start.x = last.end.x;
 
-    // Final merge of collinear neighbors, but keep explicit breaks at junctions
+    // Final merge of collinear neighbors; keep explicit breaks at junctions only.
     const merged: typeof wire.segments = [];
-    for (const s of wire.segments) {
+    const raw = wire.segments;
+    for (let si = 0; si < raw.length; si++) {
+      const s = raw[si]!;
       const prev = merged[merged.length - 1];
       const seamHasJunction = this.hasJunctionAtPoint(
         wire,
@@ -2160,13 +3200,13 @@ export class InteractiveWireSystem {
         s.start.y,
         2
       );
-      if (
+      const canCollinearMerge =
         prev &&
         !seamHasJunction &&
         prev.isHorizontal === s.isHorizontal &&
         prev.end.x === s.start.x &&
-        prev.end.y === s.start.y
-      ) {
+        prev.end.y === s.start.y;
+      if (canCollinearMerge) {
         prev.end = { ...s.end };
       } else {
         merged.push({ ...s });
@@ -2183,6 +3223,14 @@ export class InteractiveWireSystem {
   private normalizeWireSegments(wire: InteractiveWireConnection): void {
     const epsilon = 0.001;
     const round = (v: number) => Math.round(v);
+    const pinStart =
+      wire.segments.length > 0
+        ? { ...wire.segments[0].start }
+        : { x: 0, y: 0, layer: 0 };
+    const pinEnd =
+      wire.segments.length > 0
+        ? { ...wire.segments[wire.segments.length - 1].end }
+        : { x: 0, y: 0, layer: 0 };
     const normalized: WireSegment[] = [];
 
     for (let i = 0; i < wire.segments.length; i++) {
@@ -2194,14 +3242,20 @@ export class InteractiveWireSystem {
         layer: 0,
       };
 
-      // Re-derive orientation and align
+      // Re-derive orientation: near-axis segments must stay axis-locked (rounding
+      // noise was flipping short horiz/vert legs and opening gaps at T-junctions).
       const dx = Math.abs(s.end.x - s.start.x);
       const dy = Math.abs(s.end.y - s.start.y);
-      if (dx >= dy) {
-        s.isHorizontal = true;
+      const axisEps = 0.75;
+      let horiz = s0.isHorizontal;
+      if (dy < axisEps && dx >= axisEps) horiz = true;
+      else if (dx < axisEps && dy >= axisEps) horiz = false;
+      else if (dx >= dy) horiz = true;
+      else horiz = false;
+      s.isHorizontal = horiz;
+      if (horiz) {
         s.end.y = s.start.y;
       } else {
-        s.isHorizontal = false;
         s.end.x = s.start.x;
       }
 
@@ -2221,14 +3275,13 @@ export class InteractiveWireSystem {
         continue;
       }
 
-      // Merge collinear
       const prev = normalized[normalized.length - 1];
-      if (
+      const canMerge =
         prev &&
         prev.isHorizontal === s.isHorizontal &&
         prev.end.x === s.start.x &&
-        prev.end.y === s.start.y
-      ) {
+        prev.end.y === s.start.y;
+      if (canMerge) {
         prev.end = { ...s.end } as any;
       } else {
         normalized.push(s);
@@ -2236,6 +3289,19 @@ export class InteractiveWireSystem {
     }
 
     wire.segments = normalized;
+    if (normalized.length > 0) {
+      normalized[0].start = { ...pinStart, layer: 0 };
+      if (normalized[0].isHorizontal) {
+        normalized[0].end.y = normalized[0].start.y;
+      } else {
+        normalized[0].end.x = normalized[0].start.x;
+      }
+      const Li = normalized.length - 1;
+      normalized[Li].end = { ...pinEnd, layer: 0 };
+      const last = normalized[Li];
+      if (last.isHorizontal) last.start.y = last.end.y;
+      else last.start.x = last.end.x;
+    }
   }
 
   private hasJunctionAtPoint(
@@ -2382,13 +3448,17 @@ export class InteractiveWireSystem {
   private updateJunctionGraphics(): void {
     this.junctionGraphics.clear();
 
-    // Draw all junction nodes
+    // Explicit electrical junctions (T-joins): visible dot distinct from wire crossings.
     this.nodes.forEach((node) => {
       if (node.type === "junction") {
-        this.junctionGraphics.circle(node.x, node.y, 4);
-        this.junctionGraphics.fill(this.junctionColor);
-        this.junctionGraphics.circle(node.x, node.y, 6);
-        this.junctionGraphics.stroke({ width: 2, color: this.junctionColor });
+        this.junctionGraphics.circle(node.x, node.y, 5.5);
+        this.junctionGraphics.fill({ color: this.junctionColor, alpha: 1 });
+        this.junctionGraphics.circle(node.x, node.y, 8);
+        this.junctionGraphics.stroke({
+          width: 2,
+          color: 0xfff8e7,
+          alpha: 0.85,
+        });
       }
     });
   }
@@ -2491,11 +3561,16 @@ export class InteractiveWireSystem {
    */
   public clearWires(): void {
     this.wires.forEach((wire) => {
+      if (wire.hitGraphics) {
+        this.wireContainer.removeChild(wire.hitGraphics);
+        wire.hitGraphics.destroy();
+      }
       this.wireContainer.removeChild(wire.graphics);
       wire.graphics.destroy();
     });
     this.wires.clear();
     this.nodes.clear();
+    this.wireGeometryTokens.clear();
   }
 
   /**
@@ -2508,17 +3583,21 @@ export class InteractiveWireSystem {
     const wire = this.wires.get(wireId);
     if (!wire) return false;
 
-    // Remove from container
+    if (wire.hitGraphics?.parent) {
+      wire.hitGraphics.parent.removeChild(wire.hitGraphics);
+    }
+    wire.hitGraphics?.destroy();
     if (wire.graphics.parent) {
       wire.graphics.parent.removeChild(wire.graphics);
     }
+    wire.graphics.destroy();
 
-    // Clean up nodes
     for (const node of wire.nodes) {
       this.nodes.delete(node.id);
     }
 
     this.wires.delete(wireId);
+    this.wireGeometryTokens.delete(wireId);
     this.interactionState.selectedWire = null;
     this.updateSelectionGraphics();
 
@@ -2544,6 +3623,7 @@ export class InteractiveWireSystem {
       }
     } catch {}
 
+    this.notifyTopologyChanged();
     return true;
   }
 
@@ -2660,10 +3740,11 @@ export class InteractiveWireSystem {
    * Destroy the system
    */
   public destroy(): void {
+    for (const t of this.componentRerouteTimers.values()) clearTimeout(t);
+    this.componentRerouteTimers.clear();
     this.clearWires();
     this.wireContainer.destroy();
-    this.router.clearCache();
-    this.hybridRouter.clear();
+    this.wireRouter.invalidateCaches();
   }
 
   /**

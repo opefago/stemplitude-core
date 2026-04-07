@@ -15,6 +15,7 @@ import {
   type AttendanceExcusalStaffRow,
   type StudentProfile,
 } from "../../lib/api/students";
+import { ApiHttpError } from "../../lib/api/client";
 import { listUsers } from "../../lib/api/users";
 import { listNotifications, type NotificationRecord } from "../../lib/api/notifications";
 import { useTenantRealtime } from "../../hooks/useTenantRealtime";
@@ -51,6 +52,7 @@ export function AdminDashboard() {
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
   const [pendingExcusals, setPendingExcusals] = useState<AttendanceExcusalStaffRow[]>([]);
   const [excusalsLoading, setExcusalsLoading] = useState(false);
+  const [excusalsError, setExcusalsError] = useState<string | null>(null);
   const [denyingId, setDenyingId] = useState<string | null>(null);
   const [denyNote, setDenyNote] = useState("");
   const [excusalActionId, setExcusalActionId] = useState<string | null>(null);
@@ -88,11 +90,19 @@ export function AdminDashboard() {
       try {
         const pending = await listAttendanceExcusalRequestsStaff({
           status: "pending",
-          limit: 20,
+          limit: 10,
         });
         setPendingExcusals(pending);
-      } catch {
+        setExcusalsError(null);
+      } catch (e) {
         setPendingExcusals([]);
+        if (e instanceof ApiHttpError) {
+          setExcusalsError(e.message || `Could not load requests (${e.status})`);
+        } else if (e instanceof Error) {
+          setExcusalsError(e.message);
+        } else {
+          setExcusalsError("Could not load requests");
+        }
       } finally {
         setExcusalsLoading(false);
       }
@@ -148,11 +158,19 @@ export function AdminDashboard() {
     try {
       const pending = await listAttendanceExcusalRequestsStaff({
         status: "pending",
-        limit: 20,
+        limit: 10,
       });
       setPendingExcusals(pending);
-    } catch {
+      setExcusalsError(null);
+    } catch (e) {
       setPendingExcusals([]);
+      if (e instanceof ApiHttpError) {
+        setExcusalsError(e.message || `Could not load requests (${e.status})`);
+      } else if (e instanceof Error) {
+        setExcusalsError(e.message);
+      } else {
+        setExcusalsError("Could not load requests");
+      }
     } finally {
       setExcusalsLoading(false);
     }
@@ -428,12 +446,21 @@ export function AdminDashboard() {
               <ClipboardList size={22} aria-hidden />
             </div>
           </div>
+          <Link
+            to="/app/excusals"
+            className="dashboard-bento__card-action"
+            aria-label="View all parent excusal requests"
+          >
+            View all <ArrowRight size={14} aria-hidden />
+          </Link>
           <p className="admin-dashboard__excusals-intro">
             When guardians submit an absence excuse, approve it to record the learner as excused for
             that session, or deny with an optional note.
           </p>
           {excusalsLoading ? (
             <p className="dashboard-bento__card-desc">Loading…</p>
+          ) : excusalsError ? (
+            <p className="dashboard-bento__card-desc" role="alert">{excusalsError}</p>
           ) : pendingExcusals.length === 0 ? (
             <p className="dashboard-bento__card-desc">No pending requests.</p>
           ) : (

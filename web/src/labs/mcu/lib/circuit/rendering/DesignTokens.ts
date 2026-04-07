@@ -29,6 +29,8 @@ export const DesignTokens = {
   // Wire colors and sizes
   wire: {
     baseColor: 0xffffff,
+    /** Minimum axis-aligned stub from pin before main routing (schematic escape). */
+    escapeMinPx: 14,
     thickness: 2,
     glowColor: 0x00ffff,
     glowMinAlpha: 0.05,

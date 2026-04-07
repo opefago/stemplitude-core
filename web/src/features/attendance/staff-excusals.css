@@ -1,0 +1,139 @@
+.staff-excusals {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.staff-excusals__header {
+  margin-bottom: 14px;
+}
+
+.staff-excusals__crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-text-secondary, #64748b);
+  text-decoration: none;
+  margin-bottom: 6px;
+}
+
+.staff-excusals__title {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+.staff-excusals__subtitle {
+  margin-top: 6px;
+  color: var(--color-text-secondary, #64748b);
+}
+
+.staff-excusals__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.staff-excusals__label {
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.staff-excusals__select,
+.staff-excusals__textarea {
+  border: 1px solid var(--color-border, #d1d5db);
+  border-radius: 8px;
+  padding: 8px;
+  font: inherit;
+}
+
+.staff-excusals__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.staff-excusals__item {
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 12px;
+  background: var(--color-surface, #fff);
+  padding: 12px;
+}
+
+.staff-excusals__top {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.staff-excusals__meta {
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary, #64748b);
+}
+
+.staff-excusals__reason {
+  margin: 8px 0 0;
+}
+
+.staff-excusals__deny-box {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.staff-excusals__actions {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+}
+
+.staff-excusals__btn {
+  border-radius: 8px;
+  border: 1px solid var(--color-border, #d1d5db);
+  padding: 7px 10px;
+  font-size: 0.875rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.staff-excusals__btn--primary {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: white;
+}
+
+.staff-excusals__btn--danger {
+  background: #dc2626;
+  border-color: #dc2626;
+  color: white;
+}
+
+.staff-excusals__btn--ghost {
+  background: transparent;
+  color: var(--color-text, #1f2937);
+}
+
+.staff-excusals__btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.staff-excusals__muted {
+  color: var(--color-text-secondary, #64748b);
+}
+
+.staff-excusals__error {
+  color: #b91c1c;
+}
+
+.staff-excusals__pager {
+  margin-top: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}

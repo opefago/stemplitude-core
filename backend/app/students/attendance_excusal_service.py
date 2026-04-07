@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
@@ -15,7 +16,13 @@ from app.classrooms.models import Classroom, ClassroomSession, ClassroomStudent
 from app.classrooms.repository import ClassroomRepository
 from app.classrooms.service import ClassroomService
 from app.dependencies import CurrentIdentity
+from app.email.outbox import enqueue_transactional_email
+from app.email.presets import build_notification_email
+from app.email.templates import app_absolute_url
+from app.notifications.models import Notification
 from app.progress.models import Attendance, AttendanceExcusalRequest
+from app.realtime.user_events import publish_notifications_changed
+from app.roles.models import Role
 from app.students.models import Student
 from app.students.schemas import (
     AttendanceExcusalCreate,
@@ -26,11 +33,14 @@ from app.students.schemas import (
     GuardianAttendanceSessionRow,
     GuardianExcusalSummary,
 )
+from app.tenants.models import Membership
+from app.users.models import User
 from app.classrooms.schemas import RecordAttendanceRequest
 
 _PENDING = "pending"
 _APPROVED = "approved"
 _DENIED = "denied"
+logger = logging.getLogger(__name__)
 
 
 def _student_label(s: Student) -> str:
@@ -44,6 +54,90 @@ class AttendanceExcusalService:
     def __init__(self, session: AsyncSession):
         self.session = session
         self.classroom_repo = ClassroomRepository(session)
+
+    async def _notify_staff_excusal_submission(
+        self,
+        *,
+        tenant_id: UUID,
+        student_id: UUID,
+        classroom_id: UUID,
+        session_id: UUID,
+        updated_existing: bool,
+    ) -> None:
+        classroom = await self.classroom_repo.get_by_id(classroom_id, tenant_id)
+        student = await self.session.get(Student, student_id)
+        student_name = _student_label(student) if student else "A student"
+        classroom_name = (
+            classroom.name.strip() if classroom and classroom.name else "a class"
+        )
+
+        recipients: dict[UUID, str | None] = {}
+        if classroom and classroom.instructor_id:
+            instructor = await self.session.get(User, classroom.instructor_id)
+            if instructor and instructor.is_active:
+                recipients[instructor.id] = instructor.email
+
+        staff_rows = (
+            await self.session.execute(
+                select(User.id, User.email)
+                .join(Membership, Membership.user_id == User.id)
+                .join(Role, Role.id == Membership.role_id)
+                .where(
+                    Membership.tenant_id == tenant_id,
+                    Membership.is_active == True,
+                    User.is_active == True,
+                    Role.is_active == True,
+                    Role.slug.in_(("owner", "admin")),
+                )
+            )
+        ).all()
+        for uid, email in staff_rows:
+            recipients.setdefault(uid, email)
+
+        if not recipients:
+            return
+
+        verb = "updated" if updated_existing else "submitted"
+        title = f"Parent excusal request {verb}"
+        body = (
+            f"{student_name} has a {verb} excusal request for {classroom_name} "
+            f"(session {session_id})."
+        )
+        for uid in recipients:
+            self.session.add(
+                Notification(
+                    user_id=uid,
+                    student_id=None,
+                    tenant_id=tenant_id,
+                    type="attendance_excusal",
+                    title=title,
+                    body=body,
+                    action_path="/app",
+                    action_label="Review requests",
+                )
+            )
+        await self.session.flush()
+
+        for uid, email in recipients.items():
+            try:
+                await publish_notifications_changed(tenant_id, uid)
+            except Exception:
+                logger.exception(
+                    "Failed to publish staff excusal notification uid=%s", uid
+                )
+            if email and email.strip():
+                prepared = build_notification_email(
+                    subject=title,
+                    headline=title,
+                    summary=body,
+                    action_url=app_absolute_url("/app"),
+                    action_label="Open dashboard",
+                )
+                enqueue_transactional_email(
+                    to_email=email.strip(),
+                    prepared=prepared,
+                    tenant_id=tenant_id,
+                )
 
     async def guardian_overview(
         self,
@@ -145,7 +239,43 @@ class AttendanceExcusalService:
             data.session_id, data.classroom_id, tenant_id
         )
         if not session_obj:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+            # Some parent-facing calendars can include scheduled recurrence occurrences
+            # that are not yet materialized into `classroom_sessions`.
+            if data.session_start is not None and data.session_end is not None:
+                classroom = await self.classroom_repo.get_by_id(
+                    data.classroom_id, tenant_id
+                )
+                if not classroom:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Classroom not found",
+                    )
+                if data.session_end <= data.session_start:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="session_end must be after session_start",
+                    )
+                session_obj = ClassroomSession(
+                    id=data.session_id,
+                    classroom_id=data.classroom_id,
+                    tenant_id=tenant_id,
+                    session_start=data.session_start,
+                    session_end=data.session_end,
+                    status="scheduled",
+                )
+                self.session.add(session_obj)
+                try:
+                    await self.session.flush()
+                except IntegrityError:
+                    # If another request materialized it first, re-load.
+                    session_obj = await self.classroom_repo.get_session_by_id(
+                        data.session_id, data.classroom_id, tenant_id
+                    )
+            if not session_obj:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Session not found",
+                )
         if session_obj.status == "canceled":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -179,10 +309,20 @@ class AttendanceExcusalService:
             )
         )
         if existing_p:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="A pending excusal already exists for this session",
+            # Allow guardians to resubmit while pending by updating the same request.
+            existing_p.reason = data.reason.strip()
+            existing_p.submitted_by_user_id = guardian_user_id
+            existing_p.updated_at = now
+            await self.session.flush()
+            await self.session.refresh(existing_p)
+            await self._notify_staff_excusal_submission(
+                tenant_id=tenant_id,
+                student_id=student_id,
+                classroom_id=data.classroom_id,
+                session_id=data.session_id,
+                updated_existing=True,
             )
+            return AttendanceExcusalRow.model_validate(existing_p)
 
         row = AttendanceExcusalRequest(
             id=uuid.uuid4(),
@@ -198,11 +338,40 @@ class AttendanceExcusalService:
         try:
             await self.session.flush()
         except IntegrityError as err:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="A pending excusal already exists for this session",
-            ) from err
+            # Race-safe fallback: another request may have created pending first.
+            existing_p = await self.session.scalar(
+                select(AttendanceExcusalRequest).where(
+                    AttendanceExcusalRequest.session_id == data.session_id,
+                    AttendanceExcusalRequest.student_id == student_id,
+                    AttendanceExcusalRequest.status == _PENDING,
+                )
+            )
+            if not existing_p:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="A pending excusal already exists for this session",
+                ) from err
+            existing_p.reason = data.reason.strip()
+            existing_p.submitted_by_user_id = guardian_user_id
+            existing_p.updated_at = now
+            await self.session.flush()
+            await self.session.refresh(existing_p)
+            await self._notify_staff_excusal_submission(
+                tenant_id=tenant_id,
+                student_id=student_id,
+                classroom_id=data.classroom_id,
+                session_id=data.session_id,
+                updated_existing=True,
+            )
+            return AttendanceExcusalRow.model_validate(existing_p)
         await self.session.refresh(row)
+        await self._notify_staff_excusal_submission(
+            tenant_id=tenant_id,
+            student_id=student_id,
+            classroom_id=data.classroom_id,
+            session_id=data.session_id,
+            updated_existing=False,
+        )
         return AttendanceExcusalRow.model_validate(row)
 
     async def list_for_staff(
@@ -210,11 +379,12 @@ class AttendanceExcusalService:
         *,
         tenant_id: UUID,
         identity: CurrentIdentity,
+        effective_role: str | None = None,
         status_filter: str | None,
         skip: int,
         limit: int,
     ) -> list[AttendanceExcusalStaffRow]:
-        role = (identity.role or "").strip().lower()
+        role = (effective_role or identity.role or "").strip().lower()
         stmt = (
             select(AttendanceExcusalRequest, Student, Classroom.name)
             .join(Student, Student.id == AttendanceExcusalRequest.student_id)
@@ -223,11 +393,6 @@ class AttendanceExcusalService:
         )
         if role == "instructor":
             stmt = stmt.where(Classroom.instructor_id == identity.id)
-        elif role not in ("owner", "admin"):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not allowed to view excusal requests",
-            )
 
         if status_filter:
             stmt = stmt.where(AttendanceExcusalRequest.status == status_filter)
@@ -265,11 +430,10 @@ class AttendanceExcusalService:
         excusal_id: UUID,
         tenant_id: UUID,
         identity: CurrentIdentity,
+        effective_role: str | None = None,
         data: AttendanceExcusalReview,
     ) -> AttendanceExcusalStaffRow:
-        role = (identity.role or "").strip().lower()
-        if role not in ("owner", "admin", "instructor"):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed")
+        role = (effective_role or identity.role or "").strip().lower()
 
         ex = await self.session.get(AttendanceExcusalRequest, excusal_id)
         if not ex or ex.tenant_id != tenant_id:

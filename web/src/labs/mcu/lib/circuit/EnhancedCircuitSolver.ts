@@ -14,6 +14,36 @@ import { ACSource } from "./components/ACSource";
 import { NPNTransistor } from "./components/NPNTransistor";
 import { PNPTransistor } from "./components/PNPTransistor";
 import type { SimulationSnapshot } from "./types/SimulationSnapshot";
+import { compileInteractiveWireNetGraph } from "./wire/netlistCompiler";
+import { MnaStampWriter } from "./mna/MnaStampWriter";
+import { CircuitNetlist } from "./mna/CircuitNetlist";
+import { MnaAssembler } from "./mna/MnaAssembler";
+import {
+  populateNetlistFromComponents,
+  VOLTAGE_SOURCE_COMPONENT_TYPES,
+} from "./mna/ComponentStampRegistry";
+import {
+  stampComparatorSource,
+  stampOpAmpSource,
+  type BehavioralSourceStampContext,
+} from "./mna/domains/linear";
+import {
+  stampLogicGateDigital,
+  stampTimer555Digital,
+  type BehavioralDigitalStampContext,
+} from "./mna/domains/digital";
+import {
+  stampAcSource,
+  stampRelay,
+  type LinearBehavioralStampContext,
+} from "./mna/domains/linear";
+import {
+  stampBjtSwitchModel,
+  stampLedCompanion,
+  stampMosfetSwitch,
+  stampZenerCompanion,
+  type NonlinearStampContext,
+} from "./mna/domains/nonlinear";
 
 // Keep warnings/errors, silence verbose dev logs for this module.
 const console = {
@@ -76,6 +106,7 @@ export class EnhancedCircuitSolver {
   private stateFlipCounts: Map<string, number> = new Map();
   private solverTelemetryEnabled: boolean = false;
   private solverTelemetryFrameCounter: number = 0;
+  private stampWriter?: MnaStampWriter;
 
   constructor() {
     this.components = new Map();
@@ -160,6 +191,65 @@ export class EnhancedCircuitSolver {
     console.log(`🔗 SOLVER: Disconnected ${globalNode1} ⨯ ${globalNode2}`);
   }
 
+  /** Longest registered component id such that global id is `{id}_{node}`. */
+  private componentIdFromGlobalNodeId(globalNodeId: string): string | undefined {
+    let best: string | undefined;
+    let bestLen = -1;
+    for (const id of this.components.keys()) {
+      if (!globalNodeId.startsWith(`${id}_`)) continue;
+      if (id.length > bestLen) {
+        best = id;
+        bestLen = id.length;
+      }
+    }
+    return best;
+  }
+
+  private linkSolverNodePair(globalNode1: string, globalNode2: string): void {
+    if (globalNode1 === globalNode2) return;
+    if (!this.nodeConnections.has(globalNode1)) {
+      this.nodeConnections.set(globalNode1, new Set());
+    }
+    if (!this.nodeConnections.has(globalNode2)) {
+      this.nodeConnections.set(globalNode2, new Set());
+    }
+    this.nodeConnections.get(globalNode1)!.add(globalNode2);
+    this.nodeConnections.get(globalNode2)!.add(globalNode1);
+  }
+
+  /**
+   * Rebuild the undirected connection graph from interactive schematic wires (components + junctions).
+   * Replaces incremental connectNodes state so T-joints and multi-leg wires stay KCL-consistent.
+   *
+   * Net extraction follows the usual simulator preprocessing: undirected graph on component pins plus
+   * ideal junction vertices; each wire’s ordered `nodes` add edges between consecutive vertices.
+   * Junctions sharing the same snapped grid cell are merged (see CircuitJS-style coincident nodes).
+   */
+  public rebuildConnectionsFromInteractiveWires(
+    wires: Map<
+      string,
+      {
+        nodes: Array<{
+          type: string;
+          id: string;
+          componentId?: string;
+          nodeId?: string;
+          x?: number;
+          y?: number;
+        }>;
+      }
+    >,
+    options?: { gridPitchPx?: number },
+  ): void {
+    this.nodeConnections.clear();
+    const { edges } = compileInteractiveWireNetGraph(wires, options);
+    for (const [a, b] of edges) {
+      this.linkSolverNodePair(a, b);
+    }
+
+    this.rebuildNodeMap();
+  }
+
   /**
    * Connect two component nodes together
    */
@@ -174,16 +264,7 @@ export class EnhancedCircuitSolver {
 
     console.log(`🔗 SOLVER: Connecting ${globalNode1} ↔ ${globalNode2}`);
 
-    // Track connection
-    if (!this.nodeConnections.has(globalNode1)) {
-      this.nodeConnections.set(globalNode1, new Set());
-    }
-    if (!this.nodeConnections.has(globalNode2)) {
-      this.nodeConnections.set(globalNode2, new Set());
-    }
-
-    this.nodeConnections.get(globalNode1)!.add(globalNode2);
-    this.nodeConnections.get(globalNode2)!.add(globalNode1);
+    this.linkSolverNodePair(globalNode1, globalNode2);
 
     console.log(
       `   Before rebuild: ${this.nodeConnections.size} tracked nodes`
@@ -212,6 +293,7 @@ export class EnhancedCircuitSolver {
         );
       }
     });
+    this.warnAboutBypassedComponents();
 
     try {
       // Reset all node voltages to 0V before starting iterations
@@ -278,6 +360,27 @@ export class EnhancedCircuitSolver {
     } catch (error) {
       console.error("❌ Enhanced DC analysis failed:", error);
       return false;
+    }
+  }
+
+  /**
+   * Diagnostics: detect components whose terminals collapsed to one electrical node.
+   * This usually means an explicit short path is bypassing that part.
+   */
+  private warnAboutBypassedComponents(): void {
+    for (const component of this.components.values()) {
+      const nodes = component.getNodes();
+      if (nodes.length < 2) continue;
+      const merged = new Set<number>();
+      for (const n of nodes) {
+        const idx = this.nodeMap.get(`${component.getName()}_${n.id}`);
+        if (idx !== undefined) merged.add(idx);
+      }
+      if (merged.size === 1) {
+        console.warn(
+          `[solver] ${component.getName()} (${component.getComponentType()}) terminals are on the same net (component is bypassed by an ideal short path).`
+        );
+      }
     }
   }
 
@@ -596,9 +699,9 @@ export class EnhancedCircuitSolver {
     nodeGroups.forEach((group) => {
       // Check if any node in this group is a ground component
       const hasGroundComponent = Array.from(group).some((nodeId) => {
-        const [compId] = nodeId.split("_");
-        const component = this.components.get(compId);
-        return component?.getComponentType() === "ground";
+        const compId = this.componentIdFromGlobalNodeId(nodeId);
+        if (!compId) return false;
+        return this.components.get(compId)?.getComponentType() === "ground";
       });
 
       // If group contains ground, all nodes map to index 0
@@ -624,7 +727,6 @@ export class EnhancedCircuitSolver {
     const visited = new Set<string>();
     const groups: Set<string>[] = [];
 
-    // Collect all component nodes
     this.components.forEach((component) => {
       const componentId = component.getName();
       component.getNodes().forEach((node) => {
@@ -632,30 +734,36 @@ export class EnhancedCircuitSolver {
       });
     });
 
-    // DFS to find connected components
     const dfs = (nodeId: string, currentGroup: Set<string>) => {
       if (visited.has(nodeId)) return;
       visited.add(nodeId);
-      currentGroup.add(nodeId);
+      if (allNodes.has(nodeId)) currentGroup.add(nodeId);
 
       const connections = this.nodeConnections.get(nodeId);
       if (connections) {
         connections.forEach((connectedNode) => {
-          if (allNodes.has(connectedNode)) {
-            dfs(connectedNode, currentGroup);
-          }
+          dfs(connectedNode, currentGroup);
         });
       }
     };
 
-    // Find all connected groups
-    allNodes.forEach((nodeId) => {
+    const seeds = new Set<string>(allNodes);
+    for (const k of this.nodeConnections.keys()) seeds.add(k);
+    for (const neigh of this.nodeConnections.values()) {
+      for (const v of neigh) seeds.add(v);
+    }
+
+    for (const nodeId of seeds) {
       if (!visited.has(nodeId)) {
         const group = new Set<string>();
         dfs(nodeId, group);
-        if (group.size > 0) {
-          groups.push(group);
-        }
+        if (group.size > 0) groups.push(group);
+      }
+    }
+
+    allNodes.forEach((nodeId) => {
+      if (!visited.has(nodeId)) {
+        groups.push(new Set([nodeId]));
       }
     });
 
@@ -675,133 +783,49 @@ export class EnhancedCircuitSolver {
     // Clear voltage source map before rebuilding
     this.voltageSourceMap.clear();
 
-    // Initialize matrices
-    this.G = Array(numNodes)
-      .fill(0)
-      .map(() => Array(numNodes).fill(0));
-    this.B = Array(numNodes)
-      .fill(0)
-      .map(() => Array(m).fill(0));
-    this.C = Array(m)
-      .fill(0)
-      .map(() => Array(numNodes).fill(0));
-    this.D = Array(m)
-      .fill(0)
-      .map(() => Array(m).fill(0));
-    this.i = Array(numNodes).fill(0);
-    this.e = Array(m).fill(0);
+    const mna = MnaAssembler.createSystem(numNodes, m, 1e-12);
+    this.G = mna.G;
+    this.B = mna.B;
+    this.C = mna.C;
+    this.D = mna.D;
+    this.i = mna.i;
+    this.e = mna.e;
+    this.stampWriter = mna.stampWriter;
 
-    // SPICE-style gmin: weak shunt to ground for each node to improve conditioning
-    // and avoid pathological floating-node singularities.
-    const gmin = 1e-12;
-    for (let ni = 0; ni < numNodes; ni++) {
-      this.G[ni][ni] += gmin;
-    }
-
-    let vsIndex = 0;
-
-    // Process each component
-    this.components.forEach((component) => {
-      const type = component.getComponentType();
-
-      switch (type) {
-        case "resistor":
-          this.addResistor(component as Resistor);
-          break;
-        case "battery":
-          vsIndex = this.addBattery(component as Battery, vsIndex);
-          break;
-        case "acsource":
-          vsIndex = this.addACSource(component as ACSource, vsIndex);
-          break;
-        case "capacitor":
-          // DC analysis: capacitor is open circuit (no contribution)
-          break;
-        case "inductor":
-          // DC analysis only: inductor becomes its winding resistance.
-          if (!this.inTransientStamping) {
-            this.addInductorDC(component as Inductor);
-          }
-          break;
-        case "led":
-          // LED: nonlinear PN junction companion model.
-          this.addLEDSimplified(component as LED);
-          break;
-        case "npn_transistor":
-          // NPN BJT: model as controlled resistor (switch/amplifier)
-          this.addNPNTransistor(component as NPNTransistor);
-          break;
-        case "pnp_transistor":
-          // PNP BJT: model as controlled resistor (switch/amplifier)
-          this.addPNPTransistor(component as PNPTransistor);
-          break;
-        case "switch":
-        case "push_button":
-          // Switch: acts as variable resistor (low when closed, high when open)
-          this.addSwitch(component as Switch);
-          break;
-        case "spdt_switch":
-          this.addSpdtSwitch(component as SpdtSwitch);
-          break;
-        case "potentiometer":
-          this.addPotentiometer(component as Potentiometer);
-          break;
-        case "ammeter":
-          // Ammeter: acts as very low resistance
-          this.addAmmeter(component as Ammeter);
-          break;
-        case "voltmeter":
-        case "oscilloscope":
-          // Voltmeter/Oscilloscope: acts as very high resistance
-          this.addHighResistance(component);
-          break;
-        case "diode":
-          // Diode: nonlinear PN junction companion model.
-          this.addLEDSimplified(component as any);
-          break;
-        case "zener_diode":
-          // Zener: forward PN + reverse breakdown companion model.
-          this.addZenerSimplified(component as ZenerDiode);
-          break;
-        case "nmos_transistor":
-          // NMOS: piecewise linear like BJT — model as switch/variable resistor
-          this.addMOSFETSwitch(component);
-          break;
-        case "pmos_transistor":
-          // PMOS: same treatment as NMOS
-          this.addMOSFETSwitch(component);
-          break;
-        case "opamp":
-          // Op-amp: behavioral VCVS with finite output impedance and saturation.
-          vsIndex = this.addOpAmp(component, vsIndex);
-          break;
-        case "comparator":
-          // Comparator: threshold+hysteresis with finite output impedance.
-          vsIndex = this.addComparator(component, vsIndex);
-          break;
-        case "timer555":
-          // 555: solver-integrated behavioral macro model (comparators+latch+discharge+OUT stage)
-          vsIndex = this.addTimer555(component, vsIndex);
-          break;
-        case "relay":
-          // Relay coil as resistor; contacts handled separately
-          this.addRelayCoil(component);
-          break;
-        case "nor_gate":
-        case "nand_gate":
-        case "and_gate":
-        case "or_gate":
-        case "xor_gate":
-        case "not_gate":
-          // Logic gates: behavioral digital outputs with finite output impedance.
-          vsIndex = this.addLogicGate(component, type, vsIndex);
-          break;
-        case "ground":
-          break;
-        default:
-          console.warn(`Component type ${type} not handled in MNA`);
-      }
-    });
+    const netlist = new CircuitNetlist();
+    populateNetlistFromComponents(
+      this.components,
+      netlist,
+      {
+        timeStep: this.timeStep,
+        nodeIndex: (globalNodeId) => (this.nodeMap.get(globalNodeId) ?? 0) - 1,
+        addTwoNodeConductance: (n1, n2, g) => this.addTwoNodeConductance(n1, n2, g),
+        addTwoNodeCurrentSource: (nPlus, nMinus, current) =>
+          this.addTwoNodeCurrentSource(nPlus, nMinus, current),
+        addSeriesVoltageSource: (nPlus, nMinus, vs, v, r) =>
+          this.addSeriesVoltageSource(nPlus, nMinus, vs, v, r),
+        setVoltageSourceMap: (componentId, vs) => this.voltageSourceMap.set(componentId, vs),
+        limitStateFlip: (key, prev, next) => this.limitStateFlip(key, prev, next),
+        getComparatorState: (componentId) => this.comparatorState.get(componentId),
+        setComparatorState: (componentId, isHigh) =>
+          this.comparatorState.set(componentId, isHigh),
+        getTimer555State: (componentId) => this.timer555State.get(componentId),
+        setTimer555State: (componentId, state) =>
+          this.timer555State.set(componentId, state),
+        getRelayState: (componentId) => this.relayState.get(componentId),
+        setRelayState: (componentId, state) => this.relayState.set(componentId, state),
+        getSpdtState: (componentId) => this.spdtState.get(componentId),
+        setSpdtState: (componentId, value) => this.spdtState.set(componentId, value),
+        evaluatePnCompanion: (vAnodeCathode, kneeVoltage, dynamicResistance) =>
+          this.evaluatePnCompanion(vAnodeCathode, kneeVoltage, dynamicResistance),
+      },
+      {
+        inTransientStamping: this.inTransientStamping,
+        onUnknownType: (type) =>
+          console.warn(`Component type ${type} not handled in MNA`),
+      },
+    );
+    netlist.applyAll(0);
   }
 
   /**
@@ -847,15 +871,7 @@ export class EnhancedCircuitSolver {
     const n1 = this.nodeMap.get(`${componentId}_${nodes[0].id}`)! - 1; // -1 because matrix starts at index 0
     const n2 = this.nodeMap.get(`${componentId}_${nodes[1].id}`)! - 1;
 
-    // Add to G matrix using stamp method
-    if (n1 >= 0) {
-      this.G[n1][n1] += conductance;
-      if (n2 >= 0) this.G[n1][n2] -= conductance;
-    }
-    if (n2 >= 0) {
-      this.G[n2][n2] += conductance;
-      if (n1 >= 0) this.G[n2][n1] -= conductance;
-    }
+    this.getStampWriter().stampTwoNodeConductance(n1, n2, conductance);
   }
 
   /**
@@ -873,17 +889,7 @@ export class EnhancedCircuitSolver {
     const n1 = this.nodeMap.get(`${componentId}_${nodes[0].id}`)! - 1; // Positive
     const n2 = this.nodeMap.get(`${componentId}_${nodes[1].id}`)! - 1; // Negative
 
-    // Voltage source stamp
-    if (n1 >= 0) {
-      this.B[n1][vsIndex] = 1;
-      this.C[vsIndex][n1] = 1;
-    }
-    if (n2 >= 0) {
-      this.B[n2][vsIndex] = -1;
-      this.C[vsIndex][n2] = -1;
-    }
-
-    this.e[vsIndex] = voltage;
+    this.getStampWriter().stampVoltageSource(n1, n2, vsIndex, voltage);
 
     return vsIndex + 1;
   }
@@ -941,14 +947,7 @@ export class EnhancedCircuitSolver {
 
     const conductance = 1 / resistance;
 
-    if (n1 >= 0) {
-      this.G[n1][n1] += conductance;
-      if (n2 >= 0) this.G[n1][n2] -= conductance;
-    }
-    if (n2 >= 0) {
-      this.G[n2][n2] += conductance;
-      if (n1 >= 0) this.G[n2][n1] -= conductance;
-    }
+    this.getStampWriter().stampTwoNodeConductance(n1, n2, conductance);
   }
 
   /** SPDT: common to one throw low-R, other throw open */
@@ -1006,19 +1005,8 @@ export class EnhancedCircuitSolver {
     const nw = this.nodeMap.get(`${componentId}_wiper`)! - 1;
     const n2 = this.nodeMap.get(`${componentId}_end2`)! - 1;
 
-    if (n1 >= 0) {
-      this.G[n1][n1] += g1;
-      if (nw >= 0) this.G[n1][nw] -= g1;
-    }
-    if (nw >= 0) {
-      this.G[nw][nw] += g1 + g2;
-      if (n1 >= 0) this.G[nw][n1] -= g1;
-      if (n2 >= 0) this.G[nw][n2] -= g2;
-    }
-    if (n2 >= 0) {
-      this.G[n2][n2] += g2;
-      if (nw >= 0) this.G[n2][nw] -= g2;
-    }
+    this.getStampWriter().stampTwoNodeConductance(n1, nw, g1);
+    this.getStampWriter().stampTwoNodeConductance(nw, n2, g2);
   }
 
   /**
@@ -1035,14 +1023,7 @@ export class EnhancedCircuitSolver {
 
     const conductance = 1 / resistance;
 
-    if (n1 >= 0) {
-      this.G[n1][n1] += conductance;
-      if (n2 >= 0) this.G[n1][n2] -= conductance;
-    }
-    if (n2 >= 0) {
-      this.G[n2][n2] += conductance;
-      if (n1 >= 0) this.G[n2][n1] -= conductance;
-    }
+    this.getStampWriter().stampTwoNodeConductance(n1, n2, conductance);
   }
 
   /**
@@ -1059,14 +1040,21 @@ export class EnhancedCircuitSolver {
 
     const conductance = 1 / resistance;
 
-    if (n1 >= 0) {
-      this.G[n1][n1] += conductance;
-      if (n2 >= 0) this.G[n1][n2] -= conductance;
+    this.getStampWriter().stampTwoNodeConductance(n1, n2, conductance);
+  }
+
+  private getStampWriter(): MnaStampWriter {
+    if (!this.stampWriter) {
+      this.stampWriter = new MnaStampWriter(
+        this.G,
+        this.B,
+        this.C,
+        this.D,
+        this.i,
+        this.e,
+      );
     }
-    if (n2 >= 0) {
-      this.G[n2][n2] += conductance;
-      if (n1 >= 0) this.G[n2][n1] -= conductance;
-    }
+    return this.stampWriter;
   }
 
   private addTwoNodeConductance(
@@ -1074,22 +1062,64 @@ export class EnhancedCircuitSolver {
     n2: number,
     conductance: number
   ): void {
-    if (conductance <= 0 || !Number.isFinite(conductance)) return;
-    if (n1 >= 0) {
-      this.G[n1][n1] += conductance;
-      if (n2 >= 0) this.G[n1][n2] -= conductance;
-    }
-    if (n2 >= 0) {
-      this.G[n2][n2] += conductance;
-      if (n1 >= 0) this.G[n2][n1] -= conductance;
-    }
+    this.getStampWriter().stampTwoNodeConductance(n1, n2, conductance);
   }
 
   // Positive current flows from nPlus to nMinus.
   private addTwoNodeCurrentSource(nPlus: number, nMinus: number, current: number): void {
-    if (!Number.isFinite(current) || current === 0) return;
-    if (nPlus >= 0) this.i[nPlus] -= current;
-    if (nMinus >= 0) this.i[nMinus] += current;
+    this.getStampWriter().stampTwoNodeCurrentSource(nPlus, nMinus, current);
+  }
+
+  private nonlinearStampContext(): NonlinearStampContext {
+    return {
+      nodeIndex: (globalNodeId: string) => (this.nodeMap.get(globalNodeId) ?? 0) - 1,
+      addTwoNodeConductance: (n1, n2, g) => this.addTwoNodeConductance(n1, n2, g),
+      addTwoNodeCurrentSource: (np, nm, i) => this.addTwoNodeCurrentSource(np, nm, i),
+      evaluatePnCompanion: (v, knee, rd) => this.evaluatePnCompanion(v, knee, rd),
+    };
+  }
+
+  private behavioralSourceContext(): BehavioralSourceStampContext {
+    return {
+      nodeIndex: (globalNodeId: string) => (this.nodeMap.get(globalNodeId) ?? 0) - 1,
+      addTwoNodeConductance: (n1, n2, g) => this.addTwoNodeConductance(n1, n2, g),
+      addSeriesVoltageSource: (nPlus, nMinus, vs, v, r) =>
+        this.addSeriesVoltageSource(nPlus, nMinus, vs, v, r),
+      setVoltageSourceMap: (componentId, vs) => this.voltageSourceMap.set(componentId, vs),
+      getComparatorState: (componentId) => this.comparatorState.get(componentId),
+      setComparatorState: (componentId, isHigh) =>
+        this.comparatorState.set(componentId, isHigh),
+      limitStateFlip: (key, prev, next) => this.limitStateFlip(key, prev, next),
+    };
+  }
+
+  private behavioralDigitalContext(): BehavioralDigitalStampContext {
+    return {
+      nodeIndex: (globalNodeId: string) => (this.nodeMap.get(globalNodeId) ?? 0) - 1,
+      timeStep: this.timeStep,
+      addTwoNodeConductance: (n1, n2, g) => this.addTwoNodeConductance(n1, n2, g),
+      addSeriesVoltageSource: (nPlus, nMinus, vs, v, r) =>
+        this.addSeriesVoltageSource(nPlus, nMinus, vs, v, r),
+      setVoltageSourceMap: (componentId, vs) => this.voltageSourceMap.set(componentId, vs),
+      limitStateFlip: (key, prev, next) => this.limitStateFlip(key, prev, next),
+      getTimer555State: (componentId) => this.timer555State.get(componentId),
+      setTimer555State: (componentId, state) =>
+        this.timer555State.set(componentId, state),
+    };
+  }
+
+  private linearBehavioralContext(): LinearBehavioralStampContext {
+    return {
+      nodeIndex: (globalNodeId: string) => (this.nodeMap.get(globalNodeId) ?? 0) - 1,
+      timeStep: this.timeStep,
+      addTwoNodeConductance: (n1, n2, g) => this.addTwoNodeConductance(n1, n2, g),
+      addSeriesVoltageSource: (nPlus, nMinus, vs, v, r) =>
+        this.addSeriesVoltageSource(nPlus, nMinus, vs, v, r),
+      setVoltageSourceMap: (componentId, vs) => this.voltageSourceMap.set(componentId, vs),
+      limitStateFlip: (key, prev, next) => this.limitStateFlip(key, prev, next),
+      getRelayState: (componentId) => this.relayState.get(componentId),
+      setRelayState: (componentId, state) => this.relayState.set(componentId, state),
+    };
   }
 
   private evaluatePnCompanion(
@@ -1118,17 +1148,13 @@ export class EnhancedCircuitSolver {
     voltage: number,
     seriesResistance: number
   ): void {
-    if (nPlus >= 0) {
-      this.B[nPlus][vsIndex] = 1;
-      this.C[vsIndex][nPlus] = 1;
-    }
-    if (nMinus >= 0) {
-      this.B[nMinus][vsIndex] = -1;
-      this.C[vsIndex][nMinus] = -1;
-    }
-    // V(n+) - V(n-) - R*I = Vtarget
-    this.D[vsIndex][vsIndex] = -Math.max(seriesResistance, 1e-9);
-    this.e[vsIndex] = voltage;
+    this.getStampWriter().stampVoltageSource(
+      nPlus,
+      nMinus,
+      vsIndex,
+      voltage,
+      seriesResistance,
+    );
   }
 
   /**
@@ -1138,139 +1164,19 @@ export class EnhancedCircuitSolver {
    * - OUT pin modeled as Thevenin source to GND with finite Rout
    */
   private addTimer555(component: CircuitComponent, vsIndex: number): number {
-    const componentId = component.getName();
-    const nodes = component.getNodes();
-    const byId = new Map(nodes.map((n) => [n.id, n]));
-    const nodeIndex = (id: string) =>
-      (this.nodeMap.get(`${componentId}_${id}`) ?? 0) - 1;
-
-    const nOut = nodeIndex("out");
-    const nGnd = nodeIndex("gnd");
-    const nDis = nodeIndex("disch");
-
-    const vGnd = byId.get("gnd")?.voltage ?? 0;
-    const vVcc = byId.get("vcc")?.voltage ?? vGnd;
-    const vTrig = byId.get("trig")?.voltage ?? vGnd;
-    const vThresh = byId.get("thresh")?.voltage ?? vGnd;
-    const vCtrlRaw = byId.get("ctrl")?.voltage ?? vGnd;
-    const vRst = byId.get("rst")?.voltage ?? vVcc;
-
-    const vSupply = Math.max(0, vVcc - vGnd);
-    const resetLow = vRst - vGnd < 0.8;
-    const enabled = !resetLow && vSupply >= 4.0;
-    const ctrlValid = Number.isFinite(vCtrlRaw) && Math.abs(vCtrlRaw - vGnd) > 0.05;
-    const trigRel = vTrig - vGnd;
-    const threshRel = vThresh - vGnd;
-
-    const prev = this.timer555State.get(componentId) ?? {
-      latchSet: false,
-      outputHigh: false,
-      ctrlFiltered: (2 / 3) * vSupply,
-    };
-    const ctrlAlpha = Math.min(1, this.timeStep / (this.timeStep + 2e-6));
-    const ctrlInstant = ctrlValid ? vCtrlRaw - vGnd : (2 / 3) * vSupply;
-    const ctrlFiltered =
-      prev.ctrlFiltered + ctrlAlpha * (ctrlInstant - prev.ctrlFiltered);
-    const vUpperRaw = ctrlValid ? ctrlFiltered : (2 / 3) * vSupply;
-    const vUpper = Math.min(Math.max(vUpperRaw, 0.2 * vSupply), 0.95 * vSupply);
-    const vLower = 0.5 * vUpper;
-    const hyst = Math.max(0.003, 0.002 * vSupply);
-    let latchSet = prev.latchSet;
-    if (!enabled) {
-      latchSet = false;
-    } else {
-      if (trigRel < vLower - hyst) latchSet = true;
-      if (threshRel > vUpper + hyst) latchSet = false;
-    }
-    latchSet = this.limitStateFlip(`timer555:${componentId}`, prev.latchSet, latchSet);
-    const outputHigh = enabled && latchSet;
-    this.timer555State.set(componentId, { latchSet, outputHigh, ctrlFiltered });
-
-    const dischR = outputHigh ? 1e9 : 12;
-    this.addTwoNodeConductance(nDis, nGnd, 1 / dischR);
-
-    const outTarget = outputHigh ? Math.max(0, vSupply - 1.2) : 0.15;
-    const outR = outputHigh ? 25 : 18;
-    this.voltageSourceMap.set(componentId, vsIndex);
-    this.addSeriesVoltageSource(nOut, nGnd, vsIndex, outTarget, outR);
-
-    // Keep component behavior/UI synchronized with solver-integrated state.
-    component.updateCircuitProperties({ outputHigh } as any);
-    return vsIndex + 1;
+    return stampTimer555Digital(this.behavioralDigitalContext(), component, vsIndex);
   }
 
   private addOpAmp(component: CircuitComponent, vsIndex: number): number {
-    const componentId = component.getName();
-    const props = component.getCircuitProperties() as any;
-    const nodes = component.getNodes();
-    const inv = nodes.find((n) => n.id === "inverting");
-    const nonInv = nodes.find((n) => n.id === "nonInverting");
-    const out = nodes.find((n) => n.id === "output");
-    if (!inv || !nonInv || !out) return vsIndex;
-
-    const nInv = (this.nodeMap.get(`${componentId}_${inv.id}`) ?? 0) - 1;
-    const nNonInv = (this.nodeMap.get(`${componentId}_${nonInv.id}`) ?? 0) - 1;
-    const nOut = (this.nodeMap.get(`${componentId}_${out.id}`) ?? 0) - 1;
-    const nGnd = -1;
-
-    // Input bias paths (very high Zin to ground) to avoid ideal floating inputs.
-    const zin = Math.max(props.inputImpedance ?? 1e6, 1e3);
-    this.addTwoNodeConductance(nInv, nGnd, 1 / zin);
-    this.addTwoNodeConductance(nNonInv, nGnd, 1 / zin);
-
-    const vDiff = (nonInv.voltage ?? 0) - (inv.voltage ?? 0);
-    const av = Math.max(props.openLoopGain ?? 100000, 1);
-    const vSatP = props.vSatPositive ?? 12;
-    const vSatN = props.vSatNegative ?? -12;
-    const vTargetRaw = av * vDiff;
-    const vTarget = Math.max(vSatN, Math.min(vSatP, vTargetRaw));
-    const rout = Math.max(props.outputImpedance ?? 75, 1e-3);
-
-    this.voltageSourceMap.set(componentId, vsIndex);
-    this.addSeriesVoltageSource(nOut, nGnd, vsIndex, vTarget, rout);
-    return vsIndex + 1;
+    return stampOpAmpSource(this.behavioralSourceContext(), component, vsIndex);
   }
 
   private addComparator(component: CircuitComponent, vsIndex: number): number {
-    const componentId = component.getName();
-    const props = component.getCircuitProperties() as any;
-    const nodes = component.getNodes();
-    const inv = nodes.find((n) => n.id === "inverting");
-    const nonInv = nodes.find((n) => n.id === "nonInverting");
-    const out = nodes.find((n) => n.id === "output");
-    if (!inv || !nonInv || !out) return vsIndex;
-
-    const nInv = (this.nodeMap.get(`${componentId}_${inv.id}`) ?? 0) - 1;
-    const nNonInv = (this.nodeMap.get(`${componentId}_${nonInv.id}`) ?? 0) - 1;
-    const nOut = (this.nodeMap.get(`${componentId}_${out.id}`) ?? 0) - 1;
-    const nGnd = -1;
-
-    const zin = 1e6;
-    this.addTwoNodeConductance(nInv, nGnd, 1 / zin);
-    this.addTwoNodeConductance(nNonInv, nGnd, 1 / zin);
-
-    const threshold = props.threshold ?? 0;
-    const hysteresis = Math.max(props.hysteresis ?? 0.1, 0);
-    const vDiff = (nonInv.voltage ?? 0) - (inv.voltage ?? 0);
-    const prevHigh = this.comparatorState.get(componentId) ?? !!props.isOutputHigh;
-    let isHigh = prevHigh;
-    if (prevHigh) {
-      if (vDiff < threshold - hysteresis) isHigh = false;
-    } else {
-      if (vDiff > threshold + hysteresis) isHigh = true;
-    }
-    isHigh = this.limitStateFlip(`comparator:${componentId}`, prevHigh, isHigh);
-    this.comparatorState.set(componentId, isHigh);
-    component.updateCircuitProperties({ isOutputHigh: isHigh } as any);
-
-    const vHigh = props.outputHigh ?? 5;
-    const vLow = props.outputLow ?? 0;
-    const vTarget = isHigh ? vHigh : vLow;
-    const rout = 40;
-
-    this.voltageSourceMap.set(componentId, vsIndex);
-    this.addSeriesVoltageSource(nOut, nGnd, vsIndex, vTarget, rout);
-    return vsIndex + 1;
+    return stampComparatorSource(
+      this.behavioralSourceContext(),
+      component,
+      vsIndex,
+    );
   }
 
   private addLogicGate(
@@ -1278,73 +1184,12 @@ export class EnhancedCircuitSolver {
     gateType: string,
     vsIndex: number
   ): number {
-    const componentId = component.getName();
-    const nodes = component.getNodes();
-    const byId = new Map(nodes.map((n) => [n.id, n]));
-    const nGnd = -1;
-    const logicThreshold = 2.5;
-    const vHigh = 5;
-    const vLow = 0;
-    const rout = 35;
-    const zin = 1e7;
-
-    const boolFromNode = (nodeId: string): boolean =>
-      ((byId.get(nodeId)?.voltage ?? 0) >= logicThreshold);
-
-    // Input leakage paths for conditioning.
-    ["inputA", "inputB", "input1", "input2", "input"].forEach((id) => {
-      const idx = (this.nodeMap.get(`${componentId}_${id}`) ?? 0) - 1;
-      if (idx >= 0) this.addTwoNodeConductance(idx, nGnd, 1 / zin);
-    });
-
-    let outHigh = false;
-    if (gateType === "not_gate") {
-      const a = boolFromNode("input");
-      outHigh = !a;
-      component.updateCircuitProperties({ input: a, output: outHigh } as any);
-    } else if (gateType === "and_gate") {
-      const a = boolFromNode("inputA");
-      const b = boolFromNode("inputB");
-      outHigh = a && b;
-      component.updateCircuitProperties({ inputA: a, inputB: b, output: outHigh } as any);
-    } else if (gateType === "or_gate") {
-      const a = boolFromNode("inputA");
-      const b = boolFromNode("inputB");
-      outHigh = a || b;
-      component.updateCircuitProperties({ inputA: a, inputB: b, output: outHigh } as any);
-    } else if (gateType === "xor_gate") {
-      const a = boolFromNode("inputA");
-      const b = boolFromNode("inputB");
-      outHigh = a !== b;
-      component.updateCircuitProperties({ inputA: a, inputB: b, output: outHigh } as any);
-    } else if (gateType === "nand_gate") {
-      const a = boolFromNode("input1");
-      const b = boolFromNode("input2");
-      outHigh = !(a && b);
-      component.updateCircuitProperties({
-        inputStates: [a, b],
-        outputState: outHigh,
-      } as any);
-    } else if (gateType === "nor_gate") {
-      const a = boolFromNode("input1");
-      const b = boolFromNode("input2");
-      outHigh = !(a || b);
-      component.updateCircuitProperties({
-        inputStates: [a, b],
-        outputState: outHigh,
-      } as any);
-    }
-
-    const outNode =
-      gateType === "not_gate"
-        ? "output"
-        : "output";
-    const nOut = (this.nodeMap.get(`${componentId}_${outNode}`) ?? 0) - 1;
-    if (nOut < 0) return vsIndex;
-
-    this.voltageSourceMap.set(componentId, vsIndex);
-    this.addSeriesVoltageSource(nOut, nGnd, vsIndex, outHigh ? vHigh : vLow, rout);
-    return vsIndex + 1;
+    return stampLogicGateDigital(
+      this.behavioralDigitalContext(),
+      component,
+      gateType,
+      vsIndex,
+    );
   }
 
   /**
@@ -1352,88 +1197,14 @@ export class EnhancedCircuitSolver {
    * This avoids hard switching artifacts while keeping the model lightweight.
    */
   private addMOSFETSwitch(component: CircuitComponent): void {
-    const props = component.getCircuitProperties() as any;
-    const nodes = component.getNodes();
-    const componentId = component.getName();
-
-    const gateNode = nodes.find((n: any) => n.id === "gate");
-    const drainNode = nodes.find((n: any) => n.id === "drain");
-    const sourceNode = nodes.find((n: any) => n.id === "source");
-    if (!drainNode || !sourceNode) return;
-
-    const gateV = gateNode ? gateNode.voltage : 0;
-    const drainV = drainNode.voltage;
-    const sourceV = sourceNode.voltage;
-    const rdson = Math.max(props.rdson ?? 0.1, 1e-5);
-    const vth = Math.abs(props.vgsThreshold ?? 2);
-    const isNmos = component.getComponentType() === "nmos_transistor";
-    const overdrive = isNmos ? gateV - sourceV - vth : sourceV - gateV - vth;
-
-    // Smooth turn-on around Vth (logistic blend) to reduce numerical chatter.
-    const sharpness = 0.06;
-    const sigmoid = 1 / (1 + Math.exp(-Math.max(-60, Math.min(60, overdrive / sharpness))));
-    const gOff = 1e-9;
-    const gOn = 1 / rdson;
-    const conductance = gOff + (gOn - gOff) * sigmoid;
-
-    const n1 = (this.nodeMap.get(`${componentId}_${drainNode.id}`) ?? 0) - 1;
-    const n2 = (this.nodeMap.get(`${componentId}_${sourceNode.id}`) ?? 0) - 1;
-
-    this.addTwoNodeConductance(n1, n2, conductance);
+    stampMosfetSwitch(this.nonlinearStampContext(), component);
   }
 
   /**
    * Add relay coil as a simple resistor between coil terminals.
    */
   private addRelayCoil(component: CircuitComponent): void {
-    const props = component.getCircuitProperties() as any;
-    const nodes = component.getNodes();
-    const componentId = component.getName();
-
-    const coil1 = nodes.find((n: any) => n.id === "coil1");
-    const coil2 = nodes.find((n: any) => n.id === "coil2");
-    if (!coil1 || !coil2) return;
-
-    const resistance = Math.max(props.coilResistance ?? 100, 1e-3);
-    const conductance = 1 / resistance;
-
-    const n1 = (this.nodeMap.get(`${componentId}_${coil1.id}`) ?? 0) - 1;
-    const n2 = (this.nodeMap.get(`${componentId}_${coil2.id}`) ?? 0) - 1;
-
-    this.addTwoNodeConductance(n1, n2, conductance);
-
-    // Coil-derived actuation with pickup/dropout hysteresis and finite release.
-    const vCoil = Math.abs((coil1.voltage ?? 0) - (coil2.voltage ?? 0));
-    const vAct = Math.max(0.1, props.activationVoltage ?? 5);
-    const pickup = vAct;
-    const dropout = 0.7 * vAct;
-    const prev = this.relayState.get(componentId) ?? { drive: 0, closed: false };
-    let closed = prev.closed;
-    if (!closed && vCoil >= pickup) closed = true;
-    if (closed && vCoil <= dropout) closed = false;
-    closed = this.limitStateFlip(`relay:${componentId}`, prev.closed, closed);
-    const targetDrive = closed ? 1 : 0;
-    const tauPull = 1.2e-3;
-    const tauRelease = 2.5e-3;
-    const tau = targetDrive > prev.drive ? tauPull : tauRelease;
-    const alpha = Math.min(1, this.timeStep / (this.timeStep + tau));
-    const drive = prev.drive + alpha * (targetDrive - prev.drive);
-    this.relayState.set(componentId, { drive, closed });
-    component.updateCircuitProperties({ isActivated: drive > 0.5 } as any);
-
-    // Contact side: finite on/off resistance blended by relay armature drive.
-    const contactCommon = nodes.find((n: any) => n.id === "contact_common");
-    const contactNo = nodes.find((n: any) => n.id === "contact_no");
-    if (contactCommon && contactNo) {
-      const ron = 0.03;
-      const roff = 1e9;
-      const gOn = 1 / ron;
-      const gOff = 1 / roff;
-      const contactG = gOff + (gOn - gOff) * drive;
-      const nc = (this.nodeMap.get(`${componentId}_${contactCommon.id}`) ?? 0) - 1;
-      const nn = (this.nodeMap.get(`${componentId}_${contactNo.id}`) ?? 0) - 1;
-      this.addTwoNodeConductance(nc, nn, contactG);
-    }
+    stampRelay(this.linearBehavioralContext(), component);
   }
 
   /**
@@ -1441,29 +1212,7 @@ export class EnhancedCircuitSolver {
    * Similar to battery but voltage varies with time
    */
   private addACSource(source: ACSource, vsIndex: number): number {
-    const voltage = source.getCircuitProperties().voltage; // Instantaneous voltage
-    const nodes = source.getNodes();
-    const componentId = source.getName();
-
-    // Store voltage source index for this AC source
-    this.voltageSourceMap.set(componentId, vsIndex);
-
-    const n1 = this.nodeMap.get(`${componentId}_${nodes[0].id}`)! - 1; // Positive
-    const n2 = this.nodeMap.get(`${componentId}_${nodes[1].id}`)! - 1; // Negative
-
-    // Voltage source stamp (same as battery)
-    if (n1 >= 0) {
-      this.B[n1][vsIndex] = 1;
-      this.C[vsIndex][n1] = 1;
-    }
-    if (n2 >= 0) {
-      this.B[n2][vsIndex] = -1;
-      this.C[vsIndex][n2] = -1;
-    }
-
-    this.e[vsIndex] = voltage;
-
-    return vsIndex + 1;
+    return stampAcSource(this.linearBehavioralContext(), source, vsIndex);
   }
 
   /**
@@ -1476,21 +1225,7 @@ export class EnhancedCircuitSolver {
    * - Total voltage: V_anode - V_cathode = Vf + I × Rd
    */
   private addLEDSimplified(led: LED): void {
-    const nodes = led.getNodes();
-    const componentId = led.getName();
-    const nAnode = this.nodeMap.get(`${componentId}_${nodes[0].id}`)! - 1;
-    const nCathode = this.nodeMap.get(`${componentId}_${nodes[1].id}`)! - 1;
-    const vAnode = nodes[0].voltage || 0;
-    const vCathode = nodes[1].voltage || 0;
-    const vak = vAnode - vCathode;
-    const forwardVoltage = led.getForwardVoltage();
-    const ledProps = led.getCircuitProperties() as any;
-    const dynamicResistance = ledProps.dynamicResistance ?? 25;
-
-    const { g, i } = this.evaluatePnCompanion(vak, forwardVoltage, dynamicResistance);
-    const iEq = i - g * vak;
-    this.addTwoNodeConductance(nAnode, nCathode, g);
-    this.addTwoNodeCurrentSource(nAnode, nCathode, iEq);
+    stampLedCompanion(this.nonlinearStampContext(), led);
   }
 
   /**
@@ -1500,41 +1235,7 @@ export class EnhancedCircuitSolver {
    * - Reverse at/above breakdown: -Vz + dynamic resistance
    */
   private addZenerSimplified(zener: ZenerDiode): void {
-    const nodes = zener.getNodes();
-    const componentId = zener.getName();
-    const props = zener.getCircuitProperties() as any;
-
-    const nAnode = this.nodeMap.get(`${componentId}_${nodes[0].id}`)! - 1;
-    const nCathode = this.nodeMap.get(`${componentId}_${nodes[1].id}`)! - 1;
-
-    const vAnode = nAnode >= 0 ? (nodes[0].voltage || 0) : 0;
-    const vCathode = nCathode >= 0 ? (nodes[1].voltage || 0) : 0;
-    const vForward = vAnode - vCathode;
-    const vReverse = vCathode - vAnode;
-
-    const forwardVoltage = zener.getForwardVoltage();
-    const breakdownVoltage = zener.getBreakdownVoltage();
-    const dynamicResistance = props.dynamicResistance || 10;
-
-    const fwd = this.evaluatePnCompanion(vForward, forwardVoltage, dynamicResistance);
-
-    let totalG = fwd.g;
-    let totalI = fwd.i; // positive is anode -> cathode
-
-    // Reverse breakdown branch: current flows cathode -> anode.
-    if (vReverse > breakdownVoltage) {
-      const rev = this.evaluatePnCompanion(
-        vReverse,
-        breakdownVoltage,
-        dynamicResistance
-      );
-      totalG += rev.g;
-      totalI -= rev.i;
-    }
-
-    const iEq = totalI - totalG * vForward;
-    this.addTwoNodeConductance(nAnode, nCathode, totalG);
-    this.addTwoNodeCurrentSource(nAnode, nCathode, iEq);
+    stampZenerCompanion(this.nonlinearStampContext(), zener);
   }
 
   /**
@@ -1563,60 +1264,18 @@ export class EnhancedCircuitSolver {
     transistor: NPNTransistor | PNPTransistor,
     isPnp: boolean
   ): void {
-    const nodes = transistor.getNodes();
-    const componentId = transistor.getName();
-    const props = transistor.getBJTProperties();
-
-    // Node indices: 0=base, 1=collector, 2=emitter
-    const nBase = this.nodeMap.get(`${componentId}_${nodes[0].id}`)! - 1;
-    const nCollector = this.nodeMap.get(`${componentId}_${nodes[1].id}`)! - 1;
-    const nEmitter = this.nodeMap.get(`${componentId}_${nodes[2].id}`)! - 1;
-
-    const vBase = nodes[0].voltage;
-    const vCollector = nodes[1].voltage;
-    const vEmitter = nodes[2].voltage;
-
-    // Robust BJT educational model:
-    // - base-emitter controlled conduction ("drive")
-    // - collector-emitter path as controlled resistor for deterministic switching
-    // This is intentionally stable for interactive circuits (less fragile than pure gm stamps).
-    const vbeEff = isPnp ? vEmitter - vBase : vBase - vEmitter;
-    const vceEff = isPnp ? vEmitter - vCollector : vCollector - vEmitter;
-    const sharpness = 0.03;
-    const drive =
-      1 /
-      (1 +
-        Math.exp(
-          -Math.max(-60, Math.min(60, (vbeEff - (props.vbe ?? 0.7)) / sharpness))
-        ));
-
-    const gBeOff = 1e-9;
-    const gCeOff = 1e-9;
-    const gBeOn = 1 / 1200; // input junction when driven
-    const gCeOn = 1 / 8; // saturated-ish C-E path for switch behavior
-    const gBe = gBeOff + (gBeOn - gBeOff) * drive;
-    const gCe = gCeOff + (gCeOn - gCeOff) * drive;
-
-    this.addTwoNodeConductance(nBase, nEmitter, gBe);
-    this.addTwoNodeConductance(nCollector, nEmitter, gCe);
-
-    // Convention across components: positive terminal current = enters component from wire.
-    const ib = gBe * (vBase - vEmitter);
-    const ic = gCe * (vCollector - vEmitter);
-    const ie = -(ib + ic); // KCL
-
-    // Keep component visual region flags coherent with operating point hints.
-    const on = drive > 0.5;
-    const saturated = isPnp
-      ? vceEff < (props.vcesat ?? 0.2)
-      : vceEff < (props.vcesat ?? 0.2);
+    const obs = stampBjtSwitchModel(
+      this.nonlinearStampContext(),
+      transistor,
+      isPnp,
+    );
     transistor.updateCircuitProperties({
-      isCutoff: !on,
-      isActive: on && !saturated,
-      isSaturated: on && saturated,
-      baseCurrent: ib,
-      collectorCurrent: ic,
-      emitterCurrent: ie,
+      isCutoff: obs.isCutoff,
+      isActive: obs.isActive,
+      isSaturated: obs.isSaturated,
+      baseCurrent: obs.baseCurrent,
+      collectorCurrent: obs.collectorCurrent,
+      emitterCurrent: obs.emitterCurrent,
     } as any);
   }
 
@@ -1756,7 +1415,15 @@ export class EnhancedCircuitSolver {
 
       switch (type) {
         case "resistor":
-          current = voltage / component.getCircuitProperties().value;
+          {
+            const r = Math.max(
+              typeof (component as any).getImpedance === "function"
+                ? (component as any).getImpedance(0)
+                : component.getCircuitProperties().value,
+              1e-12,
+            );
+            current = voltage / r;
+          }
           break;
         case "capacitor":
           {
@@ -1999,20 +1666,7 @@ export class EnhancedCircuitSolver {
     let count = 0;
     this.components.forEach((comp) => {
       const type = comp.getComponentType();
-      // Components modeled with explicit MNA voltage sources.
-      if (
-        type === "battery" ||
-        type === "acsource" ||
-        type === "opamp" ||
-        type === "comparator" ||
-        type === "timer555" ||
-        type === "nor_gate" ||
-        type === "nand_gate" ||
-        type === "and_gate" ||
-        type === "or_gate" ||
-        type === "xor_gate" ||
-        type === "not_gate"
-      ) {
+      if (VOLTAGE_SOURCE_COMPONENT_TYPES.has(type)) {
         count++;
       }
     });

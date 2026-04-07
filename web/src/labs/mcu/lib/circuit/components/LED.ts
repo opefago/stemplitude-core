@@ -374,6 +374,9 @@ export class LED extends CircuitComponent {
     this.overstressSamples = overstressed ? this.overstressSamples + 1 : 0;
     if (!this.circuitProps.burnt && this.overstressSamples >= 20) {
       this.circuitProps.burnt = true;
+      // Overstress-triggered burnout bypasses CircuitComponent.updateCircuitState,
+      // so explicitly start burn smoke/animation here.
+      this.startBurnAnimation();
       console.log(
         `⚠️ LED ${this.name} BURNT! Sustained overstress detected. I=${absCurrent.toFixed(4)}A`
       );

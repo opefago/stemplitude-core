@@ -36,12 +36,17 @@
    ======================================== */
 
 .lms-header {
+  --lms-bg-hero: #235390;
+  --lms-yellow: #ffc800;
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   z-index: 100;
   padding: 0 24px;
+  background: transparent;
+  border-bottom: 3px solid transparent;
+  box-shadow: none;
   transition:
     background 0.3s ease,
     box-shadow 0.3s ease;
@@ -50,7 +55,7 @@
 .lms-header[data-scrolled] {
   background: var(--lms-bg-hero);
   border-bottom: 3px solid rgba(255, 255, 255, 0.15);
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
 }
 
 .lms-header__inner {
@@ -106,6 +111,36 @@
   align-items: center;
   gap: 12px;
   flex-shrink: 0;
+}
+
+.lms-header__welcome {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.lms-header__welcome-text {
+  color: var(--lms-yellow);
+  font-size: 1.125rem;
+  font-weight: 900;
+}
+
+.lms-header__welcome-jump {
+  color: var(--lms-yellow);
+  font-size: 1.125rem;
+  font-weight: 900;
+  letter-spacing: 0.01em;
+}
+
+.lms-header__welcome:hover .lms-header__welcome-jump {
+  color: #ffda4a;
+}
+
+.lms-header__welcome:hover .lms-header__welcome-text {
+  color: #ffda4a;
 }
 
 .lms-header__login {

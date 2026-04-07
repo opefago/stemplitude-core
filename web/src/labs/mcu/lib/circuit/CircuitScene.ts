@@ -61,6 +61,7 @@ import {
   setSameNetChecker,
 } from "./state/circuitComponentWiring";
 import { resolveAstableDiscreteRcFromNetlist } from "./model/timer555DiscreteRc";
+import { orderedComponentEndpointsForWire } from "./wireEndpointTopology";
 
 // Keep warnings/errors, silence verbose dev logs for this module.
 const console = {
@@ -93,6 +94,24 @@ export interface CircuitSceneSnapshotWire {
   end?: { componentId: string; nodeId: string };
   targetWireId?: string;
   junctionPoint?: { x: number; y: number };
+  nodes?: Array<{
+    id: string;
+    x: number;
+    y: number;
+    type: "component" | "junction" | "waypoint";
+    componentId?: string;
+    nodeId?: string;
+    connectedWires: string[];
+  }>;
+  segments?: Array<{
+    start: { x: number; y: number };
+    end: { x: number; y: number };
+    isHorizontal: boolean;
+    layer: number;
+  }>;
+  segmentStableIds?: string[];
+  routeRevision?: number;
+  animationPathMeta?: { segmentIds: string[]; revision: number };
 }
 
 export interface CircuitSceneSnapshot {
@@ -134,8 +153,6 @@ export class CircuitScene extends BaseScene {
   private isDragging: boolean = false;
 
   // Wire routing state
-  private wireBendPreference: "horizontal-first" | "vertical-first" =
-    "horizontal-first";
   private wireWaypoints: { x: number; y: number }[] = [];
   private wireStartWorldPos: { x: number; y: number } | null = null;
 
@@ -172,6 +189,7 @@ export class CircuitScene extends BaseScene {
   private overlayLayer: Container = new Container();
   private wireParticleSystem: WireParticleSystem | null = null;
   private wirePathSignatures: Map<string, string> = new Map();
+  private wirePathEndpointSignatures: Map<string, string> = new Map();
   private wirePathOrientations: Map<string, 1 | -1> = new Map();
   private wireDirectionHistory: Map<string, 1 | -1 | 0> = new Map();
   private wireDisplayTopologySig: string = "";
@@ -550,6 +568,16 @@ export class CircuitScene extends BaseScene {
     console.log("🚀 Initialized HybridWireRouter with open-source algorithms");
   }
 
+  /**
+   * Rebuild MNA node merging from interactive wire `nodes` (components + junctions).
+   */
+  public syncInteractiveWireGraphToSolver(): void {
+    this.circuitSolver.rebuildConnectionsFromInteractiveWires(
+      this.interactiveWireIntegration.getWires(),
+      { gridPitchPx: this.gridCanvas.getSettings().size },
+    );
+  }
+
   public override onSceneActivated(): void {
     super.onSceneActivated();
 
@@ -578,17 +606,9 @@ export class CircuitScene extends BaseScene {
     // Setup keyboard shortcuts
     this.setupKeyboardShortcuts();
 
-    // Global wire disconnect listener (once, not per-component)
-    this._wireDisconnectHandler = (e: any) => {
-      const { a, b } = e.detail || {};
-      if (a && b) {
-        this.circuitSolver.disconnectNodes(
-          a.componentId,
-          a.nodeId,
-          b.componentId,
-          b.nodeId,
-        );
-      }
+    // Global wire disconnect listener — full solver graph rebuild (T-joints, stubs).
+    this._wireDisconnectHandler = () => {
+      this.syncInteractiveWireGraphToSolver();
     };
     (window as any).addEventListener?.(
       "wire:disconnected",
@@ -1695,6 +1715,9 @@ export class CircuitScene extends BaseScene {
     const componentName = component.getName();
     const nodes = component.getNodes();
 
+    // Schematic wires (interactive layer): reroute when pin positions change (flip/rotate, etc.).
+    this.interactiveWireIntegration.updateWirePositions(componentName);
+
     // Get all wires from the wire system
     const allWires = this.wireSystem.getAllWires();
 
@@ -2106,7 +2129,6 @@ export class CircuitScene extends BaseScene {
       this.isWireMode = true;
       this.wireWaypoints = [];
       this.wireStartWorldPos = null;
-      this.wireBendPreference = "horizontal-first";
       document.body.classList.add("wire-mode");
 
       // Visual feedback - highlight the starting node
@@ -2138,20 +2160,6 @@ export class CircuitScene extends BaseScene {
             console.log(
               `🔗 Wire connected to existing wire at (${_x.toFixed(1)}, ${_y.toFixed(1)})`,
             );
-            // Also connect solver nets: start node ↔ all component endpoints on the target wire
-            try {
-              const endpoints = (existingWire.nodes || []).filter(
-                (n: any) => n.type === "component",
-              );
-              endpoints.forEach((end: any) => {
-                this.circuitSolver.connectNodes(
-                  this.wireStartComponent!.getName(),
-                  this.wireStartNode!,
-                  end.componentId,
-                  end.nodeId,
-                );
-              });
-            } catch {}
           }
         } else {
           // Regular component-to-component connection
@@ -2166,13 +2174,6 @@ export class CircuitScene extends BaseScene {
 
           if (success) {
             console.log(`🔗 Wire created: ${wireId}`);
-            // Connect nodes in circuit solver
-            this.circuitSolver.connectNodes(
-              this.wireStartComponent!.getName(),
-              this.wireStartNode!,
-              component.getName(),
-              node.id,
-            );
           } else {
             console.warn("⚠️ Failed to create wire");
           }
@@ -2209,19 +2210,6 @@ export class CircuitScene extends BaseScene {
             console.log(
               `🔗 Wire connected to existing wire at (${x.toFixed(1)}, ${y.toFixed(1)})`,
             );
-            try {
-              const endpoints = (existingWire.nodes || []).filter(
-                (n: any) => n.type === "component",
-              );
-              endpoints.forEach((end: any) => {
-                this.circuitSolver.connectNodes(
-                  this.wireStartComponent.getName(),
-                  this.wireStartNode!,
-                  end.componentId,
-                  end.nodeId,
-                );
-              });
-            } catch {}
           }
           this.cancelWireMode();
           return;
@@ -2229,27 +2217,45 @@ export class CircuitScene extends BaseScene {
       }
       // Place a waypoint at the clicked grid position and continue routing
       if (this.wireStartComponent && this.wireStartNode) {
-        const GRID = 20;
+        const GRID = this.gridCanvas.getSettings().size;
         const snappedX = Math.round(x / GRID) * GRID;
         const snappedY = Math.round(y / GRID) * GRID;
 
-        // Compute the orthogonal route from last anchor to this waypoint
         const lastAnchor =
           this.wireWaypoints.length > 0
             ? this.wireWaypoints[this.wireWaypoints.length - 1]
             : this.wireStartWorldPos!;
 
-        const route = this.computeOrthogonalRoute(
+        const wireSys = this.interactiveWireIntegration.getWireSystem();
+        const avoid =
+          this.wireWaypoints.length === 0 && this.wireStartComponent
+            ? [this.wireStartComponent.getName()]
+            : [];
+        const snapForLeg =
+          this.wireWaypoints.length === 0
+            ? { ax: false, ay: false, bx: true, by: true }
+            : { ax: true, ay: true, bx: true, by: true };
+        const routePts = wireSys.getPreviewRoutePolyline(
           lastAnchor.x,
           lastAnchor.y,
           snappedX,
           snappedY,
-          this.wireBendPreference,
+          avoid,
+          snapForLeg,
+          this.wireWaypoints.length === 0 &&
+            this.wireStartComponent &&
+            this.wireStartNode
+            ? {
+                start: {
+                  componentId: this.wireStartComponent.getName(),
+                  nodeId: this.wireStartNode,
+                },
+              }
+            : undefined,
         );
 
-        // Add intermediate bend points and the endpoint as waypoints
-        for (let i = 1; i < route.length; i++) {
-          this.wireWaypoints.push(route[i]);
+        for (let i = 1; i < routePts.length; i++) {
+          this.wireWaypoints.push(routePts[i]!);
         }
         return;
       }
@@ -2281,13 +2287,6 @@ export class CircuitScene extends BaseScene {
 
         if (success) {
           console.log(`🔗 Wire created: ${wireId}`);
-          // Connect nodes in circuit solver
-          this.circuitSolver.connectNodes(
-            this.wireStartComponent.getName(),
-            this.wireStartNode!,
-            clickedComponent.getName(),
-            clickedNode.id,
-          );
         } else {
           console.warn("⚠️ Failed to create wire");
         }
@@ -2563,50 +2562,7 @@ export class CircuitScene extends BaseScene {
   }
 
   /**
-   * Compute orthogonal route segments from start to end using the current bend preference.
-   * Returns an array of {x,y} points forming horizontal/vertical segments.
-   */
-  private computeOrthogonalRoute(
-    sx: number,
-    sy: number,
-    ex: number,
-    ey: number,
-    preference: "horizontal-first" | "vertical-first",
-  ): { x: number; y: number }[] {
-    const GRID = 20;
-    const snap = (v: number) => Math.round(v / GRID) * GRID;
-    const tx = snap(ex);
-    const ty = snap(ey);
-    const dx = tx - sx;
-    const dy = ty - sy;
-
-    // Trivially aligned
-    if (Math.abs(dx) < 1 || Math.abs(dy) < 1) {
-      return [
-        { x: sx, y: sy },
-        { x: tx, y: ty },
-      ];
-    }
-
-    // L-route: one bend
-    if (preference === "horizontal-first") {
-      return [
-        { x: sx, y: sy },
-        { x: tx, y: sy },
-        { x: tx, y: ty },
-      ];
-    } else {
-      return [
-        { x: sx, y: sy },
-        { x: sx, y: ty },
-        { x: tx, y: ty },
-      ];
-    }
-  }
-
-  /**
-   * Create or update wire preview with smart orthogonal routing.
-   * Draws committed waypoint segments + a live L-shaped preview from the last anchor to the mouse.
+   * Create or update wire preview using the same A* router as committed wires.
    */
   private updateWirePreview(mouseX: number, mouseY: number): void {
     if (!this.isWireMode || !this.wireStartComponent || !this.wireStartNode)
@@ -2642,48 +2598,90 @@ export class CircuitScene extends BaseScene {
     }
     this.wirePreview = new Graphics();
 
-    // --- Build the full point path ---
-    // Start from origin, through all waypoints, to the live cursor
+    const GRID = this.gridCanvas.getSettings().size;
+    const snappedCursor = {
+      x: Math.round(worldX / GRID) * GRID,
+      y: Math.round(worldY / GRID) * GRID,
+    };
+
     const anchorPoints: { x: number; y: number }[] = [
       { x: originX, y: originY },
       ...this.wireWaypoints,
     ];
-
-    // Auto-detect bend preference from initial drag direction if not toggled
     const lastAnchor = anchorPoints[anchorPoints.length - 1];
-    const absDx = Math.abs(worldX - lastAnchor.x);
-    const absDy = Math.abs(worldY - lastAnchor.y);
+    const wireSys = this.interactiveWireIntegration.getWireSystem();
 
-    // Compute the live segment from last anchor to cursor
-    const liveRoute = this.computeOrthogonalRoute(
+    const mergeLeg = (
+      acc: { x: number; y: number }[],
+      leg: { x: number; y: number }[],
+    ) => {
+      if (!acc.length) acc.push(...leg);
+      else for (let i = 1; i < leg.length; i++) acc.push(leg[i]!);
+    };
+
+    const committed: { x: number; y: number }[] = [];
+    for (let i = 0; i < anchorPoints.length - 1; i++) {
+      const a = anchorPoints[i]!;
+      const b = anchorPoints[i + 1]!;
+      const avoid =
+        i === 0 && this.wireStartComponent
+          ? [this.wireStartComponent.getName()]
+          : [];
+      const snapLeg =
+        i === 0
+          ? { ax: false, ay: false, bx: true, by: true }
+          : { ax: true, ay: true, bx: true, by: true };
+      const leg = wireSys.getPreviewRoutePolyline(
+        a.x,
+        a.y,
+        b.x,
+        b.y,
+        avoid,
+        snapLeg,
+        i === 0 && this.wireStartComponent && this.wireStartNode
+          ? {
+              start: {
+                componentId: this.wireStartComponent.getName(),
+                nodeId: this.wireStartNode,
+              },
+            }
+          : undefined,
+      );
+      mergeLeg(committed, leg);
+    }
+
+    const liveAvoid =
+      anchorPoints.length === 1 && this.wireStartComponent
+        ? [this.wireStartComponent.getName()]
+        : [];
+    const liveSnap = { ax: false, ay: false, bx: true, by: true };
+    const liveRoute = wireSys.getPreviewRoutePolyline(
       lastAnchor.x,
       lastAnchor.y,
-      worldX,
-      worldY,
-      this.wireBendPreference,
+      snappedCursor.x,
+      snappedCursor.y,
+      liveAvoid,
+      liveSnap,
+      anchorPoints.length === 1 &&
+        this.wireStartComponent &&
+        this.wireStartNode
+        ? {
+            start: {
+              componentId: this.wireStartComponent.getName(),
+              nodeId: this.wireStartNode,
+            },
+          }
+        : undefined,
     );
 
-    // Combine: committed segments (anchor-to-anchor as straight lines) + live route
-    const allPoints: { x: number; y: number }[] = [];
-    // Add committed waypoint path
-    for (const pt of anchorPoints) {
-      allPoints.push(pt);
-    }
-    // Add live route (skip first point as it's the same as the last anchor)
-    for (let i = 1; i < liveRoute.length; i++) {
-      allPoints.push(liveRoute[i]);
-    }
-
-    // --- Draw committed segments (solid) ---
-    if (anchorPoints.length > 1) {
-      this.wirePreview.moveTo(anchorPoints[0].x, anchorPoints[0].y);
-      for (let i = 1; i < anchorPoints.length; i++) {
-        this.wirePreview.lineTo(anchorPoints[i].x, anchorPoints[i].y);
+    if (committed.length > 1) {
+      this.wirePreview.moveTo(committed[0].x, committed[0].y);
+      for (let i = 1; i < committed.length; i++) {
+        this.wirePreview.lineTo(committed[i].x, committed[i].y);
       }
       this.wirePreview.stroke({ width: 2.5, color: 0x4ecdc4, alpha: 1.0 });
     }
 
-    // --- Draw live segment (slightly transparent, rubber-band feel) ---
     if (liveRoute.length > 1) {
       this.wirePreview.moveTo(liveRoute[0].x, liveRoute[0].y);
       for (let i = 1; i < liveRoute.length; i++) {
@@ -2703,9 +2701,8 @@ export class CircuitScene extends BaseScene {
     this.wirePreview.fill({ color: 0xff6b6b, alpha: 0.9 });
 
     // Cursor dot
-    const GRID = 20;
-    const snappedX = Math.round(worldX / GRID) * GRID;
-    const snappedY = Math.round(worldY / GRID) * GRID;
+    const snappedX = snappedCursor.x;
+    const snappedY = snappedCursor.y;
     this.wirePreview.circle(snappedX, snappedY, 4);
     this.wirePreview.fill({ color: 0x00ff88, alpha: 0.9 });
 
@@ -2815,7 +2812,6 @@ export class CircuitScene extends BaseScene {
     this.wireStartNode = null;
     this.wireWaypoints = [];
     this.wireStartWorldPos = null;
-    this.wireBendPreference = "horizontal-first";
     this.clearNodeHighlight();
     this.clearWirePreview();
     this.hideWireModeIndicator();
@@ -3930,6 +3926,7 @@ export class CircuitScene extends BaseScene {
       this.clearSelectionHighlight();
       this.selectedComponent = null;
     }
+    this.educationOverlays?.removeBadge(componentName);
 
     // Destroy the component
     component.destroy();
@@ -4014,6 +4011,7 @@ export class CircuitScene extends BaseScene {
   private startSimulation(): void {
     this.isSimulationRunning = true;
     setTransientSimulationRunning(true);
+    this.syncInteractiveWireGraphToSolver();
 
     this.simulationInterval = window.setInterval(() => {
       // Update AC sources voltage based on current time
@@ -4098,6 +4096,8 @@ export class CircuitScene extends BaseScene {
     // Clear wire flow debug visuals (particles + arrows + glow) immediately.
     this.wireParticleSystem?.clearVisuals();
     this.wireDirectionHistory.clear();
+    this.educationOverlays?.hideTooltip();
+    this.educationOverlays?.clearBadges();
 
     // Update UI
     const playStopButton = this.toolbar.querySelector(
@@ -4130,7 +4130,8 @@ export class CircuitScene extends BaseScene {
   /**
    * Run DC analysis
    */
-  private runDCAnalysis(): void {
+  public runDCAnalysis(): void {
+    this.syncInteractiveWireGraphToSolver();
     const success = this.circuitSolver.solveDC();
 
     if (success) {
@@ -4261,8 +4262,6 @@ export class CircuitScene extends BaseScene {
 
     const iDead = DEFAULT_WIRE_ANIM_STABILIZER_CONFIG.iDead;
     for (const [wireId, wire] of interactiveWires) {
-      const endpoints = wire.nodes.filter((n: any) => n.type === "component");
-      if (endpoints.length < 2) continue;
       this.wireAnimationStabilizer.step(
         wireId,
         wire.current,
@@ -4343,9 +4342,8 @@ export class CircuitScene extends BaseScene {
           displayMag > iDead && visualFade > 0.05;
         const normalizedI = Math.min(displayMag / 1.0, 1.0);
 
-        const endpoints = wire.nodes.filter((n: any) => n.type === "component");
-        const startEp = endpoints[0];
-        const endEp = endpoints[1];
+        const { first: startEp, second: endEp } =
+          orderedComponentEndpointsForWire(wire);
         const visualSignAlong =
           this.wireAnimationStabilizer.getVisualSignAlongEndpoints(wireId);
         const flowAlongEndpoints = visualSignAlong;
@@ -4359,22 +4357,84 @@ export class CircuitScene extends BaseScene {
             endEp,
           );
           if (energized) {
-            renderDir = (flowAlongEndpoints * pathOrientation) as 1 | -1;
+            const startV =
+              startEp?.componentId && startEp?.nodeId
+                ? snapshot?.componentTerminalVoltages?.[startEp.componentId]?.[
+                    startEp.nodeId
+                  ]
+                : undefined;
+            const endV =
+              endEp?.componentId && endEp?.nodeId
+                ? snapshot?.componentTerminalVoltages?.[endEp.componentId]?.[
+                    endEp.nodeId
+                  ]
+                : undefined;
+            if (
+              Number.isFinite(startV) &&
+              Number.isFinite(endV) &&
+              Math.abs((startV as number) - (endV as number)) > 1e-5
+            ) {
+              const endpointDir = (startV as number) >= (endV as number) ? 1 : -1;
+              renderDir = (endpointDir * pathOrientation) as 1 | -1;
+            } else {
+            const flowSource = (wire as any).flowSource as
+              | { x?: number; y?: number }
+              | undefined;
+            const flowSink = (wire as any).flowSink as
+              | { x?: number; y?: number }
+              | undefined;
+            if (
+              flowSource &&
+              flowSink &&
+              Number.isFinite(flowSource.x) &&
+              Number.isFinite(flowSource.y) &&
+              Number.isFinite(flowSink.x) &&
+              Number.isFinite(flowSink.y)
+            ) {
+              const pathStart = wire.segments[0].start;
+              const pathEnd = wire.segments[wire.segments.length - 1].end;
+              const dist2 = (
+                a: { x: number; y: number },
+                b: { x: number; y: number },
+              ) => (a.x - b.x) ** 2 + (a.y - b.y) ** 2;
+              const source = { x: flowSource.x as number, y: flowSource.y as number };
+              const sink = { x: flowSink.x as number, y: flowSink.y as number };
+              const sum01 = dist2(pathStart, source) + dist2(pathEnd, sink);
+              const sum10 = dist2(pathStart, sink) + dist2(pathEnd, source);
+              renderDir = sum01 <= sum10 ? 1 : -1;
+            } else {
+              renderDir = (flowAlongEndpoints * pathOrientation) as 1 | -1;
+            }
+            }
           }
         }
 
-        const ep = wire.nodes.filter((n: { type: string }) => n.type === "component") as Array<{
-          componentId?: string;
-          nodeId?: string;
-        }>;
         let phaseShift = 0;
-        if (ep.length >= 2 && ep[0].componentId && ep[0].nodeId && ep[1].componentId && ep[1].nodeId) {
-          const ma = this.circuitSolver.getMergedNodeIndex(ep[0].componentId, ep[0].nodeId);
-          const mb = this.circuitSolver.getMergedNodeIndex(ep[1].componentId, ep[1].nodeId);
+        if (
+          startEp?.componentId &&
+          startEp?.nodeId &&
+          endEp?.componentId &&
+          endEp?.nodeId
+        ) {
+          const ma = this.circuitSolver.getMergedNodeIndex(
+            startEp.componentId,
+            startEp.nodeId,
+          );
+          const mb = this.circuitSolver.getMergedNodeIndex(
+            endEp.componentId,
+            endEp.nodeId,
+          );
           const pa = ma !== undefined ? this.mergedNetVisualPhase.get(ma) ?? 0 : 0;
           const pb = mb !== undefined ? this.mergedNetVisualPhase.get(mb) ?? 0 : 0;
           const blend = (pa + pb) * 0.5;
           phaseShift = blend - Math.floor(blend);
+        } else if (startEp?.componentId && startEp?.nodeId) {
+          const m = this.circuitSolver.getMergedNodeIndex(
+            startEp.componentId,
+            startEp.nodeId,
+          );
+          const p = m !== undefined ? this.mergedNetVisualPhase.get(m) ?? 0 : 0;
+          phaseShift = p - Math.floor(p);
         }
 
         const flowDirEndpoint = (wire as any).flowDirEndpoint as string | undefined;
@@ -4436,17 +4496,28 @@ export class CircuitScene extends BaseScene {
           `${seg.start.x.toFixed(2)},${seg.start.y.toFixed(2)}->${seg.end.x.toFixed(2)},${seg.end.y.toFixed(2)}`,
       )
       .join("|");
+    const endpointSignature = `${startEp?.componentId ?? "na"}:${startEp?.nodeId ?? "na"}|${endEp?.componentId ?? "na"}:${endEp?.nodeId ?? "na"}`;
     const previousSignature = this.wirePathSignatures.get(wireId);
-    if (previousSignature === signature) {
+    const previousEndpointSignature = this.wirePathEndpointSignatures.get(wireId);
+    if (
+      previousSignature === signature &&
+      previousEndpointSignature === endpointSignature
+    ) {
       return this.wirePathOrientations.get(wireId) ?? 1;
     }
 
     this.wirePathSignatures.set(wireId, signature);
+    this.wirePathEndpointSignatures.set(wireId, endpointSignature);
     const pathSegments = wire.segments.map((seg: any) => ({
       start: { x: seg.start.x, y: seg.start.y },
       end: { x: seg.end.x, y: seg.end.y },
     }));
-    this.wireParticleSystem!.updateWirePaths(wireId, pathSegments);
+    const anim = wire.animationPathMeta as
+      | { segmentIds: string[]; revision: number }
+      | undefined;
+    this.wireParticleSystem!.updateWirePaths(wireId, pathSegments, anim
+      ? { segmentIds: anim.segmentIds, revision: anim.revision }
+      : undefined);
 
     const pathStart = wire.segments[0].start;
     const pathEnd = wire.segments[wire.segments.length - 1].end;
@@ -4457,6 +4528,14 @@ export class CircuitScene extends BaseScene {
     if (startEp && endEp) {
       const sum01 = dist2(pathStart, startEp) + dist2(pathEnd, endEp);
       const sum10 = dist2(pathStart, endEp) + dist2(pathEnd, startEp);
+      orientation = sum01 <= sum10 ? 1 : -1;
+    } else if (startEp && !endEp) {
+      const jn = wire.nodes?.find((n: any) => n.type === "junction") as
+        | { x: number; y: number }
+        | undefined;
+      const anchor = jn ?? pathEnd;
+      const sum01 = dist2(pathStart, startEp) + dist2(pathEnd, anchor);
+      const sum10 = dist2(pathStart, anchor) + dist2(pathEnd, startEp);
       orientation = sum01 <= sum10 ? 1 : -1;
     }
     this.wirePathOrientations.set(wireId, orientation);
@@ -4500,16 +4579,15 @@ export class CircuitScene extends BaseScene {
         }
       }
 
-      const endpoints = wire.nodes.filter((n: any) => n.type === "component");
-      const startEp = endpoints[0];
-      const endEp = endpoints[1];
+      const { first: startEp, second: endEp } =
+        orderedComponentEndpointsForWire(wire);
       const startV =
         snapshot?.componentTerminalVoltages?.[startEp?.componentId]?.[
-          startEp?.nodeId
+          startEp?.nodeId ?? ""
         ];
       const endV =
         snapshot?.componentTerminalVoltages?.[endEp?.componentId]?.[
-          endEp?.nodeId
+          endEp?.nodeId ?? ""
         ];
       if (
         Number.isFinite(startV) &&
@@ -4549,6 +4627,7 @@ export class CircuitScene extends BaseScene {
       if (!liveIds.has(wireId)) {
         this.wireDirectionHistory.delete(wireId);
         this.wirePathSignatures.delete(wireId);
+        this.wirePathEndpointSignatures.delete(wireId);
         this.wirePathOrientations.delete(wireId);
       }
     }
@@ -4590,6 +4669,8 @@ export class CircuitScene extends BaseScene {
       } else {
         this.educationOverlays.hideTooltip();
       }
+    } else {
+      this.educationOverlays?.hideTooltip();
     }
   }
 
@@ -4651,15 +4732,6 @@ export class CircuitScene extends BaseScene {
       case " ":
         event.preventDefault();
         this.toggleSimulation();
-        break;
-      case "/":
-        if (this.isWireMode) {
-          event.preventDefault();
-          this.wireBendPreference =
-            this.wireBendPreference === "horizontal-first"
-              ? "vertical-first"
-              : "horizontal-first";
-        }
         break;
     }
   }
@@ -5468,6 +5540,7 @@ export class CircuitScene extends BaseScene {
     // Clean up hybrid wire router
     this.hybridWireRouter.clear();
     this.wirePathSignatures.clear();
+    this.wirePathEndpointSignatures.clear();
     this.wirePathOrientations.clear();
     this.wireDirectionHistory.clear();
     this.wireDisplayTopologySig = "";
@@ -5498,10 +5571,10 @@ export class CircuitScene extends BaseScene {
 
     const wires: CircuitSceneSnapshotWire[] = [];
     this.interactiveWireIntegration.getWires().forEach((wire) => {
-      const endpoints = (wire.nodes ?? []).filter((n: any) => n.type === "component");
-      if (endpoints.length >= 2) {
-        const start = endpoints[0];
-        const end = endpoints[endpoints.length - 1];
+      const endpoints = orderedComponentEndpointsForWire(wire);
+      const start = endpoints.first;
+      const end = endpoints.second;
+      if (start && end) {
         if (
           start?.componentId &&
           start?.nodeId &&
@@ -5513,13 +5586,35 @@ export class CircuitScene extends BaseScene {
             kind: "component_to_component",
             start: { componentId: start.componentId, nodeId: start.nodeId },
             end: { componentId: end.componentId, nodeId: end.nodeId },
+            nodes: (wire.nodes ?? []).map((n: any) => ({
+              id: n.id,
+              x: n.x,
+              y: n.y,
+              type: n.type,
+              componentId: n.componentId,
+              nodeId: n.nodeId,
+              connectedWires: Array.isArray(n.connectedWires) ? [...n.connectedWires] : [],
+            })),
+            segments: (wire.segments ?? []).map((s: any) => ({
+              start: { x: s.start.x, y: s.start.y },
+              end: { x: s.end.x, y: s.end.y },
+              isHorizontal: Boolean(s.isHorizontal),
+              layer: Number.isFinite(s.layer) ? s.layer : 0,
+            })),
+            segmentStableIds: wire.segmentStableIds ? [...wire.segmentStableIds] : undefined,
+            routeRevision: wire.routeRevision,
+            animationPathMeta: wire.animationPathMeta
+              ? {
+                  segmentIds: [...wire.animationPathMeta.segmentIds],
+                  revision: wire.animationPathMeta.revision,
+                }
+              : undefined,
           });
         }
         return;
       }
 
-      if (endpoints.length === 1) {
-        const start = endpoints[0];
+      if (start && !end) {
         const junction = (wire.nodes ?? []).find((n: any) => n.type === "junction");
         const targetWireId = junction?.connectedWires?.find(
           (id: string) => id !== wire.id,
@@ -5531,6 +5626,29 @@ export class CircuitScene extends BaseScene {
             start: { componentId: start.componentId, nodeId: start.nodeId },
             targetWireId,
             junctionPoint: { x: junction.x, y: junction.y },
+            nodes: (wire.nodes ?? []).map((n: any) => ({
+              id: n.id,
+              x: n.x,
+              y: n.y,
+              type: n.type,
+              componentId: n.componentId,
+              nodeId: n.nodeId,
+              connectedWires: Array.isArray(n.connectedWires) ? [...n.connectedWires] : [],
+            })),
+            segments: (wire.segments ?? []).map((s: any) => ({
+              start: { x: s.start.x, y: s.start.y },
+              end: { x: s.end.x, y: s.end.y },
+              isHorizontal: Boolean(s.isHorizontal),
+              layer: Number.isFinite(s.layer) ? s.layer : 0,
+            })),
+            segmentStableIds: wire.segmentStableIds ? [...wire.segmentStableIds] : undefined,
+            routeRevision: wire.routeRevision,
+            animationPathMeta: wire.animationPathMeta
+              ? {
+                  segmentIds: [...wire.animationPathMeta.segmentIds],
+                  revision: wire.animationPathMeta.revision,
+                }
+              : undefined,
           });
         }
       }
@@ -5580,21 +5698,13 @@ export class CircuitScene extends BaseScene {
 
       for (const wire of directWires) {
         if (!wire.end) continue;
-        const success = this.interactiveWireIntegration.createWire(
+        this.interactiveWireIntegration.createWire(
           wire.id,
           wire.start.componentId,
           wire.start.nodeId,
           wire.end.componentId,
           wire.end.nodeId,
         );
-        if (success) {
-          this.circuitSolver.connectNodes(
-            wire.start.componentId,
-            wire.start.nodeId,
-            wire.end.componentId,
-            wire.end.nodeId,
-          );
-        }
       }
 
       let pending = [...branchWires];
@@ -5627,23 +5737,36 @@ export class CircuitScene extends BaseScene {
             nextPending.push(wire);
             continue;
           }
-
-          const endpoints = (targetWire.nodes ?? []).filter(
-            (n: any) => n.type === "component",
-          );
-          endpoints.forEach((end: any) => {
-            this.circuitSolver.connectNodes(
-              wire.start.componentId,
-              wire.start.nodeId,
-              end.componentId,
-              end.nodeId,
-            );
-          });
         }
         pending = nextPending;
       }
 
+      this.syncInteractiveWireGraphToSolver();
+
+      const hasSavedGeometry = snapshot.wires.some(
+        (w) => Array.isArray(w.segments) && w.segments.length > 0,
+      );
+      if (hasSavedGeometry) {
+        const wireSystem = this.interactiveWireIntegration.getWireSystem();
+        for (const saved of snapshot.wires) {
+          wireSystem.restoreWireGeometry(saved.id, {
+            nodes: saved.nodes,
+            segments: saved.segments,
+            segmentStableIds: saved.segmentStableIds,
+            routeRevision: saved.routeRevision,
+            animationPathMeta: saved.animationPathMeta,
+          });
+        }
+      } else {
+        // Legacy snapshots: rebuild deterministic geometry from connectivity.
+        this.interactiveWireIntegration.refreshAllWireGeometry();
+        requestAnimationFrame(() => {
+          this.interactiveWireIntegration.refreshAllWireGeometry();
+        });
+      }
+
       this.wirePathSignatures.clear();
+      this.wirePathEndpointSignatures.clear();
       this.wirePathOrientations.clear();
       this.wireDirectionHistory.clear();
       this.wireDisplayTopologySig = "";
@@ -5676,13 +5799,17 @@ export class CircuitScene extends BaseScene {
     components.forEach((component) => this.deleteComponent(component));
 
     this.interactiveWireIntegration.clearWires();
+    this.syncInteractiveWireGraphToSolver();
     this.wirePathSignatures.clear();
+    this.wirePathEndpointSignatures.clear();
     this.wirePathOrientations.clear();
     this.wireDirectionHistory.clear();
     this.wireDisplayTopologySig = "";
     this.mergedNetVisualPhase.clear();
     this.wireAnimationStabilizer.clear();
     this.lastWireAnimEffectsMs = 0;
+    this.educationOverlays?.hideTooltip();
+    this.educationOverlays?.clearBadges();
     this.hidePropertiesPanel();
   }
 

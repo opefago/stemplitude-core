@@ -58,9 +58,62 @@ class ProjectResponse(BaseModel):
         description="Additional metadata or project metadata.",
     )
     status: str = Field("submitted", description="Project status: draft, submitted, graded, returned.")
+    save_kind: str = Field("checkpoint", description="Save mode: autosave or checkpoint.")
+    revision: int = Field(1, description="Monotonic project revision counter.")
+    source_project_id: UUID | None = Field(
+        None,
+        description="Optional parent project id for checkpoint/version lineage.",
+    )
     submitted_at: datetime = Field(
         ...,
         description="When the project was submitted.",
+    )
+    updated_at: datetime = Field(
+        ...,
+        description="When the project was last updated.",
+    )
+
+
+class ProjectUpdate(BaseModel):
+    """Schema for updating an existing project save."""
+
+    title: str | None = Field(
+        None,
+        max_length=200,
+        description="Updated display title of the project.",
+    )
+    metadata_: dict | None = Field(
+        None,
+        serialization_alias="metadata",
+        description="Updated metadata payload.",
+    )
+    save_kind: str | None = Field(
+        None,
+        description="Save mode (autosave or checkpoint).",
+    )
+
+
+class PublicExploreProjectResponse(BaseModel):
+    """Public game/project card shown on the Explore page."""
+
+    id: UUID = Field(..., description="Unique project identifier.")
+    title: str = Field(..., description="Public display title for the project.")
+    creator_name: str = Field(..., description="Display name of the creator.")
+    creator_avatar_url: str | None = Field(
+        None,
+        description="Optional creator avatar URL.",
+    )
+    icon_url: str | None = Field(
+        None,
+        description="Optional icon/thumbnail image for the game card.",
+    )
+    play_url: str | None = Field(
+        None,
+        description="Optional public URL where the game can be played.",
+    )
+    published_at: datetime = Field(
+        ...,
+        description="Timestamp used for ordering the public gallery.",
     )
 
 

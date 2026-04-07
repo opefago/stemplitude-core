@@ -106,6 +106,10 @@ export interface CircuitNode {
   current: number;
   connections: string[];
   role?: AnchorRole;
+  /** Optional unit vector (local pin space) for wire leave direction; normalized to a cardinal in routing. */
+  wireExitLocal?: { x: number; y: number };
+  /** Per-pin override for schematic escape stub length (px). */
+  wireEscapeMinPx?: number;
 }
 
 export interface CircuitProperties {
@@ -275,6 +279,35 @@ export abstract class CircuitComponent extends GameObject {
     return this.nodes.find((node) => node.id === id);
   }
 
+  /** Cardinals only — aligns with orthogonal routing after `minPx` stub from the pin. */
+  private static cardinalizeDir(dx: number, dy: number): { x: number; y: number } {
+    if (Math.abs(dx) < 1e-6 && Math.abs(dy) < 1e-6) return { x: 1, y: 0 };
+    if (Math.abs(dx) >= Math.abs(dy))
+      return { x: Math.sign(dx) || 1, y: 0 };
+    return { x: 0, y: Math.sign(dy) || 1 };
+  }
+
+  /**
+   * Preferred wire exit from a pin: away from component body through the pin lead.
+   * Uses optional `wireExitLocal` or infers from pin offset from origin (same space as `node.position`).
+   */
+  public static wireExitDirForNode(node: CircuitNode): { x: number; y: number } {
+    const ex = node.wireExitLocal;
+    if (ex) {
+      const len = Math.hypot(ex.x, ex.y);
+      if (len > 1e-6) {
+        return CircuitComponent.cardinalizeDir(ex.x / len, ex.y / len);
+      }
+    }
+    return CircuitComponent.cardinalizeDir(node.position.x, node.position.y);
+  }
+
+  public getWireExitDirForNode(nodeId: string): { x: number; y: number } {
+    const node = this.getNode(nodeId);
+    if (!node) return { x: 1, y: 0 };
+    return CircuitComponent.wireExitDirForNode(node);
+  }
+
   protected updateNodePositions(): void {
     // Update node positions based on orientation
     // Override in derived classes for specific node layouts
@@ -356,6 +389,8 @@ export abstract class CircuitComponent extends GameObject {
    */
   public override update(deltaTime: number): void {
     super.update(deltaTime);
+    // Pixi ticker deltaTime is frame-scaled (~1 at 60 FPS), convert to seconds for emitters.
+    const dtSeconds = Math.max(0, deltaTime / 60);
 
     // Update animations
     if (this.currentFlowAnimation > 0) {
@@ -369,13 +404,12 @@ export abstract class CircuitComponent extends GameObject {
     }
 
     if (this.burnSmokeEmitter) {
-      // `deltaTime` here is already in seconds in this simulation loop.
-      this.burnSmokeEmitter.update(Math.max(0, deltaTime));
+      this.burnSmokeEmitter.update(dtSeconds);
       if (this.circuitProps.burnt) {
         this.burnSmokeEmitter.emit = true;
         this.burnSmokeTimeLeft = Math.max(this.burnSmokeTimeLeft, 0.2);
       } else if (this.burnSmokeTimeLeft > 0) {
-        this.burnSmokeTimeLeft = Math.max(0, this.burnSmokeTimeLeft - deltaTime);
+        this.burnSmokeTimeLeft = Math.max(0, this.burnSmokeTimeLeft - dtSeconds);
         if (this.burnSmokeTimeLeft <= 0) {
           this.burnSmokeEmitter.emit = false;
         }

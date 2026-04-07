@@ -268,11 +268,16 @@ export class EducationOverlays {
     }
   }
 
-  destroy(): void {
-    this.hideTooltip();
-    for (const [, g] of this.badgeGraphics) {
-      g.destroy();
+  clearBadges(): void {
+    for (const [, badge] of this.badgeGraphics) {
+      if (badge.parent) badge.parent.removeChild(badge);
+      badge.destroy();
     }
     this.badgeGraphics.clear();
+  }
+
+  destroy(): void {
+    this.hideTooltip();
+    this.clearBadges();
   }
 }
