@@ -187,6 +187,43 @@ a.kid-button--ghost:active {
   box-shadow: 0 1px 0 var(--color-border, #e2e8f0);
 }
 
+.kid-button--danger {
+  background: linear-gradient(180deg, #ff7d7d, #ef4444);
+  color: #fff;
+  border: 2px solid #d73a3a;
+  box-shadow:
+    0 4px 0 #b52f2f,
+    0 8px 14px rgba(183, 47, 47, 0.28);
+}
+
+.kid-button--danger:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow:
+    0 5px 0 #b52f2f,
+    0 10px 16px rgba(183, 47, 47, 0.32);
+}
+
+.kid-button--danger:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow:
+    0 2px 0 #b52f2f,
+    0 4px 8px rgba(183, 47, 47, 0.24);
+}
+
+.kid-dialog__actions {
+  width: 100%;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.kid-dialog__description {
+  margin: 0;
+  color: #374151;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
 /* Kid dropdown */
 .kid-dropdown {
   position: relative;

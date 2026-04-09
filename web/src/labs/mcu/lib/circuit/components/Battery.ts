@@ -344,9 +344,11 @@ export class Battery extends CircuitComponent {
     // Negative terminal (reference)
     this.nodes[1].voltage = 0;
 
-    // Update node currents (current flows out of positive, into negative)
-    this.nodes[0].current = -this.circuitProps.current; // Current flows out
-    this.nodes[1].current = this.circuitProps.current; // Current flows in
+    // MNA j_vs is negative when battery drives current (exits + terminal).
+    // Convention: positive node.current = enters terminal from wire.
+    // j_vs < 0 → negative at + → exits terminal into wire ✓
+    this.nodes[0].current = this.circuitProps.current;
+    this.nodes[1].current = -this.circuitProps.current;
   }
 
   public getImpedance(_frequency: number = 0): number {

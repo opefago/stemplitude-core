@@ -1,6 +1,12 @@
-import type { InteractiveWireConnection, WireNode, WireSegment } from "./InteractiveWireSystem";
+import type {
+  InteractiveWireConnection,
+  WireNode,
+  WireSegment,
+} from "./InteractiveWireSystem";
 
-function segmentsToPolylinePoints(segments: WireSegment[]): { x: number; y: number }[] {
+function segmentsToPolylinePoints(
+  segments: WireSegment[],
+): { x: number; y: number }[] {
   if (segments.length === 0) return [];
   const pts: { x: number; y: number }[] = [
     { x: segments[0]!.start.x, y: segments[0]!.start.y },

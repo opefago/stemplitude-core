@@ -6,7 +6,7 @@ import {
   type SessionResponse,
 } from "../../lib/api/students";
 import { ApiHttpError } from "../../lib/api/client";
-import { ModalDialog } from "../../components/ui";
+import { KidDropdown, ModalDialog } from "../../components/ui";
 import "react-day-picker/src/style.css";
 import "../../components/ui/ui.css";
 import "./guardian-excusal-modal.css";
@@ -246,6 +246,14 @@ export function GuardianExcusalRequestModal({
   }, [open, mode, calRange, studentId, loadRangeSessions]);
 
   const showSessionSelect = mode === "session" && !preset && Boolean(sessionChoices?.length);
+  const sessionDropdownOptions = useMemo(
+    () =>
+      (sessionChoices ?? []).map((c) => ({
+        value: `${c.sessionId}|${c.classroomId}|${c.sessionStart ?? ""}|${c.sessionEnd ?? ""}`,
+        label: c.label,
+      })),
+    [sessionChoices],
+  );
 
   const dateInputBounds = useMemo(() => {
     const min = new Date();
@@ -425,7 +433,7 @@ export function GuardianExcusalRequestModal({
           <div className="ui-form-actions">
             <button
               type="button"
-              className="ui-btn ui-btn--secondary"
+              className="kid-button kid-button--ghost"
               onClick={onClose}
               disabled={submitting}
             >
@@ -433,7 +441,7 @@ export function GuardianExcusalRequestModal({
             </button>
             <button
               type="button"
-              className="ui-btn ui-btn--primary"
+              className="kid-button"
               onClick={submit}
               disabled={primaryDisabled}
             >
@@ -481,21 +489,13 @@ export function GuardianExcusalRequestModal({
                 <label className="g-excusal-modal__label" htmlFor="g-excusal-session">
                   Session
                 </label>
-                <select
-                  id="g-excusal-session"
-                  className="g-excusal-modal__select"
+                <KidDropdown
                   value={sessionPick}
-                  onChange={(e) => setSessionPick(e.target.value)}
-                >
-                  {sessionChoices!.map((c) => (
-                    <option
-                      key={`${c.sessionId}|${c.classroomId}`}
-                      value={`${c.sessionId}|${c.classroomId}|${c.sessionStart ?? ""}|${c.sessionEnd ?? ""}`}
-                    >
-                      {c.label}
-                    </option>
-                  ))}
-                </select>
+                  options={sessionDropdownOptions}
+                  onChange={setSessionPick}
+                  ariaLabel="Session"
+                  fullWidth
+                />
               </>
             ) : null}
           </>
@@ -591,7 +591,7 @@ export function GuardianExcusalRequestModal({
             <div className="ui-form-actions">
               <button
                 type="button"
-                className="ui-btn ui-btn--primary"
+                className="kid-button"
                 onClick={() => setCalendarPickerOpen(false)}
               >
                 Done

@@ -1,4 +1,4 @@
-import { Container, Graphics, ParticleContainer, Text, Texture } from "pixi.js";
+import { Container, Graphics, Text, Texture } from "pixi.js";
 import { Emitter } from "@spd789562/particle-emitter";
 import GameObject from "../shared/GameObject";
 import type { ComponentRuntimeState } from "./types/RuntimeState";
@@ -153,7 +153,7 @@ export abstract class CircuitComponent extends GameObject {
   protected currentFlowAnimation: number = 0;
   protected burnAnimation: number = 0;
   protected glowAnimation: number = 0;
-  protected burnSmokeContainer: ParticleContainer | null = null;
+  protected burnSmokeContainer: Container | null = null;
   protected burnSmokeEmitter: Emitter | null = null;
   protected burnSmokeTimeLeft: number = 0;
 
@@ -328,24 +328,40 @@ export abstract class CircuitComponent extends GameObject {
   }
 
   /**
+   * Reset all runtime / visual state back to defaults (idle, undamaged).
+   * Called when simulation stops so every component looks "fresh".
+   */
+  public resetToDefault(): void {
+    this.circuitProps.voltage = 0;
+    this.circuitProps.current = 0;
+    this.circuitProps.power = 0;
+    this.circuitProps.burnt = false;
+    this.circuitProps.glowing = false;
+
+    this.burnAnimation = 0;
+    this.glowAnimation = 0;
+    this.currentFlowAnimation = 0;
+    this.burnSmokeTimeLeft = 0;
+    if (this.burnSmokeEmitter) {
+      this.burnSmokeEmitter.emit = false;
+    }
+
+    for (const node of this.nodes) {
+      node.voltage = 0;
+      node.current = 0;
+    }
+
+    this.runtimeState = createDefaultRuntimeState();
+    this.updateVisuals(0);
+  }
+
+  /**
    * Update component state based on circuit analysis
    */
   public updateCircuitState(voltage: number, current: number): void {
     this.circuitProps.voltage = voltage;
     this.circuitProps.current = current;
     this.circuitProps.power = Math.abs(voltage * current);
-
-    // Reset burnt state if voltage and current are both zero (simulation stopped)
-    if (voltage === 0 && current === 0) {
-      this.circuitProps.burnt = false;
-      this.circuitProps.glowing = false;
-    }
-
-    // Check for component failure
-    if (this.circuitProps.power > this.circuitProps.powerRating) {
-      this.circuitProps.burnt = true;
-      this.startBurnAnimation();
-    }
 
     // Update node voltages
     this.updateNodeVoltages();
@@ -431,7 +447,7 @@ export abstract class CircuitComponent extends GameObject {
   private ensureBurnSmokeEmitter(): void {
     if (this.burnSmokeEmitter || !this.displayContainer) return;
 
-    const smokeContainer = new ParticleContainer();
+    const smokeContainer = new Container();
     smokeContainer.eventMode = "none";
     this.displayContainer.addChild(smokeContainer);
     this.burnSmokeContainer = smokeContainer;

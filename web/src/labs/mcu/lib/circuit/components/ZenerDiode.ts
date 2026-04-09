@@ -178,8 +178,8 @@ export class ZenerDiode extends CircuitComponent {
   }
 
   protected updateNodeVoltages(): void {
-    this.nodes[0].current = -this.circuitProps.current;
-    this.nodes[1].current = this.circuitProps.current;
+    this.nodes[0].current = this.circuitProps.current;
+    this.nodes[1].current = -this.circuitProps.current;
   }
 
   public getImpedance(_frequency: number = 0): number {

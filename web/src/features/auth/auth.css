@@ -322,3 +322,35 @@
 .auth-toggle__btn:hover:not(.auth-toggle__btn--active) {
   color: var(--color-text, #1e293b);
 }
+
+/* Password visibility toggle */
+.auth-password-wrapper {
+  position: relative;
+}
+
+.auth-password-wrapper .auth-input {
+  padding-right: 2.75rem;
+}
+
+.auth-password-toggle {
+  position: absolute;
+  right: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm, 4px);
+  background: transparent;
+  color: var(--color-text-secondary, #64748b);
+  cursor: pointer;
+  transition: color var(--transition-fast, 150ms ease);
+}
+
+.auth-password-toggle:hover {
+  color: var(--color-text, #1e293b);
+}

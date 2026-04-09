@@ -570,8 +570,13 @@ export class CircuitScene extends BaseScene {
 
   /**
    * Rebuild MNA node merging from interactive wire `nodes` (components + junctions).
+   * When called from an interactive topology change (wire drawn/removed by user)
+   * while the simulation is running, stop the simulation first.
    */
   public syncInteractiveWireGraphToSolver(): void {
+    if (this.isSimulationRunning) {
+      this.stopSimulation();
+    }
     this.circuitSolver.rebuildConnectionsFromInteractiveWires(
       this.interactiveWireIntegration.getWires(),
       { gridPitchPx: this.gridCanvas.getSettings().size },
@@ -1156,6 +1161,9 @@ export class CircuitScene extends BaseScene {
    * Place a component at specific coordinates
    */
   private placeComponentAt(componentType: string, x: number, y: number): void {
+    // Topology is about to change — stop the simulation to avoid unstable state.
+    this.stopSimulation();
+
     const component = this.createComponent(componentType, x, y);
     if (component) {
       this.gameObjects.set(component.getName(), component);
@@ -1404,6 +1412,9 @@ export class CircuitScene extends BaseScene {
    */
   private deleteSelectedWire(): void {
     if (!this.selectedWireId) return;
+
+    // Topology is about to change — stop the simulation to avoid unstable state.
+    this.stopSimulation();
 
     const wireId = this.selectedWireId;
     this.selectedWireId = null;
@@ -2337,6 +2348,9 @@ export class CircuitScene extends BaseScene {
    * Place a new component on the canvas (legacy method - now uses createComponent)
    */
   private placeComponent(type: string, x: number, y: number): void {
+    // Topology is about to change — stop the simulation to avoid unstable state.
+    this.stopSimulation();
+
     const component = this.createComponent(type, x, y);
     if (component) {
       this.gameObjects.set(component.getName(), component);
@@ -3899,6 +3913,9 @@ export class CircuitScene extends BaseScene {
    * Delete a component from the circuit
    */
   private deleteComponent(component: CircuitComponent): void {
+    // Topology is about to change — stop the simulation to avoid unstable state.
+    this.stopSimulation();
+
     const componentName = component.getName();
 
     // Remove from game objects
@@ -4009,9 +4026,19 @@ export class CircuitScene extends BaseScene {
    * Start time-domain simulation
    */
   private startSimulation(): void {
+    // Clear damage state from any previous run so the simulation starts fresh
+    this.gameObjects.forEach((obj) => {
+      if (obj instanceof CircuitComponent) {
+        obj.getCircuitProperties().burnt = false;
+      }
+    });
+
+    // Sync topology BEFORE setting the running flag — syncInteractiveWireGraphToSolver
+    // stops any already-running simulation, so this order avoids immediately undoing start.
+    this.syncInteractiveWireGraphToSolver();
+
     this.isSimulationRunning = true;
     setTransientSimulationRunning(true);
-    this.syncInteractiveWireGraphToSolver();
 
     this.simulationInterval = window.setInterval(() => {
       // Update AC sources voltage based on current time
@@ -4075,6 +4102,8 @@ export class CircuitScene extends BaseScene {
    * Stop simulation
    */
   private stopSimulation(): void {
+    if (!this.isSimulationRunning && !this.simulationInterval) return;
+
     this.isSimulationRunning = false;
     setTransientSimulationRunning(false);
 
@@ -4086,16 +4115,19 @@ export class CircuitScene extends BaseScene {
     // Reset solver state (clears capacitor/inductor previous state)
     this.circuitSolver.reset();
 
-    // Reset all component states to default (turn off LEDs, reset displays, etc.)
+    // Reset every component to its idle, undamaged default visual state.
     this.gameObjects.forEach((gameObject) => {
       if (gameObject instanceof CircuitComponent) {
-        gameObject.updateCircuitState(0, 0);
+        gameObject.resetToDefault();
       }
     });
 
-    // Clear wire flow debug visuals (particles + arrows + glow) immediately.
+    // Clear all wire flow visuals (particles, arrows, glow) immediately.
     this.wireParticleSystem?.clearVisuals();
+    this.wireAnimationStabilizer.clear();
     this.wireDirectionHistory.clear();
+    this.wireDisplayTopologySig = "";
+    this.mergedNetVisualPhase.clear();
     this.educationOverlays?.hideTooltip();
     this.educationOverlays?.clearBadges();
 
@@ -4115,14 +4147,6 @@ export class CircuitScene extends BaseScene {
    */
   private resetSimulation(): void {
     this.stopSimulation();
-    this.circuitSolver.reset();
-
-    // Reset all component visual states
-    this.gameObjects.forEach((gameObject) => {
-      if (gameObject instanceof CircuitComponent) {
-        gameObject.updateCircuitState(0, 0);
-      }
-    });
 
     console.log("🔄 Circuit simulation reset");
   }
@@ -4131,6 +4155,13 @@ export class CircuitScene extends BaseScene {
    * Run DC analysis
    */
   public runDCAnalysis(): void {
+    // Clear damage state from any previous run so the solve starts fresh
+    this.gameObjects.forEach((obj) => {
+      if (obj instanceof CircuitComponent) {
+        obj.getCircuitProperties().burnt = false;
+      }
+    });
+
     this.syncInteractiveWireGraphToSolver();
     const success = this.circuitSolver.solveDC();
 
@@ -4286,9 +4317,9 @@ export class CircuitScene extends BaseScene {
     }
 
     const dtPhase = 0.016;
-    const phaseK = 0.12;
+    const phaseK = 0.05;
     displaySolve.netMaxAbsByMerged.forEach((imax, net) => {
-      const omega = Math.log(1 + imax / 0.008);
+      const omega = Math.log(1 + imax / 0.02);
       this.mergedNetVisualPhase.set(
         net,
         (this.mergedNetVisualPhase.get(net) ?? 0) + dtPhase * phaseK * omega,
@@ -4377,34 +4408,12 @@ export class CircuitScene extends BaseScene {
               const endpointDir = (startV as number) >= (endV as number) ? 1 : -1;
               renderDir = (endpointDir * pathOrientation) as 1 | -1;
             } else {
-            const flowSource = (wire as any).flowSource as
-              | { x?: number; y?: number }
-              | undefined;
-            const flowSink = (wire as any).flowSink as
-              | { x?: number; y?: number }
-              | undefined;
-            if (
-              flowSource &&
-              flowSink &&
-              Number.isFinite(flowSource.x) &&
-              Number.isFinite(flowSource.y) &&
-              Number.isFinite(flowSink.x) &&
-              Number.isFinite(flowSink.y)
-            ) {
-              const pathStart = wire.segments[0].start;
-              const pathEnd = wire.segments[wire.segments.length - 1].end;
-              const dist2 = (
-                a: { x: number; y: number },
-                b: { x: number; y: number },
-              ) => (a.x - b.x) ** 2 + (a.y - b.y) ** 2;
-              const source = { x: flowSource.x as number, y: flowSource.y as number };
-              const sink = { x: flowSink.x as number, y: flowSink.y as number };
-              const sum01 = dist2(pathStart, source) + dist2(pathEnd, sink);
-              const sum10 = dist2(pathStart, sink) + dist2(pathEnd, source);
-              renderDir = sum01 <= sum10 ? 1 : -1;
-            } else {
+              // Keep render direction in the same signed frame as wire.current:
+              // canonical endpoint flow (+ startEp->endEp / - endEp->startEp),
+              // then map that into polyline direction via pathOrientation.
+              // Do not infer from flowSource/flowSink geometry; that can
+              // double-apply orientation and visually reverse arrows.
               renderDir = (flowAlongEndpoints * pathOrientation) as 1 | -1;
-            }
             }
           }
         }
@@ -5773,7 +5782,17 @@ export class CircuitScene extends BaseScene {
       this.mergedNetVisualPhase.clear();
       this.wireAnimationStabilizer.clear();
       this.lastWireAnimEffectsMs = 0;
-      this.updateVisualEffects();
+
+      // Ensure all components start in a clean, undamaged state after import.
+      // Saved snapshots may contain stale burnt/glowing flags, and the
+      // DC solve inside updateVisualEffects can mark components as damaged
+      // during Newton iterations.
+      this.gameObjects.forEach((obj) => {
+        if (obj instanceof CircuitComponent) {
+          obj.resetToDefault();
+        }
+      });
+
       return true;
     } catch {
       return false;

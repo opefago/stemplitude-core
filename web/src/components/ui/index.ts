@@ -13,6 +13,7 @@ export { DateTimePicker } from "./DateTimePicker";
 export type { DateTimePickerProps } from "./DateTimePicker";
 export { cmpDate, cmpTime, cmpDatetime } from "./DateTimePicker";
 export { ModalDialog } from "./ModalDialog";
+export { KidDialog } from "./KidDialog";
 export { KidCheckbox } from "./KidCheckbox";
 export { KidSwitch } from "./KidSwitch";
 export { AppTooltip } from "./AppTooltip";

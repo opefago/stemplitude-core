@@ -87,6 +87,8 @@ const Playground = () => {
   ];
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('resume') !== 'last') return;
     let best = { id: null, ts: 0 };
     for (const lab of labs) {
       const t = readLabLastOpenedAt(lab.id);

@@ -42,7 +42,8 @@ export function StudentAssignmentsPage() {
   const studentIdFromUrl = searchParams.get("studentId")?.trim() || null;
   const isGuardianViewer =
     subType === "user" && (role === "parent" || role === "homeschool_parent");
-  const canActOnAssignments = subType === "student";
+  const isGuardianLearnerMode = isGuardianViewer && Boolean(childContextStudentId);
+  const canActOnAssignments = subType === "student" || isGuardianLearnerMode;
   const guardianLearnerId = isGuardianViewer
     ? studentIdFromUrl || childContextStudentId
     : null;
@@ -63,7 +64,7 @@ export function StudentAssignmentsPage() {
       setError(null);
       try {
         const rows =
-          subType === "student"
+          subType === "student" || isGuardianLearnerMode
             ? await getMyAssignments(200)
             : await getParentChildAssignments(guardianLearnerId!, 200);
         if (!mounted) return;
@@ -78,7 +79,7 @@ export function StudentAssignmentsPage() {
     }
     void load();
     return () => { mounted = false; };
-  }, [canLoadMyAssignments, subType, guardianLearnerId]);
+  }, [canLoadMyAssignments, subType, guardianLearnerId, isGuardianLearnerMode]);
 
   const now = Date.now();
   const dueSoon = useMemo(
@@ -161,7 +162,7 @@ export function StudentAssignmentsPage() {
       <header className="dashboard-bento__header student-assignments__header">
         <h1>Assignments</h1>
         <p>
-          {isGuardianViewer
+          {isGuardianViewer && !isGuardianLearnerMode
             ? "Track due work and submissions for your learner."
             : "Track due work and submit your progress."}
         </p>

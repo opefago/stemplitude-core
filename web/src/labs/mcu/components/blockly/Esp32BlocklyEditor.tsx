@@ -65,6 +65,7 @@ import {
   writeLabProjectsArray,
 } from "../../../../lib/learnerLabStorage";
 import { useAuth } from "../../../../providers/AuthProvider";
+import { KidDialog } from "../../../../components/ui/KidDialog";
 
 const MM_PROJECTS_BASE_KEY = "stemplitude_micromaker_projects";
 const loadMmProjectsFromStorage = () => readLabProjectsArray(MM_PROJECTS_BASE_KEY);
@@ -816,6 +817,7 @@ export const Esp32BlocklyEditor: React.FC<Props> = ({
   const [showHelp, setShowHelp] = useState<boolean>(false);
   const [showProjects, setShowProjects] = useState<boolean>(false);
   const [savedProjects, setSavedProjects] = useState<any[]>([]);
+  const [projectPendingDelete, setProjectPendingDelete] = useState<any | null>(null);
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
   const childCtx = useChildContextStudentId();
   const { user } = useAuth();
@@ -2496,7 +2498,7 @@ export const Esp32BlocklyEditor: React.FC<Props> = ({
                         Open
                       </button>
                       <button
-                        onClick={() => handleDeleteProject(p.id)}
+                        onClick={() => setProjectPendingDelete(p)}
                         title="Delete project"
                         style={{
                           ...headerBtnStyle,
@@ -2516,6 +2518,25 @@ export const Esp32BlocklyEditor: React.FC<Props> = ({
           </div>
         </div>
       )}
+      <KidDialog
+        isOpen={Boolean(projectPendingDelete)}
+        onClose={() => setProjectPendingDelete(null)}
+        onConfirm={() => {
+          if (!projectPendingDelete?.id) return;
+          handleDeleteProject(projectPendingDelete.id);
+          setProjectPendingDelete(null);
+        }}
+        title="Delete project?"
+        description={
+          <>
+            Are you sure you want to delete{" "}
+            <strong>{projectPendingDelete?.name ?? "this project"}</strong>? This
+            cannot be undone.
+          </>
+        }
+        confirmLabel="Delete"
+        cancelLabel="Keep project"
+      />
 
       {/* Serial Monitor Dialog */}
       {showSerialDialog && (

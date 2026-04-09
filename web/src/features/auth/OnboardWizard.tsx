@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
+import { Eye, EyeOff } from "lucide-react";
 import { useAuth } from "../../providers/AuthProvider";
 import { checkEmail, checkSlug } from "../../lib/api/auth";
 import type { OnboardData } from "../../lib/api/auth";
@@ -59,6 +60,8 @@ export function OnboardWizard() {
   const [slugMessage, setSlugMessage] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const debouncedEmail = useDebounce(email, DEBOUNCE_MS);
   const debouncedSlug = useDebounce(orgSlug, DEBOUNCE_MS);
@@ -267,30 +270,52 @@ export function OnboardWizard() {
                 <label htmlFor="password" className="auth-label">
                   Password
                 </label>
-                <input
-                  id="password"
-                  type="password"
-                  className="auth-input"
-                  placeholder="At least 8 characters"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  autoComplete="new-password"
-                  minLength={8}
-                />
+                <div className="auth-password-wrapper">
+                  <input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    className="auth-input"
+                    placeholder="At least 8 characters"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    autoComplete="new-password"
+                    minLength={8}
+                  />
+                  <button
+                    type="button"
+                    className="auth-password-toggle"
+                    onClick={() => setShowPassword((v) => !v)}
+                    tabIndex={-1}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                  >
+                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
               </div>
               <div className="auth-form-group">
                 <label htmlFor="confirmPassword" className="auth-label">
                   Confirm password
                 </label>
-                <input
-                  id="confirmPassword"
-                  type="password"
-                  className={`auth-input ${confirmPassword && password !== confirmPassword ? "auth-input--error" : ""}`}
-                  placeholder="Repeat your password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  autoComplete="new-password"
-                />
+                <div className="auth-password-wrapper">
+                  <input
+                    id="confirmPassword"
+                    type={showConfirmPassword ? "text" : "password"}
+                    className={`auth-input ${confirmPassword && password !== confirmPassword ? "auth-input--error" : ""}`}
+                    placeholder="Repeat your password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    autoComplete="new-password"
+                  />
+                  <button
+                    type="button"
+                    className="auth-password-toggle"
+                    onClick={() => setShowConfirmPassword((v) => !v)}
+                    tabIndex={-1}
+                    aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+                  >
+                    {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
                 {confirmPassword && password !== confirmPassword && (
                   <span className="auth-error">Passwords do not match</span>
                 )}

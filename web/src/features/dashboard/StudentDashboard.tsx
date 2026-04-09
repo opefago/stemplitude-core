@@ -372,9 +372,7 @@ export function StudentDashboard() {
     ? classroomNameById.get(currentSession.classroom_id) ?? "Classroom session"
     : "Nothing on your schedule right now";
   const focusJoinPath = currentSession
-    ? hasActiveSession
-      ? `/app/classrooms/${currentSession.classroom_id}/live`
-      : `/app/classrooms/${currentSession.classroom_id}?sessionAction=waiting`
+    ? `/app/classrooms/${currentSession.classroom_id}/live`
     : "/app/classrooms";
   const focusJoinLabel = hasActiveSession ? "JOIN CLASS NOW" : "OPEN WAITING ROOM";
   const announcements = useMemo(() => {
@@ -399,7 +397,7 @@ export function StudentDashboard() {
         id: "class-upcoming",
         title: "Next class reminder",
         body: `Your next class starts ${start}. Open the waiting room early and get ready.`,
-        link: `/app/classrooms/${upcomingSessions[0].classroom_id}?sessionAction=waiting`,
+        link: `/app/classrooms/${upcomingSessions[0].classroom_id}/live`,
       });
     }
     if (weekWinners[0]) {

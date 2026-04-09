@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
+import { Eye, EyeOff } from "lucide-react";
 import { useAuth } from "../../providers/AuthProvider";
 import "./auth.css";
 
@@ -14,6 +15,7 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [emailTouched, setEmailTouched] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const emailValid = !email || EMAIL_REGEX.test(email);
   const emailError = emailTouched && email && !emailValid ? "Please enter a valid email address" : null;
@@ -77,16 +79,27 @@ export function LoginPage() {
             <label htmlFor="password" className="auth-label">
               Password
             </label>
-            <input
-              id="password"
-              type="password"
-              className="auth-input"
-              placeholder="••••••••"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password"
-              disabled={isLoading}
-            />
+            <div className="auth-password-wrapper">
+              <input
+                id="password"
+                type={showPassword ? "text" : "password"}
+                className="auth-input"
+                placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
+                disabled={isLoading}
+              />
+              <button
+                type="button"
+                className="auth-password-toggle"
+                onClick={() => setShowPassword((v) => !v)}
+                tabIndex={-1}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+              >
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
             <Link
               to="/auth/forgot-password"
               className="auth-link"

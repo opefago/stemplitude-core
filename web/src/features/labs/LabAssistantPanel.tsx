@@ -1,5 +1,6 @@
 import { AlertCircle, Bell, BellOff, ChevronDown, ChevronUp, Eye, HelpCircle, MessageSquare, Send, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import {
   ClassroomRealtimeClient,
@@ -29,7 +30,11 @@ export function LabAssistantPanel({ classroomContext }: Props) {
   const { tenant } = useTenant();
   const childContextStudentId = useChildContextStudentId();
 
-  const isInstructor = user?.subType === "user";
+  const isGuardianLearnerMode = Boolean(
+    childContextStudentId && user?.subType === "user" &&
+    (user?.role === "parent" || user?.role === "homeschool_parent"),
+  );
+  const isInstructor = user?.subType === "user" && !isGuardianLearnerMode;
 
   const [muted, setMuted] = useState(false);
   const mutedRef = useRef(false);
@@ -215,7 +220,7 @@ export function LabAssistantPanel({ classroomContext }: Props) {
     );
   }, [instructorInLab, classroomId, sessionId, navigate]);
 
-  return (
+  return createPortal(
     <>
     <RecognitionToast event={recognitionEvent} onDismiss={() => setRecognitionEvent(null)} />
     <div
@@ -315,6 +320,7 @@ export function LabAssistantPanel({ classroomContext }: Props) {
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
                   onKeyDown={(e) => {
+                    e.stopPropagation();
                     if (e.key === "Enter" && !e.shiftKey) {
                       e.preventDefault();
                       sendChat();
@@ -391,6 +397,7 @@ export function LabAssistantPanel({ classroomContext }: Props) {
                     rows={3}
                     value={helpNote}
                     onChange={(e) => setHelpNote(e.target.value)}
+                    onKeyDown={(e) => e.stopPropagation()}
                   />
                   <button
                     type="button"
@@ -477,6 +484,7 @@ export function LabAssistantPanel({ classroomContext }: Props) {
         </>
       )}
     </div>
-    </>
+    </>,
+    document.body,
   );
 }

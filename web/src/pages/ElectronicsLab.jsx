@@ -1,12 +1,18 @@
-import { CircuitLabContainer } from '../labs/mcu/components/CircuitLabContainer.tsx';
-import { useLabSession } from '../features/labs/useLabSession';
-import { useLabSync } from '../features/labs/useLabSync';
-import './Labs.css';
+import { CircuitLabContainer } from "../labs/circuit/components/CircuitLabContainer.tsx";
+import { useLabSession } from "../features/labs/useLabSession";
+import { useLabSync, getLocalActorId } from "../features/labs/useLabSync";
+import { LabAnnotationOverlay } from "../components/lab/LabAnnotationOverlay";
+import "./Labs.css";
 
 const ElectronicsLab = () => {
-  const { exitLab, fallbackExitPath, panel, classroomContext } = useLabSession();
-  // Yjs infrastructure — state binding handled inside CircuitLabContainer when ydoc/provider are passed
-  const { ydoc, provider } = useLabSync(null, classroomContext?.sessionId, false, !!classroomContext);
+  const { exitLab, fallbackExitPath, panel, classroomContext } =
+    useLabSession();
+  const { ydoc, provider } = useLabSync(
+    null,
+    classroomContext?.sessionId,
+    false,
+    !!classroomContext,
+  );
 
   return (
     <div className="lab-page electronics-lab-fullscreen">
@@ -15,7 +21,20 @@ const ElectronicsLab = () => {
         onExit={exitLab}
         ydoc={classroomContext ? ydoc : undefined}
         yjsProvider={classroomContext ? provider : undefined}
+        classroomId={classroomContext?.classroomId}
+        sessionId={classroomContext?.sessionId}
       />
+      {classroomContext && provider && (
+        <LabAnnotationOverlay
+          provider={provider}
+          actorId={getLocalActorId() ?? ''}
+          actorName="Student"
+          isInstructor={false}
+          enabled
+        >
+          <span />
+        </LabAnnotationOverlay>
+      )}
       {panel}
     </div>
   );

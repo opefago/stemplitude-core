@@ -157,9 +157,11 @@ export class Diode extends CircuitComponent {
   }
 
   protected updateNodeVoltages(): void {
-    // MNA voltage source convention: negate so positive = enters from wire
-    this.nodes[0].current = -this.circuitProps.current;
-    this.nodes[1].current = this.circuitProps.current;
+    // Companion-model current: positive = forward (anode→cathode).
+    // Convention: positive node.current = enters terminal from wire.
+    // Forward current enters anode from wire (+) and exits cathode (-).
+    this.nodes[0].current = this.circuitProps.current;
+    this.nodes[1].current = -this.circuitProps.current;
   }
 
   public getImpedance(_frequency: number = 0): number {

@@ -60,6 +60,28 @@ export async function listExploreGameCards(opts?: {
   });
 }
 
+/** Fetch a single project by ID (includes blob_url for downloading the snapshot). */
+export async function getLabProject(
+  projectId: string,
+): Promise<StudentLabProject> {
+  return apiFetch<StudentLabProject>(`/labs/projects/${projectId}`);
+}
+
+/** List all projects created during a classroom session. */
+export async function listSessionProjects(
+  sessionId: string,
+  opts?: { classroomId?: string; limit?: number; skip?: number },
+): Promise<StudentLabProject[]> {
+  const q = new URLSearchParams();
+  if (opts?.classroomId) q.set("classroom_id", opts.classroomId);
+  if (opts?.limit != null) q.set("limit", String(opts.limit));
+  if (opts?.skip != null) q.set("skip", String(opts.skip));
+  const qs = q.toString();
+  return apiFetch<StudentLabProject[]>(
+    `/labs/projects/by-session/${sessionId}${qs ? `?${qs}` : ""}`,
+  );
+}
+
 export async function createLabProject(params: {
   title: string;
   lab_id?: string | null;

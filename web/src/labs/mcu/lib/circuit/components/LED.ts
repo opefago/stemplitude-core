@@ -207,6 +207,14 @@ export class LED extends CircuitComponent {
     glowFront.rotation = g.rotation;
     glowFront.scale.copyFrom(g.scale);
 
+    // Ensure the front glow renders above everything else in this component.
+    if (glowFront.parent === this.displayContainer) {
+      this.displayContainer.setChildIndex(
+        glowFront,
+        this.displayContainer.children.length - 1,
+      );
+    }
+
     this.updateLabels();
   }
 
@@ -228,98 +236,84 @@ export class LED extends CircuitComponent {
   /** Rays in IEC SVG space (0–150), emission toward upper-right like Diode-COM-LED.svg */
   private drawLightRays(target: PIXI.Graphics): void {
     const rayColor = this.getLEDColor();
-    const alpha = this.ledProps?.brightness ?? 0;
+    const b = this.ledProps?.brightness ?? 0;
     const startX = 118;
     const startY = 62;
+    const t = Date.now() * 0.003;
 
-    for (let i = 0; i < 3; i++) {
-      const angle = -Math.PI / 5 + (i - 1) * 0.28;
-      const len = 28;
+    for (let i = 0; i < 5; i++) {
+      const angle = -Math.PI / 4 + (i - 2) * 0.22;
+      const shimmer = 0.85 + 0.15 * Math.sin(t + i * 1.7);
+      const len = (24 + 14 * b) * shimmer;
       const endX = startX + len * Math.cos(angle);
       const endY = startY + len * Math.sin(angle);
 
+      // Thick soft glow ray
       target.moveTo(startX, startY);
       target.lineTo(endX, endY);
-      target.stroke({
-        width: 3,
-        color: rayColor,
-        alpha: 0.35 + 0.55 * alpha,
-      });
+      target.stroke({ width: 6, color: rayColor, alpha: 0.15 * b * shimmer });
 
-      const arrowSize = 4;
+      // Thin bright core ray
+      target.moveTo(startX, startY);
+      target.lineTo(endX, endY);
+      target.stroke({ width: 2.5, color: 0xffffff, alpha: (0.3 + 0.5 * b) * shimmer });
+
+      // Arrowhead
       const arrowAngle = Math.atan2(endY - startY, endX - startX);
-
+      const as = 5;
       target.moveTo(endX, endY);
-      target.lineTo(
-        endX - arrowSize * Math.cos(arrowAngle - 0.5),
-        endY - arrowSize * Math.sin(arrowAngle - 0.5)
-      );
+      target.lineTo(endX - as * Math.cos(arrowAngle - 0.5), endY - as * Math.sin(arrowAngle - 0.5));
       target.moveTo(endX, endY);
-      target.lineTo(
-        endX - arrowSize * Math.cos(arrowAngle + 0.5),
-        endY - arrowSize * Math.sin(arrowAngle + 0.5)
-      );
-      target.stroke({
-        width: 2,
-        color: rayColor,
-        alpha: 0.45 + 0.5 * alpha,
-      });
+      target.lineTo(endX - as * Math.cos(arrowAngle + 0.5), endY - as * Math.sin(arrowAngle + 0.5));
+      target.stroke({ width: 2, color: rayColor, alpha: (0.4 + 0.5 * b) * shimmer });
     }
   }
 
-  /** EveryCircuit-style circular bloom + pulse around the LED body. */
+  /** Vivid bloom + shimmer glow around the LED body. */
   private drawGlowEffect(target: PIXI.Graphics): void {
     const glowColor = this.getLEDColor();
-    const brightness = this.ledProps?.brightness ?? 0;
+    const b = this.ledProps?.brightness ?? 0;
     const t = Date.now() * 0.004;
-    const pulse = 0.88 + 0.12 * Math.sin(t);
+    const pulse = 0.9 + 0.1 * Math.sin(t);
     const cx = 75;
     const cy = 75;
 
+    // Outer soft aura — wide halo
     const auraLayers = [
-      { radius: 108, alpha: 0.05 },
-      { radius: 88, alpha: 0.07 },
-      { radius: 70, alpha: 0.1 },
-      { radius: 54, alpha: 0.14 },
-      { radius: 40, alpha: 0.2 },
-      { radius: 28, alpha: 0.28 },
-      { radius: 18, alpha: 0.36 },
+      { radius: 120, alpha: 0.06 },
+      { radius: 96, alpha: 0.10 },
+      { radius: 78, alpha: 0.16 },
+      { radius: 60, alpha: 0.24 },
+      { radius: 46, alpha: 0.35 },
+      { radius: 34, alpha: 0.50 },
+      { radius: 24, alpha: 0.65 },
     ];
 
     for (const layer of auraLayers) {
       target.circle(cx, cy, layer.radius * pulse);
-      target.fill({
-        color: glowColor,
-        alpha: layer.alpha * brightness,
-      });
+      target.fill({ color: glowColor, alpha: layer.alpha * b });
     }
 
-    // Big circular color pool centered on LED body.
-    target.circle(cx, cy, 42 + 10 * brightness * pulse);
-    target.fill({
-      color: glowColor,
-      alpha: 0.2 + 0.32 * brightness,
-    });
+    // Saturated color pool — the main visible glow body
+    target.circle(cx, cy, 44 + 12 * b * pulse);
+    target.fill({ color: glowColor, alpha: 0.5 + 0.35 * b });
 
-    // Hot core to simulate sensor/camera bloom.
-    target.circle(cx, cy, 14 + 9 * brightness * pulse);
-    target.fill({
-      color: glowColor,
-      alpha: 0.55 * brightness,
-    });
-    target.circle(cx, cy, 5 + 4 * brightness);
-    target.fill({
-      color: 0xffffff,
-      alpha: 0.25 + 0.45 * brightness,
-    });
+    // Hot white-ish core — the "filament" shine
+    target.circle(cx, cy, 18 + 10 * b * pulse);
+    target.fill({ color: glowColor, alpha: 0.75 * b });
+    target.circle(cx, cy, 8 + 5 * b * pulse);
+    target.fill({ color: 0xffffff, alpha: 0.55 + 0.4 * b });
+    target.circle(cx, cy, 3 + 2 * b);
+    target.fill({ color: 0xffffff, alpha: 0.8 * b });
 
-    // Surface halo ring around the circular glow.
-    target.circle(cx, cy, 34 + 6 * brightness * pulse);
-    target.stroke({
-      width: 3.5,
-      color: glowColor,
-      alpha: 0.45 + 0.45 * brightness,
-    });
+    // Shiny halo ring
+    target.circle(cx, cy, 38 + 8 * b * pulse);
+    target.stroke({ width: 4, color: glowColor, alpha: 0.5 + 0.4 * b });
+
+    // Outer shimmer ring
+    const shimmer = 0.7 + 0.3 * Math.sin(t * 1.5);
+    target.circle(cx, cy, 56 + 6 * b * pulse);
+    target.stroke({ width: 2, color: 0xffffff, alpha: 0.15 * b * shimmer });
   }
 
   private ensureGlowLayer(position: "back" | "front"): PIXI.Graphics {
@@ -328,16 +322,13 @@ export class LED extends CircuitComponent {
 
     const layer = new PIXI.Graphics();
     layer.eventMode = "none";
-    layer.blendMode = "add" as any;
+    layer.blendMode = "screen" as any;
     const componentIndex = this.displayContainer.getChildIndex(this.componentGraphics);
     if (position === "back") {
       this.displayContainer.addChildAt(layer, Math.max(0, componentIndex));
       this.glowBackLayer = layer;
     } else {
-      this.displayContainer.addChildAt(
-        layer,
-        Math.min(componentIndex + 1, this.displayContainer.children.length)
-      );
+      this.displayContainer.addChild(layer);
       this.glowFrontLayer = layer;
     }
     return layer;
@@ -381,15 +372,6 @@ export class LED extends CircuitComponent {
         `⚠️ LED ${this.name} BURNT! Sustained overstress detected. I=${absCurrent.toFixed(4)}A`
       );
     }
-    // Auto-clear stale false-burn state if present conditions are clearly safe.
-    if (
-      this.circuitProps.burnt &&
-      absCurrent <= this.ledProps.maxCurrent * 1.2 &&
-      Math.abs(voltageDrop) <= this.ledProps.forwardVoltage + 1.5
-    ) {
-      this.circuitProps.burnt = false;
-    }
-
     // A burnt LED is an open circuit — no conduction regardless of bias
     if (this.circuitProps.burnt) {
       this.ledProps.isOn = false;

@@ -167,6 +167,8 @@ export function LabLauncher() {
   }, [navigate, searchParams]);
 
   useEffect(() => {
+    // Only auto-open "last lab" when explicitly requested.
+    if (searchParams.get("resume") !== "last") return;
     // Explicit lab query always wins.
     if (searchParams.get("lab")) return;
     // Wait for availability check so we don't auto-open a blocked lab.

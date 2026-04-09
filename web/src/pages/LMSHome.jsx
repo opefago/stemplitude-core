@@ -19,6 +19,7 @@ import {
   BrainCircuit,
   Trophy,
   Eye,
+  EyeOff,
   Heart,
   TrendingUp,
   GraduationCap,
@@ -230,6 +231,7 @@ const LMSHome = () => {
   const [loginCode, setLoginCode] = useState("");
   const [loginError, setLoginError] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 10);
@@ -251,6 +253,7 @@ const LMSHome = () => {
     setLoginCode("");
     setLoginError("");
     setLoginLoading(false);
+    setShowLoginPassword(false);
   };
 
   const openSignup = useCallback(() => {
@@ -584,14 +587,25 @@ const LMSHome = () => {
 
                     <div className="lms-login-form__field">
                       <label htmlFor="lms-login-password">Password</label>
-                      <input
-                        id="lms-login-password"
-                        type="password"
-                        value={loginPassword}
-                        onChange={(e) => setLoginPassword(e.target.value)}
-                        placeholder="Enter your password"
-                        required
-                      />
+                      <div className="lms-login-form__pw-wrapper">
+                        <input
+                          id="lms-login-password"
+                          type={showLoginPassword ? "text" : "password"}
+                          value={loginPassword}
+                          onChange={(e) => setLoginPassword(e.target.value)}
+                          placeholder="Enter your password"
+                          required
+                        />
+                        <button
+                          type="button"
+                          className="lms-login-form__pw-toggle"
+                          onClick={() => setShowLoginPassword((v) => !v)}
+                          tabIndex={-1}
+                          aria-label={showLoginPassword ? "Hide password" : "Show password"}
+                        >
+                          {showLoginPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                        </button>
+                      </div>
                     </div>
 
                     {selectedRole === "student" && (

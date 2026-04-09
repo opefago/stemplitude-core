@@ -1,17 +1,25 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, CheckCircle2, XCircle, Clock, ClipboardList } from "lucide-react";
+import { KidDropdown } from "../../components/ui";
 import {
   listAttendanceExcusalRequestsStaff,
   reviewAttendanceExcusalRequest,
   type AttendanceExcusalStaffRow,
 } from "../../lib/api/students";
 import { ApiHttpError } from "../../lib/api/client";
+import "../../components/ui/ui.css";
 import "./staff-excusals.css";
 
 const PAGE_SIZE = 20;
 
 type StatusFilter = "pending" | "approved" | "denied";
+
+const STATUS_OPTIONS = [
+  { value: "pending", label: "Pending" },
+  { value: "approved", label: "Approved" },
+  { value: "denied", label: "Denied" },
+];
 
 function whenLabel(iso: string): string {
   try {
@@ -24,6 +32,26 @@ function whenLabel(iso: string): string {
   } catch {
     return iso;
   }
+}
+
+function statusBadge(status: string) {
+  if (status === "approved")
+    return (
+      <span className="staff-excusals__badge staff-excusals__badge--approved">
+        <CheckCircle2 size={14} aria-hidden /> Approved
+      </span>
+    );
+  if (status === "denied")
+    return (
+      <span className="staff-excusals__badge staff-excusals__badge--denied">
+        <XCircle size={14} aria-hidden /> Denied
+      </span>
+    );
+  return (
+    <span className="staff-excusals__badge staff-excusals__badge--pending">
+      <Clock size={14} aria-hidden /> Pending
+    </span>
+  );
 }
 
 export function StaffExcusalRequestsPage() {
@@ -68,7 +96,6 @@ export function StaffExcusalRequestsPage() {
   const visibleRows = useMemo(() => rows.slice(0, PAGE_SIZE), [rows]);
 
   useEffect(() => {
-    // Keep page bounded if filter shrinks result set.
     if (!loading && page > 1 && visibleRows.length === 0) {
       setPage((p) => Math.max(1, p - 1));
     }
@@ -105,41 +132,52 @@ export function StaffExcusalRequestsPage() {
         <Link to="/app" className="staff-excusals__crumb">
           <ChevronLeft size={18} aria-hidden /> Dashboard
         </Link>
-        <h1 className="staff-excusals__title">Parent excusal requests</h1>
-        <p className="staff-excusals__subtitle">
-          Review guardian-submitted absence requests. Dashboard preview shows only the latest 10;
-          use this page for the full queue.
-        </p>
+        <div className="staff-excusals__header-row">
+          <div className="staff-excusals__header-icon">
+            <ClipboardList size={28} aria-hidden />
+          </div>
+          <div>
+            <h1 className="staff-excusals__title">Parent Excusal Requests</h1>
+            <p className="staff-excusals__subtitle">
+              Review guardian-submitted absence requests. Approve or deny with an optional note.
+            </p>
+          </div>
+        </div>
       </header>
 
       <div className="staff-excusals__toolbar">
-        <label htmlFor="excusal-status" className="staff-excusals__label">
-          Status
-        </label>
-        <select
-          id="excusal-status"
+        <KidDropdown
           value={statusFilter}
-          onChange={(e) => {
-            setStatusFilter(e.target.value as StatusFilter);
+          onChange={(val) => {
+            setStatusFilter(val as StatusFilter);
             setPage(1);
           }}
-          className="staff-excusals__select"
-        >
-          <option value="pending">Pending</option>
-          <option value="approved">Approved</option>
-          <option value="denied">Denied</option>
-        </select>
+          options={STATUS_OPTIONS}
+          ariaLabel="Filter by status"
+          minWidth={180}
+        />
+        <span className="staff-excusals__count">
+          {loading ? "Loading..." : `${visibleRows.length} request${visibleRows.length === 1 ? "" : "s"}`}
+        </span>
       </div>
 
-      {loading ? <p className="staff-excusals__muted">Loading…</p> : null}
       {error ? (
-        <p className="staff-excusals__error" role="alert">
-          {error}
-        </p>
+        <div className="staff-excusals__error-card" role="alert">
+          <XCircle size={18} aria-hidden />
+          <span>{error}</span>
+        </div>
       ) : null}
 
       {!loading && !error && visibleRows.length === 0 ? (
-        <p className="staff-excusals__muted">No {statusFilter} requests.</p>
+        <div className="staff-excusals__empty">
+          <ClipboardList size={40} aria-hidden />
+          <p>No {statusFilter} requests</p>
+          <span>
+            {statusFilter === "pending"
+              ? "All caught up! No requests need your attention right now."
+              : `No ${statusFilter} requests found.`}
+          </span>
+        </div>
       ) : null}
 
       {!loading && !error && visibleRows.length > 0 ? (
@@ -147,10 +185,13 @@ export function StaffExcusalRequestsPage() {
           {visibleRows.map((row) => (
             <li key={row.id} className="staff-excusals__item" role="listitem">
               <div className="staff-excusals__top">
-                <strong>{row.student_display_name}</strong>
-                <span className="staff-excusals__meta">
-                  {row.classroom_name} · {whenLabel(row.created_at)}
-                </span>
+                <div className="staff-excusals__student-info">
+                  <strong className="staff-excusals__student-name">{row.student_display_name}</strong>
+                  <span className="staff-excusals__meta">
+                    {row.classroom_name} &middot; {whenLabel(row.created_at)}
+                  </span>
+                </div>
+                {statusBadge(row.status)}
               </div>
               <p className="staff-excusals__reason">{row.reason}</p>
               {row.status === "pending" ? (
@@ -167,11 +208,12 @@ export function StaffExcusalRequestsPage() {
                         rows={2}
                         maxLength={1000}
                         className="staff-excusals__textarea"
+                        placeholder="Reason for denying this request..."
                       />
                       <div className="staff-excusals__actions">
                         <button
                           type="button"
-                          className="staff-excusals__btn staff-excusals__btn--ghost"
+                          className="ui-btn ui-btn--ghost"
                           onClick={() => {
                             setDenyingId(null);
                             setDenyNote("");
@@ -181,11 +223,11 @@ export function StaffExcusalRequestsPage() {
                         </button>
                         <button
                           type="button"
-                          className="staff-excusals__btn staff-excusals__btn--danger"
+                          className="ui-btn ui-btn--danger"
                           disabled={actionId === row.id}
                           onClick={() => void deny(row.id)}
                         >
-                          {actionId === row.id ? "Saving…" : "Confirm deny"}
+                          {actionId === row.id ? "Saving..." : "Confirm Deny"}
                         </button>
                       </div>
                     </div>
@@ -193,15 +235,15 @@ export function StaffExcusalRequestsPage() {
                     <div className="staff-excusals__actions">
                       <button
                         type="button"
-                        className="staff-excusals__btn staff-excusals__btn--primary"
+                        className="ui-btn ui-btn--primary"
                         disabled={actionId === row.id}
                         onClick={() => void approve(row.id)}
                       >
-                        {actionId === row.id ? "Saving…" : "Approve"}
+                        {actionId === row.id ? "Saving..." : "Approve"}
                       </button>
                       <button
                         type="button"
-                        className="staff-excusals__btn staff-excusals__btn--ghost"
+                        className="ui-btn ui-btn--ghost"
                         disabled={actionId != null}
                         onClick={() => {
                           setDenyingId(row.id);
@@ -213,35 +255,33 @@ export function StaffExcusalRequestsPage() {
                     </div>
                   )}
                 </>
-              ) : (
-                <p className="staff-excusals__muted">
-                  Status: <strong>{row.status}</strong>
-                </p>
-              )}
+              ) : null}
             </li>
           ))}
         </ul>
       ) : null}
 
-      <nav className="staff-excusals__pager" aria-label="Excusal request pages">
-        <button
-          type="button"
-          className="staff-excusals__btn staff-excusals__btn--ghost"
-          disabled={loading || page <= 1}
-          onClick={() => setPage((p) => Math.max(1, p - 1))}
-        >
-          Previous
-        </button>
-        <span className="staff-excusals__pager-meta">Page {page}</span>
-        <button
-          type="button"
-          className="staff-excusals__btn staff-excusals__btn--ghost"
-          disabled={loading || !hasNextPage}
-          onClick={() => setPage((p) => p + 1)}
-        >
-          Next
-        </button>
-      </nav>
+      {!loading && visibleRows.length > 0 && (
+        <nav className="staff-excusals__pager" aria-label="Excusal request pages">
+          <button
+            type="button"
+            className="ui-btn ui-btn--ghost"
+            disabled={loading || page <= 1}
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+          >
+            Previous
+          </button>
+          <span className="staff-excusals__pager-meta">Page {page}</span>
+          <button
+            type="button"
+            className="ui-btn ui-btn--ghost"
+            disabled={loading || !hasNextPage}
+            onClick={() => setPage((p) => p + 1)}
+          >
+            Next
+          </button>
+        </nav>
+      )}
     </div>
   );
 }

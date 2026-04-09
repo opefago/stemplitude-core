@@ -478,6 +478,37 @@
   color: #bbb;
 }
 
+.lms-login-form__pw-wrapper {
+  position: relative;
+}
+
+.lms-login-form__pw-wrapper input {
+  padding-right: 2.75rem;
+}
+
+.lms-login-form__pw-toggle {
+  position: absolute;
+  right: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #aaa;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.lms-login-form__pw-toggle:hover {
+  color: var(--lms-text);
+}
+
 .lms-login-form__error {
   font-size: 0.875rem;
   color: var(--lms-red);

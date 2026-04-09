@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
-import { CheckCircle, Clock, UserCheck, Users, XCircle } from "lucide-react";
+import { CheckCircle, Clock, Eye, EyeOff, UserCheck, Users, XCircle } from "lucide-react";
 import { useAuth } from "../../providers/AuthProvider";
 import {
   acceptInvite,
@@ -31,6 +31,7 @@ export function AcceptInvitePage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [accepted, setAccepted] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
     if (!token) {
@@ -323,15 +324,26 @@ export function AcceptInvitePage() {
                 </div>
                 <div className="auth-form-group">
                   <label className="auth-label" htmlFor="invite-password">Password</label>
-                  <input
-                    id="invite-password"
-                    className="auth-input"
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                    autoComplete="current-password"
-                  />
+                  <div className="auth-password-wrapper">
+                    <input
+                      id="invite-password"
+                      className="auth-input"
+                      type={showPassword ? "text" : "password"}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      required
+                      autoComplete="current-password"
+                    />
+                    <button
+                      type="button"
+                      className="auth-password-toggle"
+                      onClick={() => setShowPassword((v) => !v)}
+                      tabIndex={-1}
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                    >
+                      {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
                 </div>
                 <button
                   type="submit"
@@ -382,16 +394,27 @@ export function AcceptInvitePage() {
                 </div>
                 <div className="auth-form-group">
                   <label className="auth-label" htmlFor="invite-reg-password">Password</label>
-                  <input
-                    id="invite-reg-password"
-                    className="auth-input"
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    minLength={8}
-                    required
-                    autoComplete="new-password"
-                  />
+                  <div className="auth-password-wrapper">
+                    <input
+                      id="invite-reg-password"
+                      className="auth-input"
+                      type={showPassword ? "text" : "password"}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      minLength={8}
+                      required
+                      autoComplete="new-password"
+                    />
+                    <button
+                      type="button"
+                      className="auth-password-toggle"
+                      onClick={() => setShowPassword((v) => !v)}
+                      tabIndex={-1}
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                    >
+                      {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
                 </div>
                 <button
                   type="submit"

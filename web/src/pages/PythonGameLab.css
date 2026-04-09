@@ -26,10 +26,21 @@
 }
 
 .pgl-controls-left,
+.pgl-controls-center,
 .pgl-controls-right {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+
+.pgl-controls-center {
+  flex: 1;
+  justify-content: center;
+  min-width: 0;
+}
+
+.pgl-project-name-topbar {
+  max-width: 220px;
 }
 
 .pgl-logo {
@@ -447,6 +458,12 @@
     flex-wrap: wrap;
     height: auto;
     padding: 0.4rem 0.75rem;
+  }
+
+  .pgl-controls-center {
+    order: 3;
+    width: 100%;
+    justify-content: flex-start;
   }
 
   .pgl-logo span {

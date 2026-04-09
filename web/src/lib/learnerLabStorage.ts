@@ -45,15 +45,36 @@ export function labProjectsStorageKey(baseKey: string): string {
   return scope ? `${baseKey}__sid_${scope}` : baseKey;
 }
 
+/**
+ * Common shape for lab project entries persisted in localStorage.
+ * The blob store (via useLabPersistence) is the authoritative copy;
+ * localStorage holds a lightweight project list for the UI plus an
+ * optional local draft as a failure/offline fallback.
+ */
+export interface LabProject<TDraft = unknown> {
+  id: string;
+  name: string;
+  updatedAt: string;
+  createdAt: string;
+  /** Server revision counter for freshness validation across browsers. */
+  revision?: number;
+  /** Local draft data saved by useLabPersistence or manual save. */
+  draft?: TDraft | null;
+  /** Legacy: some labs store the full snapshot inline. Prefer `draft`. */
+  snapshot?: TDraft | null;
+  /** Which save produced this row (autosave, checkpoint, or manual). */
+  saveKind?: string;
+}
+
 /** Read project rows: scoped bucket first, then legacy global key if scoped is empty. */
-export function readLabProjectsArray(baseKey: string): unknown[] {
+export function readLabProjectsArray<T = unknown>(baseKey: string): T[] {
   const scoped = labProjectsStorageKey(baseKey);
   let rows = parseJsonArray(localStorage.getItem(scoped));
-  if (rows.length > 0) return rows;
+  if (rows.length > 0) return rows as T[];
   if (scoped !== baseKey) {
     rows = parseJsonArray(localStorage.getItem(baseKey));
   }
-  return rows;
+  return rows as T[];
 }
 
 export function writeLabProjectsArray(baseKey: string, rows: unknown[]): void {

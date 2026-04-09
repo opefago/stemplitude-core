@@ -48,12 +48,12 @@ export const DesignTokens = {
     radius: 4.5,
     minAlpha: 0.6,
     maxAlpha: 1.0,
-    minSpeed: 14, // px/s — idle drift along wire
-    maxSpeed: 220, // px/s — cap at high |I|
-    minSpacing: 12, // px between particles at high current
-    maxSpacing: 40, // px between particles at low current
+    minSpeed: 8, // px/s — idle drift along wire
+    maxSpeed: 90, // px/s — cap at high |I|
+    minSpacing: 14, // px between particles at high current
+    maxSpacing: 44, // px between particles at low current
     currentThreshold: 0.001, // A — below this, no particles
-    speedScale: 45, // multiplier for log(1 + |I|)
+    speedScale: 22, // multiplier for log(1 + |I|)
     poolSize: 500,
     /** Scales arrow model units to screen px */
     directionArrowScale: 0.33,

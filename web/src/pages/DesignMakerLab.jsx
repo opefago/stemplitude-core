@@ -28,8 +28,12 @@ import {
   sceneInteracting,
   getEffectiveSelectionIdsFromState,
 } from '../labs/design-maker/store';
+import { KidDialog } from '../components/ui/KidDialog';
 import { unionCSG, mergeCSG, subtractCSG, intersectCSG } from '../labs/design-maker/csgUtils';
 import { emitLabEvent, emitLabEventThrottled } from '../lib/api/gamification';
+import { LabAnnotationOverlay } from '../components/lab/LabAnnotationOverlay';
+import { getLocalActorId } from '../features/labs/useLabSync';
+import { useSessionProjectSync } from '../features/labs/useSessionProjectSync';
 import './DesignMakerLab.css';
 
 function downloadBlob(blob, filename) {
@@ -113,6 +117,7 @@ export default function DesignMakerLab() {
   const navigate = useNavigate();
   const { exitLab, panel, classroomContext } = useLabSession();
   const { ydoc, provider } = useLabSync(null, classroomContext?.sessionId, false, !!classroomContext);
+  const { pushToServer } = useSessionProjectSync(classroomContext, 'design-maker');
   const fileInputRef = useRef(null);
   const [exportOpen, setExportOpen] = React.useState(false);
   const [dragOver, setDragOver] = React.useState(false);
@@ -471,9 +476,23 @@ export default function DesignMakerLab() {
 
   useEffect(() => {
     if (!isDirty) return;
-    const timer = setTimeout(() => saveProject(), 2000);
+    const timer = setTimeout(async () => {
+      const ok = await saveProject();
+      if (ok) {
+        const state = useDesignStore.getState();
+        const saveable = state.objects.map((o) => {
+          const { geometry, ...rest } = o;
+          return rest;
+        });
+        const blob = new Blob(
+          [JSON.stringify({ objects: saveable, projectName: state.projectName })],
+          { type: 'application/json' },
+        );
+        pushToServer(state.projectName, blob, `${state.projectName || 'design-maker'}.json`);
+      }
+    }, 2000);
     return () => clearTimeout(timer);
-  }, [isDirty, objects, projectName, saveProject]);
+  }, [isDirty, objects, projectName, saveProject, pushToServer]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -790,6 +809,13 @@ export default function DesignMakerLab() {
   }, [selectedIds, objects, replaceObjects, getCSGTransform, normalizeImportedPivot]);
 
   return (
+    <LabAnnotationOverlay
+      provider={classroomContext ? provider : null}
+      actorId={getLocalActorId() ?? ''}
+      actorName="Student"
+      isInstructor={false}
+      enabled={!!classroomContext && !!provider}
+    >
     <div className="dml-container">
       <header className="dml-header">
         <div className="dml-header-left">
@@ -1192,36 +1218,30 @@ export default function DesignMakerLab() {
         </div>
       )}
 
-      {deleteConfirm && (
-        <div className="dml-confirm-overlay" onClick={() => setDeleteConfirm(null)}>
-          <div className="dml-confirm-dialog" onClick={(e) => e.stopPropagation()}>
-            <div className="dml-confirm-icon">
-              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="3 6 5 6 21 6" />
-                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
-                <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                <line x1="10" y1="11" x2="10" y2="17" />
-                <line x1="14" y1="11" x2="14" y2="17" />
-              </svg>
-            </div>
-            <h3 className="dml-confirm-title">Delete Project</h3>
-            <p className="dml-confirm-msg">
-              Are you sure you want to delete <strong>{deleteConfirm.name}</strong>? This action cannot be undone.
-            </p>
-            <div className="dml-confirm-actions">
-              <button className="dml-confirm-cancel" onClick={() => setDeleteConfirm(null)}>Cancel</button>
-              <button className="dml-confirm-delete" onClick={() => {
-                deleteProject(deleteConfirm.id);
-                const fresh = getProjectList();
-                setProjectList(fresh);
-                setDialogProjects(fresh);
-                setDeleteConfirm(null);
-              }}>Delete</button>
-            </div>
-          </div>
-        </div>
-      )}
+      <KidDialog
+        isOpen={Boolean(deleteConfirm)}
+        onClose={() => setDeleteConfirm(null)}
+        onConfirm={() => {
+          if (!deleteConfirm?.id) return;
+          deleteProject(deleteConfirm.id);
+          const fresh = getProjectList();
+          setProjectList(fresh);
+          setDialogProjects(fresh);
+          setDeleteConfirm(null);
+        }}
+        title="Delete project?"
+        description={
+          <>
+            Are you sure you want to delete{" "}
+            <strong>{deleteConfirm?.name ?? 'this project'}</strong>? This cannot
+            be undone.
+          </>
+        }
+        confirmLabel="Delete"
+        cancelLabel="Keep project"
+      />
       {panel}
     </div>
+    </LabAnnotationOverlay>
   );
 }

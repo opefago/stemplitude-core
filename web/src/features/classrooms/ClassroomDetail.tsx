@@ -707,7 +707,11 @@ export function ClassroomDetail() {
       void handleStartSession().finally(clearParams);
       return;
     }
-    if (action === "join") {
+    if (action === "join" || action === "waiting") {
+      if (!isInstructorView && id) {
+        navigate(`/app/classrooms/${id}/live`, { replace: true });
+        return;
+      }
       setActiveTab("sessions");
       if (activeSession && id) {
         navigate(`/app/classrooms/${id}/live`);
@@ -721,18 +725,6 @@ export function ClassroomDetail() {
       } else {
         setWaitingSessionId(null);
         setWaitingForClassStart(false);
-      }
-      clearParams();
-      return;
-    }
-    if (action === "waiting" && isInstructorView) {
-      setActiveTab("sessions");
-      if (nextScheduledSession) {
-        setWaitingSessionId(nextScheduledSession.id);
-        setWaitingForClassStart(false);
-      } else {
-        setWaitingSessionId(null);
-        setWaitingForClassStart(true);
       }
       clearParams();
     }
@@ -1175,6 +1167,7 @@ export function ClassroomDetail() {
       const refreshed = await listClassroomSessions(id);
       setSessions(refreshed.length ? refreshed : [created]);
       setActiveTab("sessions");
+      navigate(`/app/classrooms/${id}/live`);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to start session");
     } finally {

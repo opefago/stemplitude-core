@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { X, Save, FolderOpen, Download, Plus } from 'lucide-react';
 import { useLabSession } from '../features/labs/useLabSession';
+import { LabAnnotationOverlay } from '../components/lab/LabAnnotationOverlay';
 import './Labs.css';
 
 const MAKECODE_URL = 'https://arcade.makecode.com';
@@ -77,6 +78,12 @@ const GameDevLab = () => {
   };
 
   return (
+    <LabAnnotationOverlay
+      provider={null}
+      actorId=""
+      isInstructor={false}
+      enabled={false}
+    >
     <div className="lab-page gamedev-lab-fullscreen">
       {/* Top Bar */}
       <div className="gamedev-topbar">
@@ -131,6 +138,7 @@ const GameDevLab = () => {
       />
       {panel}
     </div>
+    </LabAnnotationOverlay>
   );
 };
 

@@ -2,10 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createLabProject,
   createLabProjectCheckpoint,
+  getLabProject,
   type StudentLabProject,
   updateLabProject,
 } from "../../lib/api/labs";
 import { emitLabEventThrottled } from "../../lib/api/gamification";
+import { ensureFreshAccessToken } from "../../lib/api/client";
 import { readLabProjectsArray, writeLabProjectsArray } from "../../lib/learnerLabStorage";
 
 type SaveStatus = "idle" | "dirty" | "saving" | "saved" | "error";
@@ -51,6 +53,8 @@ export function useLabPersistence(opts: UseLabPersistenceOptions) {
   const autosaveIntervalRef = useRef<number | null>(null);
   const lastPayloadHashRef = useRef<string>("");
   const inFlightRef = useRef(false);
+  const authFailedRef = useRef(false);
+  const authFailedAtRef = useRef(0);
 
   const clearSaveTimer = useCallback(() => {
     if (saveTimerRef.current != null) {
@@ -60,15 +64,18 @@ export function useLabPersistence(opts: UseLabPersistenceOptions) {
   }, []);
 
   const writeLocalDraft = useCallback(
-    (payload: LabSavePayload, saveKind: SaveKind) => {
+    (payload: LabSavePayload, saveKind: SaveKind, serverRevision?: number) => {
+      const currentPid = projectIdRef.current;
       const rows = readLabProjectsArray(localStorageKey);
       const nowIso = new Date().toISOString();
+      const localId = currentPid ?? `local:${crypto.randomUUID()}`;
       const row = {
-        id: projectId ?? crypto.randomUUID(),
+        id: localId,
         name: title || "Untitled",
         updatedAt: nowIso,
         createdAt: nowIso,
         saveKind,
+        revision: serverRevision ?? revisionRef.current ?? undefined,
         draft: payload.localDraft ?? null,
       };
       const idx = rows.findIndex((r: any) => r?.id === row.id);
@@ -83,9 +90,8 @@ export function useLabPersistence(opts: UseLabPersistenceOptions) {
         rows.unshift(row);
       }
       writeLabProjectsArray(localStorageKey, rows);
-      if (!projectId) setProjectId(row.id);
     },
-    [localStorageKey, projectId, title],
+    [localStorageKey, title],
   );
 
   const applyServerResponse = useCallback((resp: StudentLabProject) => {
@@ -96,17 +102,36 @@ export function useLabPersistence(opts: UseLabPersistenceOptions) {
     setError(null);
   }, []);
 
+  const projectIdRef = useRef<string | null>(projectId);
+  const revisionRef = useRef<number | null>(revision);
+  useEffect(() => { projectIdRef.current = projectId; }, [projectId]);
+  useEffect(() => { revisionRef.current = revision; }, [revision]);
+
   const saveWithRetry = useCallback(
     async (saveKind: SaveKind, payload: LabSavePayload) => {
       if (!enabled || inFlightRef.current) return;
+      if (authFailedRef.current && Date.now() - authFailedAtRef.current < 60_000) return;
       inFlightRef.current = true;
       setStatus("saving");
+      const hasToken = await ensureFreshAccessToken(30);
+      if (!hasToken) {
+        writeLocalDraft(payload, saveKind);
+        setStatus("error");
+        setError("Not authenticated");
+        authFailedRef.current = true;
+        authFailedAtRef.current = Date.now();
+        inFlightRef.current = false;
+        return;
+      }
+      authFailedRef.current = false;
       let attempt = 0;
       let backoff = 500;
       while (attempt < 3) {
+        const currentProjectId = projectIdRef.current;
+        const currentRevision = revisionRef.current;
         try {
           let resp: StudentLabProject;
-          if (!projectId) {
+          if (!currentProjectId) {
             resp = await createLabProject({
               title: title || "Untitled",
               lab_id: null,
@@ -116,7 +141,7 @@ export function useLabPersistence(opts: UseLabPersistenceOptions) {
               save_kind: saveKind,
             });
           } else if (saveKind === "checkpoint") {
-            resp = await createLabProjectCheckpoint(projectId, {
+            resp = await createLabProjectCheckpoint(currentProjectId, {
               title: title || "Untitled",
               lab_id: null,
               file: payload.blob,
@@ -124,16 +149,18 @@ export function useLabPersistence(opts: UseLabPersistenceOptions) {
               metadata: payload.metadata ?? {},
             });
           } else {
-            resp = await updateLabProject(projectId, {
+            resp = await updateLabProject(currentProjectId, {
               title: title || "Untitled",
               metadata: payload.metadata ?? {},
               save_kind: "autosave",
-              expected_revision: revision ?? undefined,
+              expected_revision: currentRevision ?? undefined,
               file: payload.blob,
               filename: payload.filename,
             });
           }
           applyServerResponse(resp);
+          projectIdRef.current = resp.id;
+          revisionRef.current = resp.revision ?? null;
           emitLabEventThrottled(
             {
               lab_id: labId,
@@ -147,11 +174,29 @@ export function useLabPersistence(opts: UseLabPersistenceOptions) {
             },
             1200,
           );
-          writeLocalDraft(payload, saveKind);
+          writeLocalDraft(payload, saveKind, resp.revision);
           dirtyRef.current = false;
           inFlightRef.current = false;
           return;
         } catch (e) {
+          const errStatus = (e as any)?.status ?? (e as any)?.response?.status;
+          if (errStatus === 401 || errStatus === 403) {
+            writeLocalDraft(payload, saveKind);
+            setStatus("error");
+            setError("Not authenticated");
+            authFailedRef.current = true;
+            authFailedAtRef.current = Date.now();
+            inFlightRef.current = false;
+            return;
+          }
+          if ((errStatus === 404 || errStatus === 409) && currentProjectId) {
+            setProjectId(null);
+            setRevision(null);
+            projectIdRef.current = null;
+            revisionRef.current = null;
+            attempt += 1;
+            continue;
+          }
           attempt += 1;
           if (attempt >= 3) {
             const msg = e instanceof Error ? e.message : "Save failed";
@@ -182,9 +227,7 @@ export function useLabPersistence(opts: UseLabPersistenceOptions) {
     },
     [
       enabled,
-      projectId,
       title,
-      revision,
       applyServerResponse,
       writeLocalDraft,
       labId,
@@ -244,6 +287,81 @@ export function useLabPersistence(opts: UseLabPersistenceOptions) {
     return "Idle";
   }, [status]);
 
+  /**
+   * Resolve the freshest version of a project by comparing the local row's
+   * revision against the server. Returns `{ source, data }` where `data`
+   * is the parsed JSON blob (the project snapshot) when downloaded from
+   * the server, or `null` when the local copy is current.
+   *
+   * Call this from any lab's "Open project" handler instead of blindly
+   * trusting the localStorage row.
+   */
+  const resolveLatestProject = useCallback(
+    async (localRow: {
+      id?: string;
+      revision?: number;
+      [key: string]: unknown;
+    }): Promise<{
+      source: "local" | "server" | "server_unreachable";
+      serverData: unknown | null;
+      serverRevision: number | null;
+      serverProjectId: string | null;
+    }> => {
+      const localId = typeof localRow.id === "string" ? localRow.id : null;
+      const localRev = typeof localRow.revision === "number" ? localRow.revision : null;
+
+      if (!localId) {
+        return { source: "local", serverData: null, serverRevision: null, serverProjectId: null };
+      }
+
+      try {
+        const serverProject = await getLabProject(localId);
+        const serverRev = serverProject.revision ?? 0;
+
+        if (localRev != null && serverRev <= localRev) {
+          setProjectId(serverProject.id);
+          setRevision(serverRev);
+          return {
+            source: "local",
+            serverData: null,
+            serverRevision: serverRev,
+            serverProjectId: serverProject.id,
+          };
+        }
+
+        if (serverProject.blob_url) {
+          const res = await fetch(serverProject.blob_url);
+          if (res.ok) {
+            const data = await res.json();
+            setProjectId(serverProject.id);
+            setRevision(serverRev);
+
+            const rows = readLabProjectsArray(localStorageKey);
+            const idx = rows.findIndex((r: any) => r?.id === localId);
+            if (idx >= 0) {
+              (rows[idx] as any).revision = serverRev;
+              writeLabProjectsArray(localStorageKey, rows);
+            }
+
+            return {
+              source: "server",
+              serverData: data,
+              serverRevision: serverRev,
+              serverProjectId: serverProject.id,
+            };
+          }
+        }
+
+        setProjectId(serverProject.id);
+        setRevision(serverRev);
+        return { source: "local", serverData: null, serverRevision: serverRev, serverProjectId: serverProject.id };
+      } catch {
+        return { source: "server_unreachable", serverData: null, serverRevision: null, serverProjectId: localId };
+      }
+    },
+    [localStorageKey],
+  );
+
   return {
     status,
     saveLabel,
@@ -253,9 +371,13 @@ export function useLabPersistence(opts: UseLabPersistenceOptions) {
     revision,
     markDirty,
     saveCheckpoint,
+    resolveLatestProject,
     setProjectIdentity: (nextProjectId: string | null, nextRevision: number | null = null) => {
-      setProjectId(nextProjectId);
+      const serverId = nextProjectId?.startsWith("local:") ? null : nextProjectId;
+      setProjectId(serverId);
       setRevision(nextRevision);
+      projectIdRef.current = serverId;
+      revisionRef.current = nextRevision;
     },
   };
 }

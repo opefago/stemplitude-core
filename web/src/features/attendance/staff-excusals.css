@@ -1,52 +1,106 @@
 .staff-excusals {
   max-width: 980px;
   margin: 0 auto;
-  padding: 16px;
+  padding: 24px 16px;
 }
 
 .staff-excusals__header {
-  margin-bottom: 14px;
+  margin-bottom: 20px;
 }
 
 .staff-excusals__crumb {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: var(--color-text-secondary, #64748b);
+  color: var(--color-primary, #0066ff);
   text-decoration: none;
-  margin-bottom: 6px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.staff-excusals__crumb:hover {
+  text-decoration: underline;
+}
+
+.staff-excusals__header-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.staff-excusals__header-icon {
+  flex-shrink: 0;
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-lg, 16px);
+  background: var(--color-primary, #0066ff);
+  color: #fff;
 }
 
 .staff-excusals__title {
   margin: 0;
   font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--color-text, #1e293b);
 }
 
 .staff-excusals__subtitle {
-  margin-top: 6px;
+  margin: 4px 0 0;
+  font-size: 0.9375rem;
   color: var(--color-text-secondary, #64748b);
 }
 
 .staff-excusals__toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 10px;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.staff-excusals__count {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-text-secondary, #64748b);
 }
 
 .staff-excusals__label {
   font-size: 0.875rem;
   font-weight: 700;
+  color: var(--color-text, #1e293b);
 }
 
-.staff-excusals__select,
-.staff-excusals__textarea {
-  border: 1px solid var(--color-border, #d1d5db);
-  border-radius: 8px;
-  padding: 8px;
-  font: inherit;
+/* ── Badges ── */
+.staff-excusals__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
+.staff-excusals__badge--pending {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.staff-excusals__badge--approved {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.staff-excusals__badge--denied {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+/* ── List ── */
 .staff-excusals__list {
   list-style: none;
   margin: 0;
@@ -57,17 +111,36 @@
 }
 
 .staff-excusals__item {
-  border: 1px solid var(--color-border, #e5e7eb);
-  border-radius: 12px;
+  border: 1.5px solid var(--color-border, #e2e8f0);
+  border-radius: var(--radius-lg, 16px);
   background: var(--color-surface, #fff);
-  padding: 12px;
+  padding: 16px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.staff-excusals__item:hover {
+  border-color: var(--color-primary, #0066ff);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.06);
 }
 
 .staff-excusals__top {
   display: flex;
   justify-content: space-between;
+  align-items: flex-start;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.staff-excusals__student-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.staff-excusals__student-name {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--color-text, #1e293b);
 }
 
 .staff-excusals__meta {
@@ -76,64 +149,92 @@
 }
 
 .staff-excusals__reason {
-  margin: 8px 0 0;
+  margin: 10px 0 0;
+  font-size: 0.9375rem;
+  color: var(--color-text, #1e293b);
+  line-height: 1.5;
+  padding: 10px 12px;
+  background: var(--color-bg, #f8fafc);
+  border-radius: var(--radius-md, 8px);
+  border-left: 3px solid var(--color-primary, #0066ff);
 }
 
 .staff-excusals__deny-box {
-  margin-top: 10px;
+  margin-top: 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
+.staff-excusals__textarea {
+  border: 1.5px solid var(--color-border, #e2e8f0);
+  border-radius: var(--radius-md, 8px);
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 0.9375rem;
+  resize: vertical;
+  transition: border-color 0.15s ease;
+}
+
+.staff-excusals__textarea:focus {
+  outline: none;
+  border-color: var(--color-primary, #0066ff);
+  box-shadow: 0 0 0 3px rgb(0 102 255 / 0.12);
+}
+
 .staff-excusals__actions {
-  margin-top: 10px;
+  margin-top: 12px;
   display: flex;
   gap: 8px;
 }
 
-.staff-excusals__btn {
-  border-radius: 8px;
-  border: 1px solid var(--color-border, #d1d5db);
-  padding: 7px 10px;
-  font-size: 0.875rem;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.staff-excusals__btn--primary {
-  background: #2563eb;
-  border-color: #2563eb;
-  color: white;
-}
-
-.staff-excusals__btn--danger {
-  background: #dc2626;
-  border-color: #dc2626;
-  color: white;
-}
-
-.staff-excusals__btn--ghost {
-  background: transparent;
-  color: var(--color-text, #1f2937);
-}
-
-.staff-excusals__btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.staff-excusals__muted {
+/* ── Empty state ── */
+.staff-excusals__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 48px 24px;
   color: var(--color-text-secondary, #64748b);
+  text-align: center;
 }
 
-.staff-excusals__error {
-  color: #b91c1c;
+.staff-excusals__empty p {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: var(--color-text, #1e293b);
 }
 
+.staff-excusals__empty span {
+  font-size: 0.875rem;
+  max-width: 360px;
+}
+
+/* ── Error ── */
+.staff-excusals__error-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-radius: var(--radius-md, 8px);
+  background: #fee2e2;
+  color: #991b1b;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+/* ── Pager ── */
 .staff-excusals__pager {
-  margin-top: 12px;
+  margin-top: 16px;
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.staff-excusals__pager-meta {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-text-secondary, #64748b);
 }

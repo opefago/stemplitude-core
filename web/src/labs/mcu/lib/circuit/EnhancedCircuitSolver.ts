@@ -1815,7 +1815,6 @@ export class EnhancedCircuitSolver {
       const terminalVoltages: Record<string, number> = {};
       const terminalCurrents: Record<string, number> = {};
 
-      const isVoltageSource = this.voltageSourceMap.has(componentId);
       for (let ni = 0; ni < nodes.length; ni++) {
         const node = nodes[ni];
         const globalNodeId = `${componentId}_${node.id}`;
@@ -1834,11 +1833,11 @@ export class EnhancedCircuitSolver {
           terminalCurrents[node.id] = node.current;
         } else if (nodes.length === 2) {
           // Convention: positive = enters terminal from wire.
-          // Passive: current enters nodes[0] when props.current > 0.
-          // Voltage source: current exits nodes[0] when j_vs > 0 → negate.
-          const sign = isVoltageSource
-            ? (ni === 0 ? -1 : 1)
-            : (ni === 0 ? 1 : -1);
+          // All 2-terminal components use the same sign frame now:
+          //   props.current > 0 ⇒ current enters nodes[0] from wire.
+          // (For MNA voltage sources, j_vs < 0 when driving, which
+          //  correctly maps to "exits nodes[0]" = negative.)
+          const sign = ni === 0 ? 1 : -1;
           terminalCurrents[node.id] = sign * props.current;
         } else {
           terminalCurrents[node.id] = 0;
