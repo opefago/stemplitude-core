@@ -588,7 +588,7 @@ class ClassroomService:
         body = payload or {}
         if event_type == "session.view.changed":
             view = body.get("view")
-            if view in {"shared", "lab"}:
+            if view in {"shared", "lab", "board"}:
                 patch["view"] = view
         elif event_type == "session.content.selected":
             resource_id = body.get("resource_id")

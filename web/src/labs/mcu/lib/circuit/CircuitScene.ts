@@ -565,7 +565,6 @@ export class CircuitScene extends BaseScene {
 
     // Initialize hybrid wire router with open-source algorithms
     this.hybridWireRouter = new HybridWireRouter(screenWidth, screenHeight, 10);
-    console.log("🚀 Initialized HybridWireRouter with open-source algorithms");
   }
 
   /**
@@ -631,8 +630,6 @@ export class CircuitScene extends BaseScene {
 
     // Override GameManager's wheel zoom with our custom implementation
     this.overrideWheelZoom();
-
-    console.log("🔌 Circuit simulation scene activated");
   }
 
   /**
@@ -651,8 +648,6 @@ export class CircuitScene extends BaseScene {
 
     // Update grid scale reference
     this.updateGridScale(newScale);
-
-    console.log(`🔍 Zoomed in - Level: ${(newScale * 100).toFixed(0)}%`);
 
     // Update transform controls position if a component is selected (after render)
     if (this.selectedComponent) {
@@ -674,8 +669,6 @@ export class CircuitScene extends BaseScene {
 
     // Update grid scale reference
     this.updateGridScale(newScale);
-
-    console.log(`🔍 Zoomed out - Level: ${(newScale * 100).toFixed(0)}%`);
 
     // Update transform controls position if a component is selected (after render)
     if (this.selectedComponent) {
@@ -770,8 +763,6 @@ export class CircuitScene extends BaseScene {
 
     // Update grid coordinate labels to reflect new camera position
     this.updateGridCoordinateLabels();
-
-    console.log("🎯 Camera recentered to (0,0)");
   }
 
   protected override panCamera(deltaX: number, deltaY: number): void {
@@ -804,10 +795,6 @@ export class CircuitScene extends BaseScene {
 
     // Update grid coordinate labels
     this.gridCanvas.updateCoordinateLabels(cameraOffsetX, cameraOffsetY);
-
-    console.log(
-      `📍 Grid coordinates updated - Camera offset: (${cameraOffsetX.toFixed(0)}, ${cameraOffsetY.toFixed(0)})`,
-    );
   }
 
   /**
@@ -824,10 +811,6 @@ export class CircuitScene extends BaseScene {
 
     // Recreate grid with new scale reference
     this.recreateGridWithScale(effectiveUnitSize);
-
-    console.log(
-      `📏 Grid scale updated - 1 grid square = ${effectiveUnitSize.toFixed(2)} units`,
-    );
   }
 
   /**
@@ -891,8 +874,6 @@ export class CircuitScene extends BaseScene {
 
     // Store reference for cleanup
     (this as any).wheelHandler = wheelHandler;
-
-    console.log("🔒 Wheel zoom overridden for CircuitScene");
   }
 
   protected override onSceneDeactivated(): void {
@@ -900,8 +881,6 @@ export class CircuitScene extends BaseScene {
 
     this.stopSimulation();
     this.cleanupUI();
-
-    console.log("🔌 Circuit simulation scene deactivated");
   }
 
   /**
@@ -1052,7 +1031,6 @@ export class CircuitScene extends BaseScene {
       delay: [500, 0],
       maxWidth: 250,
     });
-
   }
 
   /**
@@ -1117,7 +1095,6 @@ export class CircuitScene extends BaseScene {
         this.showDragPreview(item);
         this.updateDragPreview(event.clientX, event.clientY);
       }
-
     };
   }
 
@@ -1152,9 +1129,6 @@ export class CircuitScene extends BaseScene {
 
     // Place component at drop position
     this.placeComponentAt(item.type, position.x, position.y);
-    console.log(
-      `🎯 Dropped ${item.name} at (${position.x.toFixed(1)}, ${position.y.toFixed(1)})`,
-    );
   }
 
   /**
@@ -1192,10 +1166,6 @@ export class CircuitScene extends BaseScene {
 
       // Record placement time to prevent immediate panning
       this.lastComponentPlacedTime = Date.now();
-
-      console.log(
-        `✅ Placed ${componentType} at (${x.toFixed(1)}, ${y.toFixed(1)})`,
-      );
     }
   }
 
@@ -1356,12 +1326,9 @@ export class CircuitScene extends BaseScene {
 
       // Update properties panel
       this.updatePropertiesPanel(component);
-
-      console.log(`🎯 Selected component: ${component.getName()}`);
     } else {
       // Hide properties panel when nothing is selected
       this.hidePropertiesPanel();
-      console.log("🎯 Deselected all components");
     }
 
     // Update trash bin visibility
@@ -1388,7 +1355,6 @@ export class CircuitScene extends BaseScene {
     }
 
     this.updateTrashBinVisibility();
-    console.log(`🎯 Selected wire: ${wireId}`);
   }
 
   /**
@@ -1423,7 +1389,6 @@ export class CircuitScene extends BaseScene {
     this.interactiveWireIntegration.removeWire(wireId);
 
     this.updateTrashBinVisibility();
-    console.log(`🗑️ Deleted wire: ${wireId}`);
   }
 
   /**
@@ -1681,8 +1646,6 @@ export class CircuitScene extends BaseScene {
 
     // Refresh selection highlight and controls
     this.createSelectionHighlight(component);
-
-    console.log(`🔄 Flipped component: ${component.getName()}`);
   }
 
   /**
@@ -1696,10 +1659,6 @@ export class CircuitScene extends BaseScene {
 
     // Refresh selection highlight and controls
     this.createSelectionHighlight(component);
-
-    console.log(
-      `🔄 Rotated component clockwise: ${component.getName()} to ${component.getOrientation()}°`,
-    );
   }
 
   /**
@@ -1713,10 +1672,6 @@ export class CircuitScene extends BaseScene {
 
     // Refresh selection highlight and controls
     this.createSelectionHighlight(component);
-
-    console.log(
-      `🔄 Rotated component counter-clockwise: ${component.getName()} to ${component.getOrientation()}°`,
-    );
   }
 
   /**
@@ -1746,13 +1701,8 @@ export class CircuitScene extends BaseScene {
           (wire.endComponent === componentName && wire.endNode === node.id),
       );
 
-      console.log(
-        `  Node ${node.id}: found ${connectedWires.length} connected wires`,
-      );
-
       // Redraw each connected wire
       connectedWires.forEach((wire: any) => {
-        console.log(`    Updating wire ${wire.id}`);
         if (this.wireSystem.updateWire(wire.id)) {
           wiresUpdated++;
         }
@@ -1879,10 +1829,6 @@ export class CircuitScene extends BaseScene {
    */
   private deleteSelectedComponentsWithoutConfirmation(): void {
     if (this.selectedComponents.size > 0) {
-      console.log(
-        `🗑️ Deleting ${this.selectedComponents.size} selected components`,
-      );
-
       // Delete each selected component
       this.selectedComponents.forEach((component) => {
         this.deleteComponent(component);
@@ -1978,7 +1924,7 @@ export class CircuitScene extends BaseScene {
     // Play/Stop button (for transient simulation)
     const playStopButton = document.createElement("button");
     playStopButton.className = "sim-button play-stop";
-    playStopButton.textContent = "▶️ Start";
+    playStopButton.textContent = "Start";
     playStopButton.title =
       "Run time-domain simulation (shows capacitor charging/discharging)";
     playStopButton.addEventListener("click", () => this.toggleSimulation());
@@ -1990,7 +1936,7 @@ export class CircuitScene extends BaseScene {
     // Reset button
     const resetButton = document.createElement("button");
     resetButton.className = "sim-button reset";
-    resetButton.textContent = "🔄 Reset";
+    resetButton.textContent = "Reset";
     resetButton.title = "Reset simulation to t=0";
     resetButton.addEventListener("click", () => this.resetSimulation());
     this.addTooltip(resetButton, "Reset simulation to initial state (t=0)");
@@ -2081,9 +2027,6 @@ export class CircuitScene extends BaseScene {
 
     // Switch state change event listener
     const switchStateHandler = ((event: CustomEvent) => {
-      console.log(
-        `🔄 Switch state changed: ${event.detail.componentId} is now ${event.detail.isClosed ? "CLOSED" : "OPEN"}`,
-      );
       // Switch state is updated, but circuit analysis is only done when user clicks Run/Analyze buttons
       // This allows users to set up their circuit before running analysis
     }) as EventListener;
@@ -2100,7 +2043,6 @@ export class CircuitScene extends BaseScene {
   private onCanvasClick(event: MouseEvent): void {
     // Ignore clicks that occurred during/after a component drag
     if (this.isDraggingComponent) {
-      console.log("🖱️ Ignoring click - component was being dragged");
       return;
     }
 
@@ -2112,10 +2054,6 @@ export class CircuitScene extends BaseScene {
     const containerScale = this.zoomableContainer.scale.x;
     const worldX = (screenX - this.zoomableContainer.x) / containerScale;
     const worldY = (screenY - this.zoomableContainer.y) / containerScale;
-
-    console.log(
-      `🖱️ Canvas clicked at screen (${screenX}, ${screenY}) -> world (${worldX}, ${worldY})`,
-    );
 
     if (this.isWireMode) {
       this.handleWireClick(worldX, worldY);
@@ -2144,8 +2082,6 @@ export class CircuitScene extends BaseScene {
 
       // Visual feedback - highlight the starting node
       this.highlightNode(component, node);
-
-      console.log(`🔗 Wire start: ${component.getName()}.${node.id}`);
     } else {
       // Complete wire connection
       if (
@@ -2168,9 +2104,6 @@ export class CircuitScene extends BaseScene {
             );
 
           if (success) {
-            console.log(
-              `🔗 Wire connected to existing wire at (${_x.toFixed(1)}, ${_y.toFixed(1)})`,
-            );
           }
         } else {
           // Regular component-to-component connection
@@ -2184,9 +2117,8 @@ export class CircuitScene extends BaseScene {
           );
 
           if (success) {
-            console.log(`🔗 Wire created: ${wireId}`);
           } else {
-            console.warn("⚠️ Failed to create wire");
+            console.warn("Failed to create wire");
           }
         }
       }
@@ -2218,9 +2150,6 @@ export class CircuitScene extends BaseScene {
               existingWire.id,
             );
           if (success) {
-            console.log(
-              `🔗 Wire connected to existing wire at (${x.toFixed(1)}, ${y.toFixed(1)})`,
-            );
           }
           this.cancelWireMode();
           return;
@@ -2281,9 +2210,6 @@ export class CircuitScene extends BaseScene {
       // Start wire
       this.wireStartComponent = clickedComponent;
       this.wireStartNode = clickedNode.id;
-      console.log(
-        `🔗 Wire start: ${clickedComponent.getName()}.${clickedNode.id}`,
-      );
     } else {
       // Complete wire
       if (clickedComponent !== this.wireStartComponent) {
@@ -2297,7 +2223,6 @@ export class CircuitScene extends BaseScene {
         );
 
         if (success) {
-          console.log(`🔗 Wire created: ${wireId}`);
         } else {
           console.warn("⚠️ Failed to create wire");
         }
@@ -2376,8 +2301,6 @@ export class CircuitScene extends BaseScene {
 
       // Update properties panel
       this.updatePropertiesPanel(component);
-
-      console.log(`✅ Placed ${type} at (${x.toFixed(1)}, ${y.toFixed(1)})`);
     }
   }
 
@@ -2450,7 +2373,6 @@ export class CircuitScene extends BaseScene {
     this.isWireMode = !this.isWireMode;
 
     if (this.isWireMode) {
-      console.log("🔗 Wire mode activated");
       // Update UI to show wire mode
       document.body.classList.add("wire-mode");
     } else {
@@ -2489,10 +2411,6 @@ export class CircuitScene extends BaseScene {
 
     // Show wire mode indicator
     this.showWireModeIndicator(component, node);
-
-    console.log(
-      `✨ Highlighted node ${node.id} at (${nodeWorldX.toFixed(1)}, ${nodeWorldY.toFixed(1)})`,
-    );
   }
 
   /**
@@ -2676,9 +2594,7 @@ export class CircuitScene extends BaseScene {
       snappedCursor.y,
       liveAvoid,
       liveSnap,
-      anchorPoints.length === 1 &&
-        this.wireStartComponent &&
-        this.wireStartNode
+      anchorPoints.length === 1 && this.wireStartComponent && this.wireStartNode
         ? {
             start: {
               componentId: this.wireStartComponent.getName(),
@@ -2830,7 +2746,6 @@ export class CircuitScene extends BaseScene {
     this.clearWirePreview();
     this.hideWireModeIndicator();
     document.body.classList.remove("wire-mode");
-    console.log("🔗 Wire mode cancelled");
   }
 
   /**
@@ -2889,7 +2804,6 @@ export class CircuitScene extends BaseScene {
         component.setName(value || oldName);
         // Force visual update
         component.update(0);
-        console.log(`📝 Component renamed from ${oldName} to ${value}`);
       },
     );
     content.appendChild(nameField);
@@ -2908,7 +2822,6 @@ export class CircuitScene extends BaseScene {
             });
             // Force visual update
             resistor.update(0);
-            console.log(`🔧 Resistor resistance updated to ${value}Ω`);
           },
         );
 
@@ -2927,7 +2840,6 @@ export class CircuitScene extends BaseScene {
             });
             // Force visual update
             capacitor.update(0);
-            console.log(`⚡ Capacitor capacitance updated to ${value}F`);
           },
         );
 
@@ -2944,7 +2856,6 @@ export class CircuitScene extends BaseScene {
             battery.updateCircuitProperties({ value: parseFloat(value) || 9 });
             // Force visual update
             battery.update(0);
-            console.log(`🔋 Battery voltage updated to ${value}V`);
           },
         );
 
@@ -2963,7 +2874,6 @@ export class CircuitScene extends BaseScene {
             });
             // Force visual update
             inductor.update(0);
-            console.log(`🌀 Inductor inductance updated to ${value}H`);
           },
         );
 
@@ -2986,7 +2896,6 @@ export class CircuitScene extends BaseScene {
             } as any);
             // Force visual update
             acSource.update(0);
-            console.log(`⚡ AC Source amplitude updated to ${value}V`);
           },
         );
         content.appendChild(amplitudeField);
@@ -3002,7 +2911,6 @@ export class CircuitScene extends BaseScene {
             } as any);
             // Force visual update
             acSource.update(0);
-            console.log(`🌊 AC Source frequency updated to ${value}Hz`);
           },
         );
         content.appendChild(frequencyField);
@@ -3018,7 +2926,6 @@ export class CircuitScene extends BaseScene {
             } as any);
             // Force visual update
             acSource.update(0);
-            console.log(`🔄 AC Source phase updated to ${value} rad`);
           },
         );
         content.appendChild(phaseField);
@@ -3181,7 +3088,6 @@ export class CircuitScene extends BaseScene {
           ledComponent.setColor(newColor);
           // Refresh properties panel to show updated values
           this.updatePropertiesPanel(component);
-          console.log(`💡 LED color changed to ${newColor}`);
         });
 
         content.appendChild(colorField);
@@ -3208,7 +3114,7 @@ export class CircuitScene extends BaseScene {
 
         if (isBurnt) {
           stateHTML += `
-            <div style="color: #ff4444; font-weight: bold; font-size: 13px;">⚠️ BURNT - Overcurrent!</div>
+            <div style="color: #ff4444; font-weight: bold; font-size: 13px;">BURNT - Overcurrent!</div>
             <div style="color: #888; font-size: 11px; margin-top: 4px;">The LED has been damaged by excessive current.</div>
           `;
         } else if (isOn) {
@@ -3367,7 +3273,6 @@ export class CircuitScene extends BaseScene {
     if (confirmed) {
       this.deleteComponent(component);
       this.selectComponent(null); // Deselect and hide properties panel
-      console.log(`🗑️ Deleted component: ${component.getName()}`);
     }
   }
 
@@ -3716,14 +3621,7 @@ export class CircuitScene extends BaseScene {
 
     // Start drag
     displayObject.on("pointerdown", (e: any) => {
-      console.log(
-        `👆 pointerdown on ${component.getName()} (type: ${component.getComponentType()})`,
-      );
-
       if (this.isWireMode || this.isDraggingFromToolbar) {
-        console.log(
-          `   ⏭️ Skipping - wireMode=${this.isWireMode}, draggingFromToolbar=${this.isDraggingFromToolbar}`,
-        );
         return;
       }
 
@@ -3732,14 +3630,12 @@ export class CircuitScene extends BaseScene {
         component.getComponentType() === "switch" ||
         component.getComponentType() === "spdt_switch"
       ) {
-        console.log(`🔘 Toggling switch: ${component.getName()}`);
         (component as Switch | SpdtSwitch).toggleSwitch();
         e.stopPropagation();
         return; // Don't start dragging
       }
       // Special handling for Push Button components - momentary press on hold
       if (component.getComponentType() === "push_button") {
-        console.log(`🟦 Pressing push button: ${component.getName()}`);
         (component as any).pressButton?.();
         const release = () => {
           (component as any).releaseButton?.();
@@ -3873,8 +3769,6 @@ export class CircuitScene extends BaseScene {
         e.stopPropagation();
       }
     });
-
-    console.log(`🎯 Added interaction handlers to ${component.getName()}`);
   }
 
   /**
@@ -3947,8 +3841,6 @@ export class CircuitScene extends BaseScene {
 
     // Destroy the component
     component.destroy();
-
-    console.log(`🗑️ Component ${componentName} deleted successfully`);
   }
 
   /**
@@ -4079,9 +3971,6 @@ export class CircuitScene extends BaseScene {
           obj.getComponentType() === "capacitor"
         ) {
           const props = obj.getCircuitProperties();
-          console.log(
-            `⚡ ${obj.getName()} - t=${postStepTime.toFixed(3)}s, V=${props.voltage.toFixed(3)}V, I=${props.current.toFixed(6)}A`,
-          );
         }
       });
     }, this.timeStep * 1000); // Convert to milliseconds
@@ -4091,11 +3980,8 @@ export class CircuitScene extends BaseScene {
       ".play-stop",
     ) as HTMLButtonElement;
     if (playStopButton) {
-      playStopButton.textContent = "⏹️ Stop";
+      playStopButton.textContent = "Stop";
     }
-
-    console.log("▶️ Circuit simulation started (transient analysis enabled)");
-    console.log(`⏱️ Time step: ${this.timeStep * 1000}ms`);
   }
 
   /**
@@ -4138,8 +4024,6 @@ export class CircuitScene extends BaseScene {
     if (playStopButton) {
       playStopButton.textContent = "▶️ Start";
     }
-
-    console.log("⏹️ Circuit simulation stopped");
   }
 
   /**
@@ -4147,38 +4031,6 @@ export class CircuitScene extends BaseScene {
    */
   private resetSimulation(): void {
     this.stopSimulation();
-
-    console.log("🔄 Circuit simulation reset");
-  }
-
-  /**
-   * Run DC analysis
-   */
-  public runDCAnalysis(): void {
-    // Clear damage state from any previous run so the solve starts fresh
-    this.gameObjects.forEach((obj) => {
-      if (obj instanceof CircuitComponent) {
-        obj.getCircuitProperties().burnt = false;
-      }
-    });
-
-    this.syncInteractiveWireGraphToSolver();
-    const success = this.circuitSolver.solveDC();
-
-    if (success) {
-      const results = this.circuitSolver.getAnalysisResults();
-      const snapshot = this.circuitSolver.getSimulationSnapshot();
-      console.log("⚡ DC Analysis Results:", results);
-
-      // Update wire systems with typed snapshot data (includes terminal currents)
-      const snapshotResults = { ...results, ...snapshot };
-      this.wireSystem.updateWireStates(snapshotResults);
-      this.interactiveWireIntegration.updateWireStates(snapshotResults);
-
-      this.showAnalysisResults(results);
-    } else {
-      console.error("❌ DC analysis failed");
-    }
   }
 
   /**
@@ -4369,8 +4221,7 @@ export class CircuitScene extends BaseScene {
           this.wireAnimationStabilizer.getDisplaySigned(wireId);
         const displayMag = Math.abs(displaySigned);
         const visualFade = this.wireAnimationStabilizer.getFade01(wireId);
-        const energized =
-          displayMag > iDead && visualFade > 0.05;
+        const energized = displayMag > iDead && visualFade > 0.05;
         const normalizedI = Math.min(displayMag / 1.0, 1.0);
 
         const { first: startEp, second: endEp } =
@@ -4405,7 +4256,8 @@ export class CircuitScene extends BaseScene {
               Number.isFinite(endV) &&
               Math.abs((startV as number) - (endV as number)) > 1e-5
             ) {
-              const endpointDir = (startV as number) >= (endV as number) ? 1 : -1;
+              const endpointDir =
+                (startV as number) >= (endV as number) ? 1 : -1;
               renderDir = (endpointDir * pathOrientation) as 1 | -1;
             } else {
               // Keep render direction in the same signed frame as wire.current:
@@ -4433,8 +4285,10 @@ export class CircuitScene extends BaseScene {
             endEp.componentId,
             endEp.nodeId,
           );
-          const pa = ma !== undefined ? this.mergedNetVisualPhase.get(ma) ?? 0 : 0;
-          const pb = mb !== undefined ? this.mergedNetVisualPhase.get(mb) ?? 0 : 0;
+          const pa =
+            ma !== undefined ? (this.mergedNetVisualPhase.get(ma) ?? 0) : 0;
+          const pb =
+            mb !== undefined ? (this.mergedNetVisualPhase.get(mb) ?? 0) : 0;
           const blend = (pa + pb) * 0.5;
           phaseShift = blend - Math.floor(blend);
         } else if (startEp?.componentId && startEp?.nodeId) {
@@ -4442,11 +4296,14 @@ export class CircuitScene extends BaseScene {
             startEp.componentId,
             startEp.nodeId,
           );
-          const p = m !== undefined ? this.mergedNetVisualPhase.get(m) ?? 0 : 0;
+          const p =
+            m !== undefined ? (this.mergedNetVisualPhase.get(m) ?? 0) : 0;
           phaseShift = p - Math.floor(p);
         }
 
-        const flowDirEndpoint = (wire as any).flowDirEndpoint as string | undefined;
+        const flowDirEndpoint = (wire as any).flowDirEndpoint as
+          | string
+          | undefined;
         wireStates.set(wireId, {
           currentMagnitude: displayMag,
           currentDirection: renderDir as 1 | -1 | 0,
@@ -4470,7 +4327,10 @@ export class CircuitScene extends BaseScene {
   private circuitHasAcSourceOrTransientMotion(): boolean {
     if (this.isSimulationRunning) return true;
     for (const obj of this.gameObjects.values()) {
-      if (obj instanceof CircuitComponent && obj.getComponentType() === "acsource") {
+      if (
+        obj instanceof CircuitComponent &&
+        obj.getComponentType() === "acsource"
+      ) {
         return true;
       }
     }
@@ -4507,7 +4367,8 @@ export class CircuitScene extends BaseScene {
       .join("|");
     const endpointSignature = `${startEp?.componentId ?? "na"}:${startEp?.nodeId ?? "na"}|${endEp?.componentId ?? "na"}:${endEp?.nodeId ?? "na"}`;
     const previousSignature = this.wirePathSignatures.get(wireId);
-    const previousEndpointSignature = this.wirePathEndpointSignatures.get(wireId);
+    const previousEndpointSignature =
+      this.wirePathEndpointSignatures.get(wireId);
     if (
       previousSignature === signature &&
       previousEndpointSignature === endpointSignature
@@ -4524,9 +4385,13 @@ export class CircuitScene extends BaseScene {
     const anim = wire.animationPathMeta as
       | { segmentIds: string[]; revision: number }
       | undefined;
-    this.wireParticleSystem!.updateWirePaths(wireId, pathSegments, anim
-      ? { segmentIds: anim.segmentIds, revision: anim.revision }
-      : undefined);
+    this.wireParticleSystem!.updateWirePaths(
+      wireId,
+      pathSegments,
+      anim
+        ? { segmentIds: anim.segmentIds, revision: anim.revision }
+        : undefined,
+    );
 
     const pathStart = wire.segments[0].start;
     const pathEnd = wire.segments[wire.segments.length - 1].end;
@@ -4628,7 +4493,7 @@ export class CircuitScene extends BaseScene {
 
     if (issues.length > 0 && now - this.lastWireInvariantWarningMs > 1000) {
       this.lastWireInvariantWarningMs = now;
-      console.warn("⚠️ Wire flow invariant violations:", issues.slice(0, 6));
+      console.warn("Wire flow invariant violations:", issues.slice(0, 6));
     }
 
     const liveIds = new Set(interactiveWires.keys());
@@ -4931,21 +4796,14 @@ export class CircuitScene extends BaseScene {
     // Event listeners
     zoomInBtn.addEventListener("click", () => {
       this.zoomIn();
-      console.log(
-        `🔍 Zoomed in - Level: ${(this.getZoomLevel() * 100).toFixed(0)}%`,
-      );
     });
 
     zoomOutBtn.addEventListener("click", () => {
       this.zoomOut();
-      console.log(
-        `🔍 Zoomed out - Level: ${(this.getZoomLevel() * 100).toFixed(0)}%`,
-      );
     });
 
     centerBtn.addEventListener("click", () => {
       this.recenterCamera();
-      console.log("🎯 Camera centered on components");
     });
 
     helpBtn.addEventListener("click", () => {
@@ -5018,13 +4876,9 @@ export class CircuitScene extends BaseScene {
 
       // Check if we hit a component
       const hitObject = this.findComponentAt(worldX, worldY);
-      console.log(
-        `🎯 Hit test at screen (${screenX.toFixed(0)}, ${screenY.toFixed(0)}) -> world (${worldX.toFixed(0)}, ${worldY.toFixed(0)}): ${hitObject ? hitObject.getName() : "null"}`,
-      );
 
       // Shift + Drag = Pan
       if (event.shiftKey) {
-        console.log("🔄 Shift held - starting pan");
         this.isPanningCanvas = true;
         panStarted = true;
 
@@ -5037,13 +4891,11 @@ export class CircuitScene extends BaseScene {
         this.cameraStartPosition.y = cameraPos.y;
 
         canvas.style.cursor = "grabbing";
-        console.log("🔄 Panning canvas - drag to move around");
         return;
       }
 
       // Regular drag on empty canvas = Selection rectangle
       if (!hitObject) {
-        console.log("📦 Starting selection rectangle");
         this.isSelectingRectangle = true;
         this.selectionRectStart = { x: worldX, y: worldY };
 
@@ -5123,7 +4975,6 @@ export class CircuitScene extends BaseScene {
     const onMouseUp = (event: MouseEvent) => {
       // Handle panning end
       if (this.isPanningCanvas && panStarted) {
-        console.log("🔄 Canvas panning ended");
         this.isPanningCanvas = false;
         panStarted = false;
 
@@ -5158,10 +5009,6 @@ export class CircuitScene extends BaseScene {
           this.selectionRectGraphics = null;
         }
         canvas.style.cursor = "default";
-
-        console.log(
-          `📦 Selection complete - ${this.selectedComponents.size} components selected`,
-        );
       }
     };
 
@@ -5195,25 +5042,18 @@ export class CircuitScene extends BaseScene {
         case "=":
           event.preventDefault();
           this.zoomIn();
-          console.log(
-            `⌨️ Keyboard zoom in - Level: ${(this.getZoomLevel() * 100).toFixed(0)}%`,
-          );
           break;
 
         case "-":
         case "_":
           event.preventDefault();
           this.zoomOut();
-          console.log(
-            `⌨️ Keyboard zoom out - Level: ${(this.getZoomLevel() * 100).toFixed(0)}%`,
-          );
           break;
 
         case "0":
           if (event.ctrlKey || event.metaKey) {
             event.preventDefault();
             this.resetCamera();
-            console.log("⌨️ Camera reset to origin");
           }
           break;
 
@@ -5224,20 +5064,17 @@ export class CircuitScene extends BaseScene {
           }
           event.preventDefault();
           this.recenterCamera();
-          console.log("⌨️ Camera centered on components");
           break;
 
         case "f":
           event.preventDefault();
           this.recenterCamera();
-          console.log("⌨️ Fit all components in view");
           break;
 
         case "delete":
         case "backspace":
           event.preventDefault();
           void this.deleteSelectedComponents();
-          console.log("⌨️ Delete key pressed");
           break;
       }
 
@@ -5423,7 +5260,6 @@ export class CircuitScene extends BaseScene {
 
       // Re-add to grid container (at index 0 to keep it below zoomable content)
       this.gridContainer.addChildAt(this.gridCanvas.getContainer(), 0);
-
     };
 
     // Use ResizeObserver for more reliable resize detection
@@ -5462,7 +5298,6 @@ export class CircuitScene extends BaseScene {
           this.gameManager.getApp().renderer.render(this.sceneContainer);
         }
       }, 100);
-
     }
   }
 
@@ -5602,7 +5437,9 @@ export class CircuitScene extends BaseScene {
               type: n.type,
               componentId: n.componentId,
               nodeId: n.nodeId,
-              connectedWires: Array.isArray(n.connectedWires) ? [...n.connectedWires] : [],
+              connectedWires: Array.isArray(n.connectedWires)
+                ? [...n.connectedWires]
+                : [],
             })),
             segments: (wire.segments ?? []).map((s: any) => ({
               start: { x: s.start.x, y: s.start.y },
@@ -5610,7 +5447,9 @@ export class CircuitScene extends BaseScene {
               isHorizontal: Boolean(s.isHorizontal),
               layer: Number.isFinite(s.layer) ? s.layer : 0,
             })),
-            segmentStableIds: wire.segmentStableIds ? [...wire.segmentStableIds] : undefined,
+            segmentStableIds: wire.segmentStableIds
+              ? [...wire.segmentStableIds]
+              : undefined,
             routeRevision: wire.routeRevision,
             animationPathMeta: wire.animationPathMeta
               ? {
@@ -5624,7 +5463,9 @@ export class CircuitScene extends BaseScene {
       }
 
       if (start && !end) {
-        const junction = (wire.nodes ?? []).find((n: any) => n.type === "junction");
+        const junction = (wire.nodes ?? []).find(
+          (n: any) => n.type === "junction",
+        );
         const targetWireId = junction?.connectedWires?.find(
           (id: string) => id !== wire.id,
         );
@@ -5642,7 +5483,9 @@ export class CircuitScene extends BaseScene {
               type: n.type,
               componentId: n.componentId,
               nodeId: n.nodeId,
-              connectedWires: Array.isArray(n.connectedWires) ? [...n.connectedWires] : [],
+              connectedWires: Array.isArray(n.connectedWires)
+                ? [...n.connectedWires]
+                : [],
             })),
             segments: (wire.segments ?? []).map((s: any) => ({
               start: { x: s.start.x, y: s.start.y },
@@ -5650,7 +5493,9 @@ export class CircuitScene extends BaseScene {
               isHorizontal: Boolean(s.isHorizontal),
               layer: Number.isFinite(s.layer) ? s.layer : 0,
             })),
-            segmentStableIds: wire.segmentStableIds ? [...wire.segmentStableIds] : undefined,
+            segmentStableIds: wire.segmentStableIds
+              ? [...wire.segmentStableIds]
+              : undefined,
             routeRevision: wire.routeRevision,
             animationPathMeta: wire.animationPathMeta
               ? {
@@ -5668,7 +5513,11 @@ export class CircuitScene extends BaseScene {
 
   public importSnapshot(snapshot: CircuitSceneSnapshot): boolean {
     try {
-      if (!snapshot || !Array.isArray(snapshot.components) || !Array.isArray(snapshot.wires)) {
+      if (
+        !snapshot ||
+        !Array.isArray(snapshot.components) ||
+        !Array.isArray(snapshot.wires)
+      ) {
         return false;
       }
 
@@ -5835,10 +5684,11 @@ export class CircuitScene extends BaseScene {
   /**
    * Set the wire routing strategy
    */
-  public setWireRoutingStrategy(strategy: "dagre" | "astar" | "hybrid"): void {
+  public setWireRoutingStrategy(
+    strategy: "orthogonal" | "astar" | "hybrid",
+  ): void {
     this.hybridWireRouter.setRoutingStrategy(strategy);
     this.interactiveWireIntegration.setRoutingStrategy(strategy);
-    console.log(` Wire routing strategy set to: ${strategy}`);
   }
 
   /**
@@ -5853,7 +5703,6 @@ export class CircuitScene extends BaseScene {
    */
   public registerComponentWithRouter(component: CircuitComponent): void {
     this.hybridWireRouter.addComponent(component);
-    console.log(` Registered ${component.getName()} with hybrid wire router`);
   }
 
   /**
@@ -5861,15 +5710,12 @@ export class CircuitScene extends BaseScene {
    */
   public unregisterComponentFromRouter(componentId: string): void {
     this.hybridWireRouter.removeComponent(componentId);
-    console.log(` Unregistered ${componentId} from hybrid wire router`);
   }
 
   /**
    * Test the open-source routing algorithms (for debugging)
    */
   public testOpenSourceRouting(): void {
-    console.log(" Testing Open-Source Wire Routing...");
-
     // Test the InteractiveWireSystem routing
     this.interactiveWireIntegration.testOpenSourceRouting();
 
@@ -5878,8 +5724,8 @@ export class CircuitScene extends BaseScene {
     const end: RoutingPoint = { x: 300, y: 200, layer: 0 };
 
     // Test all strategies
-    const strategies: ("dagre" | "astar" | "hybrid")[] = [
-      "dagre",
+    const strategies: ("orthogonal" | "astar" | "hybrid")[] = [
+      "orthogonal",
       "astar",
       "hybrid",
     ];
@@ -5887,22 +5733,10 @@ export class CircuitScene extends BaseScene {
     strategies.forEach((strategy) => {
       this.hybridWireRouter.setRoutingStrategy(strategy);
       const path = this.hybridWireRouter.routeWire(start, end);
-
-      console.log(` ${strategy.toUpperCase()} Results:`);
-      console.log(`   - Segments: ${path.segments.length}`);
-      console.log(`   - Length: ${path.totalLength.toFixed(2)}px`);
-      console.log(`   - Bends: ${path.bendCount}`);
     });
 
     // Show statistics
     const stats = this.getRoutingStats();
-    console.log("\n Routing Statistics:");
-    console.log(`   - Strategy: ${stats.strategy}`);
-    console.log(`   - Components: ${stats.componentCount}`);
-    console.log(`   - Dagre Available: ${stats.dagreAvailable}`);
-    console.log(`   - A* Available: ${stats.aStarAvailable}`);
-
-    console.log("\n Open-Source Routing Test Complete!");
   }
 
   /**

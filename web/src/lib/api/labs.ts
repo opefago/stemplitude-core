@@ -98,7 +98,7 @@ export async function createLabProject(params: {
   if (params.save_kind) form.set("save_kind", params.save_kind);
   if (params.source_project_id) form.set("source_project_id", params.source_project_id);
   form.set("file", params.file, params.filename);
-  return apiFetch<StudentLabProject>("/labs/projects", {
+  return apiFetch<StudentLabProject>("/labs/projects/", {
     method: "POST",
     body: form,
   });

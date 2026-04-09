@@ -936,7 +936,7 @@ export class InteractiveWireIntegration {
   /**
    * Set the wire routing strategy
    */
-  public setRoutingStrategy(strategy: "dagre" | "astar" | "hybrid"): void {
+  public setRoutingStrategy(strategy: "orthogonal" | "astar" | "hybrid"): void {
     this.wireSystem.setRoutingStrategy(strategy);
   }
 

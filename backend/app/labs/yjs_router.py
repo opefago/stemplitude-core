@@ -4,6 +4,7 @@ Room ID formats
 ---------------
 Solo   (1 writer + N observers):  ``lab:solo:{actorId}:{sessionId}``
 Group  (N writers):               ``lab:group:{groupId}:{sessionId}``
+Board  (session-wide whiteboard): ``board:{sessionId}``
 Legacy (backward compat):         ``lab:{actorId}:{sessionId}``
 
 Auth
@@ -37,6 +38,26 @@ router = APIRouter()
 
 # Module-level server — started/stopped in the app lifespan.
 yjs_server = WebsocketServer(auto_clean_rooms=True)
+_server_started = False
+
+
+async def _ensure_server_started() -> None:
+    """Start the Yjs WebSocket server if not already running.
+
+    The lifespan handler in main.py uses ``async with yjs_server:`` which
+    is the canonical way.  However uvicorn --reload can lose the lifespan
+    context on hot-reloads, leaving the server in a stopped state.  This
+    fallback ensures the endpoint still works during development.
+    """
+    global _server_started
+    if _server_started:
+        return
+    try:
+        await yjs_server.start()
+        _server_started = True
+        logger.info("Yjs WebsocketServer started (fallback)")
+    except RuntimeError:
+        pass
 
 
 # ─── Room ID parsing ──────────────────────────────────────────────────────────
@@ -44,6 +65,7 @@ yjs_server = WebsocketServer(auto_clean_rooms=True)
 class RoomKind(str, Enum):
     SOLO = "solo"
     GROUP = "group"
+    BOARD = "board"
 
 
 @dataclass
@@ -62,6 +84,7 @@ def _parse_room_name(room_name: str) -> ParsedRoom | None:
     Accepts:
       lab:solo:{actorId}:{sessionId}     (canonical solo)
       lab:group:{groupId}:{sessionId}    (group room)
+      board:{sessionId}                  (session-wide whiteboard)
       lab:{actorId}:{sessionId}          (legacy / backward compat → treated as solo)
     """
     parts = room_name.split(":")
@@ -79,6 +102,12 @@ def _parse_room_name(room_name: str) -> ParsedRoom | None:
                 kind=RoomKind.GROUP,
                 group_id=UUID(parts[2]),
                 session_id=UUID(parts[3]),
+            )
+
+        if len(parts) == 2 and parts[0] == "board":
+            return ParsedRoom(
+                kind=RoomKind.BOARD,
+                session_id=UUID(parts[1]),
             )
 
         # Legacy: lab:{actorId}:{sessionId}
@@ -138,9 +167,24 @@ async def _authorize_yjs_access(
 
     if not read_only and parsed.kind == RoomKind.SOLO:
         # Solo writer: only the room's owner may write.
-        return identity.id == parsed.actor_id
+        if identity.id == parsed.actor_id:
+            return True
+        # Guardian in learner mode: allow parent to write to their child's room.
+        if identity.sub_type == "user" and parsed.actor_id is not None:
+            role = (getattr(identity, "role", "") or "").strip().lower()
+            if role in ("parent", "homeschool_parent"):
+                from app.students.parent_access import guardian_may_use_child_context_in_tenant
+                async with async_session_factory() as db:
+                    return await guardian_may_use_child_context_in_tenant(
+                        db,
+                        identity=identity,
+                        student_id=parsed.actor_id,
+                        tenant_id=tenant_id,
+                    )
+        return False
 
-    # For all other cases (observer, or group writer) verify classroom membership.
+    # Board and group rooms: any session participant may read/write.
+    # Observers: verify classroom membership.
     from app.classrooms.models import ClassroomSession  # local import avoids circulars
     from sqlalchemy import select as sa_select
 
@@ -182,6 +226,7 @@ async def _attach_persistence(room_name: str) -> None:
     """Load persisted state into the room and register a save-on-update observer."""
     from app.labs.yjs_persistence import load_room_state, schedule_save  # local import
 
+    await _ensure_server_started()
     room = await yjs_server.get_room(room_name)
     ydoc = room.ydoc
 
@@ -253,6 +298,7 @@ async def lab_yjs_sync(
     await websocket.accept()
 
     # Restore persisted state and register save hook (idempotent per room).
+    await _ensure_server_started()
     await _attach_persistence(room_name)
 
     channel = _StarletteWsChannel(websocket, room_name)

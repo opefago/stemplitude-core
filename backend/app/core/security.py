@@ -64,5 +64,7 @@ def create_refresh_token(sub: UUID, sub_type: str = "user") -> tuple[str, str]:
 def decode_token(token: str) -> dict:
     try:
         return jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
-    except JWTError:
+    except JWTError as e:
+        import logging
+        logging.getLogger(__name__).warning("JWT decode failed: %s", e)
         return {}

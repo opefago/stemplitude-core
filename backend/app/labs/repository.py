@@ -47,6 +47,29 @@ class ProjectRepository:
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
+    async def list_by_session(
+        self,
+        tenant_id: UUID,
+        session_id: str,
+        *,
+        classroom_id: str | None = None,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> list[Project]:
+        """List projects that were created during a classroom session."""
+        from sqlalchemy import cast, String
+        query = select(Project).where(
+            Project.tenant_id == tenant_id,
+            cast(Project.metadata_["session_id"].astext, String) == session_id,
+        )
+        if classroom_id:
+            query = query.where(
+                cast(Project.metadata_["classroom_id"].astext, String) == classroom_id,
+            )
+        query = query.order_by(Project.submitted_at.desc()).offset(skip).limit(limit)
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
     async def create(self, project: Project) -> Project:
         """Create a project."""
         self.session.add(project)

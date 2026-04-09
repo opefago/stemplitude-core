@@ -4,7 +4,7 @@ import logging
 import uuid
 from uuid import UUID
 
-from fastapi import HTTPException, UploadFile, status
+from fastapi import HTTPException, Request, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import blob_storage
@@ -89,10 +89,22 @@ class LabsService:
         self.assignment_repo = LabAssignmentRepository(session)
         self.feedback_repo = FeedbackRepository(session)
 
-    def _student_id(self, identity: CurrentIdentity, tenant_ctx: TenantContext) -> UUID:
-        """Resolve student_id: identity.id if student, else require student_id param."""
+    @staticmethod
+    def _student_id(
+        identity: CurrentIdentity,
+        tenant_ctx: TenantContext,
+        request: Request | None = None,
+    ) -> UUID:
+        """Resolve student_id: identity.id if student, else fall back to X-Child-Context."""
         if identity.sub_type == "student":
             return identity.id
+        if request is not None:
+            raw = (request.headers.get("X-Child-Context") or "").strip()
+            if raw:
+                try:
+                    return UUID(raw)
+                except ValueError:
+                    pass
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Student context required for project operations",
@@ -127,9 +139,10 @@ class LabsService:
         metadata_: dict | None = None,
         save_kind: str = "checkpoint",
         source_project_id: UUID | None = None,
+        request: Request | None = None,
     ) -> ProjectResponse:
         """Submit a project with file upload to R2."""
-        student_id = self._student_id(identity, tenant_ctx)
+        student_id = self._student_id(identity, tenant_ctx, request)
         from app.member_billing.guard import assert_member_billing_access_allowed
 
         await assert_member_billing_access_allowed(
@@ -189,6 +202,30 @@ class LabsService:
             self._to_project_response(p)
             for p in projects
         ]
+
+    async def list_session_projects(
+        self,
+        tenant_ctx: TenantContext,
+        session_id: str,
+        classroom_id: str | None = None,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> list[ProjectResponse]:
+        """List all projects created during a specific classroom session."""
+        projects = await self.repo.list_by_session(
+            tenant_ctx.tenant_id,
+            session_id,
+            classroom_id=classroom_id,
+            skip=skip,
+            limit=limit,
+        )
+        result = []
+        for p in projects:
+            signed_url = None
+            if p.blob_key:
+                signed_url = blob_storage.generate_presigned_url(p.blob_key)
+            result.append(self._to_project_response(p, blob_url=signed_url))
+        return result
 
     async def get_project(
         self,

@@ -80,6 +80,7 @@ async def submit_project(
         metadata_=metadata_,
         save_kind=save_kind,
         source_project_id=source_project_id,
+        request=request,
     )
 
 
@@ -105,6 +106,32 @@ async def list_projects(
         tenant_ctx=tenant,
         student_id=student_id,
         lab_id=lab_id,
+        skip=skip,
+        limit=limit,
+    )
+
+
+@projects_router.get(
+    "/by-session/{session_id}",
+    response_model=list[ProjectResponse],
+    dependencies=[_require_tenant(), require_permission("labs", "view")],
+)
+async def list_session_projects(
+    session_id: UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    tenant: TenantContext = Depends(get_tenant_context),
+    classroom_id: UUID | None = Query(None),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+):
+    """List all projects created during a specific classroom session."""
+    service = LabsService(db)
+    return await service.list_session_projects(
+        tenant_ctx=tenant,
+        session_id=str(session_id),
+        classroom_id=str(classroom_id) if classroom_id else None,
         skip=skip,
         limit=limit,
     )
