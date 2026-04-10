@@ -357,6 +357,7 @@ export const CircuitLabContainer: React.FC<Props> = ({
     const scene = sceneRef.current;
     if (!scene || !yjsProvider || !sceneReady) return;
     const yScene = ydoc?.getMap("circuit_scene") ?? null;
+    let lastSentSimulationState = Boolean(scene.getSimulationRunning?.());
 
     scene.onCursorMove = (x, y) => {
       const norm = scene.worldToNormalizedCoordinates?.(x, y);
@@ -366,14 +367,40 @@ export const CircuitLabContainer: React.FC<Props> = ({
       }
       awarenessRef.current.setCursor(x, y);
     };
-    scene.onDragProgress = (name, fx, fy, tx, ty) => awarenessRef.current.setDrag(name, fx, fy, tx, ty);
+    scene.onDragProgress = (name, fx, fy, tx, ty) => {
+      const from = scene.worldToNormalizedCoordinates?.(fx, fy);
+      const to = scene.worldToNormalizedCoordinates?.(tx, ty);
+      if (from && to) {
+        awarenessRef.current.setDrag(name, from.x, from.y, to.x, to.y, true);
+        return;
+      }
+      awarenessRef.current.setDrag(name, fx, fy, tx, ty, false);
+    };
     scene.onDragEnd = () => awarenessRef.current.clearDrag();
+    scene.onWireDrawProgress = (points) => {
+      const normalizedPoints = points
+        .map((p) => scene.worldToNormalizedCoordinates?.(p.x, p.y) ?? null)
+        .filter((p): p is { x: number; y: number } => Boolean(p));
+      if (normalizedPoints.length === points.length && normalizedPoints.length > 0) {
+        awarenessRef.current.setWireProgress(normalizedPoints, true);
+        return;
+      }
+      awarenessRef.current.setWireProgress(points, false);
+    };
+    scene.onWireDrawEnd = () => awarenessRef.current.clearWireProgress();
     scene.onSimulationStateChange = (running) => {
       yScene?.set("simulation_running", running);
     };
 
     const renderInterval = window.setInterval(() => {
       scene.updateRemotePeers(awarenessRef.current.peers);
+      if (yScene) {
+        const running = Boolean(scene.getSimulationRunning?.());
+        if (running !== lastSentSimulationState) {
+          yScene.set("simulation_running", running);
+          lastSentSimulationState = running;
+        }
+      }
     }, 66);
 
     return () => {
@@ -381,6 +408,8 @@ export const CircuitLabContainer: React.FC<Props> = ({
       scene.onCursorMove = undefined;
       scene.onDragProgress = undefined;
       scene.onDragEnd = undefined;
+      scene.onWireDrawProgress = undefined;
+      scene.onWireDrawEnd = undefined;
       scene.onSimulationStateChange = undefined;
     };
   }, [sceneReady, yjsProvider, ydoc]);

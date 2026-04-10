@@ -12,6 +12,7 @@ import {
   CircuitScene,
   type CircuitSceneSnapshot,
 } from "../mcu/lib/circuit/CircuitScene";
+import { useCircuitAwareness } from "../circuit/hooks/useCircuitAwareness";
 
 interface Props {
   ydoc: Y.Doc;
@@ -24,6 +25,11 @@ export function CircuitLabObserver({ ydoc, provider: _provider }: Props) {
   const sceneRef = useRef<CircuitScene | null>(null);
   const [sceneReady, setSceneReady] = useState(false);
   const [connected, setConnected] = useState(false);
+  const awareness = useCircuitAwareness(_provider ?? null, ydoc ?? null, {
+    actorName: "Instructor",
+    role: "instructor",
+    enabled: Boolean(_provider),
+  });
 
   useEffect(() => {
     setConnected(_provider?.wsconnected ?? false);
@@ -104,6 +110,23 @@ export function CircuitLabObserver({ ydoc, provider: _provider }: Props) {
 
     return () => { yScene.unobserve(onSceneChange); };
   }, [ydoc, sceneReady]);
+
+  const awarenessRef = useRef(awareness);
+  awarenessRef.current = awareness;
+
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene || !_provider || !sceneReady) return;
+
+    const renderInterval = window.setInterval(() => {
+      scene.updateRemotePeers(awarenessRef.current.peers);
+    }, 66);
+
+    return () => {
+      window.clearInterval(renderInterval);
+      scene.updateRemotePeers([]);
+    };
+  }, [sceneReady, _provider]);
 
   return (
     <div style={{ width: "100%", height: "100%", position: "relative" }}>

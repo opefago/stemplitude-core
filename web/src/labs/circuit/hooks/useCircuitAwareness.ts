@@ -21,9 +21,11 @@ export interface CircuitPeerState {
     fromY: number;
     toX: number;
     toY: number;
+    normalized?: boolean;
   } | null;
   wireProgress?: {
     points: { x: number; y: number }[];
+    normalized?: boolean;
   } | null;
 }
 
@@ -46,7 +48,7 @@ export function useCircuitAwareness(
   },
 ) {
   const [peers, setPeers] = useState<CircuitPeerState[]>([]);
-  const lastPushRef = useRef(0);
+  const lastPushByFieldRef = useRef<Record<string, number>>({});
   const localStateRef = useRef<Record<string, unknown>>({});
 
   // Set local identity on awareness
@@ -97,8 +99,9 @@ export function useCircuitAwareness(
     (field: string, value: unknown) => {
       if (!provider || !opts.enabled) return;
       const now = Date.now();
-      if (now - lastPushRef.current < THROTTLE_MS) return;
-      lastPushRef.current = now;
+      const last = lastPushByFieldRef.current[field] ?? 0;
+      if (now - last < THROTTLE_MS) return;
+      lastPushByFieldRef.current[field] = now;
       localStateRef.current[field] = value;
       provider.awareness.setLocalStateField(field, value);
     },
@@ -125,8 +128,22 @@ export function useCircuitAwareness(
   );
 
   const setDrag = useCallback(
-    (componentName: string, fromX: number, fromY: number, toX: number, toY: number) =>
-      pushField("circuit_drag", { componentName, fromX, fromY, toX, toY }),
+    (
+      componentName: string,
+      fromX: number,
+      fromY: number,
+      toX: number,
+      toY: number,
+      normalized = false,
+    ) =>
+      pushField("circuit_drag", {
+        componentName,
+        fromX,
+        fromY,
+        toX,
+        toY,
+        normalized,
+      }),
     [pushField],
   );
 
@@ -136,8 +153,8 @@ export function useCircuitAwareness(
   );
 
   const setWireProgress = useCallback(
-    (points: { x: number; y: number }[]) =>
-      pushField("circuit_wire", { points }),
+    (points: { x: number; y: number }[], normalized = false) =>
+      pushField("circuit_wire", { points, normalized }),
     [pushField],
   );
 

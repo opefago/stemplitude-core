@@ -1048,6 +1048,15 @@ export class CircuitScene extends BaseScene {
       if (this.isDraggingFromToolbar) {
         e.preventDefault();
         this.updateDragPreview(e.clientX, e.clientY);
+        const world = this.screenToWorldCoordinates(e.clientX, e.clientY);
+        const item = this.toolbarItems.find((x) => x.id === draggedItemId);
+        this.onDragProgress?.(
+          item?.type ?? item?.id ?? "component",
+          world.x,
+          world.y,
+          world.x,
+          world.y,
+        );
       }
     };
 
@@ -1075,6 +1084,7 @@ export class CircuitScene extends BaseScene {
         this.isDraggingFromToolbar = false;
         this.isDragging = false;
         this.hideDragPreview();
+        this.onDragEnd?.();
         draggedItemId = "";
       }
     };
@@ -2688,6 +2698,18 @@ export class CircuitScene extends BaseScene {
     this.wirePreview.lineTo(snappedX, snappedY + 8);
     this.wirePreview.stroke({ width: 1, color: 0x00ff88, alpha: 0.4 });
 
+    // Broadcast in-progress wire ghost for remote observers.
+    const ghostPoints: { x: number; y: number }[] = [];
+    const appendPoints = (pts: { x: number; y: number }[]) => {
+      for (const p of pts) {
+        const prev = ghostPoints[ghostPoints.length - 1];
+        if (!prev || prev.x !== p.x || prev.y !== p.y) ghostPoints.push(p);
+      }
+    };
+    appendPoints(committed);
+    appendPoints(liveRoute);
+    this.onWireDrawProgress?.(ghostPoints);
+
     this.zoomableContainer.addChild(this.wirePreview);
   }
 
@@ -2790,6 +2812,7 @@ export class CircuitScene extends BaseScene {
     this.clearWirePreview();
     this.hideWireModeIndicator();
     document.body.classList.remove("wire-mode");
+    this.onWireDrawEnd?.();
   }
 
   /**
@@ -3669,7 +3692,8 @@ export class CircuitScene extends BaseScene {
         return;
       }
       if (this.readOnly) {
-        // Observer mode: allow selection on pointerup, disable all drag/toggle edits.
+        // Observer mode: support selection/properties but disable edits/drag/toggles.
+        this.selectComponent(component);
         e.stopPropagation();
         return;
       }
@@ -3762,7 +3786,7 @@ export class CircuitScene extends BaseScene {
         }
 
         this.onDragProgress?.(
-          component.getName(),
+          component.getComponentType(),
           componentStart.x,
           componentStart.y,
           newX,
@@ -5413,9 +5437,16 @@ export class CircuitScene extends BaseScene {
 
     // Remove wheel handler
     if ((this as any).wheelHandler) {
-      this.app.canvas.removeEventListener("wheel", (this as any).wheelHandler, {
-        capture: true,
-      });
+      try {
+        const canvasEl = (this.app as any)?.renderer?.canvas as
+          | HTMLCanvasElement
+          | undefined;
+        canvasEl?.removeEventListener("wheel", (this as any).wheelHandler, {
+          capture: true,
+        });
+      } catch {
+        // App/renderer may already be disposed during HMR teardown.
+      }
     }
 
     // Remove switch state change event listener
@@ -5840,7 +5871,17 @@ export class CircuitScene extends BaseScene {
 
   // ── Remote peer rendering (collaboration) ────────────────────────────
 
-  private remoteCursorGraphics: Map<number, { dot: Graphics; label: Text }> =
+  private remoteCursorGraphics: Map<
+    number,
+    {
+      dot: Graphics;
+      label: Text;
+      wireGhost: Graphics;
+      dragIconSprite?: PIXI.Sprite;
+      dragIconText?: Text;
+      dragIconKey?: string;
+    }
+  > =
     new Map();
 
   /**
@@ -5853,7 +5894,16 @@ export class CircuitScene extends BaseScene {
       name: string;
       role: string;
       cursor?: { x: number; y: number } | null;
-      drag?: { componentName: string; toX: number; toY: number } | null;
+      drag?: {
+        componentName: string;
+        toX: number;
+        toY: number;
+        normalized?: boolean;
+      } | null;
+      wireProgress?: {
+        points: { x: number; y: number }[];
+        normalized?: boolean;
+      } | null;
     }[],
   ): void {
     const activePeerIds = new Set<number>();
@@ -5864,6 +5914,7 @@ export class CircuitScene extends BaseScene {
       let entry = this.remoteCursorGraphics.get(peer.clientId);
       if (!entry) {
         const dot = new Graphics();
+        const wireGhost = new Graphics();
         const label = new Text({
           text: peer.name,
           style: {
@@ -5873,10 +5924,34 @@ export class CircuitScene extends BaseScene {
           },
         });
         label.anchor.set(0, 1);
+        this.zoomableContainer.addChild(wireGhost);
         this.zoomableContainer.addChild(dot);
         this.zoomableContainer.addChild(label);
-        entry = { dot, label };
+        entry = { dot, label, wireGhost };
         this.remoteCursorGraphics.set(peer.clientId, entry);
+      }
+
+      // Wire ghost preview while peer is wiring.
+      entry.wireGhost.clear();
+      const wirePts = peer.wireProgress?.points ?? [];
+      if (wirePts.length > 1) {
+        const normalizedWire = Boolean(peer.wireProgress?.normalized);
+        const first = normalizedWire
+          ? this.normalizedToWorldCoordinates(wirePts[0]!.x, wirePts[0]!.y)
+          : wirePts[0]!;
+        entry.wireGhost.moveTo(first.x, first.y);
+        for (let i = 1; i < wirePts.length; i++) {
+          const pt = wirePts[i]!;
+          const world = normalizedWire
+            ? this.normalizedToWorldCoordinates(pt.x, pt.y)
+            : pt;
+          entry.wireGhost.lineTo(world.x, world.y);
+        }
+        entry.wireGhost.stroke({
+          width: 2,
+          color: peer.role === "instructor" ? 0xfbbf24 : 0x00ff88,
+          alpha: 0.75,
+        });
       }
 
       const pos = peer.drag ?? peer.cursor;
@@ -5884,7 +5959,10 @@ export class CircuitScene extends BaseScene {
         let x = "toX" in pos ? pos.toX : pos.x;
         let y = "toY" in pos ? pos.toY : pos.y;
         // Cursor updates can be normalized (0..1) across participant viewports.
-        if (!("toX" in pos) && x >= 0 && x <= 1 && y >= 0 && y <= 1) {
+        if (
+          ("toX" in pos && Boolean(pos.normalized)) ||
+          (!("toX" in pos) && x >= 0 && x <= 1 && y >= 0 && y <= 1)
+        ) {
           const world = this.normalizedToWorldCoordinates(x, y);
           x = world.x;
           y = world.y;
@@ -5895,13 +5973,70 @@ export class CircuitScene extends BaseScene {
         entry.dot.circle(0, 0, 12).stroke({ color, alpha: 0.3, width: 2 });
         entry.dot.position.set(x, y);
         entry.dot.visible = true;
+        const dragComponentType = peer.drag?.componentName;
+        if (dragComponentType) {
+          const dragItem = this.toolbarItems.find(
+            (it) =>
+              it.type === dragComponentType ||
+              it.id === dragComponentType ||
+              it.name === dragComponentType,
+          );
+          const dragIconKey = dragItem?.svgPath ?? `emoji:${dragItem?.icon ?? "?"}`;
 
-        entry.label.text = peer.drag
-          ? `${peer.name} (moving ${peer.drag.componentName})`
-          : peer.name;
-        entry.label.position.set(x + 14, y - 4);
-        entry.label.visible = true;
+          if (entry.dragIconKey !== dragIconKey) {
+            if (entry.dragIconSprite) {
+              entry.dragIconSprite.destroy();
+              entry.dragIconSprite = undefined;
+            }
+            if (entry.dragIconText) {
+              entry.dragIconText.destroy();
+              entry.dragIconText = undefined;
+            }
+            entry.dragIconKey = dragIconKey;
+
+            if (dragItem?.svgPath) {
+              const sprite = PIXI.Sprite.from(dragItem.svgPath);
+              sprite.anchor.set(0.5, 0.5);
+              sprite.width = 28;
+              sprite.height = 28;
+              sprite.alpha = 0.9;
+              this.zoomableContainer.addChild(sprite);
+              entry.dragIconSprite = sprite;
+            } else {
+              const txt = new Text({
+                text: dragItem?.icon ?? "?",
+                style: {
+                  fontSize: 20,
+                  fill: 0x60a5fa,
+                  fontFamily: "sans-serif",
+                },
+              });
+              txt.anchor.set(0.5, 0.5);
+              this.zoomableContainer.addChild(txt);
+              entry.dragIconText = txt;
+            }
+          }
+
+          if (entry.dragIconSprite) {
+            entry.dragIconSprite.position.set(x, y);
+            entry.dragIconSprite.visible = true;
+          }
+          if (entry.dragIconText) {
+            entry.dragIconText.position.set(x, y);
+            entry.dragIconText.visible = true;
+          }
+
+          entry.label.visible = false;
+        } else {
+          if (entry.dragIconSprite) entry.dragIconSprite.visible = false;
+          if (entry.dragIconText) entry.dragIconText.visible = false;
+          entry.label.text = peer.name;
+          entry.label.position.set(x + 14, y - 4);
+          entry.label.visible = true;
+        }
       } else {
+        if (entry.dragIconSprite) entry.dragIconSprite.visible = false;
+        if (entry.dragIconText) entry.dragIconText.visible = false;
         entry.dot.visible = false;
         entry.label.visible = false;
       }
@@ -5910,6 +6045,9 @@ export class CircuitScene extends BaseScene {
     // Remove stale peers
     for (const [clientId, entry] of this.remoteCursorGraphics) {
       if (!activePeerIds.has(clientId)) {
+        entry.wireGhost.destroy();
+        if (entry.dragIconSprite) entry.dragIconSprite.destroy();
+        if (entry.dragIconText) entry.dragIconText.destroy();
         entry.dot.destroy();
         entry.label.destroy();
         this.remoteCursorGraphics.delete(clientId);

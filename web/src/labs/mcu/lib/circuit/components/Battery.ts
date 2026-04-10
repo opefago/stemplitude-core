@@ -131,11 +131,14 @@ export class Battery extends CircuitComponent {
     if (foundPlusLabel) {
       this.plusLabel = foundPlusLabel;
     } else {
-      this.plusLabel = new Text("+", {
-        fontFamily: "Arial",
-        fontSize: 16,
-        fontWeight: "bold",
-        fill: 0xffffff,
+      this.plusLabel = new Text({
+        text: "+",
+        style: {
+          fontFamily: "Arial",
+          fontSize: 16,
+          fontWeight: "bold",
+          fill: 0xffffff,
+        },
       });
       this.plusLabel.anchor.set(0.5);
       this.labelContainer.addChild(this.plusLabel);
@@ -145,11 +148,14 @@ export class Battery extends CircuitComponent {
     if (foundMinusLabel) {
       this.minusLabel = foundMinusLabel;
     } else {
-      this.minusLabel = new Text("-", {
-        fontFamily: "Arial",
-        fontSize: 16,
-        fontWeight: "bold",
-        fill: 0xffffff,
+      this.minusLabel = new Text({
+        text: "-",
+        style: {
+          fontFamily: "Arial",
+          fontSize: 16,
+          fontWeight: "bold",
+          fill: 0xffffff,
+        },
       });
       this.minusLabel.anchor.set(0.5);
       this.labelContainer.addChild(this.minusLabel);
