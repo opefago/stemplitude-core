@@ -20,6 +20,7 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from enum import Enum
+from urllib.parse import unquote
 from uuid import UUID
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -48,6 +49,7 @@ async def _ensure_server_started() -> None:
     is the canonical way.  However uvicorn --reload can lose the lifespan
     context on hot-reloads, leaving the server in a stopped state.  This
     fallback ensures the endpoint still works during development.
+
     """
     global _server_started
     if _server_started:
@@ -57,6 +59,7 @@ async def _ensure_server_started() -> None:
         _server_started = True
         logger.info("Yjs WebsocketServer started (fallback)")
     except RuntimeError:
+        # Server is already running under lifespan or during reload race.
         pass
 
 
@@ -280,7 +283,11 @@ async def lab_yjs_sync(
         await websocket.close(code=4003)
         return
 
-    parsed = _parse_room_name(room_name)
+    # Canonicalize room IDs so auth/persistence/realtime all target one room
+    # key regardless of URL encoding on the client side.
+    canonical_room_name = unquote(room_name)
+
+    parsed = _parse_room_name(canonical_room_name)
     if parsed is None:
         await websocket.close(code=4003)
         return
@@ -292,16 +299,25 @@ async def lab_yjs_sync(
         read_only=read_only,
     )
     if not allowed:
+        logger.warning(
+            "Yjs auth denied room=%s identity=%s sub_type=%s role=%s read_only=%s",
+            canonical_room_name, identity.id, identity.sub_type, getattr(identity, "role", None), read_only,
+        )
         await websocket.close(code=4003)
         return
 
     await websocket.accept()
+    logger.info(
+        "Yjs WS accepted room=%s identity=%s read_only=%s",
+        canonical_room_name,
+        identity.id,
+        read_only,
+    )
 
-    # Restore persisted state and register save hook (idempotent per room).
     await _ensure_server_started()
-    await _attach_persistence(room_name)
+    await _attach_persistence(canonical_room_name)
 
-    channel = _StarletteWsChannel(websocket, room_name)
+    channel = _StarletteWsChannel(websocket, canonical_room_name)
 
     try:
         await yjs_server.serve(channel)
@@ -309,5 +325,5 @@ async def lab_yjs_sync(
         pass
     except Exception:
         logger.debug(
-            "Yjs sync error room=%s identity=%s", room_name, identity.id, exc_info=True
+            "Yjs sync error room=%s identity=%s", canonical_room_name, identity.id, exc_info=True
         )

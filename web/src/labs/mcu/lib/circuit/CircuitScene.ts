@@ -214,6 +214,7 @@ export class CircuitScene extends BaseScene {
   public onDragEnd?: () => void;
   public onWireDrawProgress?: (points: { x: number; y: number }[]) => void;
   public onWireDrawEnd?: () => void;
+  public onSimulationStateChange?: (running: boolean) => void;
 
   // Simulation state
   private isSimulationRunning: boolean = false;
@@ -609,8 +610,8 @@ export class CircuitScene extends BaseScene {
       this.toolbar.style.opacity = "0.6";
     }
 
+    this.createPropertiesPanel();
     if (!this.readOnly) {
-      this.createPropertiesPanel();
       this.createDragPreview();
       this.setupEventListeners();
       this.setupDragAndDrop();
@@ -1139,6 +1140,27 @@ export class CircuitScene extends BaseScene {
       return this.screenToWorldCoordinates(screenX, screenY);
     } catch {
       return { x: normalizedX, y: normalizedY };
+    }
+  }
+
+  /**
+   * Convert world coordinates to normalized canvas coordinates (0..1).
+   */
+  public worldToNormalizedCoordinates(
+    worldX: number,
+    worldY: number,
+  ): { x: number; y: number } {
+    try {
+      const rect = this.app.canvas.getBoundingClientRect();
+      const scale = this.zoomableContainer.scale.x;
+      const canvasX = worldX * scale + this.zoomableContainer.x;
+      const canvasY = worldY * scale + this.zoomableContainer.y;
+      return {
+        x: rect.width > 0 ? Math.max(0, Math.min(1, canvasX / rect.width)) : 0,
+        y: rect.height > 0 ? Math.max(0, Math.min(1, canvasY / rect.height)) : 0,
+      };
+    } catch {
+      return { x: worldX, y: worldY };
     }
   }
 
@@ -3646,6 +3668,11 @@ export class CircuitScene extends BaseScene {
       if (this.isWireMode || this.isDraggingFromToolbar) {
         return;
       }
+      if (this.readOnly) {
+        // Observer mode: allow selection on pointerup, disable all drag/toggle edits.
+        e.stopPropagation();
+        return;
+      }
 
       // Special handling for Switch / SPDT - toggle on click, don't drag
       if (
@@ -3800,6 +3827,16 @@ export class CircuitScene extends BaseScene {
         e.stopPropagation();
       }
     });
+  }
+
+  public setSimulationRunning(running: boolean): void {
+    if (running === this.isSimulationRunning) return;
+    if (running) this.startSimulation();
+    else this.stopSimulation();
+  }
+
+  public getSimulationRunning(): boolean {
+    return this.isSimulationRunning;
   }
 
   /**
@@ -3962,6 +3999,7 @@ export class CircuitScene extends BaseScene {
 
     this.isSimulationRunning = true;
     setTransientSimulationRunning(true);
+    this.onSimulationStateChange?.(true);
 
     this.simulationInterval = window.setInterval(() => {
       // Update AC sources voltage based on current time
@@ -4023,6 +4061,7 @@ export class CircuitScene extends BaseScene {
 
     this.isSimulationRunning = false;
     setTransientSimulationRunning(false);
+    this.onSimulationStateChange?.(false);
 
     if (this.simulationInterval) {
       clearInterval(this.simulationInterval);
@@ -5570,9 +5609,7 @@ export class CircuitScene extends BaseScene {
         component.on("positionChanged", (comp) => {
           this.interactiveWireIntegration.updateWirePositions(comp.getName());
         });
-        if (!this.readOnly) {
-          this.addComponentInteractionHandlers(component);
-        }
+        this.addComponentInteractionHandlers(component);
         component.setOrientation(item.orientation ?? 0);
         component.updateCircuitProperties((item.properties ?? {}) as any);
       }
@@ -5844,8 +5881,14 @@ export class CircuitScene extends BaseScene {
 
       const pos = peer.drag ?? peer.cursor;
       if (pos) {
-        const x = "toX" in pos ? pos.toX : pos.x;
-        const y = "toY" in pos ? pos.toY : pos.y;
+        let x = "toX" in pos ? pos.toX : pos.x;
+        let y = "toY" in pos ? pos.toY : pos.y;
+        // Cursor updates can be normalized (0..1) across participant viewports.
+        if (!("toX" in pos) && x >= 0 && x <= 1 && y >= 0 && y <= 1) {
+          const world = this.normalizedToWorldCoordinates(x, y);
+          x = world.x;
+          y = world.y;
+        }
         entry.dot.clear();
         const color = peer.role === "instructor" ? 0xfbbf24 : 0x60a5fa;
         entry.dot.circle(0, 0, 6).fill({ color, alpha: 0.8 });

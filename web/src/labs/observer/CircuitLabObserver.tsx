@@ -83,11 +83,26 @@ export function CircuitLabObserver({ ydoc, provider: _provider }: Props) {
         sceneRef.current?.importSnapshot(snap);
       } catch { /* ignore */ }
     };
+    const applySimulationState = () => {
+      const running = yScene.get("simulation_running");
+      if (typeof running !== "boolean") return;
+      (sceneRef.current as any)?.setSimulationRunning?.(running);
+    };
 
-    yScene.observe(applySnapshot);
+    const onSceneChange = (event: { keysChanged?: Set<string> }) => {
+      const changed = event.keysChanged;
+      if (!changed || changed.has("snapshot_json")) {
+        applySnapshot();
+      }
+      if (!changed || changed.has("simulation_running")) {
+        applySimulationState();
+      }
+    };
+    yScene.observe(onSceneChange);
     applySnapshot();
+    applySimulationState();
 
-    return () => { yScene.unobserve(applySnapshot); };
+    return () => { yScene.unobserve(onSceneChange); };
   }, [ydoc, sceneReady]);
 
   return (

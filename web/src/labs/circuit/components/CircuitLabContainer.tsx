@@ -136,6 +136,11 @@ export const CircuitLabContainer: React.FC<Props> = ({
   const handleStartStop = () => {
     if (sceneRef.current) {
       (sceneRef.current as any).toggleSimulation?.();
+      const yScene = ydoc?.getMap("circuit_scene");
+      if (yScene) {
+        const running = Boolean((sceneRef.current as any).getSimulationRunning?.());
+        yScene.set("simulation_running", running);
+      }
       setIsSimulationRunning((r) => !r);
       const outputs =
         (sceneRef.current as any).getGamificationOutputSummary?.() ?? {};
@@ -303,12 +308,17 @@ export const CircuitLabContainer: React.FC<Props> = ({
 
     const pushLocal = () => {
       if (localWriteRef.current) return;
+      if ((sceneRef.current as any)?.getSimulationRunning?.()) return;
       const snap = sceneRef.current?.exportSnapshot?.();
       if (!snap) return;
       const raw = JSON.stringify(snap);
       if (yScene.get("snapshot_json") === raw) return;
       localWriteRef.current = true;
       yScene.set("snapshot_json", raw);
+      yScene.set(
+        "simulation_running",
+        Boolean((sceneRef.current as any)?.getSimulationRunning?.()),
+      );
       localWriteRef.current = false;
     };
 
@@ -324,13 +334,18 @@ export const CircuitLabContainer: React.FC<Props> = ({
       } catch { /* ignore malformed */ }
     };
 
-    yScene.observe(pullRemote);
+    const onSceneChange = (event: { keysChanged?: Set<string> }) => {
+      const changed = event.keysChanged;
+      if (changed && !changed.has("snapshot_json")) return;
+      pullRemote();
+    };
+    yScene.observe(onSceneChange);
     pullRemote();
 
     const localPushTimer = window.setInterval(pushLocal, 2000);
     return () => {
       window.clearInterval(localPushTimer);
-      yScene.unobserve(pullRemote);
+      yScene.unobserve(onSceneChange);
     };
   }, [ydoc, sceneReady]);
 
@@ -341,10 +356,21 @@ export const CircuitLabContainer: React.FC<Props> = ({
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene || !yjsProvider || !sceneReady) return;
+    const yScene = ydoc?.getMap("circuit_scene") ?? null;
 
-    scene.onCursorMove = (x, y) => awarenessRef.current.setCursor(x, y);
+    scene.onCursorMove = (x, y) => {
+      const norm = scene.worldToNormalizedCoordinates?.(x, y);
+      if (norm) {
+        awarenessRef.current.setCursor(norm.x, norm.y);
+        return;
+      }
+      awarenessRef.current.setCursor(x, y);
+    };
     scene.onDragProgress = (name, fx, fy, tx, ty) => awarenessRef.current.setDrag(name, fx, fy, tx, ty);
     scene.onDragEnd = () => awarenessRef.current.clearDrag();
+    scene.onSimulationStateChange = (running) => {
+      yScene?.set("simulation_running", running);
+    };
 
     const renderInterval = window.setInterval(() => {
       scene.updateRemotePeers(awarenessRef.current.peers);
@@ -355,8 +381,9 @@ export const CircuitLabContainer: React.FC<Props> = ({
       scene.onCursorMove = undefined;
       scene.onDragProgress = undefined;
       scene.onDragEnd = undefined;
+      scene.onSimulationStateChange = undefined;
     };
-  }, [sceneReady, yjsProvider]);
+  }, [sceneReady, yjsProvider, ydoc]);
 
   // Listen for instructor commands (place component, etc.)
   useEffect(() => {
