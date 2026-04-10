@@ -1,4 +1,4 @@
-import { Container, Graphics, Text, Texture } from "pixi.js";
+import { Container, Graphics, ParticleContainer, Text, Texture } from "pixi.js";
 import { Emitter } from "@spd789562/particle-emitter";
 import GameObject from "../shared/GameObject";
 import type { ComponentRuntimeState } from "./types/RuntimeState";
@@ -153,9 +153,10 @@ export abstract class CircuitComponent extends GameObject {
   protected currentFlowAnimation: number = 0;
   protected burnAnimation: number = 0;
   protected glowAnimation: number = 0;
-  protected burnSmokeContainer: Container | null = null;
+  protected burnSmokeContainer: ParticleContainer | null = null;
   protected burnSmokeEmitter: Emitter | null = null;
   protected burnSmokeTimeLeft: number = 0;
+  protected burnSmokeDisabled: boolean = false;
 
   // Interactive state
   protected _isSelected: boolean = false;
@@ -420,7 +421,19 @@ export abstract class CircuitComponent extends GameObject {
     }
 
     if (this.burnSmokeEmitter) {
-      this.burnSmokeEmitter.update(dtSeconds);
+      try {
+        this.burnSmokeEmitter.update(dtSeconds);
+      } catch (error) {
+        console.warn("[CircuitComponent] disabling burn smoke emitter after runtime error", error);
+        this.burnSmokeDisabled = true;
+        try {
+          this.burnSmokeEmitter.destroy();
+        } catch {
+          // no-op
+        }
+        this.burnSmokeEmitter = null;
+        return;
+      }
       if (this.circuitProps.burnt) {
         this.burnSmokeEmitter.emit = true;
         this.burnSmokeTimeLeft = Math.max(this.burnSmokeTimeLeft, 0.2);
@@ -445,10 +458,21 @@ export abstract class CircuitComponent extends GameObject {
   }
 
   private ensureBurnSmokeEmitter(): void {
-    if (this.burnSmokeEmitter || !this.displayContainer) return;
+    if (this.burnSmokeDisabled || this.burnSmokeEmitter || !this.displayContainer) return;
 
-    const smokeContainer = new Container();
+    const smokeContainer = new ParticleContainer({
+      dynamicProperties: {
+        position: true,
+        rotation: true,
+        scale: true,
+        color: true,
+      },
+    });
     smokeContainer.eventMode = "none";
+    if (typeof (smokeContainer as unknown as { addParticle?: unknown }).addParticle !== "function") {
+      this.burnSmokeDisabled = true;
+      return;
+    }
     this.displayContainer.addChild(smokeContainer);
     this.burnSmokeContainer = smokeContainer;
 

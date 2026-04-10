@@ -23,6 +23,7 @@ import {
   type CircuitSceneSnapshot,
 } from "../../mcu/lib/circuit/CircuitScene";
 import { emitLabEvent, emitLabEventThrottled } from "../../../lib/api/gamification";
+import { useCircuitAwareness } from "../hooks/useCircuitAwareness";
 import {
   Zap,
   Play,
@@ -86,6 +87,12 @@ export const CircuitLabContainer: React.FC<Props> = ({
   const childCtx = useChildContextStudentId();
   const { user } = useAuth();
   const lastSnapshotHashRef = useRef<string>("");
+
+  const awareness = useCircuitAwareness(yjsProvider ?? null, ydoc ?? null, {
+    actorName: user?.firstName ?? user?.email?.split("@")[0] ?? "Student",
+    role: "student",
+    enabled: Boolean(yjsProvider),
+  });
 
   useEffect(() => {
     migrateLegacyLabProjectsIfNeeded(CM_PROJECTS_BASE_KEY);
@@ -256,10 +263,9 @@ export const CircuitLabContainer: React.FC<Props> = ({
 
       const circuitScene = new CircuitScene();
       sceneRef.current = circuitScene;
-      setSceneReady(true);
-
       gameManager.registerScene("circuit", circuitScene);
       gameManager.switchToScene("circuit");
+      setSceneReady(true);
     };
 
     initApp();
@@ -326,6 +332,67 @@ export const CircuitLabContainer: React.FC<Props> = ({
       window.clearInterval(localPushTimer);
       yScene.unobserve(pullRemote);
     };
+  }, [ydoc, sceneReady]);
+
+  // Wire scene collaboration callbacks to awareness
+  const awarenessRef = useRef(awareness);
+  awarenessRef.current = awareness;
+
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene || !yjsProvider || !sceneReady) return;
+
+    scene.onCursorMove = (x, y) => awarenessRef.current.setCursor(x, y);
+    scene.onDragProgress = (name, fx, fy, tx, ty) => awarenessRef.current.setDrag(name, fx, fy, tx, ty);
+    scene.onDragEnd = () => awarenessRef.current.clearDrag();
+
+    const renderInterval = window.setInterval(() => {
+      scene.updateRemotePeers(awarenessRef.current.peers);
+    }, 66);
+
+    return () => {
+      window.clearInterval(renderInterval);
+      scene.onCursorMove = undefined;
+      scene.onDragProgress = undefined;
+      scene.onDragEnd = undefined;
+    };
+  }, [sceneReady, yjsProvider]);
+
+  // Listen for instructor commands (place component, etc.)
+  useEffect(() => {
+    if (!ydoc || !sceneRef.current) return;
+    const yCommands = ydoc.getArray("instructor_commands");
+    const processedIds = new Set<string>();
+
+    const onCommandsChange = () => {
+      const scene = sceneRef.current;
+      if (!scene) return;
+      for (let i = 0; i < yCommands.length; i++) {
+        const cmd = yCommands.get(i) as any;
+        if (!cmd?.id || processedIds.has(cmd.id)) continue;
+        processedIds.add(cmd.id);
+        if (cmd.type === "place_component") {
+          const { componentType, x, y, normalizedX, normalizedY } = cmd.payload ?? {};
+          if (componentType && typeof x === "number" && typeof y === "number") {
+            scene.placeComponentAt?.(componentType, x, y);
+            continue;
+          }
+          if (
+            componentType &&
+            typeof normalizedX === "number" &&
+            typeof normalizedY === "number"
+          ) {
+            const world = scene.normalizedToWorldCoordinates?.(normalizedX, normalizedY);
+            if (world) {
+              scene.placeComponentAt?.(componentType, world.x, world.y);
+            }
+          }
+        }
+      }
+    };
+
+    yCommands.observe(onCommandsChange);
+    return () => { yCommands.unobserve(onCommandsChange); };
   }, [ydoc, sceneReady]);
 
   const btnStyle: React.CSSProperties = {

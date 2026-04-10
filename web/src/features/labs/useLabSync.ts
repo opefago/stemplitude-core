@@ -153,8 +153,16 @@ export function useLabSync(
 
     return () => {
       window.clearInterval(refreshTimer);
-      provider.disconnect();
-      provider.destroy();
+      try {
+        provider.disconnect();
+      } catch {
+        // Ignore close races during unmount/StrictMode.
+      }
+      try {
+        provider.destroy();
+      } catch {
+        // Ignore duplicate cleanup calls.
+      }
       providerRef.current = null;
       setIsConnected(false);
       disconnectedAtRef.current = null;

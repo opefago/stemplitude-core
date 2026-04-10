@@ -31,6 +31,7 @@ const ElectronicsLab = () => {
           actorName="Student"
           isInstructor={false}
           enabled
+          normalizationTargetSelector="#pixi-container"
         >
           <span />
         </LabAnnotationOverlay>

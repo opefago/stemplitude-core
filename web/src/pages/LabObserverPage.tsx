@@ -129,6 +129,7 @@ export function LabObserverPage() {
           actorName={user?.firstName ?? user?.email?.split("@")[0] ?? "Instructor"}
           isInstructor
           enabled={Boolean(provider && isConnected)}
+          normalizationTargetSelector="#observer-pixi-container"
         >
           {renderObserver()}
         </LabAnnotationOverlay>

@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { WebsocketProvider } from "y-websocket";
 
-const ANNOTATION_TTL_MS = 8000;
+const ANNOTATION_TTL_MS = 15000;
 const CLEANUP_INTERVAL_MS = 1000;
 
 const INSTRUCTOR_COLORS = [
@@ -46,6 +46,7 @@ export interface UseLabAnnotationOptions {
 
 export interface UseLabAnnotationHandle {
   peers: RemoteAnnotationPeer[];
+  localAnnotations: AnnotationStroke[];
   setCursor: (x: number, y: number) => void;
   clearCursor: () => void;
   addAnnotationPoint: (x: number, y: number) => void;
@@ -67,6 +68,7 @@ export function useLabAnnotation(options: UseLabAnnotationOptions): UseLabAnnota
   const { provider, actorId, actorName, isInstructor, enabled } = options;
 
   const [peers, setPeers] = useState<RemoteAnnotationPeer[]>([]);
+  const [localAnnotations, setLocalAnnotations] = useState<AnnotationStroke[]>([]);
   const activeRef = useRef<AnnotationStroke | null>(null);
   const annotationsRef = useRef<AnnotationStroke[]>([]);
   const [activeAnnotation, setActiveAnnotation] = useState<AnnotationStroke | null>(null);
@@ -108,6 +110,7 @@ export function useLabAnnotation(options: UseLabAnnotationOptions): UseLabAnnota
     return () => {
       awareness.off("change", syncPeers);
       setPeers([]);
+      setLocalAnnotations([]);
     };
   }, [provider, actorId, actorName, isInstructor, enabled, myColor]);
 
@@ -123,6 +126,7 @@ export function useLabAnnotation(options: UseLabAnnotationOptions): UseLabAnnota
         (s) => now - s.createdAt < ANNOTATION_TTL_MS,
       );
       if (annotationsRef.current.length !== before) {
+        setLocalAnnotations([...annotationsRef.current]);
         awareness.setLocalStateField("annotations", [...annotationsRef.current]);
       }
     }, CLEANUP_INTERVAL_MS);
@@ -182,6 +186,7 @@ export function useLabAnnotation(options: UseLabAnnotationOptions): UseLabAnnota
 
     if (active.points.length >= 4) {
       annotationsRef.current = [...annotationsRef.current, active];
+      setLocalAnnotations([...annotationsRef.current]);
       provider?.awareness?.setLocalStateField("annotations", [...annotationsRef.current]);
     }
   }, [isInstructor, provider]);
@@ -191,11 +196,13 @@ export function useLabAnnotation(options: UseLabAnnotationOptions): UseLabAnnota
     annotationsRef.current = [];
     activeRef.current = null;
     setActiveAnnotation(null);
+    setLocalAnnotations([]);
     provider?.awareness?.setLocalStateField("annotations", []);
   }, [isInstructor, provider]);
 
   return {
     peers,
+    localAnnotations,
     setCursor,
     clearCursor,
     addAnnotationPoint,

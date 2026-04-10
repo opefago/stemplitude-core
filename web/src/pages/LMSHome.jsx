@@ -179,7 +179,7 @@ const ROLES = [
   },
   {
     id: "stem-center",
-    label: "STEM Center",
+    label: "Organisation",
     icon: <Building2 size={32} />,
     color: "#ff9600",
     bg: "#fff6e6",
@@ -201,7 +201,7 @@ const SCALE_TIERS = [
   },
   {
     icon: <Building2 size={28} />,
-    title: "STEM Center",
+    title: "Organisation",
     desc: "Open a STEM learning center with classroom management, multi-instructor support, and enrollment tools.",
     color: "#ff9600",
   },

@@ -3,7 +3,7 @@
 .lab-annotation-overlay {
   position: absolute;
   inset: 0;
-  z-index: 1050;
+  z-index: 10050;
   pointer-events: none;
   overflow: hidden;
 }
@@ -28,11 +28,11 @@
 }
 
 .lab-annotation-overlay__stroke--fading {
-  animation: lab-annotation-fade 8s ease-out forwards;
+  animation: lab-annotation-fade 15s ease-out forwards;
 }
 
 @keyframes lab-annotation-fade {
-  0%, 60% { opacity: 0.85; }
+  0%, 75% { opacity: 0.85; }
   100% { opacity: 0; }
 }
 
@@ -41,7 +41,7 @@
   position: absolute;
   transform: translate(-50%, -50%);
   pointer-events: none;
-  z-index: 1060;
+  z-index: 10060;
   transition: left 0.06s linear, top 0.06s linear;
 }
 
@@ -66,18 +66,20 @@
 
 /* ── Instructor annotation toolbar ── */
 .lab-annotation-toolbar {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  z-index: 1070;
+  position: fixed;
+  top: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10070;
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 6px;
-  background: rgba(0, 0, 0, 0.7);
+  padding: 4px 8px;
+  background: rgba(0, 0, 0, 0.75);
   border-radius: 10px;
   pointer-events: auto;
-  backdrop-filter: blur(6px);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
 }
 
 .lab-annotation-toolbar__btn {

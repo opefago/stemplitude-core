@@ -300,7 +300,7 @@ function isUuid(value: string): boolean {
 export function ClassroomLiveSession() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { user, role, isSuperAdmin, isAuthenticated } = useAuth();
+  const { user, role, isSuperAdmin, isAuthenticated, subType } = useAuth();
   const { tenant } = useTenant();
 
   const [classroom, setClassroom] = useState<ClassroomRecord | null>(null);
@@ -423,6 +423,10 @@ export function ClassroomLiveSession() {
     isSuperAdmin || role === "admin" || role === "owner" || role === "instructor";
 
   const childContextStudentId = useChildContextStudentId();
+  const isGuardianRole = role === "parent" || role === "homeschool_parent";
+  const canUseStudentClassroomApis =
+    subType === "student" ||
+    (subType === "user" && isGuardianRole && Boolean(childContextStudentId));
   const actorId = childContextStudentId ?? user?.id ?? "";
 
   const studentParticipants = useMemo(() => {
@@ -551,6 +555,13 @@ export function ClassroomLiveSession() {
 
   useEffect(() => {
     if (!id) return;
+    if (!isInstructorView && !canUseStudentClassroomApis) {
+      setClassroom(null);
+      setSessions([]);
+      setLoading(false);
+      setError("Select a learner in Child Mode to open this live classroom.");
+      return;
+    }
     let mounted = true;
     async function load() {
       setLoading(true);
@@ -574,10 +585,11 @@ export function ClassroomLiveSession() {
     return () => {
       mounted = false;
     };
-  }, [id, isInstructorView]);
+  }, [id, isInstructorView, canUseStudentClassroomApis]);
 
   const reloadSessions = useCallback(async () => {
     if (!id) return;
+    if (!isInstructorView && !canUseStudentClassroomApis) return;
     try {
       const classSessions = isInstructorView
         ? await listClassroomSessions(id)
@@ -586,7 +598,7 @@ export function ClassroomLiveSession() {
     } catch {
       /* swallow — will retry on next invalidation */
     }
-  }, [id, isInstructorView]);
+  }, [id, isInstructorView, canUseStudentClassroomApis]);
 
   const waitingRoomTenantId = tenant?.id ?? user?.tenantId ?? null;
 
@@ -1551,10 +1563,23 @@ export function ClassroomLiveSession() {
     setUnreadChatCount(unread);
   }, [showFloatingChat, sessionEvents, lastReadChatAt, user?.id]);
 
-  const activeStudents = useMemo(
-    () => participants.filter((p) => p.actor_type === "student"),
-    [participants],
-  );
+  const activeStudents = useMemo(() => {
+    const byActor = new Map<string, SessionPresenceParticipant>();
+    for (const participant of participants) {
+      if (participant.actor_type !== "student") continue;
+      const existing = byActor.get(participant.actor_id);
+      if (!existing) {
+        byActor.set(participant.actor_id, participant);
+        continue;
+      }
+      const existingMs = Date.parse(existing.last_seen_at ?? "") || 0;
+      const nextMs = Date.parse(participant.last_seen_at ?? "") || 0;
+      if (nextMs >= existingMs) {
+        byActor.set(participant.actor_id, participant);
+      }
+    }
+    return [...byActor.values()];
+  }, [participants]);
   const visibleStudents = activeStudents;
   const filteredStudents = useMemo(() => {
     const query = participantSearch.trim().toLowerCase();

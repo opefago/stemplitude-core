@@ -4,7 +4,7 @@ import { WireSystem } from "./WireSystem";
 import { RoutingPoint } from "./OptimizedWireRouter";
 import { EnhancedCircuitSolver } from "./EnhancedCircuitSolver";
 import { CircuitComponent } from "./CircuitComponent";
-import { Container, Graphics } from "pixi.js";
+import { Container, Graphics, Text } from "pixi.js";
 import * as PIXI from "pixi.js";
 import tippy from "tippy.js";
 import "tippy.js/dist/tippy.css";
@@ -124,6 +124,7 @@ export interface CircuitSceneSnapshot {
  * Main circuit simulation scene
  */
 export class CircuitScene extends BaseScene {
+  public readOnly = false;
   private static readonly ENABLE_WIRE_FLOW_DEBUG = false;
   private gridCanvas: GridCanvas;
   private wireSystem: WireSystem;
@@ -200,6 +201,19 @@ export class CircuitScene extends BaseScene {
   private lastWireInvariantWarningMs: number = 0;
   private educationOverlays: EducationOverlays | null = null;
   private simulatorMode: SimulatorMode = new SimulatorMode();
+
+  // Collaboration callbacks (set by container to broadcast via awareness)
+  public onCursorMove?: (worldX: number, worldY: number) => void;
+  public onDragProgress?: (
+    componentName: string,
+    fromX: number,
+    fromY: number,
+    toX: number,
+    toY: number,
+  ) => void;
+  public onDragEnd?: () => void;
+  public onWireDrawProgress?: (points: { x: number; y: number }[]) => void;
+  public onWireDrawEnd?: () => void;
 
   // Simulation state
   private isSimulationRunning: boolean = false;
@@ -585,50 +599,39 @@ export class CircuitScene extends BaseScene {
   public override onSceneActivated(): void {
     super.onSceneActivated();
 
-    // Ensure scene container starts at scale 1,1
     this.sceneContainer.scale.set(1, 1);
-
-    // Initialize camera at center (0,0)
     this.zoomableContainer.x = 0;
     this.zoomableContainer.y = 0;
 
     this.createToolbar();
-    this.createPropertiesPanel();
-    this.createDragPreview();
-    this.setupEventListeners();
-    this.setupDragAndDrop();
+    if (this.readOnly && this.toolbar) {
+      this.toolbar.style.pointerEvents = "none";
+      this.toolbar.style.opacity = "0.6";
+    }
 
-    // Create zoom controls
+    if (!this.readOnly) {
+      this.createPropertiesPanel();
+      this.createDragPreview();
+      this.setupEventListeners();
+      this.setupDragAndDrop();
+      this.createTrashBin();
+      this.setupKeyboardShortcuts();
+
+      this._wireDisconnectHandler = () => {
+        this.syncInteractiveWireGraphToSolver();
+      };
+      (window as any).addEventListener?.(
+        "wire:disconnected",
+        this._wireDisconnectHandler,
+      );
+    }
+
     this.createZoomControls();
 
-    // Create floating delete button
-    this.createTrashBin();
-
-    // Setup canvas panning
     this.setupCanvasPanning();
-
-    // Setup keyboard shortcuts
-    this.setupKeyboardShortcuts();
-
-    // Global wire disconnect listener — full solver graph rebuild (T-joints, stubs).
-    this._wireDisconnectHandler = () => {
-      this.syncInteractiveWireGraphToSolver();
-    };
-    (window as any).addEventListener?.(
-      "wire:disconnected",
-      this._wireDisconnectHandler,
-    );
-
-    // Setup window resize handler
     this.setupResizeHandler();
-
-    // Force initial render
     this.forceGridRender();
-
-    // Ensure scene container starts at scale 1,1
     this.sceneContainer.scale.set(1, 1);
-
-    // Override GameManager's wheel zoom with our custom implementation
     this.overrideWheelZoom();
   }
 
@@ -1101,7 +1104,7 @@ export class CircuitScene extends BaseScene {
   /**
    * Convert screen coordinates to world coordinates
    */
-  private screenToWorldCoordinates(
+  public screenToWorldCoordinates(
     screenX: number,
     screenY: number,
   ): { x: number; y: number } {
@@ -1121,6 +1124,25 @@ export class CircuitScene extends BaseScene {
   }
 
   /**
+   * Convert normalized canvas coordinates (0..1) to world coordinates.
+   */
+  public normalizedToWorldCoordinates(
+    normalizedX: number,
+    normalizedY: number,
+  ): { x: number; y: number } {
+    try {
+      const rect = this.app.canvas.getBoundingClientRect();
+      const clampedX = Math.max(0, Math.min(1, normalizedX));
+      const clampedY = Math.max(0, Math.min(1, normalizedY));
+      const screenX = rect.left + clampedX * rect.width;
+      const screenY = rect.top + clampedY * rect.height;
+      return this.screenToWorldCoordinates(screenX, screenY);
+    } catch {
+      return { x: normalizedX, y: normalizedY };
+    }
+  }
+
+  /**
    * Handle component drop on canvas
    */
   private handleDrop(itemId: string, position: { x: number; y: number }): void {
@@ -1134,7 +1156,7 @@ export class CircuitScene extends BaseScene {
   /**
    * Place a component at specific coordinates
    */
-  private placeComponentAt(componentType: string, x: number, y: number): void {
+  public placeComponentAt(componentType: string, x: number, y: number): void {
     // Topology is about to change — stop the simulation to avoid unstable state.
     this.stopSimulation();
 
@@ -3711,6 +3733,14 @@ export class CircuitScene extends BaseScene {
         if (this.selectedComponent === component) {
           this.createSelectionHighlight(component);
         }
+
+        this.onDragProgress?.(
+          component.getName(),
+          componentStart.x,
+          componentStart.y,
+          newX,
+          newY,
+        );
       };
 
       // Global up handler - ends drag even if mouse is released outside component
@@ -3725,6 +3755,7 @@ export class CircuitScene extends BaseScene {
         isDragging = false;
         this.isDraggingComponent = false;
         this.draggedComponent = null;
+        this.onDragEnd?.();
 
         // Clean up global handlers
         if (globalMoveHandler) {
@@ -4518,6 +4549,12 @@ export class CircuitScene extends BaseScene {
   }
 
   private onCanvasMouseMove(event: MouseEvent): void {
+    // Broadcast cursor position for collaboration
+    if (this.onCursorMove) {
+      const wp = this.screenToWorldCoordinates(event.clientX, event.clientY);
+      this.onCursorMove(wp.x, wp.y);
+    }
+
     // Update wire preview if in wire mode (priority over other interactions)
     if (this.isWireMode) {
       event.preventDefault();
@@ -5229,25 +5266,23 @@ export class CircuitScene extends BaseScene {
    * Setup window resize handler to keep grid full screen
    */
   private setupResizeHandler(): void {
+    const getContainer = () =>
+      this.app?.canvas?.parentElement ??
+      document.getElementById("pixi-container");
+
     const handleResize = () => {
       if (!this.isActive) return;
-
-      const container = document.getElementById("pixi-container");
-      if (!container) {
-        console.warn("⚠️ pixi-container not found");
-        return;
-      }
+      const container = getContainer();
+      if (!container) return;
 
       const screenWidth = container.clientWidth;
       const screenHeight = container.clientHeight;
+      if (screenWidth <= 0 || screenHeight <= 0) return;
 
-      // PIXI's resizeTo option should handle renderer resize automatically,
-      // but we manually resize the renderer to ensure it happens immediately
-      if (this.app && this.app.renderer) {
+      if (this.app?.renderer) {
         this.app.renderer.resize(screenWidth, screenHeight);
       }
 
-      // Recreate grid canvas with new dimensions
       this.gridContainer.removeChild(this.gridCanvas.getContainer());
       this.gridCanvas.destroy();
 
@@ -5258,26 +5293,17 @@ export class CircuitScene extends BaseScene {
         snapToGrid: true,
       });
 
-      // Re-add to grid container (at index 0 to keep it below zoomable content)
       this.gridContainer.addChildAt(this.gridCanvas.getContainer(), 0);
     };
 
-    // Use ResizeObserver for more reliable resize detection
-    const container = document.getElementById("pixi-container");
+    const container = getContainer();
     if (container && typeof ResizeObserver !== "undefined") {
-      const resizeObserver = new ResizeObserver(() => {
-        handleResize();
-      });
+      const resizeObserver = new ResizeObserver(() => handleResize());
       resizeObserver.observe(container);
       (this as any).resizeObserver = resizeObserver;
-    } else {
-      console.warn("⚠️ ResizeObserver not available or container not found");
     }
 
-    // Also listen to window resize as fallback
     window.addEventListener("resize", handleResize);
-
-    // Store reference for cleanup
     (this as any).resizeHandler = handleResize;
   }
 
@@ -5294,8 +5320,10 @@ export class CircuitScene extends BaseScene {
 
       // Force a render update
       setTimeout(() => {
-        if (this.gameManager && this.gameManager.getApp()) {
-          this.gameManager.getApp().renderer.render(this.sceneContainer);
+        try {
+          this.app?.renderer?.render(this.app.stage);
+        } catch {
+          /* renderer may not be ready */
         }
       }, 100);
     }
@@ -5542,7 +5570,9 @@ export class CircuitScene extends BaseScene {
         component.on("positionChanged", (comp) => {
           this.interactiveWireIntegration.updateWirePositions(comp.getName());
         });
-        this.addComponentInteractionHandlers(component);
+        if (!this.readOnly) {
+          this.addComponentInteractionHandlers(component);
+        }
         component.setOrientation(item.orientation ?? 0);
         component.updateCircuitProperties((item.properties ?? {}) as any);
       }
@@ -5643,7 +5673,8 @@ export class CircuitScene extends BaseScene {
       });
 
       return true;
-    } catch {
+    } catch (err) {
+      console.error("importSnapshot failed:", err);
       return false;
     }
   }
@@ -5768,5 +5799,78 @@ export class CircuitScene extends BaseScene {
    */
   public getSimulatorMode(): "safe-learning" | "realistic" {
     return this.simulatorMode.getMode();
+  }
+
+  // ── Remote peer rendering (collaboration) ────────────────────────────
+
+  private remoteCursorGraphics: Map<number, { dot: Graphics; label: Text }> =
+    new Map();
+
+  /**
+   * Render remote peer cursors and drag ghosts on the canvas.
+   * Called from the React container with the latest awareness data.
+   */
+  public updateRemotePeers(
+    peers: {
+      clientId: number;
+      name: string;
+      role: string;
+      cursor?: { x: number; y: number } | null;
+      drag?: { componentName: string; toX: number; toY: number } | null;
+    }[],
+  ): void {
+    const activePeerIds = new Set<number>();
+
+    for (const peer of peers) {
+      activePeerIds.add(peer.clientId);
+
+      let entry = this.remoteCursorGraphics.get(peer.clientId);
+      if (!entry) {
+        const dot = new Graphics();
+        const label = new Text({
+          text: peer.name,
+          style: {
+            fontSize: 11,
+            fill: peer.role === "instructor" ? 0xfbbf24 : 0x60a5fa,
+            fontFamily: "sans-serif",
+          },
+        });
+        label.anchor.set(0, 1);
+        this.zoomableContainer.addChild(dot);
+        this.zoomableContainer.addChild(label);
+        entry = { dot, label };
+        this.remoteCursorGraphics.set(peer.clientId, entry);
+      }
+
+      const pos = peer.drag ?? peer.cursor;
+      if (pos) {
+        const x = "toX" in pos ? pos.toX : pos.x;
+        const y = "toY" in pos ? pos.toY : pos.y;
+        entry.dot.clear();
+        const color = peer.role === "instructor" ? 0xfbbf24 : 0x60a5fa;
+        entry.dot.circle(0, 0, 6).fill({ color, alpha: 0.8 });
+        entry.dot.circle(0, 0, 12).stroke({ color, alpha: 0.3, width: 2 });
+        entry.dot.position.set(x, y);
+        entry.dot.visible = true;
+
+        entry.label.text = peer.drag
+          ? `${peer.name} (moving ${peer.drag.componentName})`
+          : peer.name;
+        entry.label.position.set(x + 14, y - 4);
+        entry.label.visible = true;
+      } else {
+        entry.dot.visible = false;
+        entry.label.visible = false;
+      }
+    }
+
+    // Remove stale peers
+    for (const [clientId, entry] of this.remoteCursorGraphics) {
+      if (!activePeerIds.has(clientId)) {
+        entry.dot.destroy();
+        entry.label.destroy();
+        this.remoteCursorGraphics.delete(clientId);
+      }
+    }
   }
 }

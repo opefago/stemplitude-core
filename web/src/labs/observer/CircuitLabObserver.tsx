@@ -53,6 +53,7 @@ export function CircuitLabObserver({ ydoc, provider: _provider }: Props) {
 
       const gm = GameManager.create(app);
       const scene = new CircuitScene();
+      scene.readOnly = true;
       sceneRef.current = scene;
       setSceneReady(true);
       gm.registerScene("circuit", scene);
@@ -93,6 +94,7 @@ export function CircuitLabObserver({ ydoc, provider: _provider }: Props) {
     <div style={{ width: "100%", height: "100%", position: "relative" }}>
       <div
         ref={containerRef}
+        id="observer-pixi-container"
         style={{ width: "100%", height: "100%", background: "#1e1e2e" }}
       />
       <div

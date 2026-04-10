@@ -5,6 +5,7 @@
  * and toolbar. In student mode, renders the instructor's annotations and cursor.
  */
 import { useCallback, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Pencil, Trash2, X } from "lucide-react";
 import type { WebsocketProvider } from "y-websocket";
 import {
@@ -23,37 +24,52 @@ interface Props {
   actorName?: string;
   isInstructor: boolean;
   enabled: boolean;
+  normalizationTargetSelector?: string;
   children: ReactNode;
 }
 
-function pointsToSvgPath(points: number[], w: number, h: number): string {
-  if (points.length < 4) return "";
-  let d = `M${points[0] * w},${points[1] * h}`;
-  for (let i = 2; i < points.length; i += 2) {
-    d += ` L${points[i] * w},${points[i + 1] * h}`;
+function StrokePath({
+  stroke,
+  fading,
+  targetRect,
+}: {
+  stroke: AnnotationStroke;
+  fading: boolean;
+  targetRect: { left: number; top: number; width: number; height: number };
+}) {
+  if (stroke.points.length < 4) return null;
+  let d = `M${targetRect.left + stroke.points[0] * targetRect.width},${targetRect.top + stroke.points[1] * targetRect.height}`;
+  for (let i = 2; i < stroke.points.length; i += 2) {
+    d += ` L${targetRect.left + stroke.points[i] * targetRect.width},${targetRect.top + stroke.points[i + 1] * targetRect.height}`;
   }
-  return d;
-}
-
-function StrokePath({ stroke, w, h, fading }: { stroke: AnnotationStroke; w: number; h: number; fading: boolean }) {
-  const d = pointsToSvgPath(stroke.points, w, h);
-  if (!d) return null;
   return (
     <path
       d={d}
       className={`lab-annotation-overlay__stroke${fading ? " lab-annotation-overlay__stroke--fading" : ""}`}
       stroke={stroke.color}
       strokeWidth={stroke.size}
+      strokeLinecap="round"
+      strokeLinejoin="round"
     />
   );
 }
 
-function CursorDot({ peer }: { peer: RemoteAnnotationPeer }) {
+function CursorDot({
+  peer,
+  targetRect,
+}: {
+  peer: RemoteAnnotationPeer;
+  targetRect: { left: number; top: number; width: number; height: number };
+}) {
   if (!peer.cursor) return null;
   return (
     <div
       className="lab-annotation-cursor"
-      style={{ left: `${peer.cursor.x * 100}%`, top: `${peer.cursor.y * 100}%` }}
+      style={{
+        position: "fixed",
+        left: targetRect.left + peer.cursor.x * targetRect.width,
+        top: targetRect.top + peer.cursor.y * targetRect.height,
+      }}
     >
       <div className="lab-annotation-cursor__dot" style={{ borderColor: peer.color, background: `${peer.color}44` }} />
       <span className="lab-annotation-cursor__label" style={{ background: peer.color }}>
@@ -69,6 +85,7 @@ export function LabAnnotationOverlay({
   actorName,
   isInstructor,
   enabled,
+  normalizationTargetSelector,
   children,
 }: Props) {
   const annotation = useLabAnnotation({ provider, actorId, actorName, isInstructor, enabled });
@@ -79,15 +96,45 @@ export function LabAnnotationOverlay({
   const [penSize] = useState(DEFAULT_SIZE);
   const isDrawingRef = useRef(false);
 
-  const getNorm = useCallback((e: React.PointerEvent) => {
-    const el = containerRef.current;
-    if (!el) return { x: 0, y: 0 };
-    const rect = el.getBoundingClientRect();
+  const getOverlayBounds = useCallback(() => {
+    const root = containerRef.current;
+    const selector = normalizationTargetSelector?.trim();
+    const selectorTarget =
+      selector && selector.length > 0
+        ? (document.querySelector(selector) as HTMLElement | null)
+        : null;
+    const selectorCanvasTarget =
+      selectorTarget?.querySelector("canvas") instanceof HTMLCanvasElement
+        ? (selectorTarget.querySelector("canvas") as HTMLCanvasElement)
+        : null;
+    const rootCanvasTarget =
+      root?.querySelector("canvas") instanceof HTMLCanvasElement
+        ? (root.querySelector("canvas") as HTMLCanvasElement)
+        : null;
+    const target =
+      selectorCanvasTarget ??
+      selectorTarget ??
+      rootCanvasTarget ??
+      root;
+    const rect = target?.getBoundingClientRect();
+    if (rect && rect.width > 0 && rect.height > 0) return rect;
     return {
-      x: rect.width > 0 ? Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)) : 0,
-      y: rect.height > 0 ? Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height)) : 0,
+      left: 0,
+      top: 0,
+      width: window.innerWidth,
+      height: window.innerHeight,
     };
-  }, []);
+  }, [normalizationTargetSelector]);
+
+  const getNorm = useCallback((e: React.PointerEvent) => {
+    const bounds = getOverlayBounds();
+    const w = bounds.width;
+    const h = bounds.height;
+    return {
+      x: w > 0 ? Math.max(0, Math.min(1, (e.clientX - bounds.left) / w)) : 0,
+      y: h > 0 ? Math.max(0, Math.min(1, (e.clientY - bounds.top) / h)) : 0,
+    };
+  }, [getOverlayBounds]);
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent) => {
@@ -136,6 +183,9 @@ export function LabAnnotationOverlay({
   if (isInstructor && annotation.activeAnnotation) {
     allAnnotations.push(annotation.activeAnnotation);
   }
+  if (isInstructor && annotation.localAnnotations.length > 0) {
+    allAnnotations.push(...annotation.localAnnotations);
+  }
 
   const instructorPeers = isInstructor ? [] : annotation.peers.filter((p) => p.role === "instructor");
   const allCursorPeers = annotation.peers;
@@ -146,27 +196,32 @@ export function LabAnnotationOverlay({
 
   const wrapperStyle: React.CSSProperties = hasRealChildren
     ? { position: "relative", width: "100%", height: "100%" }
-    : { position: "fixed", inset: 0, pointerEvents: "none", zIndex: 1050 };
+    : { position: "fixed", inset: 0, pointerEvents: "none", zIndex: 10050 };
+  const overlayBounds = getOverlayBounds();
 
-  return (
+  const overlayContent = (
     <div ref={containerRef} style={wrapperStyle}>
       {hasRealChildren && children}
 
       {/* Cursors layer */}
       {enabled && allCursorPeers.map((peer) => (
-        <CursorDot key={peer.clientId} peer={peer} />
+        <CursorDot key={peer.clientId} peer={peer} targetRect={overlayBounds} />
       ))}
 
       {/* Annotation strokes layer (visible to students) */}
       {enabled && allAnnotations.length > 0 && (
-        <svg className="lab-annotation-overlay__svg" style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+        <svg
+          className="lab-annotation-overlay__svg"
+          viewBox={`0 0 ${Math.max(window.innerWidth, 1)} ${Math.max(window.innerHeight, 1)}`}
+          preserveAspectRatio="none"
+          style={{ position: "fixed", inset: 0, width: "100vw", height: "100vh", pointerEvents: "none", zIndex: 10050 }}
+        >
           {allAnnotations.map((stroke) => (
             <StrokePath
               key={stroke.id}
               stroke={stroke}
-              w={containerRef.current?.clientWidth ?? 1}
-              h={containerRef.current?.clientHeight ?? 1}
               fading
+              targetRect={overlayBounds}
             />
           ))}
         </svg>
@@ -176,6 +231,7 @@ export function LabAnnotationOverlay({
       {isInstructor && enabled && drawingActive && (
         <div
           className="lab-annotation-overlay lab-annotation-overlay--drawing"
+          style={{ position: "absolute", inset: 0, zIndex: 10050 }}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
@@ -185,7 +241,7 @@ export function LabAnnotationOverlay({
 
       {/* Instructor cursor on student side */}
       {!isInstructor && enabled && instructorPeers.map((peer) => (
-        <CursorDot key={`inst-${peer.clientId}`} peer={peer} />
+        <CursorDot key={`inst-${peer.clientId}`} peer={peer} targetRect={overlayBounds} />
       ))}
 
       {/* Instructor toolbar */}
@@ -227,4 +283,9 @@ export function LabAnnotationOverlay({
       )}
     </div>
   );
+
+  if (!hasRealChildren) {
+    return createPortal(overlayContent, document.body);
+  }
+  return overlayContent;
 }
