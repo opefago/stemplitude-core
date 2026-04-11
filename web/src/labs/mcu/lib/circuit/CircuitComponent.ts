@@ -1,5 +1,9 @@
-import { Container, Graphics, Text } from "pixi.js";
+import { Container, Graphics, ParticleContainer, Text, Texture } from "pixi.js";
+import { Emitter } from "@spd789562/particle-emitter";
 import GameObject from "../shared/GameObject";
+import type { ComponentRuntimeState } from "./types/RuntimeState";
+import { createDefaultRuntimeState } from "./types/RuntimeState";
+import { DesignTokens } from "./rendering/DesignTokens";
 
 /**
  * Simple browser-compatible event emitter
@@ -60,26 +64,52 @@ export type CircuitComponentType =
   | "battery"
   | "acsource"
   | "led"
+  | "diode"
+  | "zener_diode"
   | "transistor"
   | "npn_transistor"
   | "pnp_transistor"
+  | "nmos_transistor"
+  | "pmos_transistor"
   | "ground"
   | "wire"
   | "switch"
+  | "spdt_switch"
+  | "push_button"
+  | "relay"
+  | "potentiometer"
   | "ammeter"
   | "voltmeter"
   | "oscilloscope"
+  | "opamp"
+  | "comparator"
+  | "timer555"
   | "and_gate"
   | "or_gate"
+  | "nor_gate"
+  | "nand_gate"
   | "xor_gate"
   | "not_gate";
+
+export type AnchorRole =
+  | "terminal"
+  | "control"
+  | "power"
+  | "ground"
+  | "logic"
+  | "probe";
 
 export interface CircuitNode {
   id: string;
   position: { x: number; y: number };
   voltage: number;
   current: number;
-  connections: string[]; // IDs of connected components
+  connections: string[];
+  role?: AnchorRole;
+  /** Optional unit vector (local pin space) for wire leave direction; normalized to a cardinal in routing. */
+  wireExitLocal?: { x: number; y: number };
+  /** Per-pin override for schematic escape stub length (px). */
+  wireEscapeMinPx?: number;
 }
 
 export interface CircuitProperties {
@@ -107,8 +137,10 @@ export abstract class CircuitComponent extends GameObject {
   protected componentType: CircuitComponentType;
   protected circuitProps: CircuitProperties;
   protected nodes: CircuitNode[];
-  protected gridPosition: { x: number; y: number }; // Grid coordinates
+  protected gridPosition: { x: number; y: number };
   protected orientation: number; // 0, 90, 180, 270 degrees
+
+  public runtimeState: ComponentRuntimeState = createDefaultRuntimeState();
 
   // Visual elements
   protected componentGraphics: Graphics;
@@ -121,6 +153,10 @@ export abstract class CircuitComponent extends GameObject {
   protected currentFlowAnimation: number = 0;
   protected burnAnimation: number = 0;
   protected glowAnimation: number = 0;
+  protected burnSmokeContainer: ParticleContainer | null = null;
+  protected burnSmokeEmitter: Emitter | null = null;
+  protected burnSmokeTimeLeft: number = 0;
+  protected burnSmokeDisabled: boolean = false;
 
   // Interactive state
   protected _isSelected: boolean = false;
@@ -144,8 +180,8 @@ export abstract class CircuitComponent extends GameObject {
     // Initialize visual elements
     this.componentGraphics = new Graphics();
     this.labelContainer = new Container(); // Separate container for labels
-    this.labelText = new Text("", { fontSize: 10, fill: 0xffffff });
-    this.valueText = new Text("", { fontSize: 8, fill: 0xcccccc });
+    this.labelText = new Text({ text: "", style: { fontSize: 10, fill: 0xffffff } });
+    this.valueText = new Text({ text: "", style: { fontSize: 8, fill: 0xcccccc } });
 
     // Add component graphics to display container (will be transformed)
     this.displayContainer.addChild(this.componentGraphics);
@@ -244,6 +280,35 @@ export abstract class CircuitComponent extends GameObject {
     return this.nodes.find((node) => node.id === id);
   }
 
+  /** Cardinals only — aligns with orthogonal routing after `minPx` stub from the pin. */
+  private static cardinalizeDir(dx: number, dy: number): { x: number; y: number } {
+    if (Math.abs(dx) < 1e-6 && Math.abs(dy) < 1e-6) return { x: 1, y: 0 };
+    if (Math.abs(dx) >= Math.abs(dy))
+      return { x: Math.sign(dx) || 1, y: 0 };
+    return { x: 0, y: Math.sign(dy) || 1 };
+  }
+
+  /**
+   * Preferred wire exit from a pin: away from component body through the pin lead.
+   * Uses optional `wireExitLocal` or infers from pin offset from origin (same space as `node.position`).
+   */
+  public static wireExitDirForNode(node: CircuitNode): { x: number; y: number } {
+    const ex = node.wireExitLocal;
+    if (ex) {
+      const len = Math.hypot(ex.x, ex.y);
+      if (len > 1e-6) {
+        return CircuitComponent.cardinalizeDir(ex.x / len, ex.y / len);
+      }
+    }
+    return CircuitComponent.cardinalizeDir(node.position.x, node.position.y);
+  }
+
+  public getWireExitDirForNode(nodeId: string): { x: number; y: number } {
+    const node = this.getNode(nodeId);
+    if (!node) return { x: 1, y: 0 };
+    return CircuitComponent.wireExitDirForNode(node);
+  }
+
   protected updateNodePositions(): void {
     // Update node positions based on orientation
     // Override in derived classes for specific node layouts
@@ -264,24 +329,40 @@ export abstract class CircuitComponent extends GameObject {
   }
 
   /**
+   * Reset all runtime / visual state back to defaults (idle, undamaged).
+   * Called when simulation stops so every component looks "fresh".
+   */
+  public resetToDefault(): void {
+    this.circuitProps.voltage = 0;
+    this.circuitProps.current = 0;
+    this.circuitProps.power = 0;
+    this.circuitProps.burnt = false;
+    this.circuitProps.glowing = false;
+
+    this.burnAnimation = 0;
+    this.glowAnimation = 0;
+    this.currentFlowAnimation = 0;
+    this.burnSmokeTimeLeft = 0;
+    if (this.burnSmokeEmitter) {
+      this.burnSmokeEmitter.emit = false;
+    }
+
+    for (const node of this.nodes) {
+      node.voltage = 0;
+      node.current = 0;
+    }
+
+    this.runtimeState = createDefaultRuntimeState();
+    this.updateVisuals(0);
+  }
+
+  /**
    * Update component state based on circuit analysis
    */
   public updateCircuitState(voltage: number, current: number): void {
     this.circuitProps.voltage = voltage;
     this.circuitProps.current = current;
     this.circuitProps.power = Math.abs(voltage * current);
-
-    // Reset burnt state if voltage and current are both zero (simulation stopped)
-    if (voltage === 0 && current === 0) {
-      this.circuitProps.burnt = false;
-      this.circuitProps.glowing = false;
-    }
-
-    // Check for component failure
-    if (this.circuitProps.power > this.circuitProps.powerRating) {
-      this.circuitProps.burnt = true;
-      this.startBurnAnimation();
-    }
 
     // Update node voltages
     this.updateNodeVoltages();
@@ -300,6 +381,11 @@ export abstract class CircuitComponent extends GameObject {
    */
   protected startBurnAnimation(): void {
     this.burnAnimation = 1.0;
+    this.ensureBurnSmokeEmitter();
+    if (this.burnSmokeEmitter) {
+      this.burnSmokeEmitter.emit = true;
+      this.burnSmokeTimeLeft = 3.0;
+    }
   }
 
   protected startCurrentFlowAnimation(): void {
@@ -320,6 +406,8 @@ export abstract class CircuitComponent extends GameObject {
    */
   public override update(deltaTime: number): void {
     super.update(deltaTime);
+    // Pixi ticker deltaTime is frame-scaled (~1 at 60 FPS), convert to seconds for emitters.
+    const dtSeconds = Math.max(0, deltaTime / 60);
 
     // Update animations
     if (this.currentFlowAnimation > 0) {
@@ -332,6 +420,33 @@ export abstract class CircuitComponent extends GameObject {
       this.burnAnimation = Math.max(0, this.burnAnimation);
     }
 
+    if (this.burnSmokeEmitter) {
+      try {
+        this.burnSmokeEmitter.update(dtSeconds);
+      } catch (error) {
+        console.warn("[CircuitComponent] disabling burn smoke emitter after runtime error", error);
+        this.burnSmokeDisabled = true;
+        try {
+          this.burnSmokeEmitter.destroy();
+        } catch {
+          // no-op
+        }
+        this.burnSmokeEmitter = null;
+        return;
+      }
+      if (this.circuitProps.burnt) {
+        this.burnSmokeEmitter.emit = true;
+        this.burnSmokeTimeLeft = Math.max(this.burnSmokeTimeLeft, 0.2);
+      } else if (this.burnSmokeTimeLeft > 0) {
+        this.burnSmokeTimeLeft = Math.max(0, this.burnSmokeTimeLeft - dtSeconds);
+        if (this.burnSmokeTimeLeft <= 0) {
+          this.burnSmokeEmitter.emit = false;
+        }
+      } else {
+        this.burnSmokeEmitter.emit = false;
+      }
+    }
+
     if (this.glowAnimation > 0 && !this.circuitProps.glowing) {
       this.glowAnimation -= deltaTime * 3; // 0.33 second fade
       this.glowAnimation = Math.max(0, this.glowAnimation);
@@ -340,6 +455,103 @@ export abstract class CircuitComponent extends GameObject {
     // Start animations based on current state
     this.startCurrentFlowAnimation();
     this.startGlowAnimation();
+  }
+
+  private ensureBurnSmokeEmitter(): void {
+    if (this.burnSmokeDisabled || this.burnSmokeEmitter || !this.displayContainer) return;
+
+    const smokeContainer = new ParticleContainer({
+      dynamicProperties: {
+        position: true,
+        rotation: true,
+        scale: true,
+        color: true,
+      },
+    });
+    smokeContainer.eventMode = "none";
+    if (typeof (smokeContainer as unknown as { addParticle?: unknown }).addParticle !== "function") {
+      this.burnSmokeDisabled = true;
+      return;
+    }
+    this.displayContainer.addChild(smokeContainer);
+    this.burnSmokeContainer = smokeContainer;
+
+    // Based on Pixi particle-emitter "cartoon smoke" behavior profile:
+    // slow upward drift, expanding puffs, fading alpha.
+    this.burnSmokeEmitter = new Emitter(smokeContainer, {
+      lifetime: { min: 0.9, max: 1.8 },
+      frequency: 0.045,
+      spawnChance: 1,
+      particlesPerWave: 2,
+      emitterLifetime: -1,
+      maxParticles: 220,
+      addAtBack: false,
+      pos: { x: 0, y: -8 },
+      behaviors: [
+        {
+          type: "alpha",
+          config: {
+            alpha: {
+              list: [
+                { value: 0.0, time: 0 },
+                { value: 0.52, time: 0.12 },
+                { value: 0.0, time: 1 },
+              ],
+            },
+          },
+        },
+        {
+          type: "scale",
+          config: {
+            scale: {
+              list: [
+                { value: 0.08, time: 0 },
+                { value: 0.9, time: 1 },
+              ],
+            },
+          },
+        },
+        {
+          type: "color",
+          config: {
+            color: {
+              list: [
+                { value: "666666", time: 0 },
+                { value: "4d4d4d", time: 0.5 },
+                { value: "2b2b2b", time: 1 },
+              ],
+            },
+          },
+        },
+        {
+          type: "moveSpeed",
+          config: {
+            speed: {
+              list: [
+                { value: 30, time: 0 },
+                { value: 10, time: 1 },
+              ],
+            },
+          },
+        },
+        {
+          type: "rotationStatic",
+          config: { min: 250, max: 290 },
+        },
+        {
+          type: "spawnShape",
+          config: {
+            type: "torus",
+            data: { x: 0, y: -10, radius: 8, innerRadius: 2, affectRotation: false },
+          },
+        },
+        {
+          type: "textureSingle",
+          config: { texture: Texture.WHITE },
+        },
+      ],
+    } as any);
+    this.burnSmokeEmitter.emit = false;
   }
 
   /**
@@ -402,11 +614,15 @@ export abstract class CircuitComponent extends GameObject {
     return `${(henries * 1e6).toFixed(1)}μH`;
   }
 
+  /** Connection-point disc radius in px; override for symbols with tight geometry. */
+  protected getTerminalPinRadius(): number {
+    return DesignTokens.node.radius;
+  }
+
   /**
-   * Create interactive pin graphics (from reference implementation)
+   * Create interactive pin graphics with state-driven colors and hover rings.
    */
   protected createPinGraphics(): void {
-    // Clear existing pin graphics
     this.pinGraphics.forEach((pin) => {
       if (pin.parent) {
         pin.parent.removeChild(pin);
@@ -415,46 +631,66 @@ export abstract class CircuitComponent extends GameObject {
     });
     this.pinGraphics = [];
 
-    // Create pin graphics for each node
-    this.nodes.forEach((node, index) => {
-      const pinGraphics = new Graphics();
-      const pinSize = 6;
+    const tokenNode = DesignTokens.node;
 
-      // Pin position is already relative to component center in node.position
-      // No need to subtract this.position since node.position is already relative
-      const relativePos = {
-        x: node.position.x,
-        y: node.position.y,
-      };
+    this.nodes.forEach((node) => {
+      const pinGraphics = new Graphics();
+      const pinSize = this.getTerminalPinRadius();
+      const hoverRingR =
+        tokenNode.hoverRingRadius * (pinSize / DesignTokens.node.radius);
+      const relativePos = { x: node.position.x, y: node.position.y };
+
+      const isActive =
+        Math.abs(this.circuitProps.current) > 0.001;
+      const defaultFill = isActive ? tokenNode.activeCurrent : tokenNode.default;
 
       pinGraphics.circle(relativePos.x, relativePos.y, pinSize);
-      pinGraphics.fill(0xffffff);
-      pinGraphics.stroke({ width: 2, color: 0x888888 });
+      pinGraphics.fill(defaultFill);
+      pinGraphics.stroke({
+        width: tokenNode.strokeWidth,
+        color: tokenNode.strokeColor,
+      });
 
-      // Make pin interactive
       pinGraphics.eventMode = "static";
       pinGraphics.cursor = "pointer";
 
-      // Pin hover effects
       pinGraphics.on("pointerover", () => {
         pinGraphics.clear();
+        // Hover ring (outer glow)
+        pinGraphics.circle(
+          relativePos.x,
+          relativePos.y,
+          hoverRingR
+        );
+        pinGraphics.fill({
+          color: tokenNode.hover,
+          alpha: tokenNode.hoverRingAlpha,
+        });
+        // Main node
         pinGraphics.circle(relativePos.x, relativePos.y, pinSize);
-        pinGraphics.fill(0x44ff44);
-        pinGraphics.stroke({ width: 2, color: 0x66ff66 });
+        pinGraphics.fill(tokenNode.hover);
+        pinGraphics.stroke({
+          width: tokenNode.strokeWidth,
+          color: tokenNode.hover,
+        });
       });
 
       pinGraphics.on("pointerout", () => {
         pinGraphics.clear();
+        const fillNow =
+          Math.abs(this.circuitProps.current) > 0.001
+            ? tokenNode.activeCurrent
+            : tokenNode.default;
         pinGraphics.circle(relativePos.x, relativePos.y, pinSize);
-        pinGraphics.fill(0xffffff);
-        pinGraphics.stroke({ width: 2, color: 0x888888 });
+        pinGraphics.fill(fillNow);
+        pinGraphics.stroke({
+          width: tokenNode.strokeWidth,
+          color: tokenNode.strokeColor,
+        });
       });
 
-      // Pin click events
       pinGraphics.on("pointerdown", (event) => {
         event.stopPropagation();
-        // Pin clicks are handled by the scene's canvas event listeners
-        console.log(`🔌 Pin clicked: ${this.getName()}.${node.id}`);
       });
 
       this.displayContainer.addChild(pinGraphics);

@@ -2,11 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ChevronLeft, ChevronRight, ClipboardList, Sparkles } from "lucide-react";
 import {
+  getParentChildAttendanceOverview,
   getParentChildren,
   getParentChildrenSessions,
   localMonthStartFromDateMonthsOffset,
   PARENT_EVENTS_UPCOMING_EXCLUSIVE_MONTH_OFFSET,
   sessionStartBeforeForParentEventsHub,
+  type GuardianExcusalSummary,
   type SessionResponse,
   type StudentProfile,
 } from "../../lib/api/students";
@@ -88,6 +90,13 @@ function sessionDateParts(iso: string): { day: string; month: string; weekday: s
 
 type MainTab = "week" | "month" | "past";
 
+function excusalStatusLabel(status: string): string {
+  if (status === "pending") return "Excuse sent";
+  if (status === "approved") return "Excusal approved";
+  if (status === "denied") return "Excusal denied";
+  return "Excusal sent";
+}
+
 export function useParentEventsWeekIndicator(enabled: boolean): boolean {
   const [hasThisWeek, setHasThisWeek] = useState(false);
 
@@ -134,6 +143,7 @@ export function ParentEventsHub() {
   const [listPage, setListPage] = useState(1);
   const [upcoming, setUpcoming] = useState<SessionResponse[]>([]);
   const [past, setPast] = useState<SessionResponse[]>([]);
+  const [excusalBySessionId, setExcusalBySessionId] = useState<Record<string, GuardianExcusalSummary>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [excusalOpen, setExcusalOpen] = useState(false);
@@ -190,6 +200,7 @@ export function ParentEventsHub() {
     if (!activeStudentId) {
       setUpcoming([]);
       setPast([]);
+      setExcusalBySessionId({});
       setLoading(false);
       setError(null);
       return;
@@ -198,19 +209,28 @@ export function ParentEventsHub() {
     setError(null);
     try {
       const monthBound = sessionStartBeforeForParentEventsHub();
-      const [up, pa] = await Promise.all([
+      const [up, pa, attendance] = await Promise.all([
         getParentChildrenSessions(800, activeStudentId, "upcoming", {
           sessionStartBefore: monthBound,
           expandMonthSessions: true,
         }),
         getParentChildrenSessions(80, activeStudentId, "past"),
+        getParentChildAttendanceOverview(activeStudentId),
       ]);
       setUpcoming(up);
       setPast(pa);
+      const nextExcusalMap: Record<string, GuardianExcusalSummary> = {};
+      for (const row of attendance.rows ?? []) {
+        if (row.excusal?.status) {
+          nextExcusalMap[row.session_id] = row.excusal;
+        }
+      }
+      setExcusalBySessionId(nextExcusalMap);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load events");
       setUpcoming([]);
       setPast([]);
+      setExcusalBySessionId({});
     } finally {
       setLoading(false);
     }
@@ -440,6 +460,7 @@ export function ParentEventsHub() {
                 {pagedList.map((s) => {
                   const parts = sessionDateParts(s.session_start);
                   const isPast = mainTab === "past";
+                  const excusal = excusalBySessionId[s.id];
                   return (
                     <li
                       key={s.id}
@@ -466,6 +487,13 @@ export function ParentEventsHub() {
                           </span>
                         </div>
                         <h3 className="msg-hub-events__card-title">{classTitle(s)}</h3>
+                        {excusal ? (
+                          <span
+                            className={`msg-hub-events__excusal-state msg-hub-events__excusal-state--${excusal.status}`}
+                          >
+                            {excusalStatusLabel(excusal.status)}
+                          </span>
+                        ) : null}
                         {s.notes ? (
                           <p className="msg-hub-events__card-notes">{s.notes}</p>
                         ) : null}
@@ -487,7 +515,7 @@ export function ParentEventsHub() {
                               onClick={() => openExcusalForSession(s)}
                             >
                               <ClipboardList size={14} aria-hidden />
-                              Request excusal
+                              {excusal ? "Excuse again" : "Request excusal"}
                             </button>
                           </div>
                         ) : s.meeting_link ? (

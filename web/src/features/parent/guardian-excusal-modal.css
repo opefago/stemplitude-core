@@ -31,17 +31,6 @@
   color: var(--color-text-secondary, #64748b);
 }
 
-.g-excusal-modal__select {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 8px 12px;
-  border-radius: 10px;
-  border: 2px solid var(--color-border, #e5e5e5);
-  font: inherit;
-  font-weight: 600;
-  background: var(--color-surface, #fff);
-}
-
 .g-excusal-modal__textarea {
   width: 100%;
   box-sizing: border-box;

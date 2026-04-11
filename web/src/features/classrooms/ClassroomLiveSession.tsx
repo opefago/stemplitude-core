@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import tippy, { type Instance as TippyInstance } from "tippy.js";
-import * as Y from "yjs";
 import {
   ArrowLeft,
   Video,
@@ -31,6 +30,7 @@ import {
   Maximize2,
   Minimize2,
   Search,
+  FolderOpen,
 } from "lucide-react";
 import {
   DateTimePicker,
@@ -88,12 +88,161 @@ import "../../components/ui/ui.css";
 import "./classrooms.css";
 import { RecognitionToast, type RecognitionEvent } from "./RecognitionToast";
 import { LiveVideoWidget } from "./LiveVideoWidget";
-import { playAwardSound } from "../labs/labSounds";
+import { playAwardSound, playHelpSound } from "../labs/labSounds";
 import { ApiHttpError } from "../../lib/api/client";
 import { rewardEngine } from "../../rewards";
 import { useChildContextStudentId } from "../../lib/childContext";
+import { SessionStudentProjects } from "./SessionStudentProjects";
+import { useTenantRealtime } from "../../hooks/useTenantRealtime";
+import {
+  useCollaborativeCanvas,
+  type ChalkboardAccessMode,
+  type ChalkboardStroke,
+  type ChalkTool,
+} from "../../hooks/useCollaborativeCanvas";
+import { Clock, Zap } from "lucide-react";
 
 const RECOGNITION_TOAST_TIMEOUT_MS = 12000;
+
+function formatCountdown(ms: number): { hours: string; minutes: string; seconds: string } {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  return {
+    hours: h.toString().padStart(2, "0"),
+    minutes: m.toString().padStart(2, "0"),
+    seconds: s.toString().padStart(2, "0"),
+  };
+}
+
+function WaitingRoom({
+  classroom,
+  nextSession,
+  tenantName,
+  tenantLogoUrl,
+  classroomId,
+  nowMs,
+}: {
+  classroom: ClassroomRecord | null;
+  nextSession: ClassroomSessionRecord | null;
+  tenantName?: string;
+  tenantLogoUrl?: string;
+  classroomId?: string;
+  nowMs: number;
+}) {
+  const msUntilStart = nextSession
+    ? new Date(nextSession.session_start).getTime() - nowMs
+    : 0;
+  const hasUpcoming = nextSession && msUntilStart > 0;
+  const countdown = hasUpcoming ? formatCountdown(msUntilStart) : null;
+
+  return (
+    <div className="waiting-room">
+      <div className="waiting-room__card">
+        <div className="waiting-room__branding">
+          {tenantLogoUrl ? (
+            <img src={tenantLogoUrl} alt={tenantName ?? "Logo"} className="waiting-room__logo" />
+          ) : (
+            <div className="waiting-room__logo-fallback">
+              <Zap size={32} />
+            </div>
+          )}
+          {tenantName && <span className="waiting-room__org-name">{tenantName}</span>}
+        </div>
+
+        <div className="waiting-room__pulse-ring" aria-hidden>
+          <span className="waiting-room__pulse-dot" />
+        </div>
+
+        <h2 className="waiting-room__title">
+          {classroom?.name ?? "Classroom"}
+        </h2>
+
+        <p className="waiting-room__status">
+          <Clock size={16} aria-hidden />
+          {hasUpcoming
+            ? "Your session hasn't started yet"
+            : "Waiting for the instructor to start the session"}
+        </p>
+
+        {countdown && (
+          <div className="waiting-room__countdown" aria-label="Time until session starts">
+            <div className="waiting-room__countdown-unit">
+              <span className="waiting-room__countdown-value">{countdown.hours}</span>
+              <span className="waiting-room__countdown-label">Hours</span>
+            </div>
+            <span className="waiting-room__countdown-sep">:</span>
+            <div className="waiting-room__countdown-unit">
+              <span className="waiting-room__countdown-value">{countdown.minutes}</span>
+              <span className="waiting-room__countdown-label">Min</span>
+            </div>
+            <span className="waiting-room__countdown-sep">:</span>
+            <div className="waiting-room__countdown-unit">
+              <span className="waiting-room__countdown-value">{countdown.seconds}</span>
+              <span className="waiting-room__countdown-label">Sec</span>
+            </div>
+          </div>
+        )}
+
+        <p className="waiting-room__hint">
+          You'll be taken to class automatically when it begins.
+        </p>
+
+        <div className="waiting-room__links">
+          <span className="waiting-room__links-label">While you wait</span>
+          <div className="waiting-room__links-grid">
+            {classroomId && (
+              <a
+                href={`/app/classrooms/${classroomId}?tab=sessions`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="waiting-room__link-card"
+              >
+                <Clock size={18} aria-hidden />
+                <span>Previous Sessions</span>
+              </a>
+            )}
+            <a
+              href="/app/assignments"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="waiting-room__link-card"
+            >
+              <FileText size={18} aria-hidden />
+              <span>Pending Assignments</span>
+            </a>
+            <a
+              href="/app/labs"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="waiting-room__link-card"
+            >
+              <FlaskConical size={18} aria-hidden />
+              <span>Practice Labs</span>
+            </a>
+            <a
+              href="/app/notifications"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="waiting-room__link-card"
+            >
+              <MessageSquare size={18} aria-hidden />
+              <span>Notifications</span>
+            </a>
+          </div>
+        </div>
+
+        <Link
+          to={classroomId ? `/app/classrooms/${classroomId}?tab=sessions` : "/app/classrooms"}
+          className="waiting-room__back-link"
+        >
+          <ArrowLeft size={14} aria-hidden /> Back to classroom
+        </Link>
+      </div>
+    </div>
+  );
+}
 
 function isLiveSession(session: ClassroomSessionRecord): boolean {
   if (session.status === "canceled" || session.status === "completed") return false;
@@ -123,34 +272,6 @@ interface SessionAssignment {
   requiresAssets?: boolean;
 }
 
-type ChalkboardAccessMode = "teacher_only" | "participants" | "selected_students";
-type ChalkTool = "chalk" | "eraser";
-
-interface ChalkboardStroke {
-  id: string;
-  author_id: string;
-  color: string;
-  size: number;
-  eraser: boolean;
-  points: number[];
-}
-
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = "";
-  for (let i = 0; i < bytes.length; i += 1) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
-}
-
-function base64ToBytes(b64: string): Uint8Array {
-  const binary = atob(b64);
-  const out = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) {
-    out[i] = binary.charCodeAt(i);
-  }
-  return out;
-}
 
 interface StudentSubmissionState {
   assignmentId: string;
@@ -179,7 +300,7 @@ function isUuid(value: string): boolean {
 export function ClassroomLiveSession() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { user, role, isSuperAdmin, isAuthenticated } = useAuth();
+  const { user, role, isSuperAdmin, isAuthenticated, subType } = useAuth();
   const { tenant } = useTenant();
 
   const [classroom, setClassroom] = useState<ClassroomRecord | null>(null);
@@ -203,14 +324,8 @@ export function ClassroomLiveSession() {
   const [sharedResources, setSharedResources] = useState<SessionSharedResource[]>([]);
   const [downloadableResources, setDownloadableResources] = useState<SessionSharedResource[]>([]);
   const [selectedSharedResourceId, setSelectedSharedResourceId] = useState("");
-  const [contentView, setContentView] = useState<"shared" | "board">("board");
+  const [contentView, setContentView] = useState<"shared" | "board" | "projects">("board");
   const [contentFullscreen, setContentFullscreen] = useState(false);
-  const [boardAccessMode, setBoardAccessMode] = useState<ChalkboardAccessMode>("teacher_only");
-  const [boardAllowedStudentIds, setBoardAllowedStudentIds] = useState<string[]>([]);
-  const [boardStrokes, setBoardStrokes] = useState<ChalkboardStroke[]>([]);
-  const [boardTool, setBoardTool] = useState<ChalkTool>("chalk");
-  const [boardColor, setBoardColor] = useState("#ffffff");
-  const [boardSize, setBoardSize] = useState(5);
   const [savingBoardSnapshot, setSavingBoardSnapshot] = useState(false);
   const [showFloatingChat, setShowFloatingChat] = useState(false);
   const [railPanels, setRailPanels] = useState({
@@ -281,11 +396,7 @@ export function ClassroomLiveSession() {
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const viewerContainerRef = useRef<HTMLDivElement>(null);
   const contentViewerRef = useRef<HTMLDivElement>(null);
-  const chalkboardCanvasRef = useRef<HTMLCanvasElement>(null);
   const sharedVideoRef = useRef<HTMLVideoElement>(null);
-  const boardDocRef = useRef<Y.Doc | null>(null);
-  const boardYStrokesRef = useRef<Y.Array<unknown> | null>(null);
-  const boardYConfigRef = useRef<Y.Map<unknown> | null>(null);
   const liveRootRef = useRef<HTMLDivElement>(null);
   const leaveSentForSessionRef = useRef<string | null>(null);
   const realtimeRef = useRef<ClassroomRealtimeClient | null>(null);
@@ -307,12 +418,15 @@ export function ClassroomLiveSession() {
     action: "play" | "pause";
     at?: number;
   } | null>(null);
-  const boardActiveStrokeRef = useRef<ChalkboardStroke | null>(null);
 
   const isInstructorView =
     isSuperAdmin || role === "admin" || role === "owner" || role === "instructor";
 
   const childContextStudentId = useChildContextStudentId();
+  const isGuardianRole = role === "parent" || role === "homeschool_parent";
+  const canUseStudentClassroomApis =
+    subType === "student" ||
+    (subType === "user" && isGuardianRole && Boolean(childContextStudentId));
   const actorId = childContextStudentId ?? user?.id ?? "";
 
   const studentParticipants = useMemo(() => {
@@ -325,16 +439,6 @@ export function ClassroomLiveSession() {
     }
     return [...map.values()];
   }, [participants]);
-
-  const canDrawOnBoard = useMemo(() => {
-    if (isInstructorView) return true;
-    if (!actorId) return false;
-    if (boardAccessMode === "participants") return true;
-    if (boardAccessMode === "selected_students") {
-      return boardAllowedStudentIds.includes(actorId);
-    }
-    return false;
-  }, [actorId, boardAccessMode, boardAllowedStudentIds, isInstructorView]);
 
   const pointsEnabled = useMemo(() => {
     const settings = tenant?.settings as Record<string, unknown> | undefined;
@@ -363,6 +467,16 @@ export function ClassroomLiveSession() {
     () => sortedSessions.find((s) => isLiveSession(s)) ?? null,
     [sortedSessions],
   );
+
+  const board = useCollaborativeCanvas({
+    sessionId: activeSession?.id ?? null,
+    actorId,
+    actorName: user?.firstName ?? user?.email?.split("@")[0] ?? "Participant",
+    isInstructor: isInstructorView,
+    enabled: Boolean(activeSession),
+  });
+  const canDrawOnBoard = board.canDraw;
+
   const liveCallLink = activeSession?.meeting_link ?? classroom?.meeting_link ?? null;
   const canJoinLiveCall =
     classroom?.mode !== "in-person" &&
@@ -441,6 +555,13 @@ export function ClassroomLiveSession() {
 
   useEffect(() => {
     if (!id) return;
+    if (!isInstructorView && !canUseStudentClassroomApis) {
+      setClassroom(null);
+      setSessions([]);
+      setLoading(false);
+      setError("Select a learner in Child Mode to open this live classroom.");
+      return;
+    }
     let mounted = true;
     async function load() {
       setLoading(true);
@@ -464,7 +585,46 @@ export function ClassroomLiveSession() {
     return () => {
       mounted = false;
     };
-  }, [id, isInstructorView]);
+  }, [id, isInstructorView, canUseStudentClassroomApis]);
+
+  const reloadSessions = useCallback(async () => {
+    if (!id) return;
+    if (!isInstructorView && !canUseStudentClassroomApis) return;
+    try {
+      const classSessions = isInstructorView
+        ? await listClassroomSessions(id)
+        : await listMyClassroomSessions(id);
+      setSessions(classSessions);
+    } catch {
+      /* swallow — will retry on next invalidation */
+    }
+  }, [id, isInstructorView, canUseStudentClassroomApis]);
+
+  const waitingRoomTenantId = tenant?.id ?? user?.tenantId ?? null;
+
+  useTenantRealtime({
+    tenantId: waitingRoomTenantId,
+    enabled: Boolean(waitingRoomTenantId && !activeSession),
+    onSessionsInvalidate: reloadSessions,
+  });
+
+  useEffect(() => {
+    if (activeSession || !id) return;
+    const poll = window.setInterval(() => {
+      void reloadSessions();
+    }, 8000);
+    return () => window.clearInterval(poll);
+  }, [activeSession, id, reloadSessions]);
+
+  const nextUpcomingSession = useMemo(() => {
+    const now = Date.now();
+    return (
+      sortedSessions.find((s) => {
+        if (s.status === "canceled" || s.status === "completed" || s.status === "deleted") return false;
+        return new Date(s.session_start).getTime() > now;
+      }) ?? null
+    );
+  }, [sortedSessions]);
 
   const selectedSharedResource = useMemo(
     () => sharedResources.find((resource) => resource.id === selectedSharedResourceId) ?? null,
@@ -487,69 +647,6 @@ export function ClassroomLiveSession() {
   const sendRealtimeEvent = useCallback((type: string, payload: Record<string, unknown>) => {
     return realtimeRef.current?.send(type, { payload }) ?? false;
   }, []);
-
-  const syncBoardStateFromYDoc = useCallback(() => {
-    const yStrokes = boardYStrokesRef.current;
-    const yConfig = boardYConfigRef.current;
-    if (!yStrokes || !yConfig) return;
-    const parsedStrokes = yStrokes
-      .toArray()
-      .map((row) => row as ChalkboardStroke)
-      .filter((row) => row && typeof row.id === "string" && Array.isArray(row.points))
-      .slice(-300);
-    const modeRaw = yConfig.get("access_mode");
-    const allowedRaw = yConfig.get("allowed_student_ids");
-    const nextMode: ChalkboardAccessMode =
-      modeRaw === "participants" || modeRaw === "selected_students" || modeRaw === "teacher_only"
-        ? modeRaw
-        : "teacher_only";
-    const nextAllowed = Array.isArray(allowedRaw)
-      ? allowedRaw.filter((id): id is string => typeof id === "string")
-      : [];
-    setBoardStrokes(parsedStrokes);
-    setBoardAccessMode(nextMode);
-    setBoardAllowedStudentIds(nextAllowed);
-  }, []);
-
-  useEffect(() => {
-    if (!activeSession?.id) return;
-    const doc = new Y.Doc();
-    const yStrokes = doc.getArray("board_strokes");
-    const yConfig = doc.getMap("board_config");
-    boardDocRef.current = doc;
-    boardYStrokesRef.current = yStrokes;
-    boardYConfigRef.current = yConfig;
-
-    if (typeof yConfig.get("access_mode") !== "string") {
-      yConfig.set("access_mode", "teacher_only");
-    }
-    if (!Array.isArray(yConfig.get("allowed_student_ids"))) {
-      yConfig.set("allowed_student_ids", []);
-    }
-
-    const pushUpdate = (update: Uint8Array, origin: unknown) => {
-      if (origin === "remote") return;
-      void sendRealtimeEvent("session.board.yjs", { update_b64: bytesToBase64(update) });
-    };
-    doc.on("update", pushUpdate);
-
-    const onLocalChanged = () => {
-      syncBoardStateFromYDoc();
-    };
-    yStrokes.observe(onLocalChanged);
-    yConfig.observe(onLocalChanged);
-    syncBoardStateFromYDoc();
-
-    return () => {
-      yStrokes.unobserve(onLocalChanged);
-      yConfig.unobserve(onLocalChanged);
-      doc.off("update", pushUpdate);
-      doc.destroy();
-      boardDocRef.current = null;
-      boardYStrokesRef.current = null;
-      boardYConfigRef.current = null;
-    };
-  }, [activeSession?.id, sendRealtimeEvent, syncBoardStateFromYDoc]);
 
   const normalizedViewerUrl = useMemo(() => {
     if (!viewerAssetUrl) return null;
@@ -585,130 +682,11 @@ export function ClassroomLiveSession() {
     [],
   );
 
-  const redrawChalkboard = useCallback(
-    (extraStroke?: ChalkboardStroke | null) => {
-      const canvas = chalkboardCanvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-      ctx.save();
-      ctx.fillStyle = "#0f2a1d";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      const renderStroke = (stroke: ChalkboardStroke) => {
-        if (!Array.isArray(stroke.points) || stroke.points.length < 4) return;
-        ctx.save();
-        ctx.globalCompositeOperation = stroke.eraser ? "destination-out" : "source-over";
-        ctx.strokeStyle = stroke.eraser ? "rgba(0,0,0,1)" : stroke.color;
-        ctx.lineWidth = Math.max(1, stroke.size);
-        ctx.lineCap = "round";
-        ctx.lineJoin = "round";
-        ctx.beginPath();
-        ctx.moveTo(stroke.points[0] * canvas.width, stroke.points[1] * canvas.height);
-        for (let i = 2; i < stroke.points.length; i += 2) {
-          ctx.lineTo(stroke.points[i] * canvas.width, stroke.points[i + 1] * canvas.height);
-        }
-        ctx.stroke();
-        ctx.restore();
-      };
-
-      for (const stroke of boardStrokes) renderStroke(stroke);
-      if (extraStroke) renderStroke(extraStroke);
-      ctx.restore();
-    },
-    [boardStrokes],
-  );
-
-  const resizeChalkboardCanvas = useCallback(() => {
-    const canvas = chalkboardCanvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return;
-    const dpr = Math.max(1, window.devicePixelRatio || 1);
-    canvas.width = Math.max(1, Math.floor(rect.width * dpr));
-    canvas.height = Math.max(1, Math.floor(rect.height * dpr));
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    redrawChalkboard(boardActiveStrokeRef.current);
-  }, [redrawChalkboard]);
-
-  useEffect(() => {
-    resizeChalkboardCanvas();
-    window.addEventListener("resize", resizeChalkboardCanvas);
-    return () => window.removeEventListener("resize", resizeChalkboardCanvas);
-  }, [resizeChalkboardCanvas]);
-
   useEffect(() => {
     if (contentView !== "board") return;
-    const raf = window.requestAnimationFrame(() => {
-      resizeChalkboardCanvas();
-    });
+    const raf = window.requestAnimationFrame(() => board.resizeCanvas());
     return () => window.cancelAnimationFrame(raf);
-  }, [contentView, contentFullscreen, resizeChalkboardCanvas]);
-
-  useEffect(() => {
-    redrawChalkboard(boardActiveStrokeRef.current);
-  }, [boardStrokes, redrawChalkboard]);
-
-  const pointerToBoardPoint = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
-    const canvas = chalkboardCanvasRef.current;
-    if (!canvas) return { x: 0, y: 0 };
-    const rect = canvas.getBoundingClientRect();
-    const x = rect.width > 0 ? Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)) : 0;
-    const y = rect.height > 0 ? Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height)) : 0;
-    return { x, y };
-  }, []);
-
-  const onBoardPointerDown = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
-    if (!canDrawOnBoard || !actorId) return;
-    const canvas = event.currentTarget;
-    canvas.setPointerCapture(event.pointerId);
-    const { x, y } = pointerToBoardPoint(event);
-    const stroke: ChalkboardStroke = {
-      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-      author_id: actorId,
-      color: boardColor,
-      size: boardSize,
-      eraser: boardTool === "eraser",
-      points: [x, y],
-    };
-    boardActiveStrokeRef.current = stroke;
-    redrawChalkboard(stroke);
-  }, [actorId, boardColor, boardSize, boardTool, canDrawOnBoard, pointerToBoardPoint, redrawChalkboard]);
-
-  const onBoardPointerMove = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
-    const active = boardActiveStrokeRef.current;
-    if (!active) return;
-    const { x, y } = pointerToBoardPoint(event);
-    active.points.push(x, y);
-    redrawChalkboard(active);
-  }, [pointerToBoardPoint, redrawChalkboard]);
-
-  const finalizeActiveStroke = useCallback(() => {
-    const active = boardActiveStrokeRef.current;
-    if (!active || active.points.length < 4) {
-      boardActiveStrokeRef.current = null;
-      redrawChalkboard(null);
-      return;
-    }
-    boardActiveStrokeRef.current = null;
-    const yStrokes = boardYStrokesRef.current;
-    if (!yStrokes) return;
-    yStrokes.push([active]);
-    if (yStrokes.length > 300) {
-      yStrokes.delete(0, yStrokes.length - 300);
-    }
-  }, [redrawChalkboard]);
-
-  const onBoardPointerUp = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
-    event.currentTarget.releasePointerCapture(event.pointerId);
-    finalizeActiveStroke();
-  }, [finalizeActiveStroke]);
-
-  const onBoardPointerLeave = useCallback(() => {
-    finalizeActiveStroke();
-  }, [finalizeActiveStroke]);
+  }, [contentView, contentFullscreen, board]);
 
   const applyLiveSyncState = useCallback(
     (syncRaw: Record<string, unknown> | null | undefined) => {
@@ -746,27 +724,6 @@ export function ClassroomLiveSession() {
           window.setTimeout(() => {
             suppressScrollBroadcastRef.current = false;
           }, 200);
-        }
-      }
-      const board = syncRaw.board;
-      if (board && typeof board === "object") {
-        const boardObj = board as Record<string, unknown>;
-        const mode = boardObj.access_mode;
-        if (mode === "teacher_only" || mode === "participants" || mode === "selected_students") {
-          setBoardAccessMode(mode);
-        }
-        if (Array.isArray(boardObj.allowed_student_ids)) {
-          setBoardAllowedStudentIds(
-            boardObj.allowed_student_ids.filter((id): id is string => typeof id === "string"),
-          );
-        }
-        if (Array.isArray(boardObj.strokes)) {
-          setBoardStrokes(
-            boardObj.strokes
-              .map((row) => row as ChalkboardStroke)
-              .filter((row) => row && Array.isArray(row.points) && typeof row.id === "string")
-              .slice(-300),
-          );
         }
       }
     },
@@ -839,6 +796,9 @@ export function ClassroomLiveSession() {
           ...prev,
           [actorId]: { note, ts: envelope.created_at ?? new Date().toISOString() },
         }));
+        if (isInstructorView) {
+          playHelpSound();
+        }
       }
       return;
     }
@@ -857,18 +817,6 @@ export function ClassroomLiveSession() {
       return;
     }
 
-    if (envelope.event_type === "session.board.yjs") {
-      const b64 = typeof payload.update_b64 === "string" ? payload.update_b64 : "";
-      if (!b64) return;
-      const doc = boardDocRef.current;
-      if (!doc) return;
-      try {
-        Y.applyUpdate(doc, base64ToBytes(b64), "remote");
-      } catch {
-        // Ignore invalid CRDT payloads
-      }
-      return;
-    }
 
     if (envelope.event_type === "session.content.selected") {
       const resourceId = payload.resource_id;
@@ -1277,8 +1225,10 @@ export function ClassroomLiveSession() {
     };
   }, [activeSession?.id, activeSession?.session_content]);
 
+  const sessionTenantId = tenant?.id ?? user?.tenantId ?? null;
+
   useEffect(() => {
-    if (!id || !activeSession || !tenant?.id) {
+    if (!id || !activeSession || !sessionTenantId) {
       setPresenceSummary(null);
       setParticipants([]);
       setSessionEvents([]);
@@ -1293,7 +1243,7 @@ export function ClassroomLiveSession() {
     const client = new ClassroomRealtimeClient({
       classroomId: id,
       sessionId: activeSession.id,
-      tenantId: tenant.id,
+      tenantId: sessionTenantId,
       childContextStudentId: !isInstructorView ? childContextStudentId : null,
       onConnected: () => {
         if (!cancelled) setRealtimeConnected(true);
@@ -1314,6 +1264,11 @@ export function ClassroomLiveSession() {
         setPresenceSummary(snapshot.presence ?? null);
         setParticipants(snapshot.participants ?? []);
         setSessionEvents((snapshot.events ?? []).map(toSessionEvent).filter(Boolean) as ClassroomSessionEventRecord[]);
+
+        for (const event of snapshot.events ?? []) {
+          applyRealtimeEvent(event);
+        }
+
         const activeLab = snapshot.state?.active_lab;
         if (typeof activeLab === "string" && activeLab) {
           setSelectedSessionLab(activeLab);
@@ -1388,6 +1343,11 @@ export function ClassroomLiveSession() {
           setSessionEvents(
             (snapshot.events ?? []).map(toSessionEvent).filter(Boolean) as ClassroomSessionEventRecord[],
           );
+
+          for (const event of snapshot.events ?? []) {
+            applyRealtimeEvent(event);
+          }
+
           const activeLab = snapshot.state?.active_lab;
           if (typeof activeLab === "string" && activeLab) {
             setSelectedSessionLab(activeLab);
@@ -1435,7 +1395,7 @@ export function ClassroomLiveSession() {
   }, [
     id,
     activeSession?.id,
-    tenant?.id,
+    sessionTenantId,
     applyRealtimeEvent,
     toSessionEvent,
     isInstructorView,
@@ -1557,10 +1517,9 @@ export function ClassroomLiveSession() {
   }, [realtimeConnected]);
 
   useEffect(() => {
-    if (!activeSession) return;
     const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [activeSession?.id]);
+  }, []);
 
   useEffect(() => {
     if (!id || !activeSession) {
@@ -1604,10 +1563,23 @@ export function ClassroomLiveSession() {
     setUnreadChatCount(unread);
   }, [showFloatingChat, sessionEvents, lastReadChatAt, user?.id]);
 
-  const activeStudents = useMemo(
-    () => participants.filter((p) => p.actor_type === "student"),
-    [participants],
-  );
+  const activeStudents = useMemo(() => {
+    const byActor = new Map<string, SessionPresenceParticipant>();
+    for (const participant of participants) {
+      if (participant.actor_type !== "student") continue;
+      const existing = byActor.get(participant.actor_id);
+      if (!existing) {
+        byActor.set(participant.actor_id, participant);
+        continue;
+      }
+      const existingMs = Date.parse(existing.last_seen_at ?? "") || 0;
+      const nextMs = Date.parse(participant.last_seen_at ?? "") || 0;
+      if (nextMs >= existingMs) {
+        byActor.set(participant.actor_id, participant);
+      }
+    }
+    return [...byActor.values()];
+  }, [participants]);
   const visibleStudents = activeStudents;
   const filteredStudents = useMemo(() => {
     const query = participantSearch.trim().toLowerCase();
@@ -1960,7 +1932,7 @@ export function ClassroomLiveSession() {
 
   const handleSaveBoardSnapshot = async () => {
     if (!isInstructorView) return;
-    const canvas = chalkboardCanvasRef.current;
+    const canvas = board.canvasRef.current;
     if (!canvas) return;
     setSavingBoardSnapshot(true);
     setError(null);
@@ -2296,13 +2268,14 @@ export function ClassroomLiveSession() {
       {loading ? (
         <p className="classroom-list__empty">Loading live session...</p>
       ) : !activeSession ? (
-        <div className="classroom-live__empty-card">
-          <h2>No active session right now</h2>
-          <p>Go back to the classroom page to view the active session card and join when a session starts.</p>
-          <Link to={`/app/classrooms/${id}?tab=sessions`} className="classroom-list__create-btn">
-            Return to Sessions
-          </Link>
-        </div>
+        <WaitingRoom
+          classroom={classroom}
+          nextSession={nextUpcomingSession}
+          tenantName={tenant?.name}
+          tenantLogoUrl={tenant?.logoUrl}
+          classroomId={id}
+          nowMs={nowMs}
+        />
       ) : (
         <>
           <header className="classroom-live__header">
@@ -2393,32 +2366,44 @@ export function ClassroomLiveSession() {
                 <button type="button" className="classroom-list__create-btn classroom-list__create-btn--ghost" onClick={openLab}><FlaskConical size={16} /> Start lab</button>
               </>
             )}
-            {isInstructorView && (
-              <div className="classroom-live__view-switch" role="group" aria-label="Session content view">
-                <button
-                  type="button"
-                  className={`classroom-list__create-btn classroom-list__create-btn--ghost ${contentView === "shared" ? "classroom-live__view-switch-btn--active" : ""}`}
-                  onClick={() => {
-                    setContentView("shared");
+            <div className="classroom-live__view-switch" role="group" aria-label="Session content view">
+              <button
+                type="button"
+                className={`classroom-list__create-btn classroom-list__create-btn--ghost ${contentView === "shared" ? "classroom-live__view-switch-btn--active" : ""}`}
+                onClick={() => {
+                  setContentView("shared");
+                  if (isInstructorView) {
                     sendGenericRealtimeEvent("session.view.changed", { view: "shared" });
-                  }}
-                >
-                  <Presentation size={16} />
-                  Shared content
-                </button>
+                  }
+                }}
+              >
+                <Presentation size={16} />
+                Shared content
+              </button>
+              <button
+                type="button"
+                className={`classroom-list__create-btn classroom-list__create-btn--ghost ${contentView === "board" ? "classroom-live__view-switch-btn--active" : ""}`}
+                onClick={() => {
+                  setContentView("board");
+                  if (isInstructorView) {
+                    sendGenericRealtimeEvent("session.view.changed", { view: "board" });
+                  }
+                }}
+              >
+                <Pencil size={16} />
+                Chalkboard
+              </button>
+              {isInstructorView && (
                 <button
                   type="button"
-                  className={`classroom-list__create-btn classroom-list__create-btn--ghost ${contentView === "board" ? "classroom-live__view-switch-btn--active" : ""}`}
-                  onClick={() => {
-                    setContentView("board");
-                    sendGenericRealtimeEvent("session.view.changed", { view: "board" });
-                  }}
+                  className={`classroom-list__create-btn classroom-list__create-btn--ghost ${contentView === "projects" ? "classroom-live__view-switch-btn--active" : ""}`}
+                  onClick={() => setContentView("projects")}
                 >
-                  <Pencil size={16} />
-                  Chalkboard
+                  <FolderOpen size={16} />
+                  Student Projects
                 </button>
-              </div>
-            )}
+              )}
+            </div>
             <button
               type="button"
               className={`classroom-list__create-btn classroom-list__create-btn--ghost classroom-live__chat-toggle ${!isInstructorView ? "classroom-live__chat-toggle--student" : ""}`}
@@ -2446,7 +2431,15 @@ export function ClassroomLiveSession() {
               <section className="classroom-live__content-stage">
                 <div className={`classroom-live__content-card classroom-live__content-card--${contentView}${contentFullscreen ? " classroom-live__content-card--fullscreen" : ""}`}>
                   <header className="classroom-live__content-header">
-                    <h3>{contentView === "board" ? "Class chalkboard" : "Shared class content"}</h3>
+                    <h3>
+                      {contentView === "board" ? "Class chalkboard" : contentView === "projects" ? "Student Projects" : "Shared class content"}
+                      {contentView === "board" && (
+                        <span
+                          className={`classroom-live__board-sync-dot ${board.isConnected ? "is-online" : "is-offline"}`}
+                          title={board.isConnected ? "Board sync connected" : "Board sync reconnecting"}
+                        />
+                      )}
+                    </h3>
                     <button
                       type="button"
                       className="classroom-live__fullscreen-btn"
@@ -2456,20 +2449,20 @@ export function ClassroomLiveSession() {
                       {contentFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
                     </button>
                     <div className="classroom-live__content-actions">
-                      {contentView === "board" ? (
+                      {contentView === "projects" ? null : contentView === "board" ? (
                         <>
                           <button
                             type="button"
-                            className={`classroom-list__create-btn classroom-list__create-btn--ghost ${boardTool === "chalk" ? "classroom-live__view-switch-btn--active" : ""}`}
-                            onClick={() => setBoardTool("chalk")}
+                            className={`classroom-list__create-btn classroom-list__create-btn--ghost ${board.tool === "chalk" ? "classroom-live__view-switch-btn--active" : ""}`}
+                            onClick={() => board.setTool("chalk")}
                           >
                             <Pencil size={15} />
                             Chalk
                           </button>
                           <button
                             type="button"
-                            className={`classroom-list__create-btn classroom-list__create-btn--ghost ${boardTool === "eraser" ? "classroom-live__view-switch-btn--active" : ""}`}
-                            onClick={() => setBoardTool("eraser")}
+                            className={`classroom-list__create-btn classroom-list__create-btn--ghost ${board.tool === "eraser" ? "classroom-live__view-switch-btn--active" : ""}`}
+                            onClick={() => board.setTool("eraser")}
                           >
                             <Eraser size={15} />
                             Eraser
@@ -2479,9 +2472,7 @@ export function ClassroomLiveSession() {
                             className="classroom-list__create-btn classroom-list__create-btn--ghost"
                             onClick={() => {
                               if (!isInstructorView) return;
-                              const yStrokes = boardYStrokesRef.current;
-                              if (!yStrokes) return;
-                              if (yStrokes.length > 0) yStrokes.delete(0, yStrokes.length);
+                              board.clearBoard();
                             }}
                             disabled={!isInstructorView}
                           >
@@ -2545,21 +2536,26 @@ export function ClassroomLiveSession() {
                     </div>
                   </header>
 
-                  {contentView === "board" ? (
+                  {contentView === "projects" ? (
+                    <SessionStudentProjects
+                      sessionId={activeSession.id}
+                      classroomId={id}
+                    />
+                  ) : contentView === "board" ? (
                     <>
                       <div className="classroom-live__board-tools">
                         <div className="classroom-live__board-colors" role="group" aria-label="Chalk colors">
-                          {["#ffffff", "#fef08a", "#93c5fd", "#fda4af", "#86efac", "#d8b4fe"].map((color) => (
+                          {["#ffffff", "#fef08a", "#93c5fd", "#fda4af", "#86efac", "#d8b4fe"].map((c) => (
                             <button
-                              key={color}
+                              key={c}
                               type="button"
-                              className={`classroom-live__board-color ${boardColor === color ? "is-active" : ""}`}
-                              style={{ backgroundColor: color }}
+                              className={`classroom-live__board-color ${board.color === c ? "is-active" : ""}`}
+                              style={{ backgroundColor: c }}
                               onClick={() => {
-                                setBoardTool("chalk");
-                                setBoardColor(color);
+                                board.setTool("chalk");
+                                board.setColor(c);
                               }}
-                              title={`Use ${color} chalk`}
+                              title={`Use ${c} chalk`}
                               disabled={!canDrawOnBoard}
                             />
                           ))}
@@ -2571,24 +2567,20 @@ export function ClassroomLiveSession() {
                             min={2}
                             max={18}
                             step={1}
-                            value={boardSize}
-                            onChange={(event) => setBoardSize(Number(event.target.value))}
+                            value={board.size}
+                            onChange={(event) => board.setSize(Number(event.target.value))}
                             disabled={!canDrawOnBoard}
                           />
                         </label>
                         {isInstructorView && (
                           <div className="classroom-live__board-moderation">
                             <KidDropdown
-                              value={boardAccessMode}
+                              value={board.accessMode}
                               onChange={(value) => {
                                 const next = value as ChalkboardAccessMode;
-                                const yConfig = boardYConfigRef.current;
-                                if (!yConfig) return;
-                                yConfig.set("access_mode", next);
+                                board.setAccessMode(next);
                                 if (next !== "selected_students") {
-                                  yConfig.set("allowed_student_ids", []);
-                                } else {
-                                  yConfig.set("allowed_student_ids", boardAllowedStudentIds);
+                                  board.setAllowedStudentIds([]);
                                 }
                               }}
                               ariaLabel="Board writing permissions"
@@ -2599,21 +2591,19 @@ export function ClassroomLiveSession() {
                                 { value: "selected_students", label: "Selected students" },
                               ]}
                             />
-                            {boardAccessMode === "selected_students" && studentParticipants.length > 0 ? (
+                            {board.accessMode === "selected_students" && studentParticipants.length > 0 ? (
                               <div className="classroom-live__board-student-list">
                                 {studentParticipants.map((student) => (
                                   <label key={student.actor_id} className="classroom-live__board-student-option">
                                     <input
                                       type="checkbox"
-                                      checked={boardAllowedStudentIds.includes(student.actor_id)}
+                                      checked={board.allowedStudentIds.includes(student.actor_id)}
                                       onChange={(event) => {
                                         const nextIds = event.target.checked
-                                          ? [...boardAllowedStudentIds, student.actor_id]
-                                          : boardAllowedStudentIds.filter((id) => id !== student.actor_id);
-                                        const yConfig = boardYConfigRef.current;
-                                        if (!yConfig) return;
-                                        yConfig.set("access_mode", "selected_students");
-                                        yConfig.set("allowed_student_ids", nextIds);
+                                          ? [...board.allowedStudentIds, student.actor_id]
+                                          : board.allowedStudentIds.filter((id) => id !== student.actor_id);
+                                        board.setAccessMode("selected_students");
+                                        board.setAllowedStudentIds(nextIds);
                                       }}
                                     />
                                     <span>{student.actor_display_name || "Student"}</span>
@@ -2626,19 +2616,37 @@ export function ClassroomLiveSession() {
                       </div>
                       <div className="classroom-live__board-frame">
                         <canvas
-                          ref={chalkboardCanvasRef}
+                          ref={board.canvasRef}
                           className={`classroom-live__chalkboard ${canDrawOnBoard ? "is-editable" : "is-readonly"}`}
-                          onPointerDown={onBoardPointerDown}
-                          onPointerMove={onBoardPointerMove}
-                          onPointerUp={onBoardPointerUp}
-                          onPointerCancel={onBoardPointerLeave}
-                          onPointerLeave={onBoardPointerLeave}
+                          onPointerDown={board.onPointerDown}
+                          onPointerMove={board.onPointerMove}
+                          onPointerUp={board.onPointerUp}
+                          onPointerCancel={board.onPointerLeave}
+                          onPointerLeave={board.onPointerLeave}
                         />
                         {!canDrawOnBoard && (
                           <div className="classroom-live__board-readonly-note">
                             Board is view-only right now. Your teacher controls who can write.
                           </div>
                         )}
+                        {board.remoteCursors.map((cursor) => (
+                          <div
+                            key={cursor.clientId}
+                            className="classroom-live__remote-cursor"
+                            style={{
+                              left: `${cursor.x * 100}%`,
+                              top: `${cursor.y * 100}%`,
+                              borderColor: cursor.color,
+                            }}
+                          >
+                            <span
+                              className="classroom-live__remote-cursor-label"
+                              style={{ background: cursor.color }}
+                            >
+                              {cursor.name}
+                            </span>
+                          </div>
+                        ))}
                       </div>
                     </>
                   ) : (

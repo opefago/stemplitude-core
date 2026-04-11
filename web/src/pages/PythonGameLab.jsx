@@ -23,6 +23,10 @@ import {
   writeLabProjectsArray,
 } from '../lib/learnerLabStorage';
 import { useAuth } from '../providers/AuthProvider';
+import { KidDialog } from '../components/ui/KidDialog';
+import { LabAnnotationOverlay } from '../components/lab/LabAnnotationOverlay';
+import { getLocalActorId } from '../features/labs/useLabSync';
+import { useSessionProjectSync } from '../features/labs/useSessionProjectSync';
 import './PythonGameLab.css';
 
 const PROJECTS_BASE_KEY = 'stemplitude_pygame_projects';
@@ -35,6 +39,7 @@ const PythonGameLab = () => {
   const { user } = useAuth();
   const { exitLab, panel, classroomContext } = useLabSession();
   const { ydoc, provider } = useLabSync(null, classroomContext?.sessionId, false, !!classroomContext);
+  const { pushToServer } = useSessionProjectSync(classroomContext, 'python-game');
   const canvasRef = useRef(null);
   const editorContainerRef = useRef(null);
   const editorViewRef = useRef(null);
@@ -57,6 +62,7 @@ const PythonGameLab = () => {
   const [projectName, setProjectName] = useState('Untitled Project');
   const [showProjects, setShowProjects] = useState(false);
   const [savedProjects, setSavedProjects] = useState(loadProjectsFromStorage);
+  const [projectPendingDelete, setProjectPendingDelete] = useState(null);
   const [shareStatus, setShareStatus] = useState(null);
   const [saveStatus, setSaveStatus] = useState(null);
 
@@ -239,7 +245,9 @@ const PythonGameLab = () => {
     setSavedProjects(projects);
     setSaveStatus('saved');
     setTimeout(() => setSaveStatus(null), 1500);
-  }, [projectId, projectName]);
+    const blob = new Blob([JSON.stringify({ code, projectName })], { type: 'application/json' });
+    pushToServer(projectName, blob, `${projectName || 'python-game'}.json`);
+  }, [projectId, projectName, pushToServer]);
 
   const handleLoadProject = useCallback((project) => {
     handleReset();
@@ -388,6 +396,13 @@ const PythonGameLab = () => {
   }, [showExamples, showProjects]);
 
   return (
+    <LabAnnotationOverlay
+      provider={classroomContext ? provider : null}
+      actorId={getLocalActorId() ?? user?.id ?? ''}
+      actorName={user?.firstName ?? user?.email?.split('@')[0] ?? 'Student'}
+      isInstructor={false}
+      enabled={!!classroomContext && !!provider}
+    >
     <div className="python-game-lab">
       {/* Top Bar */}
       <div className="pgl-topbar">
@@ -423,7 +438,28 @@ const PythonGameLab = () => {
             {editorCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
             {editorCollapsed ? 'Show Code' : 'Hide Code'}
           </button>
+        </div>
 
+        <div className="pgl-controls-center">
+          <input
+            className="pgl-project-name pgl-project-name-topbar"
+            value={projectName}
+            onChange={(e) => setProjectName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
+            spellCheck={false}
+            maxLength={40}
+            title="Click to rename project"
+          />
+          <button
+            className="pgl-btn"
+            onClick={() => { setSavedProjects(loadProjectsFromStorage()); setShowProjects(true); }}
+            title="My Projects"
+          >
+            <FolderOpen size={14} /> Open
+          </button>
+          <button className="pgl-btn" onClick={handleSaveProject} title="Save project (Ctrl+S)">
+            <Save size={14} /> {saveStatus ? 'Saved!' : 'Save'}
+          </button>
           <button className="pgl-btn" onClick={() => setShowHelp(true)} title="Reference / Help">
             <HelpCircle size={16} /> Help
           </button>
@@ -444,32 +480,12 @@ const PythonGameLab = () => {
           <div className="pgl-panel-header">
             <span>Code</span>
             <div className="pgl-panel-header-actions">
-              <input
-                className="pgl-project-name"
-                value={projectName}
-                onChange={(e) => setProjectName(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
-                spellCheck={false}
-                maxLength={40}
-                title="Click to rename project"
-              />
-              <button className="pgl-btn pgl-btn-icon" onClick={handleSaveProject} title="Save project (Ctrl+S)">
-                <Save size={14} />
-              </button>
-              {saveStatus && <span className="pgl-save-status">Saved!</span>}
               <button
                 className={`pgl-btn pgl-btn-icon ${shareStatus === 'copied' ? 'pgl-btn-copied' : ''}`}
                 onClick={handleShare}
                 title={shareStatus === 'copied' ? 'Link copied!' : 'Copy share link'}
               >
                 {shareStatus === 'copied' ? <Check size={14} /> : <Share2 size={14} />}
-              </button>
-              <button
-                className="pgl-btn pgl-btn-icon"
-                onClick={() => { setSavedProjects(loadProjectsFromStorage()); setShowProjects(true); }}
-                title="My Projects"
-              >
-                <FolderOpen size={14} />
               </button>
               <button
                 className="pgl-editor-fs-btn"
@@ -574,7 +590,7 @@ const PythonGameLab = () => {
                   </div>
                   <div className="pgl-project-actions">
                     <button className="pgl-btn pgl-btn-open" onClick={() => handleLoadProject(p)}>Open</button>
-                    <button className="pgl-project-delete" onClick={() => handleDeleteProject(p.id)} title="Delete project">
+                    <button className="pgl-project-delete" onClick={() => setProjectPendingDelete(p)} title="Delete project">
                       <Trash2 size={15} />
                     </button>
                   </div>
@@ -585,8 +601,28 @@ const PythonGameLab = () => {
         </div>
       )}
       {showHelp && <HelpPanel onClose={() => setShowHelp(false)} />}
+      <KidDialog
+        isOpen={Boolean(projectPendingDelete)}
+        onClose={() => setProjectPendingDelete(null)}
+        onConfirm={() => {
+          if (!projectPendingDelete?.id) return;
+          handleDeleteProject(projectPendingDelete.id);
+          setProjectPendingDelete(null);
+        }}
+        title="Delete project?"
+        description={
+          <>
+            Are you sure you want to delete{" "}
+            <strong>{projectPendingDelete?.name ?? 'this project'}</strong>? This
+            cannot be undone.
+          </>
+        }
+        confirmLabel="Delete"
+        cancelLabel="Keep project"
+      />
       {panel}
     </div>
+    </LabAnnotationOverlay>
   );
 };
 

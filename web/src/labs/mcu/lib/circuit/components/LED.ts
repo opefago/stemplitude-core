@@ -1,5 +1,7 @@
-import { Graphics } from "pixi.js";
+import * as PIXI from "pixi.js";
 import { CircuitComponent, CircuitProperties } from "../CircuitComponent";
+import { BJT_SVG_PIVOT, BJT_SVG_SCALE } from "../rendering/bjtSchematicSvg";
+import { drawLedIEC } from "../rendering/ledSchematicDraw";
 
 export interface LEDProperties extends CircuitProperties {
   forwardVoltage: number; // Forward voltage drop (V)
@@ -19,8 +21,14 @@ export interface LEDSpec {
   wavelength: number; // Light wavelength (nm)
 }
 
+type LEDGlowLayerMode = "behindSymbol" | "overSymbol";
+
 export class LED extends CircuitComponent {
   protected ledProps: LEDProperties;
+  private overstressSamples: number = 0;
+  private glowBackLayer: PIXI.Graphics | null = null;
+  private glowFrontLayer: PIXI.Graphics | null = null;
+  private glowLayerMode: LEDGlowLayerMode = "overSymbol";
 
   // Standard LED specifications
   private static readonly LED_SPECS: { [key: string]: LEDSpec } = {
@@ -99,14 +107,14 @@ export class LED extends CircuitComponent {
     this.nodes = [
       {
         id: "anode",
-        position: { x: -25, y: 0 },
+        position: { x: -30, y: 0 },
         voltage: 0,
         current: 0,
         connections: [],
       },
       {
         id: "cathode",
-        position: { x: 25, y: 0 },
+        position: { x: 30, y: 0 },
         voltage: 0,
         current: 0,
         connections: [],
@@ -114,90 +122,99 @@ export class LED extends CircuitComponent {
     ];
   }
 
+  protected getTerminalPinRadius(): number {
+    return 5;
+  }
+
+  /** Arrowhead fill from LED color and brightness (IEC symbol photon arrows). */
+  private getArrowFillColor(): number {
+    const isBurnt = this.circuitProps?.burnt ?? false;
+    const isOn = this.ledProps?.isOn ?? false;
+    const brightness = this.ledProps?.brightness ?? 0;
+
+    if (isBurnt) {
+      return 0x1a1a1a;
+    }
+    if (!isOn) {
+      return 0x333333;
+    }
+
+    const baseColor = this.getLEDColor();
+    const baseR = (baseColor >> 16) & 0xff;
+    const baseG = (baseColor >> 8) & 0xff;
+    const baseB = baseColor & 0xff;
+    const darkR = Math.floor(baseR * 0.2);
+    const darkG = Math.floor(baseG * 0.2);
+    const darkB = Math.floor(baseB * 0.2);
+    const r = darkR + (baseR - darkR) * brightness;
+    const g = darkG + (baseG - darkG) * brightness;
+    const b = darkB + (baseB - darkB) * brightness;
+    return (Math.floor(r) << 16) | (Math.floor(g) << 8) | Math.floor(b);
+  }
+
   protected createVisuals(): void {
-    this.componentGraphics.clear();
+    const g = this.componentGraphics;
+    g.clear();
+    const glowBack = this.ensureGlowLayer("back");
+    const glowFront = this.ensureGlowLayer("front");
+    glowBack.clear();
+    glowFront.clear();
 
     const isBurnt = this.circuitProps?.burnt ?? false;
     const isOn = this.ledProps?.isOn ?? false;
     const brightness = this.ledProps?.brightness ?? 0;
 
-    // LED symbol: triangle with line (diode symbol)
-    // Triangle (anode side)
-    this.componentGraphics.moveTo(-15, -10);
-    this.componentGraphics.lineTo(-15, 10);
-    this.componentGraphics.lineTo(5, 0);
-    this.componentGraphics.lineTo(-15, -10);
+    drawLedIEC(g, {
+      arrowFill: this.getArrowFillColor(),
+      burnt: isBurnt,
+    });
 
-    // Fill triangle based on LED state
-    let triangleColor: number;
     if (isBurnt) {
-      triangleColor = 0x000000; // Black for burnt
-    } else if (isOn) {
-      // Blend LED color with dark base color based on brightness
-      // This creates a smooth gradient from dim to bright
-      const baseColor = this.getLEDColor();
-
-      // Extract RGB components
-      const baseR = (baseColor >> 16) & 0xff;
-      const baseG = (baseColor >> 8) & 0xff;
-      const baseB = baseColor & 0xff;
-
-      // Create a dark version of the LED color (20% of original)
-      const darkR = Math.floor(baseR * 0.2);
-      const darkG = Math.floor(baseG * 0.2);
-      const darkB = Math.floor(baseB * 0.2);
-
-      // Interpolate between dark and full brightness
-      // At 0% brightness: dark color (barely visible)
-      // At 100% brightness: full LED color (vivid)
-      const r = darkR + (baseR - darkR) * brightness;
-      const g = darkG + (baseG - darkG) * brightness;
-      const b = darkB + (baseB - darkB) * brightness;
-
-      triangleColor =
-        (Math.floor(r) << 16) | (Math.floor(g) << 8) | Math.floor(b);
-    } else {
-      triangleColor = 0x333333; // Dark gray when off
+      g.moveTo(55, 55);
+      g.lineTo(95, 95);
+      g.moveTo(55, 95);
+      g.lineTo(95, 55);
+      g.stroke({
+        width: 10,
+        color: 0xff0000,
+        cap: "round",
+        join: "round",
+      });
     }
 
-    this.componentGraphics.fill(triangleColor);
-
-    // Stroke color based on state
-    const strokeColor = isBurnt ? 0xff4444 : 0xffffff; // Red border if burnt
-    this.componentGraphics.stroke({ width: 2, color: strokeColor });
-
-    // Cathode line
-    this.componentGraphics.moveTo(5, -10);
-    this.componentGraphics.lineTo(5, 10);
-    this.componentGraphics.stroke({ width: 3, color: strokeColor });
-
-    // Terminal connections
-    this.componentGraphics.moveTo(-25, 0);
-    this.componentGraphics.lineTo(-15, 0);
-    this.componentGraphics.moveTo(5, 0);
-    this.componentGraphics.lineTo(25, 0);
-    this.componentGraphics.stroke({ width: 2, color: strokeColor });
-
-    // Draw "X" if burnt
-    if (isBurnt) {
-      this.componentGraphics.moveTo(-10, -8);
-      this.componentGraphics.lineTo(10, 8);
-      this.componentGraphics.moveTo(-10, 8);
-      this.componentGraphics.lineTo(10, -8);
-      this.componentGraphics.stroke({ width: 3, color: 0xff0000 });
-    }
-
-    // Light rays (when LED is on and not burnt)
-    if (isOn && !isBurnt) {
-      this.drawLightRays();
-    }
-
-    // Glow effect when LED is on and not burnt (even at low brightness)
     if (isOn && !isBurnt && brightness > 0.01) {
-      this.drawGlowEffect();
+      if (this.glowLayerMode === "behindSymbol") {
+        this.drawGlowEffect(glowBack);
+        this.drawLightRays(glowFront);
+      } else {
+        this.drawGlowEffect(glowFront);
+        this.drawLightRays(glowFront);
+      }
     }
 
-    // Update text labels
+    g.pivot.set(BJT_SVG_PIVOT, BJT_SVG_PIVOT);
+    const flipSign = Math.sign(g.scale.x) || 1;
+    g.scale.set(flipSign * BJT_SVG_SCALE, BJT_SVG_SCALE);
+    g.hitArea = new PIXI.Rectangle(0, 0, 150, 150);
+
+    // Keep glow layers perfectly aligned when LED rotates/flips/scales.
+    glowBack.pivot.copyFrom(g.pivot);
+    glowBack.position.copyFrom(g.position);
+    glowBack.rotation = g.rotation;
+    glowBack.scale.copyFrom(g.scale);
+    glowFront.pivot.copyFrom(g.pivot);
+    glowFront.position.copyFrom(g.position);
+    glowFront.rotation = g.rotation;
+    glowFront.scale.copyFrom(g.scale);
+
+    // Ensure the front glow renders above everything else in this component.
+    if (glowFront.parent === this.displayContainer) {
+      this.displayContainer.setChildIndex(
+        glowFront,
+        this.displayContainer.children.length - 1,
+      );
+    }
+
     this.updateLabels();
   }
 
@@ -216,102 +233,110 @@ export class LED extends CircuitComponent {
     return colors[color.toLowerCase()] || 0xff4444;
   }
 
-  private drawLightRays(): void {
+  /** Rays in IEC SVG space (0–150), emission toward upper-right like Diode-COM-LED.svg */
+  private drawLightRays(target: PIXI.Graphics): void {
     const rayColor = this.getLEDColor();
-    const alpha = this.ledProps?.brightness ?? 0;
+    const b = this.ledProps?.brightness ?? 0;
+    const startX = 118;
+    const startY = 62;
+    const t = Date.now() * 0.003;
 
-    // Draw light rays emanating from LED
-    for (let i = 0; i < 3; i++) {
-      const angle = (i - 1) * 0.3; // Spread rays
-      const startX = 10;
-      const startY = 0;
-      const endX = startX + 20 * Math.cos(angle);
-      const endY = startY + 20 * Math.sin(angle);
+    for (let i = 0; i < 5; i++) {
+      const angle = -Math.PI / 4 + (i - 2) * 0.22;
+      const shimmer = 0.85 + 0.15 * Math.sin(t + i * 1.7);
+      const len = (24 + 14 * b) * shimmer;
+      const endX = startX + len * Math.cos(angle);
+      const endY = startY + len * Math.sin(angle);
 
-      this.componentGraphics.moveTo(startX, startY);
-      this.componentGraphics.lineTo(endX, endY);
-      this.componentGraphics.stroke({
-        width: 2,
-        color: rayColor,
-        alpha: alpha,
-      });
+      // Thick soft glow ray
+      target.moveTo(startX, startY);
+      target.lineTo(endX, endY);
+      target.stroke({ width: 6, color: rayColor, alpha: 0.15 * b * shimmer });
 
-      // Arrow heads for light rays
-      const arrowSize = 3;
+      // Thin bright core ray
+      target.moveTo(startX, startY);
+      target.lineTo(endX, endY);
+      target.stroke({ width: 2.5, color: 0xffffff, alpha: (0.3 + 0.5 * b) * shimmer });
+
+      // Arrowhead
       const arrowAngle = Math.atan2(endY - startY, endX - startX);
-
-      this.componentGraphics.moveTo(endX, endY);
-      this.componentGraphics.lineTo(
-        endX - arrowSize * Math.cos(arrowAngle - 0.5),
-        endY - arrowSize * Math.sin(arrowAngle - 0.5)
-      );
-      this.componentGraphics.moveTo(endX, endY);
-      this.componentGraphics.lineTo(
-        endX - arrowSize * Math.cos(arrowAngle + 0.5),
-        endY - arrowSize * Math.sin(arrowAngle + 0.5)
-      );
-      this.componentGraphics.stroke({
-        width: 1,
-        color: rayColor,
-        alpha: alpha,
-      });
+      const as = 5;
+      target.moveTo(endX, endY);
+      target.lineTo(endX - as * Math.cos(arrowAngle - 0.5), endY - as * Math.sin(arrowAngle - 0.5));
+      target.moveTo(endX, endY);
+      target.lineTo(endX - as * Math.cos(arrowAngle + 0.5), endY - as * Math.sin(arrowAngle + 0.5));
+      target.stroke({ width: 2, color: rayColor, alpha: (0.4 + 0.5 * b) * shimmer });
     }
   }
 
-  private drawGlowEffect(): void {
-    // Create glow effect in the shape of the LED triangle
-    const glowGraphics = new Graphics();
+  /** Vivid bloom + shimmer glow around the LED body. */
+  private drawGlowEffect(target: PIXI.Graphics): void {
     const glowColor = this.getLEDColor();
-    const brightness = this.ledProps?.brightness ?? 0;
+    const b = this.ledProps?.brightness ?? 0;
+    const t = Date.now() * 0.004;
+    const pulse = 0.9 + 0.1 * Math.sin(t);
+    const cx = 75;
+    const cy = 75;
 
-    // Triangle vertices (same as LED body)
-    const x1 = -15,
-      y1 = -10;
-    const x2 = -15,
-      y2 = 10;
-    const x3 = 5,
-      y3 = 0;
+    // Outer soft aura — wide halo
+    const auraLayers = [
+      { radius: 120, alpha: 0.06 },
+      { radius: 96, alpha: 0.10 },
+      { radius: 78, alpha: 0.16 },
+      { radius: 60, alpha: 0.24 },
+      { radius: 46, alpha: 0.35 },
+      { radius: 34, alpha: 0.50 },
+      { radius: 24, alpha: 0.65 },
+    ];
 
-    // Calculate centroid of triangle (center point for scaling)
-    const centerX = (x1 + x2 + x3) / 3;
-    const centerY = (y1 + y2 + y3) / 3;
-
-    // Draw multiple layers of the triangle at increasing sizes for glow effect
-    // More layers at higher brightness for a more intense glow
-    const glowLayers = Math.max(3, Math.floor(5 * brightness));
-    for (let i = glowLayers; i > 0; i--) {
-      const scale = 1 + i * 0.2 * brightness; // Scale based on brightness
-      // More intense glow at higher brightness levels
-      const alpha = (brightness * brightness * 0.6) / i; // Quadratic for more punch
-
-      // Scale each vertex from the centroid
-      const sx1 = centerX + (x1 - centerX) * scale;
-      const sy1 = centerY + (y1 - centerY) * scale;
-      const sx2 = centerX + (x2 - centerX) * scale;
-      const sy2 = centerY + (y2 - centerY) * scale;
-      const sx3 = centerX + (x3 - centerX) * scale;
-      const sy3 = centerY + (y3 - centerY) * scale;
-
-      glowGraphics.moveTo(sx1, sy1);
-      glowGraphics.lineTo(sx2, sy2);
-      glowGraphics.lineTo(sx3, sy3);
-      glowGraphics.lineTo(sx1, sy1);
-      glowGraphics.fill({
-        color: glowColor,
-        alpha: alpha,
-      });
+    for (const layer of auraLayers) {
+      target.circle(cx, cy, layer.radius * pulse);
+      target.fill({ color: glowColor, alpha: layer.alpha * b });
     }
 
-    // Add to componentGraphics so it transforms with the LED (rotation/flip)
-    this.componentGraphics.addChild(glowGraphics);
+    // Saturated color pool — the main visible glow body
+    target.circle(cx, cy, 44 + 12 * b * pulse);
+    target.fill({ color: glowColor, alpha: 0.5 + 0.35 * b });
 
-    // Remove glow after a short time (for animation)
-    setTimeout(() => {
-      if (glowGraphics.parent) {
-        glowGraphics.parent.removeChild(glowGraphics);
-      }
-      glowGraphics.destroy();
-    }, 100);
+    // Hot white-ish core — the "filament" shine
+    target.circle(cx, cy, 18 + 10 * b * pulse);
+    target.fill({ color: glowColor, alpha: 0.75 * b });
+    target.circle(cx, cy, 8 + 5 * b * pulse);
+    target.fill({ color: 0xffffff, alpha: 0.55 + 0.4 * b });
+    target.circle(cx, cy, 3 + 2 * b);
+    target.fill({ color: 0xffffff, alpha: 0.8 * b });
+
+    // Shiny halo ring
+    target.circle(cx, cy, 38 + 8 * b * pulse);
+    target.stroke({ width: 4, color: glowColor, alpha: 0.5 + 0.4 * b });
+
+    // Outer shimmer ring
+    const shimmer = 0.7 + 0.3 * Math.sin(t * 1.5);
+    target.circle(cx, cy, 56 + 6 * b * pulse);
+    target.stroke({ width: 2, color: 0xffffff, alpha: 0.15 * b * shimmer });
+  }
+
+  private ensureGlowLayer(position: "back" | "front"): PIXI.Graphics {
+    const existing = position === "back" ? this.glowBackLayer : this.glowFrontLayer;
+    if (existing) return existing;
+
+    const layer = new PIXI.Graphics();
+    layer.eventMode = "none";
+    layer.blendMode = "screen" as any;
+    const componentIndex = this.displayContainer.getChildIndex(this.componentGraphics);
+    if (position === "back") {
+      this.displayContainer.addChildAt(layer, Math.max(0, componentIndex));
+      this.glowBackLayer = layer;
+    } else {
+      this.displayContainer.addChild(layer);
+      this.glowFrontLayer = layer;
+    }
+    return layer;
+  }
+
+  public setGlowLayerMode(mode: LEDGlowLayerMode): void {
+    this.glowLayerMode = mode;
+    this.updateVisuals(0);
   }
 
   protected updateVisuals(_deltaTime: number): void {
@@ -323,41 +348,54 @@ export class LED extends CircuitComponent {
       return;
     }
 
-    // Update LED state based on current and voltage
-    // Anode is node[0], cathode is node[1]
-    const forwardBiased = this.nodes[0].voltage > this.nodes[1].voltage;
-    const voltageDrop = this.nodes[0].voltage - this.nodes[1].voltage;
-    const absCurrent = Math.abs(this.circuitProps.current);
-
-    // LED turns on when forward biased and voltage exceeds forward voltage
-    // Use absolute current to handle both current direction conventions
-    const shouldTurnOn =
-      forwardBiased &&
-      voltageDrop >= this.ledProps.forwardVoltage &&
-      absCurrent > 0.001; // 1mA threshold
-
-    this.ledProps.isOn = shouldTurnOn;
-
-    // Calculate brightness based on absolute current
-    if (this.ledProps.isOn) {
-      this.ledProps.brightness = Math.min(
-        1.0,
-        absCurrent / this.ledProps.maxCurrent
-      );
-      this.circuitProps.glowing = true;
-    } else {
-      this.ledProps.brightness = 0;
-      this.circuitProps.glowing = false;
-    }
-
     // Check for overcurrent (LED burning out) using absolute current
-    if (absCurrent > this.ledProps.maxCurrent * 2) {
+    const absCurrent = Math.abs(this.circuitProps.current);
+    const voltageDrop = this.nodes[0].voltage - this.nodes[1].voltage;
+    const forwardBiased = voltageDrop > 0;
+    const reverseVoltage = Math.max(0, -voltageDrop);
+    const junctionPower = Math.abs(voltageDrop) * absCurrent;
+    const overstressed =
+      (forwardBiased &&
+        absCurrent > this.ledProps.maxCurrent * 2.5 &&
+        junctionPower >
+          this.ledProps.forwardVoltage * this.ledProps.maxCurrent * 2.2) ||
+      (!forwardBiased &&
+        reverseVoltage > 5.5 &&
+        absCurrent > this.ledProps.maxCurrent * 0.75);
+    this.overstressSamples = overstressed ? this.overstressSamples + 1 : 0;
+    if (!this.circuitProps.burnt && this.overstressSamples >= 20) {
       this.circuitProps.burnt = true;
+      // Overstress-triggered burnout bypasses CircuitComponent.updateCircuitState,
+      // so explicitly start burn smoke/animation here.
+      this.startBurnAnimation();
+      console.log(
+        `⚠️ LED ${this.name} BURNT! Sustained overstress detected. I=${absCurrent.toFixed(4)}A`
+      );
+    }
+    // A burnt LED is an open circuit — no conduction regardless of bias
+    if (this.circuitProps.burnt) {
       this.ledProps.isOn = false;
       this.ledProps.brightness = 0;
-      console.log(
-        `⚠️ LED ${this.name} BURNT! Current: ${absCurrent.toFixed(4)}A exceeded ${(this.ledProps.maxCurrent * 2).toFixed(4)}A`
-      );
+      this.circuitProps.glowing = false;
+      (this.circuitProps as Record<string, unknown>).isForwardBiased = false;
+      (this.circuitProps as Record<string, unknown>).isConducting = false;
+    } else {
+      const shouldTurnOn =
+        forwardBiased &&
+        voltageDrop >= this.ledProps.forwardVoltage &&
+        absCurrent > 0.001;
+
+      this.ledProps.isOn = shouldTurnOn;
+      (this.circuitProps as Record<string, unknown>).isForwardBiased = forwardBiased;
+      (this.circuitProps as Record<string, unknown>).isConducting = shouldTurnOn;
+
+      if (shouldTurnOn) {
+        this.ledProps.brightness = Math.min(1.0, absCurrent / this.ledProps.maxCurrent);
+        this.circuitProps.glowing = true;
+      } else {
+        this.ledProps.brightness = 0;
+        this.circuitProps.glowing = false;
+      }
     }
 
     // Redraw with updated state
@@ -424,18 +462,18 @@ export class LED extends CircuitComponent {
     const cos = Math.cos((this.orientation * Math.PI) / 180);
     const sin = Math.sin((this.orientation * Math.PI) / 180);
 
-    // Anode (left when orientation = 0)
-    this.nodes[0].position.x = -25 * cos - 0 * sin;
-    this.nodes[0].position.y = -25 * sin + 0 * cos;
+    this.nodes[0].position.x = -30 * cos;
+    this.nodes[0].position.y = -30 * sin;
 
-    // Cathode (right when orientation = 0)
-    this.nodes[1].position.x = 25 * cos - 0 * sin;
-    this.nodes[1].position.y = 25 * sin + 0 * cos;
+    this.nodes[1].position.x = 30 * cos;
+    this.nodes[1].position.y = 30 * sin;
   }
 
   protected updateNodeVoltages(): void {
-    // Node voltages are set by the circuit solver
-    // We only need to update node currents here
+    // Node voltages are set by the circuit solver.
+    // Convention used across passive devices:
+    // positive terminal current = enters component from wire.
+    // For forward LED current (anode -> cathode), anode enters (+), cathode exits (-).
     this.nodes[0].current = this.circuitProps.current;
     this.nodes[1].current = -this.circuitProps.current;
   }

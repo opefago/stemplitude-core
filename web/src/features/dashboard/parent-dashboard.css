@@ -194,6 +194,104 @@
   gap: 8px;
 }
 
+.parent-dashboard__attendance-preview {
+  margin-top: 8px;
+  border-top: 1px solid var(--color-border, #e5e7eb);
+  padding-top: 8px;
+}
+
+.parent-dashboard__attendance-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--color-text-secondary, #64748b);
+}
+
+.parent-dashboard__attendance-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.parent-dashboard__attendance-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.8125rem;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--color-border, #e5e7eb) 75%, transparent);
+  background: color-mix(in srgb, var(--color-surface, #fff) 90%, #f8fafc);
+}
+
+.parent-dashboard__attendance-class {
+  color: var(--color-text, #1e293b);
+  font-weight: 700;
+}
+
+.parent-dashboard__attendance-main {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.parent-dashboard__attendance-meta {
+  color: var(--color-text-secondary, #64748b);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.parent-dashboard__attendance-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.parent-dashboard__attendance-status--present {
+  background: #dcfce7;
+  border-color: #bbf7d0;
+  color: #166534;
+}
+
+.parent-dashboard__attendance-status--excused {
+  background: #e0e7ff;
+  border-color: #c7d2fe;
+  color: #4338ca;
+}
+
+.parent-dashboard__attendance-status--late {
+  background: #fef3c7;
+  border-color: #fde68a;
+  color: #92400e;
+}
+
+.parent-dashboard__attendance-status--absent {
+  background: #fee2e2;
+  border-color: #fecaca;
+  color: #991b1b;
+}
+
+.parent-dashboard__attendance-status--unmarked {
+  background: #f1f5f9;
+  border-color: #e2e8f0;
+  color: #475569;
+}
+
 .parent-dashboard__quick-links--compact {
   grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
   gap: 8px;
@@ -526,6 +624,18 @@ a.parent-dashboard__assignment-open.parent-dashboard__session-excusal {
   flex-shrink: 0;
 }
 
+.parent-dashboard__assignment-state {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-secondary, #1cb0f6) 14%, var(--color-surface, #fff));
+  color: var(--color-text-secondary, #64748b);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
 .parent-dashboard__main-grid .parent-dashboard__scroll-region,
 .parent-dashboard__main-grid .parent-dashboard__scroll-region--badges {
   flex: 1 1 auto;
@@ -642,6 +752,43 @@ a.parent-dashboard__assignment-open.parent-dashboard__session-excusal {
   flex: 1;
   font-size: 1rem;
   color: var(--color-text, #1e293b);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.parent-dashboard__excusal-state {
+  display: inline-flex;
+  align-self: flex-start;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.parent-dashboard__excusal-state--pending {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.parent-dashboard__excusal-state--approved {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.parent-dashboard__excusal-state--denied {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.parent-dashboard__excusal-state--with-tooltip {
+  cursor: help;
+}
+
+.parent-dashboard__session-text > .ui-tooltip__ref-anchor {
+  align-self: flex-start;
+  justify-content: flex-start;
 }
 
 .parent-dashboard__session-excusal {
@@ -866,6 +1013,10 @@ button.parent-dashboard__quick-link:disabled:hover {
   --ql-accent: #0d9488;
 }
 
+.parent-dashboard__quick-link--analytics {
+  --ql-accent: #7c3aed;
+}
+
 .parent-dashboard__quick-link--messages {
   --ql-accent: #1cb0f6;
 }
@@ -953,4 +1104,35 @@ button.parent-dashboard__quick-link:disabled:hover {
   font-size: 0.75rem;
   color: var(--color-text-secondary, #94a3b8);
   white-space: nowrap;
+}
+
+/* Parent UX: avoid nested scroll traps inside dashboard cards */
+.parent-dashboard__main-grid {
+  grid-template-rows: auto auto;
+  min-height: 0;
+}
+
+.parent-dashboard__main-grid > .dashboard-bento__card,
+.parent-dashboard__cell-upcoming,
+.parent-dashboard__progress-activity-stack,
+.parent-dashboard__cell-insights {
+  height: auto;
+}
+
+.parent-dashboard__cell-quicklinks {
+  overflow: visible;
+}
+
+.parent-dashboard__cell-quicklinks .parent-dashboard__quick-links,
+.parent-dashboard__insights-scroll,
+.parent-dashboard__activity-scroll,
+.parent-dashboard__insights-panel .parent-dashboard__activity-scroll--in-insights,
+.parent-dashboard__scroll-region,
+.parent-dashboard__grades-preview-list {
+  max-height: none;
+  height: auto;
+  overflow: visible;
+  overscroll-behavior: auto;
+  padding-right: 0;
+  margin-right: 0;
 }

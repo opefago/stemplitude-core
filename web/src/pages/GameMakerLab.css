@@ -53,10 +53,21 @@
 }
 
 .gml-controls-left,
+.gml-controls-center,
 .gml-controls-right {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+
+.gml-controls-center {
+  flex: 1;
+  justify-content: center;
+  min-width: 0;
+}
+
+.gml-project-name-topbar {
+  max-width: 220px;
 }
 
 .gml-logo {
@@ -1228,6 +1239,11 @@
     flex-wrap: wrap;
     height: auto;
     padding: 0.4rem 0.75rem;
+  }
+  .gml-controls-center {
+    order: 3;
+    width: 100%;
+    justify-content: flex-start;
   }
   .gml-logo span {
     display: none;

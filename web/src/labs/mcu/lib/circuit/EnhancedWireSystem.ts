@@ -466,13 +466,30 @@ export class EnhancedWireSystem {
    * Update wire states with analysis results
    */
   public updateWireStates(results: any): void {
-    this.wires.forEach((wire, wireId) => {
-      // Update wire current and voltage from analysis results
-      // This would be implemented based on your specific analysis result format
-      wire.current = 0; // Placeholder
-      wire.voltage = 0; // Placeholder
+    const componentCurrents: Record<string, Record<string, number>> =
+      results?.componentTerminalCurrents ?? {};
+    const components: Array<{ id: string; current: number }> =
+      results?.components ?? [];
 
-      // Redraw wire with updated state
+    this.wires.forEach((wire, wireId) => {
+      let current = 0;
+
+      if (wire.startComponentId && componentCurrents[wire.startComponentId]) {
+        const termCurrents = componentCurrents[wire.startComponentId];
+        const termId = wire.startNodeId ?? Object.keys(termCurrents)[0];
+        if (termId && termCurrents[termId] !== undefined) {
+          current = termCurrents[termId];
+        }
+      }
+
+      if (Math.abs(current) < 1e-9 && wire.startComponentId) {
+        const comp = components.find((c: any) => c.id === wire.startComponentId);
+        if (comp) current = comp.current ?? 0;
+      }
+
+      wire.current = current;
+      wire.voltage = results?.nodeVoltages?.[wire.startNodeId ?? ""] ?? 0;
+
       this.drawWire(wire);
     });
   }

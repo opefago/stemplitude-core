@@ -3,9 +3,15 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowRight, CheckCircle2, Clock, BookOpen } from "lucide-react";
 import { useAuth } from "../../providers/AuthProvider";
 import { useChildContextStudentId } from "../../lib/childContext";
-import { getMyAssignments, type StudentAssignment } from "../../lib/api/students";
+import {
+  getMyAssignments,
+  getParentChildAssignments,
+  type StudentAssignment,
+} from "../../lib/api/students";
 import "../dashboard/dashboard-bento.css";
 import "./assignments.css";
+
+const PAGE_SIZE = 10;
 
 function submissionStatusLabel(status?: string | null): string {
   if (status === "submitted") return "Submitted";
@@ -29,10 +35,15 @@ export function StudentAssignmentsPage() {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | "pending" | "submitted">("all");
   const [timeFilter, setTimeFilter] = useState<"all" | "upcoming" | "past">("all");
+  const [dueFrom, setDueFrom] = useState("");
+  const [dueTo, setDueTo] = useState("");
+  const [page, setPage] = useState(1);
 
   const studentIdFromUrl = searchParams.get("studentId")?.trim() || null;
   const isGuardianViewer =
     subType === "user" && (role === "parent" || role === "homeschool_parent");
+  const isGuardianLearnerMode = isGuardianViewer && Boolean(childContextStudentId);
+  const canActOnAssignments = subType === "student" || isGuardianLearnerMode;
   const guardianLearnerId = isGuardianViewer
     ? studentIdFromUrl || childContextStudentId
     : null;
@@ -53,11 +64,9 @@ export function StudentAssignmentsPage() {
       setError(null);
       try {
         const rows =
-          subType === "student"
+          subType === "student" || isGuardianLearnerMode
             ? await getMyAssignments(200)
-            : await getMyAssignments(200, {
-                childContextOverride: guardianLearnerId!,
-              });
+            : await getParentChildAssignments(guardianLearnerId!, 200);
         if (!mounted) return;
         setItems(rows);
       } catch (e: unknown) {
@@ -70,7 +79,7 @@ export function StudentAssignmentsPage() {
     }
     void load();
     return () => { mounted = false; };
-  }, [canLoadMyAssignments, subType, guardianLearnerId]);
+  }, [canLoadMyAssignments, subType, guardianLearnerId, isGuardianLearnerMode]);
 
   const now = Date.now();
   const dueSoon = useMemo(
@@ -90,6 +99,9 @@ export function StudentAssignmentsPage() {
       if (item.due_at) return new Date(item.due_at).getTime() < now;
       return new Date(item.session_end).getTime() < now;
     };
+    const dueTime = (item: StudentAssignment) => {
+      return item.due_at ? new Date(item.due_at).getTime() : new Date(item.session_end).getTime();
+    };
     const byStatus = (item: StudentAssignment) => {
       if (filter === "pending") return !item.submission_status || item.submission_status === "draft";
       if (filter === "submitted") return item.submission_status === "submitted";
@@ -100,17 +112,46 @@ export function StudentAssignmentsPage() {
       if (timeFilter === "past") return isPast(item);
       return true;
     };
+    const byDueDate = (item: StudentAssignment) => {
+      const due = dueTime(item);
+      if (dueFrom) {
+        const from = new Date(`${dueFrom}T00:00:00`).getTime();
+        if (!Number.isNaN(from) && due < from) return false;
+      }
+      if (dueTo) {
+        const to = new Date(`${dueTo}T23:59:59`).getTime();
+        if (!Number.isNaN(to) && due > to) return false;
+      }
+      return true;
+    };
     return items
-      .filter((item) => byStatus(item) && byTime(item))
+      .filter((item) => byStatus(item) && byTime(item) && byDueDate(item))
       .sort((a, b) => {
         const aSubmitted = a.submission_status === "submitted" ? 1 : 0;
         const bSubmitted = b.submission_status === "submitted" ? 1 : 0;
         if (aSubmitted !== bSubmitted) return aSubmitted - bSubmitted;
-        const aDue = a.due_at ? new Date(a.due_at).getTime() : new Date(a.session_end).getTime();
-        const bDue = b.due_at ? new Date(b.due_at).getTime() : new Date(b.session_end).getTime();
+        const aDue = dueTime(a);
+        const bDue = dueTime(b);
         return aDue - bDue;
       });
-  }, [items, filter, timeFilter, now]);
+  }, [items, filter, timeFilter, dueFrom, dueTo, now]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [filter, timeFilter, dueFrom, dueTo]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const pageStart = (page - 1) * PAGE_SIZE;
+  const paged = useMemo(
+    () => filtered.slice(pageStart, pageStart + PAGE_SIZE),
+    [filtered, pageStart],
+  );
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
 
   const openAssignment = (item: StudentAssignment) => {
     navigate(`/app/classrooms/${item.classroom_id}?tab=assignments`);
@@ -121,7 +162,7 @@ export function StudentAssignmentsPage() {
       <header className="dashboard-bento__header student-assignments__header">
         <h1>Assignments</h1>
         <p>
-          {isGuardianViewer
+          {isGuardianViewer && !isGuardianLearnerMode
             ? "Track due work and submissions for your learner."
             : "Track due work and submit your progress."}
         </p>
@@ -150,9 +191,13 @@ export function StudentAssignmentsPage() {
                     <span className={submissionStatusClass(item.submission_status)}>
                       {submissionStatusLabel(item.submission_status)}
                     </span>
-                    <button type="button" className="sa-open-btn" onClick={() => openAssignment(item)}>
-                      Open <ArrowRight size={13} aria-hidden />
-                    </button>
+                    {!canActOnAssignments ? (
+                      <span className="sa-readonly-pill">View only</span>
+                    ) : (
+                      <button type="button" className="sa-open-btn" onClick={() => openAssignment(item)}>
+                        Open <ArrowRight size={13} aria-hidden />
+                      </button>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -184,9 +229,29 @@ export function StudentAssignmentsPage() {
                 </button>
               ))}
             </div>
+            <div className="sa-filter-row sa-filter-row--dates">
+              <label className="sa-date-filter">
+                <span>Due from</span>
+                <input
+                  type="date"
+                  value={dueFrom}
+                  onChange={(e) => setDueFrom(e.target.value)}
+                  className="sa-date-input"
+                />
+              </label>
+              <label className="sa-date-filter">
+                <span>Due to</span>
+                <input
+                  type="date"
+                  value={dueTo}
+                  onChange={(e) => setDueTo(e.target.value)}
+                  className="sa-date-input"
+                />
+              </label>
+            </div>
 
             <ul className="sa-list" role="list">
-              {filtered.map((item) => (
+              {paged.map((item) => (
                 <li key={`${item.session_id}:${item.id}`} className="sa-item">
                   <div className="sa-item-icon">
                     {item.submission_status === "submitted"
@@ -206,7 +271,15 @@ export function StudentAssignmentsPage() {
                   <span className={submissionStatusClass(item.submission_status)}>
                     {submissionStatusLabel(item.submission_status)}
                   </span>
-                  {item.submission_status === "submitted" ? (
+                  {!canActOnAssignments ? (
+                    <span className="sa-readonly-pill">
+                      {item.submission_status === "submitted"
+                        ? "Done"
+                        : item.submission_status === "draft"
+                          ? "Draft"
+                          : "To do"}
+                    </span>
+                  ) : item.submission_status === "submitted" ? (
                     <span className="sa-done-pill">Done</span>
                   ) : (
                     <button type="button" className="sa-open-btn" onClick={() => openAssignment(item)}>
@@ -219,6 +292,29 @@ export function StudentAssignmentsPage() {
 
             {filtered.length === 0 && (
               <p className="student-assignments__empty">No assignments match this filter.</p>
+            )}
+            {filtered.length > 0 && (
+              <nav className="sa-pager" aria-label="Assignments pages">
+                <button
+                  type="button"
+                  className="sa-open-btn"
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  Previous
+                </button>
+                <span className="sa-pager__meta">
+                  Page {page} of {totalPages} · {filtered.length} items
+                </span>
+                <button
+                  type="button"
+                  className="sa-open-btn"
+                  disabled={page >= totalPages}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                >
+                  Next
+                </button>
+              </nav>
             )}
           </div>
         </>

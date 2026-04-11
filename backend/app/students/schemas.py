@@ -535,6 +535,8 @@ class GuardianAttendanceOverviewResponse(BaseModel):
 class AttendanceExcusalCreate(BaseModel):
     session_id: UUID
     classroom_id: UUID
+    session_start: datetime | None = None
+    session_end: datetime | None = None
     reason: str = Field(..., min_length=1, max_length=2000)
 
 

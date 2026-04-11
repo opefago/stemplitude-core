@@ -1,6 +1,11 @@
-import { Graphics, Rectangle } from "pixi.js";
+import { Rectangle } from "pixi.js";
 import * as PIXI from "pixi.js";
 import { CircuitComponent, CircuitProperties } from "../CircuitComponent";
+import {
+  BJT_SVG_PIVOT,
+  BJT_SVG_SCALE,
+  drawNpnBjtInSvgSpace,
+} from "../rendering/bjtSchematicSvg";
 
 export interface BJTProperties extends CircuitProperties {
   beta: number; // Current gain (hFE)
@@ -56,11 +61,11 @@ export class NPNTransistor extends CircuitComponent {
   }
 
   protected initializeNodes(): void {
-    // Store base positions (unrotated) - match visual terminal endpoints
+    // Aligned to chris-pikul/electronic-symbols NPN SVG after pivot 75,75 and scale 0.4
     this.baseNodePositions = {
-      base: { x: -30, y: 0 }, // Left terminal end
-      collector: { x: 5, y: -25 }, // Top terminal end
-      emitter: { x: 5, y: 25 }, // Bottom terminal end
+      base: { x: -30, y: 0 },
+      collector: { x: 10, y: -30 },
+      emitter: { x: 10, y: 30 },
     };
 
     this.nodes = [
@@ -73,14 +78,14 @@ export class NPNTransistor extends CircuitComponent {
       },
       {
         id: "collector",
-        position: { x: 5, y: -25 },
+        position: { x: 10, y: -30 },
         voltage: 0,
         current: 0,
         connections: [],
       },
       {
         id: "emitter",
-        position: { x: 5, y: 25 },
+        position: { x: 10, y: 30 },
         voltage: 0,
         current: 0,
         connections: [],
@@ -96,14 +101,14 @@ export class NPNTransistor extends CircuitComponent {
     // Update node positions based on orientation and flip
     const cos = Math.cos((this.orientation * Math.PI) / 180);
     const sin = Math.sin((this.orientation * Math.PI) / 180);
-    const flipX = this.componentGraphics.scale.x; // Will be -1 if flipped
+    const flipX = Math.sign(this.componentGraphics.scale.x) || 1; // only ±1
 
     // If baseNodePositions isn't set yet, initialize it now
     if (!this.baseNodePositions) {
       this.baseNodePositions = {
         base: { x: -30, y: 0 },
-        collector: { x: 5, y: -25 },
-        emitter: { x: 5, y: 25 },
+        collector: { x: 10, y: -30 },
+        emitter: { x: 10, y: 30 },
       };
     }
 
@@ -121,53 +126,18 @@ export class NPNTransistor extends CircuitComponent {
     });
   }
 
+  protected getTerminalPinRadius(): number {
+    return 5;
+  }
+
   protected createVisuals(): void {
-    this.componentGraphics.clear();
-
-    // Circle enclosure - draw first as background
-    this.componentGraphics.circle(0, 0, 22);
-    this.componentGraphics.stroke({ width: 2.5, color: 0x8888ff });
-
-    // === BASE (left terminal) ===
-    // External base connection (extend slightly for visual alignment)
-    this.componentGraphics.moveTo(-32, 0);
-    this.componentGraphics.lineTo(-6, 0);
-
-    // === COLLECTOR (top terminal) ===
-    this.componentGraphics.moveTo(-3, -7);
-    this.componentGraphics.lineTo(5, -14);
-    this.componentGraphics.lineTo(5, -27);
-
-    // === EMITTER (bottom terminal) ===
-    this.componentGraphics.moveTo(-3, 7);
-    this.componentGraphics.lineTo(5, 14);
-    this.componentGraphics.lineTo(5, 27);
-
-    // Apply stroke to all terminal lines at once
-    this.componentGraphics.stroke({ width: 2.5, color: 0x8888ff });
-
-    // Base vertical bar (solid rectangle)
-    this.componentGraphics.rect(-6, -14, 3, 28);
-    this.componentGraphics.fill({ color: 0x8888ff });
-
-    // === ARROW (NPN - pointing OUT on emitter line) ===
-    // Arrow positioned on the diagonal emitter line
-    // The emitter line goes from (-3, 7) to (5, 14) - diagonal direction
-    // Position arrow at midpoint, angled along the line direction
-
-    // Top angled line of arrow (pointing outward along emitter diagonal)
-    this.componentGraphics.moveTo(0, 9);
-    this.componentGraphics.lineTo(4, 12);
-    this.componentGraphics.stroke({ width: 3.5, color: 0x8888ff });
-
-    // Bottom angled line of arrow
-    this.componentGraphics.moveTo(4, 12);
-    this.componentGraphics.lineTo(0, 15);
-    this.componentGraphics.stroke({ width: 3.5, color: 0x8888ff });
-
-    // Set explicit hit area to ensure transistor is clickable
-    // Spans from base connection to collector/emitter terminals
-    this.componentGraphics.hitArea = new PIXI.Rectangle(-35, -30, 45, 60);
+    const g = this.componentGraphics;
+    g.clear();
+    drawNpnBjtInSvgSpace(g);
+    g.pivot.set(BJT_SVG_PIVOT, BJT_SVG_PIVOT);
+    const flipSign = Math.sign(g.scale.x) || 1;
+    g.scale.set(flipSign * BJT_SVG_SCALE, BJT_SVG_SCALE);
+    g.hitArea = new PIXI.Rectangle(0, 0, 150, 150);
 
     this.updateLabels();
   }

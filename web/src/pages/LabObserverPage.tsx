@@ -7,9 +7,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ArrowLeft, Wifi, WifiOff } from "lucide-react";
-import { buildSoloRoomId, useLabSync } from "../features/labs/useLabSync";
+import { buildSoloRoomId, useLabSync, getLocalActorId } from "../features/labs/useLabSync";
 import { LabAssistantPanel } from "../features/labs/LabAssistantPanel";
+import { LabAnnotationOverlay } from "../components/lab/LabAnnotationOverlay";
 import type { LabClassroomContext } from "../features/labs/useLabSession";
+import { useAuth } from "../providers/AuthProvider";
 import { BlocklyLabObserver } from "../labs/observer/BlocklyLabObserver";
 import { CircuitLabObserver } from "../labs/observer/CircuitLabObserver";
 import { DesignLabObserver } from "../labs/observer/DesignLabObserver";
@@ -29,6 +31,7 @@ const LAB_LABELS: Record<string, string> = {
 
 export function LabObserverPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { classroomId, actorId } = useParams<{ classroomId: string; actorId: string }>();
   const [searchParams] = useSearchParams();
   const sessionId = searchParams.get("session_id") ?? undefined;
@@ -51,6 +54,8 @@ export function LabObserverPage() {
       referrer: "classroom_live_session",
       labType: null,
       assignmentId: null,
+      curriculumLabId: null,
+      savedProjectId: null,
     };
   }, [classroomId, sessionId]);
 
@@ -116,9 +121,18 @@ export function LabObserverPage() {
         </span>
       </header>
 
-      {/* Lab view */}
+      {/* Lab view with annotation overlay */}
       <div className="lab-observer__content">
-        {renderObserver()}
+        <LabAnnotationOverlay
+          provider={provider}
+          actorId={getLocalActorId() ?? user?.id ?? ""}
+          actorName={user?.firstName ?? user?.email?.split("@")[0] ?? "Instructor"}
+          isInstructor
+          enabled={Boolean(provider && isConnected)}
+          normalizationTargetSelector="#observer-pixi-container"
+        >
+          {renderObserver()}
+        </LabAnnotationOverlay>
       </div>
 
       {/* Floating chat panel (observer mode) */}

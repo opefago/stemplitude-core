@@ -328,10 +328,11 @@ class GamificationService:
         cfg = await self.get_tenant_config(tenant)
         if cfg.allow_streaks:
             cal_tz = await self._resolve_streak_calendar_tz(tenant.tenant_id)
-            await self.repo.update_streak(
+            streak = await self.repo.update_streak(
                 student_id, tenant.tenant_id, calendar_tz=cal_tz
             )
-            await self._invalidate_streak_summary_cache(student_id, tenant.tenant_id)
+            if streak is not None:
+                await self._invalidate_streak_summary_cache(student_id, tenant.tenant_id)
         await self.db.commit()
 
     async def track_student_activity(
@@ -344,8 +345,9 @@ class GamificationService:
         if not cfg.allow_streaks:
             return
         cal_tz = await self._resolve_streak_calendar_tz(tenant.tenant_id)
-        await self.repo.update_streak(student_id, tenant.tenant_id, calendar_tz=cal_tz)
-        await self._invalidate_streak_summary_cache(student_id, tenant.tenant_id)
+        streak = await self.repo.update_streak(student_id, tenant.tenant_id, calendar_tz=cal_tz)
+        if streak is not None:
+            await self._invalidate_streak_summary_cache(student_id, tenant.tenant_id)
         await self.db.commit()
 
     async def track_students_activity_batch(
@@ -362,8 +364,9 @@ class GamificationService:
             return
         cal_tz = await self._resolve_streak_calendar_tz(tenant.tenant_id)
         for sid in ordered:
-            await self.repo.update_streak(sid, tenant.tenant_id, calendar_tz=cal_tz)
-            await self._invalidate_streak_summary_cache(sid, tenant.tenant_id)
+            streak = await self.repo.update_streak(sid, tenant.tenant_id, calendar_tz=cal_tz)
+            if streak is not None:
+                await self._invalidate_streak_summary_cache(sid, tenant.tenant_id)
         await self.db.commit()
 
     async def award_badge(
@@ -472,10 +475,11 @@ class GamificationService:
             )
         if cfg.allow_streaks:
             cal_tz = await self._resolve_streak_calendar_tz(tenant.tenant_id)
-            await self.repo.update_streak(
+            streak = await self.repo.update_streak(
                 to_student_id, tenant.tenant_id, calendar_tz=cal_tz
             )
-            await self._invalidate_streak_summary_cache(to_student_id, tenant.tenant_id)
+            if streak is not None:
+                await self._invalidate_streak_summary_cache(to_student_id, tenant.tenant_id)
         await self.db.commit()
         from app.notifications.dispatch import enqueue_student_in_app_only
 

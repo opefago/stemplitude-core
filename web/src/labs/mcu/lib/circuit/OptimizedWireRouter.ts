@@ -12,6 +12,12 @@
 import { Graphics } from "pixi.js";
 import { CircuitComponent } from "./CircuitComponent";
 
+// Keep warnings/errors, silence verbose dev logs for this module.
+const console = {
+  ...globalThis.console,
+  log: (..._args: unknown[]) => {},
+};
+
 export interface RoutingPoint {
   x: number;
   y: number;
@@ -180,22 +186,23 @@ export class OptimizedWireRouter {
     end: RoutingPoint,
     avoidComponents: string[]
   ): WirePath {
+    this.ensureRoutingGridFitsRoute(start, end);
     const gridStart = this.worldToGrid(start);
     const gridEnd = this.worldToGrid(end);
 
-    // Create temporary occupancy grid excluding avoided components
-    const occupancy = this.createOccupancyGrid(avoidComponents);
-
-    // A* pathfinding
-    const rawPath = this.findAStarPath(gridStart, gridEnd, occupancy);
+    const rawPath = this.findAStarWithRetries(
+      gridStart,
+      gridEnd,
+      avoidComponents,
+      [start, end],
+    );
     console.log(`🔍 A* pathfinding result: ${rawPath.length} points`);
     console.log(
       `🔍 Grid start: (${gridStart.x}, ${gridStart.y}), Grid end: (${gridEnd.x}, ${gridEnd.y})`
     );
 
     if (rawPath.length === 0) {
-      console.log(`⚠️ No path found, using direct path`);
-      // Fallback to direct path if no route found
+      console.log(`⚠️ No path found segments`, { start, end });
       return this.createDirectPath(start, end);
     }
 
@@ -244,13 +251,17 @@ export class OptimizedWireRouter {
     avoidComponents: string[],
     layer: number
   ): WirePath {
+    this.ensureRoutingGridFitsRoute(start, end);
     const gridStart = this.worldToGrid(start);
     const gridEnd = this.worldToGrid(end);
 
-    // Create layer-specific occupancy grid
-    const occupancy = this.createLayerOccupancyGrid(avoidComponents, layer);
-
-    const rawPath = this.findAStarPath(gridStart, gridEnd, occupancy);
+    const rawPath = this.findAStarLayerWithRetries(
+      gridStart,
+      gridEnd,
+      avoidComponents,
+      layer,
+      [start, end],
+    );
 
     if (rawPath.length === 0) {
       return this.createDirectPath(start, end);
@@ -565,7 +576,7 @@ export class OptimizedWireRouter {
 
     // If we're moving further from the direct line, give a bonus
     if (directDistance > currentDirectDistance) {
-      return 0.5; // Bonus for outside routing
+      return 1.1; // Prefer routing outside the pin-to-pin chord (schematic style)
     }
 
     return 0;
@@ -740,25 +751,132 @@ export class OptimizedWireRouter {
     return path;
   }
 
+  private resizeRoutingGrid(newWidth: number, newHeight: number): void {
+    const w = Math.max(this.grid.width, Math.ceil(newWidth));
+    const h = Math.max(this.grid.height, Math.ceil(newHeight));
+    if (w === this.grid.width && h === this.grid.height) return;
+    this.grid.width = w;
+    this.grid.height = h;
+    this.grid.occupancy = Array(h)
+      .fill(null)
+      .map(() => Array(w).fill(false));
+    this.grid.wireLayers = Array(h)
+      .fill(null)
+      .map(() => Array(w).fill(0));
+    this.routingCache.clear();
+  }
+
+  /** Grow the logical grid so pin indices are in-range for large schematics. */
+  private ensureRoutingGridFitsRoute(
+    start: RoutingPoint,
+    end: RoutingPoint,
+  ): void {
+    let maxX = Math.max(start.x, end.x);
+    let maxY = Math.max(start.y, end.y);
+    this.componentBounds.forEach((b) => {
+      maxX = Math.max(maxX, b.x + b.width + b.padding);
+      maxY = Math.max(maxY, b.y + b.height + b.padding);
+    });
+    const cell = this.grid.cellSize;
+    const margin = cell * 10;
+    const needW = Math.ceil((maxX + margin) / cell) + 3;
+    const needH = Math.ceil((maxY + margin) / cell) + 3;
+    this.resizeRoutingGrid(needW, needH);
+  }
+
+  private findAStarWithRetries(
+    gridStart: RoutingPoint,
+    gridEnd: RoutingPoint,
+    avoid: string[],
+    access: RoutingPoint[],
+  ): RoutingPoint[] {
+    const attempts: {
+      paddingScale?: number;
+      portalExtraCells?: number;
+    }[] = [{}, { paddingScale: 0.5, portalExtraCells: 4 }, { paddingScale: 0.28, portalExtraCells: 8 }];
+    for (const o of attempts) {
+      const occ = this.createOccupancyGrid(avoid, access, o);
+      const path = this.findAStarPath(gridStart, gridEnd, occ);
+      if (path.length > 0) return path;
+    }
+    return [];
+  }
+
+  private findAStarLayerWithRetries(
+    gridStart: RoutingPoint,
+    gridEnd: RoutingPoint,
+    avoid: string[],
+    layer: number,
+    access: RoutingPoint[],
+  ): RoutingPoint[] {
+    const attempts: {
+      paddingScale?: number;
+      portalExtraCells?: number;
+    }[] = [{}, { paddingScale: 0.5, portalExtraCells: 4 }, { paddingScale: 0.28, portalExtraCells: 8 }];
+    for (const o of attempts) {
+      const occ = this.createLayerOccupancyGrid(avoid, layer, access, o);
+      const path = this.findAStarPath(gridStart, gridEnd, occ);
+      if (path.length > 0) return path;
+    }
+    return [];
+  }
+
   /**
-   * Create occupancy grid for component avoidance
+   * Open a small Manhattan neighborhood in grid space so A* can enter/leave pins
+   * while every symbol body remains blocked.
    */
-  private createOccupancyGrid(avoidComponents: string[]): boolean[][] {
+  private carvePinAccessPortals(
+    occupancy: boolean[][],
+    worldPoints: RoutingPoint[],
+    extraCells = 0,
+  ): void {
+    if (!worldPoints.length) return;
+    const rCells =
+      Math.max(3, Math.ceil(64 / this.grid.cellSize)) + Math.max(0, extraCells);
+    for (const p of worldPoints) {
+      const g = this.worldToGrid(p);
+      for (let dy = -rCells; dy <= rCells; dy++) {
+        for (let dx = -rCells; dx <= rCells; dx++) {
+          if (Math.abs(dx) + Math.abs(dy) > rCells) continue;
+          const x = g.x + dx;
+          const y = g.y + dy;
+          if (
+            x >= 0 &&
+            x < this.grid.width &&
+            y >= 0 &&
+            y < this.grid.height
+          ) {
+            occupancy[y][x] = false;
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Create occupancy grid for component avoidance.
+   * All components block cells; `accessWorldPoints` carve portals at route endpoints (pins).
+   */
+  private createOccupancyGrid(
+    _avoidComponents: string[],
+    accessWorldPoints: RoutingPoint[] = [],
+    occOpts?: { paddingScale?: number; portalExtraCells?: number },
+  ): boolean[][] {
+    const padMul = occOpts?.paddingScale ?? 1;
+    const portalExtra = occOpts?.portalExtraCells ?? 0;
     const occupancy = Array(this.grid.height)
       .fill(null)
       .map(() => Array(this.grid.width).fill(false));
 
-    // Mark components as occupied
-    this.componentBounds.forEach((bounds, componentId) => {
-      if (avoidComponents.includes(componentId)) return;
-
+    this.componentBounds.forEach((bounds) => {
+      const pad = bounds.padding * padMul;
       const gridStart = this.worldToGrid({
-        x: bounds.x - bounds.padding,
-        y: bounds.y - bounds.padding,
+        x: bounds.x - pad,
+        y: bounds.y - pad,
       });
       const gridEnd = this.worldToGrid({
-        x: bounds.x + bounds.width + bounds.padding,
-        y: bounds.y + bounds.height + bounds.padding,
+        x: bounds.x + bounds.width + pad,
+        y: bounds.y + bounds.height + pad,
       });
 
       for (
@@ -776,6 +894,8 @@ export class OptimizedWireRouter {
       }
     });
 
+    this.carvePinAccessPortals(occupancy, accessWorldPoints);
+
     return occupancy;
   }
 
@@ -784,9 +904,15 @@ export class OptimizedWireRouter {
    */
   private createLayerOccupancyGrid(
     avoidComponents: string[],
-    layer: number
+    layer: number,
+    accessWorldPoints: RoutingPoint[] = [],
+    occOpts?: { paddingScale?: number; portalExtraCells?: number },
   ): boolean[][] {
-    const occupancy = this.createOccupancyGrid(avoidComponents);
+    const occupancy = this.createOccupancyGrid(
+      avoidComponents,
+      accessWorldPoints,
+      occOpts,
+    );
 
     // Also mark existing wires on this layer as occupied
     for (let y = 0; y < this.grid.height; y++) {
@@ -801,53 +927,66 @@ export class OptimizedWireRouter {
   }
 
   /**
-   * Convert grid path to wire segments
+   * Convert grid path to wire segments (strictly orthogonal — one segment per straight grid run).
+   * Previous implementation compared each point to the *run origin*, which turned L-paths into
+   * a single diagonal once |Δx| and |Δy| were both non-zero.
    */
   private pathToSegments(path: RoutingPoint[], layer: number): WireSegment[] {
-    console.log(`🔍 Converting path to segments: ${path.length} points`);
     if (path.length < 2) return [];
 
     const segments: WireSegment[] = [];
-    let segmentStart = path[0];
-    let currentDirection: "horizontal" | "vertical" | null = null;
+    let runStart = path[0]!;
+    let runDir: "horizontal" | "vertical" | null = null;
+
+    const pushSeg = (
+      a: RoutingPoint,
+      b: RoutingPoint,
+      horiz: boolean,
+    ) => {
+      const startWorld = this.gridToWorld(a);
+      const endWorld = this.gridToWorld(b);
+      if (
+        Math.abs(endWorld.x - startWorld.x) < 1e-6 &&
+        Math.abs(endWorld.y - startWorld.y) < 1e-6
+      ) {
+        return;
+      }
+      segments.push({
+        start: startWorld,
+        end: endWorld,
+        isHorizontal: horiz,
+        layer,
+      });
+    };
 
     for (let i = 1; i < path.length; i++) {
-      const point = path[i];
-      const dx = point.x - segmentStart.x;
-      const dy = point.y - segmentStart.y;
+      const prev = path[i - 1]!;
+      const cur = path[i]!;
+      const ddx = cur.x - prev.x;
+      const ddy = cur.y - prev.y;
+      if (ddx === 0 && ddy === 0) continue;
 
-      let direction: "horizontal" | "vertical";
-      if (Math.abs(dx) > Math.abs(dy)) {
-        direction = "horizontal";
+      let stepDir: "horizontal" | "vertical";
+      if (ddx !== 0 && ddy !== 0) {
+        stepDir = Math.abs(ddx) >= Math.abs(ddy) ? "horizontal" : "vertical";
+      } else if (ddx !== 0) {
+        stepDir = "horizontal";
       } else {
-        direction = "vertical";
+        stepDir = "vertical";
       }
 
-      // If direction changed or we're at the end, create a segment
-      if (
-        (currentDirection && direction !== currentDirection) ||
-        i === path.length - 1
-      ) {
-        const segmentEnd = i === path.length - 1 ? point : path[i - 1];
-
-        const startWorld = this.gridToWorld(segmentStart);
-        const endWorld = this.gridToWorld(segmentEnd);
-
-        console.log(
-          `🔍 Creating segment: (${startWorld.x}, ${startWorld.y}) -> (${endWorld.x}, ${endWorld.y})`
-        );
-
-        segments.push({
-          start: startWorld,
-          end: endWorld,
-          isHorizontal: currentDirection === "horizontal",
-          layer,
-        });
-
-        segmentStart = segmentEnd;
+      if (runDir === null) {
+        runDir = stepDir;
+      } else if (stepDir !== runDir) {
+        pushSeg(runStart, prev, runDir === "horizontal");
+        runStart = prev;
+        runDir = stepDir;
       }
+    }
 
-      currentDirection = direction;
+    const last = path[path.length - 1]!;
+    if (runDir !== null) {
+      pushSeg(runStart, last, runDir === "horizontal");
     }
 
     return segments;
@@ -935,20 +1074,99 @@ export class OptimizedWireRouter {
     return path;
   }
 
+  /**
+   * When A* fails, still return a schematic-style orthogonal path (never a diagonal slash).
+   * Uses a simple L / single-bend Manhattan route between endpoints.
+   */
   private createDirectPath(start: RoutingPoint, end: RoutingPoint): WirePath {
-    const segments: WireSegment[] = [
-      {
-        start,
-        end,
-        isHorizontal: Math.abs(end.x - start.x) > Math.abs(end.y - start.y),
+    const x0 = start.x;
+    const y0 = start.y;
+    const x1 = end.x;
+    const y1 = end.y;
+    const manhattan = Math.abs(x1 - x0) + Math.abs(y1 - y0);
+
+    if (manhattan < 1e-6) {
+      return {
+        segments: [],
+        totalLength: 0,
+        bendCount: 0,
         layer: 0,
-      },
-    ];
+      };
+    }
+
+    if (Math.abs(y1 - y0) < 1e-6) {
+      const segments: WireSegment[] = [
+        {
+          start: { x: x0, y: y0, layer: 0 },
+          end: { x: x1, y: y0, layer: 0 },
+          isHorizontal: true,
+          layer: 0,
+        },
+      ];
+      return {
+        segments,
+        totalLength: manhattan,
+        bendCount: 0,
+        layer: 0,
+      };
+    }
+
+    if (Math.abs(x1 - x0) < 1e-6) {
+      const segments: WireSegment[] = [
+        {
+          start: { x: x0, y: y0, layer: 0 },
+          end: { x: x0, y: y1, layer: 0 },
+          isHorizontal: false,
+          layer: 0,
+        },
+      ];
+      return {
+        segments,
+        totalLength: manhattan,
+        bendCount: 0,
+        layer: 0,
+      };
+    }
+
+    // Prefer the L whose first leg spans the larger delta ("long-leg-first") —
+    // tends to route around the outside of the pin bbox instead of cutting inward.
+    const adx = Math.abs(x1 - x0);
+    const ady = Math.abs(y1 - y0);
+    const horizontalFirst = adx >= ady;
+    const segments: WireSegment[] = horizontalFirst
+      ? [
+          {
+            start: { x: x0, y: y0, layer: 0 },
+            end: { x: x1, y: y0, layer: 0 },
+            isHorizontal: true,
+            layer: 0,
+          },
+          {
+            start: { x: x1, y: y0, layer: 0 },
+            end: { x: x1, y: y1, layer: 0 },
+            isHorizontal: false,
+            layer: 0,
+          },
+        ]
+      : [
+          {
+            start: { x: x0, y: y0, layer: 0 },
+            end: { x: x0, y: y1, layer: 0 },
+            isHorizontal: false,
+            layer: 0,
+          },
+          {
+            start: { x: x0, y: y1, layer: 0 },
+            end: { x: x1, y: y1, layer: 0 },
+            isHorizontal: true,
+            layer: 0,
+          },
+        ];
 
     return {
       segments,
-      totalLength: this.calculatePathLength(segments),
-      bendCount: 0,
+      totalLength: manhattan,
+      bendCount: 1,
       layer: 0,
     };
   }
@@ -974,18 +1192,30 @@ export class OptimizedWireRouter {
     this.componentBounds.clear();
 
     this.components.forEach((component, id) => {
-      const pos = component.getPosition();
       const displayObject = component.displayObject();
-      const bounds = displayObject.getBounds();
-      const width = bounds.width > 0 ? bounds.width : 80;
-      const height = bounds.height > 0 ? bounds.height : 60;
+      try {
+        displayObject.updateLocalTransform();
+      } catch {
+        /* no-op */
+      }
+      const b = displayObject.getBounds();
+      const pos = component.getPosition();
+      const valid =
+        Number.isFinite(b.x) &&
+        Number.isFinite(b.y) &&
+        b.width > 2 &&
+        b.height > 2;
+      const width = valid ? b.width : 88;
+      const height = valid ? b.height : 72;
+      const x = valid ? b.x : pos.x - width * 0.5;
+      const y = valid ? b.y : pos.y - height * 0.5;
 
       this.componentBounds.set(id, {
-        x: pos.x,
-        y: pos.y,
-        width: width,
-        height: height,
-        padding: 40, // Increased component avoidance padding for better routing
+        x,
+        y,
+        width: Math.max(width, 8),
+        height: Math.max(height, 8),
+        padding: 48,
       });
     });
   }

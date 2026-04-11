@@ -1,5 +1,10 @@
+import * as PIXI from "pixi.js";
 import { Graphics } from "pixi.js";
 import { CircuitComponent, CircuitProperties } from "../CircuitComponent";
+import {
+  applyIECSchematicTransform,
+  drawInductorMagneticIEC,
+} from "../rendering/iecSchematicDraw";
 
 export interface InductorProperties extends CircuitProperties {
   inductance: number; // Henries
@@ -62,65 +67,39 @@ export class Inductor extends CircuitComponent {
   protected createVisuals(): void {
     this.componentGraphics.clear();
 
-    // Enhanced inductor drawing with proper circuit symbol
-    const width = 80;
-    const height = 60;
+    const g = this.componentGraphics;
+    const isBurnt = this.circuitProps?.burnt ?? false;
+    const current = this.circuitProps?.current ?? 0;
+    const currentRating = this.inductorProps?.currentRating ?? 1;
+    const iratio = currentRating > 0 ? Math.abs(current) / currentRating : 0;
 
-    // Inductor outline - REMOVED dark fill for visibility on black canvas
-    // this.componentGraphics.rect(-width / 2, -height / 2, width, height);
-    // this.componentGraphics.fill(0x333333);
-
-    // Inductor symbol (coil/spiral)
-    // Draw continuous path with visual extension to compensate for stroke rendering
-    this.componentGraphics.moveTo(-32, 0);
-    this.componentGraphics.lineTo(-20, 0);
-
-    // Coil loops (simplified as arcs)
-    const numLoops = 4;
-    const loopWidth = 40 / numLoops;
-
-    for (let i = 0; i < numLoops; i++) {
-      const x = -20 + i * loopWidth;
-      this.componentGraphics.arc(
-        x + loopWidth / 2,
-        0,
-        loopWidth / 2,
-        Math.PI,
-        0,
-        false
-      );
+    let color = 0x44ffff;
+    if (isBurnt) {
+      color = 0x444444;
+    } else if (iratio > 1.0) {
+      color = 0xff4444;
+    } else if (iratio > 0.9) {
+      color = 0xffaa00;
     }
 
-    // Ensure we end at (20, 0) before drawing right lead (extend slightly beyond)
-    this.componentGraphics.lineTo(20, 0);
-    this.componentGraphics.lineTo(32, 0);
-    this.componentGraphics.stroke({ width: 3, color: 0x44ffff });
+    g.tint = color;
+    drawInductorMagneticIEC(g);
+    applyIECSchematicTransform(g, Math.sign(g.scale.x) || 1);
+    g.hitArea = new PIXI.Rectangle(0, 0, 150, 150);
 
-    // Update text labels
+    if (isBurnt) {
+      g.moveTo(-12, -10);
+      g.lineTo(12, 5);
+      g.moveTo(-12, 5);
+      g.lineTo(12, -10);
+      g.stroke({ width: 3, color: 0xff0000 });
+    }
+
     this.updateLabels();
   }
 
   protected updateVisuals(_deltaTime: number): void {
-    // Update inductor visual state based on current and saturation
-    if (this.circuitProps.burnt) {
-      // Burnt inductor - black with red glow
-      this.componentGraphics.tint = 0x000000;
-    } else if (
-      Math.abs(this.circuitProps.current) >
-      this.inductorProps.currentRating * 0.9
-    ) {
-      // Near saturation - reddish tint
-      this.componentGraphics.tint = 0xff8888;
-    } else if (
-      Math.abs(this.circuitProps.current) >
-      this.inductorProps.currentRating * 0.7
-    ) {
-      // High current - orange tint
-      this.componentGraphics.tint = 0xffaa88;
-    } else {
-      // Normal - no tint
-      this.componentGraphics.tint = 0xffffff;
-    }
+    this.createVisuals();
 
     // Current flow animation
     if (Math.abs(this.circuitProps.current) > 0.001) {
@@ -142,7 +121,7 @@ export class Inductor extends CircuitComponent {
     // Draw moving dots along the inductor coil
     for (let i = 0; i < 5; i++) {
       const progress = (i / 5 + animationOffset * flowDirection) % 1;
-      const x = -20 + progress * 40; // Move along inductor body
+      const x = -28 + progress * 56; // Along IEC coil body (scaled space ~ −28…28)
       const y = Math.sin(progress * Math.PI * 4) * 5; // Sine wave to follow coil
       flowGraphics.drawCircle(x, y, 1);
     }
@@ -200,29 +179,14 @@ export class Inductor extends CircuitComponent {
   }
 
   protected updateNodeVoltages(): void {
-    // For an inductor, voltage is L * di/dt
-    // In steady state, inductor acts as short circuit (only DC resistance)
-    const voltageDrop =
-      this.circuitProps.current * this.inductorProps.dcResistance;
-
-    if (this.circuitProps.current > 0) {
-      // Current flows from terminal1 to terminal2
-      this.nodes[0].voltage = this.circuitProps.voltage;
-      this.nodes[1].voltage = this.circuitProps.voltage - voltageDrop;
-    } else {
-      // Current flows from terminal2 to terminal1
-      this.nodes[1].voltage = this.circuitProps.voltage;
-      this.nodes[0].voltage = this.circuitProps.voltage - voltageDrop;
-    }
-
-    // Update node currents
+    // Node voltages are solver-driven; only sync terminal currents for display.
     this.nodes[0].current = this.circuitProps.current;
     this.nodes[1].current = -this.circuitProps.current;
   }
 
   public getImpedance(frequency: number = 0): number {
+    if (this.circuitProps.burnt) return 1e9;
     if (frequency === 0) {
-      // DC: only resistance
       return this.inductorProps.dcResistance;
     }
     // AC: Z = R + jωL

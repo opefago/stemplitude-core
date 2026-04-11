@@ -1,0 +1,127 @@
+/* ── Lab Annotation Overlay ── */
+
+.lab-annotation-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10050;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.lab-annotation-overlay--drawing {
+  pointer-events: auto;
+  cursor: crosshair;
+}
+
+.lab-annotation-overlay__svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* ── Annotation strokes ── */
+.lab-annotation-overlay__stroke {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.lab-annotation-overlay__stroke--fading {
+  animation: lab-annotation-fade 15s ease-out forwards;
+}
+
+@keyframes lab-annotation-fade {
+  0%, 75% { opacity: 0.85; }
+  100% { opacity: 0; }
+}
+
+/* ── Remote cursors ── */
+.lab-annotation-cursor {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 10060;
+  transition: left 0.06s linear, top 0.06s linear;
+}
+
+.lab-annotation-cursor__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid;
+}
+
+.lab-annotation-cursor__label {
+  position: absolute;
+  left: 14px;
+  top: -3px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  padding: 1px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+/* ── Instructor annotation toolbar ── */
+.lab-annotation-toolbar {
+  position: fixed;
+  top: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10070;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: rgba(0, 0, 0, 0.75);
+  border-radius: 10px;
+  pointer-events: auto;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+}
+
+.lab-annotation-toolbar__btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #d1d5db;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.lab-annotation-toolbar__btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.lab-annotation-toolbar__btn--active {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+
+.lab-annotation-toolbar__sep {
+  width: 1px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.15);
+  margin: 0 2px;
+}
+
+.lab-annotation-toolbar__color {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: border-color 0.12s;
+}
+
+.lab-annotation-toolbar__color--active {
+  border-color: #fff;
+}

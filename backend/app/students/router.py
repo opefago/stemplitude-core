@@ -1,5 +1,6 @@
 import json
 from datetime import datetime, timezone
+import logging
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -63,6 +64,7 @@ from app.classrooms.models import ClassroomSession
 from app.classrooms.realtime import emit_presence_updated_for_session
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _utc_activity_datetime(value: datetime | None) -> datetime | None:
@@ -252,7 +254,7 @@ async def list_students(
 
 
 @router.get(
-    "/{id}",
+    "/{id:uuid}",
     response_model=StudentProfile,
     dependencies=[_require_tenant(), require_permission("students", "view")],
 )
@@ -277,7 +279,7 @@ async def get_student(
 
 
 @router.patch(
-    "/{id}",
+    "/{id:uuid}",
     response_model=StudentProfile,
     dependencies=[_require_tenant(), require_permission("students", "update")],
 )
@@ -304,7 +306,7 @@ async def update_student(
 
 
 @router.post(
-    "/{id}/enroll",
+    "/{id:uuid}/enroll",
     response_model=StudentMembershipResponse,
     status_code=status.HTTP_201_CREATED,
     dependencies=[_require_tenant(), require_permission("students", "enroll")],
@@ -334,7 +336,7 @@ async def enroll_student(
 
 
 @router.get(
-    "/{id}/memberships",
+    "/{id:uuid}/memberships",
     response_model=list[StudentMembershipResponse],
     dependencies=[_require_tenant(), require_permission("students", "view")],
 )
@@ -361,7 +363,7 @@ async def list_memberships(
 
 
 @router.post(
-    "/{id}/link",
+    "/{id:uuid}/link",
     response_model=StudentProfile,
     dependencies=[_require_tenant(), require_permission("students", "link")],
 )
@@ -388,7 +390,7 @@ async def link_students(
 
 
 @router.post(
-    "/{id}/parents",
+    "/{id:uuid}/parents",
     response_model=ParentResponse,
     status_code=status.HTTP_201_CREATED,
     dependencies=[_require_tenant(), require_permission("students", "manage_parents")],
@@ -411,7 +413,7 @@ async def link_parent(
 
 
 @router.get(
-    "/{id}/parents",
+    "/{id:uuid}/parents",
     response_model=list[ParentResponse],
     dependencies=[_require_tenant(), require_permission("students", "view")],
 )
@@ -443,7 +445,7 @@ async def list_parents(
 
 
 @router.post(
-    "/{id}/reset-password",
+    "/{id:uuid}/reset-password",
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=[_require_tenant(), require_permission("students", "update")],
 )
@@ -517,6 +519,35 @@ async def my_assignments(
     service = StudentService(db)
     items = await service.list_my_assignments(
         student_id=me_student_id,
+        tenant_id=tenant.tenant_id,
+        limit=limit,
+    )
+    return [StudentAssignmentResponse.model_validate(item) for item in items]
+
+
+@router.get(
+    "/parent/children/{student_id}/assignments",
+    response_model=list[StudentAssignmentResponse],
+    dependencies=[_require_tenant()],
+)
+async def parent_child_assignments(
+    student_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    tenant: TenantContext = Depends(get_tenant_context),
+    limit: int = Query(200, ge=1, le=500),
+):
+    if identity.sub_type != "user":
+        raise HTTPException(status_code=403, detail="User session required")
+    await ensure_can_view_student_as_guardian(
+        db,
+        identity=identity,
+        student_id=student_id,
+        tenant_id=tenant.tenant_id,
+    )
+    service = StudentService(db)
+    items = await service.list_my_assignments(
+        student_id=student_id,
         tenant_id=tenant.tenant_id,
         limit=limit,
     )
@@ -1223,6 +1254,22 @@ async def parent_child_assignment_grades(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
+    except Exception:
+        logger.exception(
+            "Failed loading guardian assignment grades",
+            extra={
+                "student_id": str(student_id),
+                "tenant_id": str(tenant.tenant_id),
+                "skip": skip,
+                "limit": limit,
+            },
+        )
+        return ParentChildAssignmentGradesResponse(
+            grades=[],
+            total=0,
+            skip=skip,
+            limit=limit,
+        )
 
 
 @router.get(
@@ -1430,6 +1477,7 @@ async def list_attendance_excusal_requests_staff(
     return await svc.list_for_staff(
         tenant_id=tenant.tenant_id,
         identity=identity,
+        effective_role=tenant.role,
         status_filter=status_filter,
         skip=skip,
         limit=limit,
@@ -1458,5 +1506,6 @@ async def review_attendance_excusal_request(
         excusal_id=excusal_id,
         tenant_id=tenant.tenant_id,
         identity=identity,
+        effective_role=tenant.role,
         data=data,
     )

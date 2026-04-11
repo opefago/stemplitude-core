@@ -2088,6 +2088,31 @@
   margin-top: 4px;
 }
 
+.msg-hub-events__excusal-state {
+  display: inline-flex;
+  align-self: flex-start;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.msg-hub-events__excusal-state--pending {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.msg-hub-events__excusal-state--approved {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.msg-hub-events__excusal-state--denied {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
 .msg-hub-events__card-time-row {
   display: flex;
   align-items: center;

@@ -4,7 +4,7 @@ import logging
 import uuid
 from uuid import UUID
 
-from fastapi import HTTPException, UploadFile, status
+from fastapi import HTTPException, Request, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import blob_storage
@@ -20,10 +20,64 @@ from .schemas import (
     LabAssignmentCreate,
     LabAssignmentResponse,
     LabAssignmentUpdate,
+    PublicExploreProjectResponse,
     ProjectResponse,
+    ProjectUpdate,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _metadata_flag_true(raw: object) -> bool:
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, (int, float)):
+        return raw != 0
+    if isinstance(raw, str):
+        v = raw.strip().lower()
+        return v in {"1", "true", "yes", "on"}
+    return False
+
+
+def _creator_name_from_student(student) -> str:
+    display = (getattr(student, "display_name", None) or "").strip()
+    if display:
+        return display
+    first = (getattr(student, "first_name", None) or "").strip()
+    last = (getattr(student, "last_name", None) or "").strip()
+    full = f"{first} {last}".strip()
+    if full:
+        return full
+    return "Learner"
+
+
+def _tenant_allows_public_explore(tenant_settings: dict | None) -> bool:
+    settings = tenant_settings if isinstance(tenant_settings, dict) else {}
+    gallery = settings.get("public_game_gallery")
+    if not isinstance(gallery, dict):
+        return True
+    return _metadata_flag_true(gallery.get("enabled", True))
+
+
+def _project_is_public_game(meta: dict | None) -> bool:
+    if not isinstance(meta, dict):
+        return False
+    # Accept a few flag/key variants to remain compatible with future publish flows.
+    published = (
+        _metadata_flag_true(meta.get("is_published"))
+        or _metadata_flag_true(meta.get("published"))
+        or _metadata_flag_true(meta.get("is_public"))
+        or _metadata_flag_true(meta.get("public"))
+        or _metadata_flag_true(meta.get("isPublic"))
+    )
+    if not published:
+        return False
+
+    kind = str(meta.get("project_type") or meta.get("type") or meta.get("content_type") or "").strip().lower()
+    if not kind:
+        # If not explicitly typed, still allow as public content once marked published.
+        return True
+    return "game" in kind
 
 
 class LabsService:
@@ -35,13 +89,44 @@ class LabsService:
         self.assignment_repo = LabAssignmentRepository(session)
         self.feedback_repo = FeedbackRepository(session)
 
-    def _student_id(self, identity: CurrentIdentity, tenant_ctx: TenantContext) -> UUID:
-        """Resolve student_id: identity.id if student, else require student_id param."""
+    @staticmethod
+    def _student_id(
+        identity: CurrentIdentity,
+        tenant_ctx: TenantContext,
+        request: Request | None = None,
+    ) -> UUID:
+        """Resolve student_id: identity.id if student, else fall back to X-Child-Context."""
         if identity.sub_type == "student":
             return identity.id
+        if request is not None:
+            raw = (request.headers.get("X-Child-Context") or "").strip()
+            if raw:
+                try:
+                    return UUID(raw)
+                except ValueError:
+                    pass
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Student context required for project operations",
+        )
+
+    @staticmethod
+    def _to_project_response(project: Project, *, blob_url: str | None = None) -> ProjectResponse:
+        return ProjectResponse(
+            id=project.id,
+            student_id=project.student_id,
+            lab_id=project.lab_id,
+            tenant_id=project.tenant_id,
+            title=project.title,
+            blob_key=project.blob_key,
+            blob_url=blob_url if blob_url is not None else project.blob_url,
+            metadata_=project.metadata_,
+            status=project.status,
+            save_kind=project.save_kind,
+            revision=project.revision,
+            source_project_id=project.source_project_id,
+            submitted_at=project.submitted_at,
+            updated_at=project.updated_at,
         )
 
     async def submit_project(
@@ -52,9 +137,12 @@ class LabsService:
         lab_id: UUID | None,
         file: UploadFile,
         metadata_: dict | None = None,
+        save_kind: str = "checkpoint",
+        source_project_id: UUID | None = None,
+        request: Request | None = None,
     ) -> ProjectResponse:
         """Submit a project with file upload to R2."""
-        student_id = self._student_id(identity, tenant_ctx)
+        student_id = self._student_id(identity, tenant_ctx, request)
         from app.member_billing.guard import assert_member_billing_access_allowed
 
         await assert_member_billing_access_allowed(
@@ -81,20 +169,12 @@ class LabsService:
             blob_key=key,
             blob_url=None,
             metadata_=metadata_ or {},
+            save_kind=save_kind or "checkpoint",
+            source_project_id=source_project_id,
         )
         project = await self.repo.create(project)
         await bump_student_streak(student_id, tenant_ctx.tenant_id)
-        return ProjectResponse(
-            id=project.id,
-            student_id=project.student_id,
-            lab_id=project.lab_id,
-            tenant_id=project.tenant_id,
-            title=project.title,
-            blob_key=project.blob_key,
-            blob_url=project.blob_url,
-            metadata_=project.metadata_,
-            submitted_at=project.submitted_at,
-        )
+        return self._to_project_response(project)
 
     async def list_projects(
         self,
@@ -119,19 +199,33 @@ class LabsService:
             sid, tenant_ctx.tenant_id, lab_id=lab_id, skip=skip, limit=limit
         )
         return [
-            ProjectResponse(
-                id=p.id,
-                student_id=p.student_id,
-                lab_id=p.lab_id,
-                tenant_id=p.tenant_id,
-                title=p.title,
-                blob_key=p.blob_key,
-                blob_url=p.blob_url,
-                metadata=p.metadata_,
-                submitted_at=p.submitted_at,
-            )
+            self._to_project_response(p)
             for p in projects
         ]
+
+    async def list_session_projects(
+        self,
+        tenant_ctx: TenantContext,
+        session_id: str,
+        classroom_id: str | None = None,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> list[ProjectResponse]:
+        """List all projects created during a specific classroom session."""
+        projects = await self.repo.list_by_session(
+            tenant_ctx.tenant_id,
+            session_id,
+            classroom_id=classroom_id,
+            skip=skip,
+            limit=limit,
+        )
+        result = []
+        for p in projects:
+            signed_url = None
+            if p.blob_key:
+                signed_url = blob_storage.generate_presigned_url(p.blob_key)
+            result.append(self._to_project_response(p, blob_url=signed_url))
+        return result
 
     async def get_project(
         self,
@@ -155,17 +249,7 @@ class LabsService:
         signed_url = None
         if project.blob_key:
             signed_url = blob_storage.generate_presigned_url(project.blob_key, expires_in)
-        return ProjectResponse(
-            id=project.id,
-            student_id=project.student_id,
-            lab_id=project.lab_id,
-            tenant_id=project.tenant_id,
-            title=project.title,
-            blob_key=project.blob_key,
-            blob_url=signed_url,
-            metadata=project.metadata_,
-            submitted_at=project.submitted_at,
-        )
+        return self._to_project_response(project, blob_url=signed_url)
 
     async def delete_project(
         self,
@@ -188,6 +272,168 @@ class LabsService:
         if project.blob_key:
             blob_storage.delete_file(project.blob_key)
         await self.repo.delete(project)
+
+    async def update_project(
+        self,
+        project_id: UUID,
+        *,
+        identity: CurrentIdentity,
+        tenant_ctx: TenantContext,
+        data: ProjectUpdate,
+        file: UploadFile | None,
+        expected_revision: int | None = None,
+    ) -> ProjectResponse:
+        """Update project blob/metadata for autosave or user save."""
+        project = await self.repo.get_by_id(project_id, tenant_ctx.tenant_id)
+        if not project:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Project not found",
+            )
+        if identity.sub_type == "student" and project.student_id != identity.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied",
+            )
+        if expected_revision is not None and expected_revision != project.revision:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Revision conflict",
+            )
+
+        old_blob_key = project.blob_key
+        if data.title is not None:
+            project.title = data.title
+        if data.metadata_ is not None:
+            project.metadata_ = data.metadata_
+        if data.save_kind:
+            project.save_kind = data.save_kind
+        if file is not None:
+            filename = file.filename or "project"
+            content_type = file.content_type or "application/octet-stream"
+            file_data = await file.read()
+            next_rev = max(project.revision + 1, 1)
+            stamped_name = f"rev-{next_rev}-{filename}"
+            key = blob_storage.tenant_project_key(
+                tenant_ctx.tenant_id, project.student_id, project.id, stamped_name
+            )
+            blob_storage.upload_file(key, file_data, content_type)
+            project.blob_key = key
+
+        project.revision = max(project.revision + 1, 1)
+        project = await self.repo.update(project)
+
+        # Remove old blob after successful update commit path.
+        if old_blob_key and old_blob_key != project.blob_key:
+            blob_storage.delete_file(old_blob_key)
+        return self._to_project_response(project)
+
+    async def create_project_checkpoint(
+        self,
+        source_project_id: UUID,
+        *,
+        identity: CurrentIdentity,
+        tenant_ctx: TenantContext,
+        title: str,
+        lab_id: UUID | None,
+        file: UploadFile,
+        metadata_: dict | None = None,
+    ) -> ProjectResponse:
+        """Create a checkpoint row linked to a source project."""
+        source = await self.repo.get_by_id(source_project_id, tenant_ctx.tenant_id)
+        if not source:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Source project not found",
+            )
+        if identity.sub_type == "student" and source.student_id != identity.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied",
+            )
+        return await self.submit_project(
+            identity=identity,
+            tenant_ctx=tenant_ctx,
+            title=title,
+            lab_id=lab_id if lab_id is not None else source.lab_id,
+            file=file,
+            metadata_=metadata_ or source.metadata_,
+            save_kind="checkpoint",
+            source_project_id=source.id,
+        )
+
+    async def list_project_revisions(
+        self,
+        project_id: UUID,
+        *,
+        identity: CurrentIdentity,
+        tenant_ctx: TenantContext,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> list[ProjectResponse]:
+        project = await self.repo.get_by_id(project_id, tenant_ctx.tenant_id)
+        if not project:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Project not found",
+            )
+        if identity.sub_type == "student" and project.student_id != identity.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied",
+            )
+        revisions = await self.repo.list_revisions(
+            project_id, tenant_ctx.tenant_id, skip=skip, limit=limit
+        )
+        return [self._to_project_response(row) for row in revisions]
+
+    async def list_public_explore_projects(
+        self,
+        *,
+        skip: int = 0,
+        limit: int = 24,
+    ) -> list[PublicExploreProjectResponse]:
+        """Public gallery cards for anonymously browsing published games."""
+        # Pull a larger candidate set so metadata-level filtering can still fill the page.
+        candidate_limit = max(limit * 4, limit)
+        rows = await self.repo.list_public_explore_candidates(
+            skip=skip,
+            limit=min(candidate_limit, 400),
+        )
+
+        cards: list[PublicExploreProjectResponse] = []
+        for project, student, tenant_settings in rows:
+            if not _tenant_allows_public_explore(tenant_settings):
+                continue
+            meta = project.metadata_ if isinstance(project.metadata_, dict) else {}
+            if not _project_is_public_game(meta):
+                continue
+
+            icon_url = (
+                meta.get("icon_url")
+                or meta.get("thumbnail_url")
+                or meta.get("cover_image_url")
+                or meta.get("preview_image_url")
+            )
+            play_url = (
+                meta.get("play_url")
+                or meta.get("public_url")
+                or meta.get("game_url")
+            )
+            cards.append(
+                PublicExploreProjectResponse(
+                    id=project.id,
+                    title=project.title,
+                    creator_name=_creator_name_from_student(student),
+                    creator_avatar_url=student.avatar_url,
+                    icon_url=str(icon_url).strip() if isinstance(icon_url, str) and icon_url.strip() else None,
+                    play_url=str(play_url).strip() if isinstance(play_url, str) and play_url.strip() else None,
+                    published_at=project.submitted_at,
+                )
+            )
+            if len(cards) >= limit:
+                break
+        return cards
 
     # --- Lab Assignment operations ---
 

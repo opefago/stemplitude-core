@@ -339,7 +339,8 @@ class ClassroomRepository:
                 ClassroomSessionPresence.session_id == session_id,
                 ClassroomSessionPresence.actor_id == actor_id,
                 ClassroomSessionPresence.actor_type == actor_type,
-            )
+            ).order_by(ClassroomSessionPresence.first_seen_at.desc())
+            .limit(1)
         )
         return result.scalar_one_or_none()
 

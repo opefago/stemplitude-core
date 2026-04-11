@@ -1,4 +1,4 @@
-import React from "react";
+import React, { lazy, Suspense, useEffect } from "react";
 import {
   BrowserRouter as Router,
   Routes,
@@ -31,87 +31,99 @@ import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
 import ScrollToTop from "./components/ScrollToTop";
 import LMSHome from "./pages/LMSHome";
-import Home from "./pages/Home";
-import Programs from "./pages/Programs";
-import Camps from "./pages/Camps";
-import DemoDays from "./pages/DemoDays";
-import About from "./pages/About";
-import Contact from "./pages/Contact";
-import Enrollment from "./pages/Enrollment";
-import Pricing from "./pages/Pricing";
 import Playground from "./pages/Playground";
-import ElectronicsLab from "./pages/ElectronicsLab";
-import MCULab from "./pages/MCULab";
-import GameDevLab from "./pages/GameDevLab";
-import PythonGameLab from "./pages/PythonGameLab";
-import GameMakerLab from "./pages/GameMakerLab";
-import DesignMakerLab from "./pages/DesignMakerLab";
-import FAQ from "./pages/FAQ";
+import LMSMarketingPage from "./pages/lms/LMSMarketingPage";
 import { OnboardWizard, AcceptInvitePage } from "./features/auth";
-import { LabLauncher } from "./features/labs";
-import { AchievementsPage } from "./features/progress";
-import {
-  StudentDashboard,
-  InstructorDashboard,
-  ParentDashboard,
-  ChildrenPage,
-  AdminDashboard,
-} from "./features/dashboard";
-import {
-  ChildModePage,
-  MessagingHub,
-  ParentActivityPage,
-  ParentChildControlsPage,
-} from "./features/parent";
 import { useChildContextStudentId } from "./lib/childContext";
-import { TenantSettings, BillingPage, RolesManager } from "./features/settings";
-import {
-  MemberBillingAdminPage,
-  MemberBillingCancelPage,
-  MemberBillingSuccessPage,
-  MemberInvoicesPage,
-  MemberPayPage,
-} from "./features/member_billing";
-import {
-  ClassroomList,
-  ClassroomDetail,
-  ClassroomLiveSession,
-} from "./features/classrooms";
-import { LabObserverPage } from "./pages/LabObserverPage";
-import { ConversationThread } from "./features/messaging";
-import { StudentAssignmentsPage } from "./features/assignments";
-import {
-  MembersPage,
-  IntegrationsPage,
-  CurriculumPage,
-  CurriculumAuthoringPage,
-  ProgramsPage,
-  SuperAdminDashboard,
-  AssetsPage,
-  InvitationsPage,
-} from "./features/admin";
-import {
-  AdminTasksPage,
-  HealthCheckPage,
-  PlatformDashboardPage,
-  JobWorkerPage,
-  EntityBrowserPage,
-  EntityDetailPage,
-  PlatformUsersPage,
-  PlatformRolesPage,
-  PlatformEmailConfigPage,
-  PlatformMemberBillingFeesPage,
-  BlobFinderPage,
-  GrowthOpsPage,
-  GrowthOpsHelpPage,
-} from "./features/platform";
-import { ProfilePage } from "./features/profile";
-import { NotificationsPage } from "./features/notifications";
-import { TenantAnalyticsPage } from "./features/analytics";
-import { GamificationStudioPage } from "./features/gamification/GamificationStudioPage";
-import { StudentProjectsPage } from "./features/projects/StudentProjectsPage";
 import { RewardRuntime } from "./rewards";
+import { writeLabLastOpenedAt } from "./lib/learnerLabStorage";
 import "./App.css";
+
+const LAB_ROUTE_PREFIX_TO_ID = [
+  ["/playground/circuit-maker", "circuit-maker"],
+  ["/playground/micro-maker", "micro-maker"],
+  ["/playground/gamedev", "gamedev"],
+  ["/playground/python-game", "python-game"],
+  ["/playground/game-maker", "game-maker"],
+  ["/playground/design-maker", "design-maker"],
+];
+
+const lazyNamed = (loader, exportName) =>
+  lazy(() => loader().then((m) => ({ default: m[exportName] })));
+
+const LabLauncher = lazyNamed(() => import("./features/labs"), "LabLauncher");
+const AchievementsPage = lazyNamed(() => import("./features/progress"), "AchievementsPage");
+const StudentDashboard = lazyNamed(() => import("./features/dashboard"), "StudentDashboard");
+const InstructorDashboard = lazyNamed(() => import("./features/dashboard"), "InstructorDashboard");
+const ParentDashboard = lazyNamed(() => import("./features/dashboard"), "ParentDashboard");
+const ChildrenPage = lazyNamed(() => import("./features/dashboard"), "ChildrenPage");
+const AdminDashboard = lazyNamed(() => import("./features/dashboard"), "AdminDashboard");
+const ChildModePage = lazyNamed(() => import("./features/parent"), "ChildModePage");
+const MessagingHub = lazyNamed(() => import("./features/parent"), "MessagingHub");
+const ParentActivityPage = lazyNamed(() => import("./features/parent"), "ParentActivityPage");
+const ParentChildAnalyticsPage = lazyNamed(() => import("./features/parent"), "ParentChildAnalyticsPage");
+const ParentAttendancePanel = lazyNamed(() => import("./features/parent"), "ParentAttendancePanel");
+const ParentChildControlsPage = lazyNamed(() => import("./features/parent"), "ParentChildControlsPage");
+const StaffExcusalRequestsPage = lazyNamed(
+  () => import("./features/attendance/StaffExcusalRequestsPage"),
+  "StaffExcusalRequestsPage",
+);
+const TenantSettings = lazyNamed(() => import("./features/settings"), "TenantSettings");
+const BillingPage = lazyNamed(() => import("./features/settings"), "BillingPage");
+const RolesManager = lazyNamed(() => import("./features/settings"), "RolesManager");
+const MemberBillingAdminPage = lazyNamed(() => import("./features/member_billing"), "MemberBillingAdminPage");
+const MemberBillingCancelPage = lazyNamed(() => import("./features/member_billing"), "MemberBillingCancelPage");
+const MemberBillingSuccessPage = lazyNamed(() => import("./features/member_billing"), "MemberBillingSuccessPage");
+const MemberInvoicesPage = lazyNamed(() => import("./features/member_billing"), "MemberInvoicesPage");
+const MemberPayPage = lazyNamed(() => import("./features/member_billing"), "MemberPayPage");
+const ClassroomList = lazyNamed(() => import("./features/classrooms"), "ClassroomList");
+const ClassroomDetail = lazyNamed(() => import("./features/classrooms"), "ClassroomDetail");
+const ClassroomLiveSession = lazyNamed(() => import("./features/classrooms"), "ClassroomLiveSession");
+const LabObserverPage = lazyNamed(() => import("./pages/LabObserverPage"), "LabObserverPage");
+const ConversationThread = lazyNamed(() => import("./features/messaging"), "ConversationThread");
+const StudentAssignmentsPage = lazyNamed(() => import("./features/assignments"), "StudentAssignmentsPage");
+const MembersPage = lazyNamed(() => import("./features/admin"), "MembersPage");
+const IntegrationsPage = lazyNamed(() => import("./features/admin"), "IntegrationsPage");
+const CurriculumPage = lazyNamed(() => import("./features/admin"), "CurriculumPage");
+const CurriculumAuthoringPage = lazyNamed(() => import("./features/admin"), "CurriculumAuthoringPage");
+const ProgramsPage = lazyNamed(() => import("./features/admin"), "ProgramsPage");
+const SuperAdminDashboard = lazyNamed(() => import("./features/admin"), "SuperAdminDashboard");
+const AssetsPage = lazyNamed(() => import("./features/admin"), "AssetsPage");
+const AdminTasksPage = lazyNamed(() => import("./features/platform"), "AdminTasksPage");
+const HealthCheckPage = lazyNamed(() => import("./features/platform"), "HealthCheckPage");
+const PlatformDashboardPage = lazyNamed(() => import("./features/platform"), "PlatformDashboardPage");
+const JobWorkerPage = lazyNamed(() => import("./features/platform"), "JobWorkerPage");
+const EntityBrowserPage = lazyNamed(() => import("./features/platform"), "EntityBrowserPage");
+const EntityDetailPage = lazyNamed(() => import("./features/platform"), "EntityDetailPage");
+const PlatformUsersPage = lazyNamed(() => import("./features/platform"), "PlatformUsersPage");
+const PlatformRolesPage = lazyNamed(() => import("./features/platform"), "PlatformRolesPage");
+const PlatformEmailConfigPage = lazyNamed(() => import("./features/platform"), "PlatformEmailConfigPage");
+const PlatformMemberBillingFeesPage = lazyNamed(
+  () => import("./features/platform"),
+  "PlatformMemberBillingFeesPage",
+);
+const BlobFinderPage = lazyNamed(() => import("./features/platform"), "BlobFinderPage");
+const GrowthOpsPage = lazyNamed(() => import("./features/platform"), "GrowthOpsPage");
+const GrowthOpsHelpPage = lazyNamed(() => import("./features/platform"), "GrowthOpsHelpPage");
+const ProfilePage = lazyNamed(() => import("./features/profile"), "ProfilePage");
+const NotificationsPage = lazyNamed(() => import("./features/notifications"), "NotificationsPage");
+const TenantAnalyticsPage = lazyNamed(() => import("./features/analytics"), "TenantAnalyticsPage");
+const GamificationStudioPage = lazyNamed(
+  () => import("./features/gamification/GamificationStudioPage"),
+  "GamificationStudioPage",
+);
+const StudentProjectsPage = lazyNamed(
+  () => import("./features/projects/StudentProjectsPage"),
+  "StudentProjectsPage",
+);
+const ElectronicsLab = lazy(() => import("./pages/ElectronicsLab"));
+const MCULab = lazy(() => import("./pages/MCULab"));
+const GameDevLab = lazy(() => import("./pages/GameDevLab"));
+const PythonGameLab = lazy(() => import("./pages/PythonGameLab"));
+const GameMakerLab = lazy(() => import("./pages/GameMakerLab"));
+const DesignMakerLab = lazy(() => import("./pages/DesignMakerLab"));
+const InvitationsPage = lazyNamed(() => import("./features/admin"), "InvitationsPage");
+const ExploreGamesPage = lazy(() => import("./pages/ExploreGamesPage"));
 
 function DashboardPlaceholder({ title, body }) {
   return (
@@ -208,6 +220,8 @@ function DashboardRouter() {
       <Route path="/children" element={<ChildrenPage />} />
       <Route path="/children/settings" element={<ParentChildControlsPage />} />
       <Route path="/activity" element={<ParentActivityPage />} />
+      <Route path="/child-analytics" element={<ParentChildAnalyticsPage />} />
+      <Route path="/attendance" element={<ParentAttendancePanel />} />
 
       {/* Instructor */}
       <Route path="/students" element={<MembersPage />} />
@@ -225,6 +239,7 @@ function DashboardRouter() {
       <Route path="/settings" element={<TenantSettings />} />
       <Route path="/gamification" element={<GamificationStudioPage />} />
       <Route path="/analytics" element={<TenantAnalyticsPage />} />
+      <Route path="/excusals" element={<StaffExcusalRequestsPage />} />
       <Route path="/integrations" element={<IntegrationsPage />} />
       <Route path="/billing" element={<BillingPage />} />
       <Route path="/member-billing/pay" element={<MemberPayPage />} />
@@ -252,13 +267,23 @@ function AppDashboardLayout() {
   const dashboardMountKey = childCtx ?? "__no_learner_ctx__";
   return (
     <AppShell>
-      <DashboardRouter key={dashboardMountKey} />
+      <Suspense fallback={<div className="dashboard-bento" style={{ padding: 16 }}>Loading…</div>}>
+        <DashboardRouter key={dashboardMountKey} />
+      </Suspense>
     </AppShell>
   );
 }
 
 function PublicContent() {
   const location = useLocation();
+
+  useEffect(() => {
+    const route = LAB_ROUTE_PREFIX_TO_ID.find(([prefix]) =>
+      location.pathname.startsWith(prefix),
+    );
+    if (!route) return;
+    writeLabLastOpenedAt(route[1]);
+  }, [location.pathname]);
 
   const isLabPage =
     location.pathname.startsWith("/playground/circuit-maker") ||
@@ -269,26 +294,40 @@ function PublicContent() {
     location.pathname.startsWith("/playground/design-maker");
 
   const isLMSHome = location.pathname === "/";
+  const isLMSMarketingPage =
+    isLMSHome ||
+    location.pathname === "/learning" ||
+    location.pathname === "/programs" ||
+    location.pathname === "/camps" ||
+    location.pathname === "/demo-days" ||
+    location.pathname === "/pricing" ||
+    location.pathname === "/about" ||
+    location.pathname === "/contact" ||
+    location.pathname === "/enrollment" ||
+    location.pathname === "/faq" ||
+    location.pathname === "/explore";
   const isAuthPage =
     location.pathname.startsWith("/auth") ||
     location.pathname.startsWith("/invite/");
   const isAppPage = location.pathname.startsWith("/app");
-  const showChrome = !isLabPage && !isLMSHome && !isAuthPage && !isAppPage;
+  const showChrome = !isLabPage && !isLMSMarketingPage && !isAuthPage && !isAppPage;
 
   return (
     <div className="app">
       {showChrome && <Navbar />}
       <AnimatePresence mode="wait">
-        <Routes>
-          {/* New LMS homepage - standalone, no Navbar/Footer */}
-          <Route path="/" element={<LMSHome />} />
+        <Suspense fallback={<div style={{ padding: 16 }}>Loading…</div>}>
+          <Routes>
+            {/* New LMS homepage - standalone, no Navbar/Footer */}
+            <Route path="/" element={<LMSHome />} />
 
           {/* STEM learning pages - with Navbar/Footer */}
-          <Route path="/learning" element={<Home />} />
-          <Route path="/programs" element={<Programs />} />
-          <Route path="/camps" element={<Camps />} />
-          <Route path="/demo-days" element={<DemoDays />} />
-          <Route path="/pricing" element={<Pricing />} />
+          <Route path="/learning" element={<LMSMarketingPage pageKey="learning" />} />
+          <Route path="/programs" element={<LMSMarketingPage pageKey="programs" />} />
+          <Route path="/camps" element={<LMSMarketingPage pageKey="camps" />} />
+          <Route path="/demo-days" element={<LMSMarketingPage pageKey="demo-days" />} />
+          <Route path="/pricing" element={<LMSMarketingPage pageKey="pricing" />} />
+          <Route path="/explore" element={<ExploreGamesPage />} />
           <Route path="/playground" element={<Playground />} />
           <Route
             path="/playground/circuit-maker"
@@ -299,10 +338,10 @@ function PublicContent() {
           <Route path="/playground/python-game" element={<PythonGameLab />} />
           <Route path="/playground/game-maker" element={<GameMakerLab />} />
           <Route path="/playground/design-maker" element={<DesignMakerLab />} />
-          <Route path="/about" element={<About />} />
-          <Route path="/contact" element={<Contact />} />
-          <Route path="/enrollment" element={<Enrollment />} />
-          <Route path="/faq" element={<FAQ />} />
+          <Route path="/about" element={<LMSMarketingPage pageKey="about" />} />
+          <Route path="/contact" element={<LMSMarketingPage pageKey="contact" />} />
+          <Route path="/enrollment" element={<LMSMarketingPage pageKey="enrollment" />} />
+          <Route path="/faq" element={<LMSMarketingPage pageKey="faq" />} />
 
           {/* Auth routes */}
           <Route path="/auth/onboard" element={<OnboardWizard />} />
@@ -373,17 +412,18 @@ function PublicContent() {
           />
 
           {/* Authenticated app routes */}
-          <Route
-            path="/app/*"
-            element={
-              <RouteGuard>
-                <GuardianLearnerProvider>
-                  <AppDashboardLayout />
-                </GuardianLearnerProvider>
-              </RouteGuard>
-            }
-          />
-        </Routes>
+            <Route
+              path="/app/*"
+              element={
+                <RouteGuard>
+                  <GuardianLearnerProvider>
+                    <AppDashboardLayout />
+                  </GuardianLearnerProvider>
+                </RouteGuard>
+              }
+            />
+          </Routes>
+        </Suspense>
       </AnimatePresence>
       {showChrome && <Footer />}
     </div>

@@ -45,15 +45,36 @@ export function labProjectsStorageKey(baseKey: string): string {
   return scope ? `${baseKey}__sid_${scope}` : baseKey;
 }
 
+/**
+ * Common shape for lab project entries persisted in localStorage.
+ * The blob store (via useLabPersistence) is the authoritative copy;
+ * localStorage holds a lightweight project list for the UI plus an
+ * optional local draft as a failure/offline fallback.
+ */
+export interface LabProject<TDraft = unknown> {
+  id: string;
+  name: string;
+  updatedAt: string;
+  createdAt: string;
+  /** Server revision counter for freshness validation across browsers. */
+  revision?: number;
+  /** Local draft data saved by useLabPersistence or manual save. */
+  draft?: TDraft | null;
+  /** Legacy: some labs store the full snapshot inline. Prefer `draft`. */
+  snapshot?: TDraft | null;
+  /** Which save produced this row (autosave, checkpoint, or manual). */
+  saveKind?: string;
+}
+
 /** Read project rows: scoped bucket first, then legacy global key if scoped is empty. */
-export function readLabProjectsArray(baseKey: string): unknown[] {
+export function readLabProjectsArray<T = unknown>(baseKey: string): T[] {
   const scoped = labProjectsStorageKey(baseKey);
   let rows = parseJsonArray(localStorage.getItem(scoped));
-  if (rows.length > 0) return rows;
+  if (rows.length > 0) return rows as T[];
   if (scoped !== baseKey) {
     rows = parseJsonArray(localStorage.getItem(baseKey));
   }
-  return rows;
+  return rows as T[];
 }
 
 export function writeLabProjectsArray(baseKey: string, rows: unknown[]): void {
@@ -83,4 +104,42 @@ export function migrateLegacyLabProjectsIfNeeded(baseKey: string): void {
   } catch {
     /* ignore */
   }
+}
+
+function labLastOpenedBaseKey(labId: string): string {
+  return `stemplitude_lab_last_opened__${labId}`;
+}
+
+/**
+ * Persist "lab opened" timestamp per learner scope so launcher cards can show
+ * recency even when no project has been saved yet.
+ */
+export function writeLabLastOpenedAt(labId: string, timestampMs: number = Date.now()): void {
+  if (!labId) return;
+  const baseKey = labLastOpenedBaseKey(labId);
+  const scopedKey = labProjectsStorageKey(baseKey);
+  const value = String(Math.max(0, Math.floor(timestampMs)));
+  try {
+    localStorage.setItem(scopedKey, value);
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
+
+/**
+ * Read "lab opened" timestamp from scoped key first, then legacy unscoped key.
+ */
+export function readLabLastOpenedAt(labId: string): number {
+  if (!labId) return 0;
+  const baseKey = labLastOpenedBaseKey(labId);
+  const scopedKey = labProjectsStorageKey(baseKey);
+  const read = (key: string): number => {
+    const raw = localStorage.getItem(key);
+    if (!raw) return 0;
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  };
+  const scoped = read(scopedKey);
+  if (scoped > 0) return scoped;
+  return scopedKey === baseKey ? scoped : read(baseKey);
 }

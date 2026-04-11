@@ -69,7 +69,7 @@ const Footer = () => {
             <li><Link to="/pricing">Pricing</Link></li>
             <li><Link to="/playground">Playground</Link></li>
             <li><Link to="/demo-days">Demo Days</Link></li>
-            <li><a href="https://blog.stemplitude.com" target="_blank" rel="noopener noreferrer">Blog</a></li>
+            <li><a href="http://blog.stemplitude.localhost" target="_blank" rel="noopener noreferrer">Blog</a></li>
             <li><Link to="/about">About Us</Link></li>
           </ul>
         </div>

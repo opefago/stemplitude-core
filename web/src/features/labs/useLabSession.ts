@@ -2,6 +2,7 @@ import { type ReactElement, useCallback, useEffect, useMemo, useRef } from "reac
 import { createElement } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { heartbeatMySession } from "../../lib/api/classrooms";
+import { ApiHttpError } from "../../lib/api/client";
 import { useAuth } from "../../providers/AuthProvider";
 import { LiveVideoWidget } from "../classrooms/LiveVideoWidget";
 import { LabAssistantPanel } from "./LabAssistantPanel";
@@ -89,14 +90,29 @@ export function useLabSession() {
   }, [location.search, location.state]);
 
   const heartbeatIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const stopHeartbeatRef = useRef(false);
 
   // Send in-lab heartbeats to keep the student listed as a participant
   useEffect(() => {
     if (!classroomContext) return;
+    // Student-only endpoint; wait for auth and run only for students.
+    if (user?.subType !== "student") return;
+    stopHeartbeatRef.current = false;
     const { classroomId, sessionId, labType } = classroomContext;
 
     const sendHeartbeat = () => {
-      void heartbeatMySession(classroomId, sessionId, "in_lab", labType).catch(() => {});
+      if (stopHeartbeatRef.current) return;
+      void heartbeatMySession(classroomId, sessionId, "in_lab", labType).catch((err: unknown) => {
+        const status = err instanceof ApiHttpError ? err.status : undefined;
+        // Terminal states for this page: stop sending heartbeat loop.
+        if (status === 409 || status === 403 || status === 401) {
+          stopHeartbeatRef.current = true;
+          if (heartbeatIntervalRef.current !== null) {
+            clearInterval(heartbeatIntervalRef.current);
+            heartbeatIntervalRef.current = null;
+          }
+        }
+      });
     };
 
     sendHeartbeat();
@@ -108,7 +124,7 @@ export function useLabSession() {
         heartbeatIntervalRef.current = null;
       }
     };
-  }, [classroomContext?.classroomId, classroomContext?.sessionId, classroomContext?.labType]);
+  }, [classroomContext?.classroomId, classroomContext?.sessionId, classroomContext?.labType, user?.subType]);
 
   const exitLab = useCallback(() => {
     const idx =

@@ -199,6 +199,16 @@
       "description": "Repair DB rows referencing missing S3/R2 objects; delete storage keys not referenced by DB",
       "schedule": { "type": "crontab", "hour": "4", "minute": "0", "day_of_week": "sunday" }
     },
+    "cron.cleanup_expired_session_recordings": {
+      "task_path": "workers.tasks.cleanup_tasks.cleanup_expired_session_recordings",
+      "queue": "default",
+      "runtime": "python",
+      "max_retries": 0,
+      "retry_delay_seconds": 0,
+      "dedup_ttl_seconds": 300,
+      "description": "Delete expired classroom session recordings and mark metadata deleted",
+      "schedule": { "type": "crontab", "hour": "3", "minute": "30" }
+    },
     "cron.cleanup_audit_events": {
       "task_path": "workers.tasks.cleanup_tasks.cleanup_audit_events",
       "queue": "default",

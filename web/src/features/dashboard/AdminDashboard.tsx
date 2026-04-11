@@ -15,8 +15,10 @@ import {
   type AttendanceExcusalStaffRow,
   type StudentProfile,
 } from "../../lib/api/students";
+import { ApiHttpError } from "../../lib/api/client";
 import { listUsers } from "../../lib/api/users";
 import { listNotifications, type NotificationRecord } from "../../lib/api/notifications";
+import { fetchAnalyticsSummary, type AnalyticsTotals } from "../../lib/api/analytics";
 import { useTenantRealtime } from "../../hooks/useTenantRealtime";
 import "./dashboard-bento.css";
 import "./admin-dashboard.css";
@@ -49,8 +51,11 @@ export function AdminDashboard() {
   const [allStudents, setAllStudents] = useState<StudentProfile[]>([]);
   const [totalUsers, setTotalUsers] = useState(0);
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
+  const [activityTotals, setActivityTotals] = useState<AnalyticsTotals | null>(null);
+  const [attendanceRate, setAttendanceRate] = useState<number | null>(null);
   const [pendingExcusals, setPendingExcusals] = useState<AttendanceExcusalStaffRow[]>([]);
   const [excusalsLoading, setExcusalsLoading] = useState(false);
+  const [excusalsError, setExcusalsError] = useState<string | null>(null);
   const [denyingId, setDenyingId] = useState<string | null>(null);
   const [denyNote, setDenyNote] = useState("");
   const [excusalActionId, setExcusalActionId] = useState<string | null>(null);
@@ -74,25 +79,38 @@ export function AdminDashboard() {
   const loadDashboard = useCallback(async () => {
     setLoading(true);
     try {
-      const [classrooms, students, usersResult, notificationResult] = await Promise.all([
+      const now = new Date();
+      const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      const [classrooms, students, usersResult, notificationResult, analyticsSummary] = await Promise.all([
         listClassrooms({ limit: 50, is_active: true }),
         listStudents({ limit: 500, is_active: true }),
         listUsers({ limit: 500 }),
         listNotifications({ limit: 12 }).catch(() => ({ items: [], total: 0 })),
+        fetchAnalyticsSummary({ dateFrom: thirtyDaysAgo, dateTo: now }).catch(() => null),
       ]);
       setAllStudents(students);
       setTotalUsers(usersResult.total ?? usersResult.items.length);
       setNotifications(notificationResult.items);
+      setActivityTotals(analyticsSummary?.totals ?? null);
+      setAttendanceRate(analyticsSummary?.attendance_rate ?? null);
 
       setExcusalsLoading(true);
       try {
         const pending = await listAttendanceExcusalRequestsStaff({
           status: "pending",
-          limit: 20,
+          limit: 10,
         });
         setPendingExcusals(pending);
-      } catch {
+        setExcusalsError(null);
+      } catch (e) {
         setPendingExcusals([]);
+        if (e instanceof ApiHttpError) {
+          setExcusalsError(e.message || `Could not load requests (${e.status})`);
+        } else if (e instanceof Error) {
+          setExcusalsError(e.message);
+        } else {
+          setExcusalsError("Could not load requests");
+        }
       } finally {
         setExcusalsLoading(false);
       }
@@ -148,11 +166,19 @@ export function AdminDashboard() {
     try {
       const pending = await listAttendanceExcusalRequestsStaff({
         status: "pending",
-        limit: 20,
+        limit: 10,
       });
       setPendingExcusals(pending);
-    } catch {
+      setExcusalsError(null);
+    } catch (e) {
       setPendingExcusals([]);
+      if (e instanceof ApiHttpError) {
+        setExcusalsError(e.message || `Could not load requests (${e.status})`);
+      } else if (e instanceof Error) {
+        setExcusalsError(e.message);
+      } else {
+        setExcusalsError("Could not load requests");
+      }
     } finally {
       setExcusalsLoading(false);
     }
@@ -326,28 +352,34 @@ export function AdminDashboard() {
           </Link>
         </div>
 
-        {/* Revenue Overview - col 3, row 2 */}
+        {/* Learning Activity - col 3, row 2 */}
         <div className="dashboard-bento__card dashboard-bento__card--orange admin-dashboard__card--revenue">
           <div className="dashboard-bento__card-header">
-            <h2 className="dashboard-bento__card-title">Revenue Overview</h2>
+            <h2 className="dashboard-bento__card-title">Learning Activity</h2>
             <div className="dashboard-bento__card-icon">
-              <img src="/assets/cartoon-icons/coin.png" alt="" className="dashboard-bento__card-icon-img" aria-hidden />
+              <img src="/assets/cartoon-icons/Trail.png" alt="" className="dashboard-bento__card-icon-img" aria-hidden />
             </div>
           </div>
           <div className="admin-dashboard__stat-block">
-            <span className="admin-dashboard__stat-value">{unreadAnnouncements.length}</span>
-            <span className="admin-dashboard__stat-label">Unread Announcements</span>
+            <span className="admin-dashboard__stat-value">
+              {activityTotals ? activityTotals.lab_completions + activityTotals.lesson_completions : (loading ? "…" : "0")}
+            </span>
+            <span className="admin-dashboard__stat-label">Completions (30 days)</span>
           </div>
           <div className="admin-dashboard__trend">
-            <img src="/assets/cartoon-icons/Trail.png" alt="" className="dashboard-bento__card-icon-img" aria-hidden />
-            <span>Live from notifications feed</span>
+            <img src="/assets/cartoon-icons/coin.png" alt="" className="dashboard-bento__card-icon-img" aria-hidden />
+            <span>
+              {attendanceRate != null
+                ? `${Math.round(attendanceRate * 100)}% attendance rate`
+                : "Attendance data pending"}
+            </span>
           </div>
           <Link
-            to="/app/notifications"
+            to="/app/analytics"
             className="dashboard-bento__card-action"
-            aria-label="View notifications"
+            aria-label="View analytics"
           >
-            View details <ArrowRight size={14} aria-hidden />
+            View insights <ArrowRight size={14} aria-hidden />
           </Link>
         </div>
 
@@ -428,12 +460,21 @@ export function AdminDashboard() {
               <ClipboardList size={22} aria-hidden />
             </div>
           </div>
+          <Link
+            to="/app/excusals"
+            className="dashboard-bento__card-action"
+            aria-label="View all parent excusal requests"
+          >
+            View all <ArrowRight size={14} aria-hidden />
+          </Link>
           <p className="admin-dashboard__excusals-intro">
             When guardians submit an absence excuse, approve it to record the learner as excused for
             that session, or deny with an optional note.
           </p>
           {excusalsLoading ? (
             <p className="dashboard-bento__card-desc">Loading…</p>
+          ) : excusalsError ? (
+            <p className="dashboard-bento__card-desc" role="alert">{excusalsError}</p>
           ) : pendingExcusals.length === 0 ? (
             <p className="dashboard-bento__card-desc">No pending requests.</p>
           ) : (

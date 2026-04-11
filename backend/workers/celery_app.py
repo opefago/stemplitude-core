@@ -28,6 +28,16 @@ celery_app.conf.update(
     # failed jobs (see app.platform.jobs.retry_task). May include email bodies;
     # keep result_expires bounded (Celery default is typically 1 day).
     result_extended=True,
+    # Broker reconnection: retry indefinitely so transient Redis restarts or
+    # network blips don't permanently kill the worker / beat process.
+    broker_connection_retry_on_startup=True,
+    broker_connection_retry=True,
+    broker_connection_max_retries=None,
+    broker_connection_timeout=30,
+    broker_transport_options={
+        "retry_on_timeout": True,
+        "socket_keepalive": True,
+    },
 )
 
 # ``autodiscover_tasks(["workers.tasks"])`` would import ``workers.tasks.tasks`` (missing).

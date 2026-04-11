@@ -21,6 +21,10 @@ import {
   writeLabProjectsArray,
 } from '../lib/learnerLabStorage';
 import { useAuth } from '../providers/AuthProvider';
+import { KidDialog } from '../components/ui/KidDialog';
+import { LabAnnotationOverlay } from '../components/lab/LabAnnotationOverlay';
+import { getLocalActorId } from '../features/labs/useLabSync';
+import { useSessionProjectSync } from '../features/labs/useSessionProjectSync';
 import 'tippy.js/animations/shift-away.css';
 import './GameMakerLab.css';
 
@@ -199,6 +203,7 @@ const GameMakerLab = () => {
   const { user } = useAuth();
   const { exitLab, panel, classroomContext } = useLabSession();
   const { ydoc, provider } = useLabSync(null, classroomContext?.sessionId, false, !!classroomContext);
+  const { pushToServer } = useSessionProjectSync(classroomContext, 'game-maker');
   const yjsApplyingRef = useRef(false);
   const blocklyDiv = useRef(null);
   const workspaceRef = useRef(null);
@@ -222,6 +227,7 @@ const GameMakerLab = () => {
   const [projectName, setProjectName] = useState('Untitled Project');
   const [showProjects, setShowProjects] = useState(false);
   const [savedProjects, setSavedProjects] = useState(loadProjectsFromStorage);
+  const [projectPendingDelete, setProjectPendingDelete] = useState(null);
   const [saveStatus, setSaveStatus] = useState(null);
 
   useEffect(() => {
@@ -588,7 +594,9 @@ const GameMakerLab = () => {
     setSavedProjects(projects);
     setSaveStatus('saved');
     setTimeout(() => setSaveStatus(null), 1500);
-  }, [projectId, projectName]);
+    const blob = new Blob([JSON.stringify({ workspace: state, assets: project.assets, projectName })], { type: 'application/json' });
+    pushToServer(projectName, blob, `${projectName || 'game-maker'}.json`);
+  }, [projectId, projectName, pushToServer]);
 
   const handleLoadProject = useCallback(async (project) => {
     handleReset();
@@ -825,6 +833,13 @@ const GameMakerLab = () => {
   }, [handleSaveProject, showProjects, showHelp, soundAddDialog, cancelSoundAdd, spriteAddDialog, cancelSpriteAdd]);
 
   return (
+    <LabAnnotationOverlay
+      provider={classroomContext ? provider : null}
+      actorId={getLocalActorId() ?? user?.id ?? ''}
+      actorName={user?.firstName ?? user?.email?.split('@')[0] ?? 'Student'}
+      isInstructor={false}
+      enabled={!!classroomContext && !!provider}
+    >
     <div className="game-maker-lab">
       {/* Top Bar */}
       <div className="gml-topbar">
@@ -854,7 +869,32 @@ const GameMakerLab = () => {
           </div>
 
           <div className="gml-separator" />
+        </div>
 
+        <div className="gml-controls-center">
+          <Tippy content="Click to rename project" {...tipProps}>
+            <input
+              className="gml-project-name gml-project-name-topbar"
+              value={projectName}
+              onChange={(e) => setProjectName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
+              spellCheck={false}
+              maxLength={40}
+            />
+          </Tippy>
+          <Tippy content="My Projects" {...tipProps}>
+            <button
+              className="gml-btn"
+              onClick={() => { setSavedProjects(loadProjectsFromStorage()); setShowProjects(true); }}
+            >
+              <FolderOpen size={14} /> Open
+            </button>
+          </Tippy>
+          <Tippy content="Save project (Ctrl+S)" {...tipProps}>
+            <button className="gml-btn" onClick={handleSaveProject}>
+              <Save size={14} /> {saveStatus ? 'Saved!' : 'Save'}
+            </button>
+          </Tippy>
           <Tippy content="Help" {...tipProps}>
             <button className="gml-btn" onClick={() => setShowHelp(!showHelp)}>
               <HelpCircle size={16} /> Help
@@ -879,30 +919,6 @@ const GameMakerLab = () => {
           <div className="gml-panel-header">
             <span>{viewMode === 'blocks' ? 'Blocks' : 'Generated Python'}</span>
             <div className="gml-panel-header-actions">
-              <Tippy content="Click to rename project" {...tipProps}>
-                <input
-                  className="gml-project-name"
-                  value={projectName}
-                  onChange={(e) => setProjectName(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
-                  spellCheck={false}
-                  maxLength={40}
-                />
-              </Tippy>
-              <Tippy content="Save project (Ctrl+S)" {...tipProps}>
-                <button className="gml-btn gml-btn-icon" onClick={handleSaveProject}>
-                  <Save size={14} />
-                </button>
-              </Tippy>
-              {saveStatus && <span className="gml-save-status">Saved!</span>}
-              <Tippy content="My Projects" {...tipProps}>
-                <button
-                  className="gml-btn gml-btn-icon"
-                  onClick={() => { setSavedProjects(loadProjectsFromStorage()); setShowProjects(true); }}
-                >
-                  <FolderOpen size={14} />
-                </button>
-              </Tippy>
             </div>
           </div>
 
@@ -1023,7 +1039,7 @@ const GameMakerLab = () => {
                   <div className="gml-project-actions">
                     <button className="gml-btn gml-btn-open" onClick={() => handleLoadProject(p)}>Open</button>
                     <Tippy content="Delete project" {...tipProps}>
-                      <button className="gml-project-delete" onClick={() => handleDeleteProject(p.id)}>
+                      <button className="gml-project-delete" onClick={() => setProjectPendingDelete(p)}>
                         <Trash2 size={15} />
                       </button>
                     </Tippy>
@@ -1225,8 +1241,28 @@ const GameMakerLab = () => {
           </div>
         </div>
       )}
+      <KidDialog
+        isOpen={Boolean(projectPendingDelete)}
+        onClose={() => setProjectPendingDelete(null)}
+        onConfirm={() => {
+          if (!projectPendingDelete?.id) return;
+          handleDeleteProject(projectPendingDelete.id);
+          setProjectPendingDelete(null);
+        }}
+        title="Delete project?"
+        description={
+          <>
+            Are you sure you want to delete{" "}
+            <strong>{projectPendingDelete?.name ?? 'this project'}</strong>? This
+            cannot be undone.
+          </>
+        }
+        confirmLabel="Delete"
+        cancelLabel="Keep project"
+      />
       {panel}
     </div>
+    </LabAnnotationOverlay>
   );
 };
 

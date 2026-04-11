@@ -118,6 +118,26 @@
   margin-top: -2px;
 }
 
+.sa-filter-row--dates {
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.sa-date-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary, #64748b);
+}
+
+.sa-date-input {
+  border: 1px solid var(--color-border, #d1d5db);
+  border-radius: 8px;
+  padding: 4px 8px;
+  font: inherit;
+}
+
 .sa-filter-btn {
   padding: 5px 16px;
   border-radius: 999px;
@@ -254,12 +274,35 @@
   background: var(--color-primary-light, #dbeafe);
 }
 
+.sa-pager {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sa-pager__meta {
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary, #64748b);
+}
+
 .sa-done-pill {
   flex-shrink: 0;
   padding: 5px 12px;
   border-radius: 999px;
   background: #dcfce7;
   color: #15803d;
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
+.sa-readonly-pill {
+  flex-shrink: 0;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: var(--color-surface-muted, #f1f5f9);
+  color: var(--color-text-muted, #64748b);
   font-size: 0.8125rem;
   font-weight: 700;
 }

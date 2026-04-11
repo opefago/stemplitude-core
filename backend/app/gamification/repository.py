@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.classrooms.models import ClassroomSessionEvent, ClassroomSessionPresence
 from app.labs.models import Project
 from app.progress.models import Attendance, LabProgress, LessonProgress
+from app.students.models import StudentMembership
 
 from .models import (
     BadgeDefinition,
@@ -78,6 +79,18 @@ class GamificationRepository:
 
     # ── Streaks ───────────────────────────────────────────────────────────────
 
+    async def student_membership_exists(
+        self, student_id: uuid.UUID, tenant_id: uuid.UUID
+    ) -> bool:
+        result = await self.db.execute(
+            select(StudentMembership.id).where(
+                StudentMembership.student_id == student_id,
+                StudentMembership.tenant_id == tenant_id,
+                StudentMembership.is_active.is_(True),
+            )
+        )
+        return result.scalar_one_or_none() is not None
+
     async def get_or_create_streak(self, student_id: uuid.UUID, tenant_id: uuid.UUID) -> Streak:
         result = await self.db.execute(
             select(Streak).where(
@@ -107,8 +120,15 @@ class GamificationRepository:
         tenant_id: uuid.UUID,
         *,
         calendar_tz: str = "UTC",
-    ) -> Streak:
+    ) -> Streak | None:
         """Advance streak using *calendar* dates in ``calendar_tz`` (IANA), not UTC alone."""
+        if not await self.student_membership_exists(student_id, tenant_id):
+            logger.debug(
+                "streak_update skipped missing_or_inactive_student_membership student=%s tenant=%s",
+                student_id,
+                tenant_id,
+            )
+            return None
         streak = await self.get_or_create_streak(student_id, tenant_id)
         try:
             tz = ZoneInfo((calendar_tz or "UTC").strip() or "UTC")

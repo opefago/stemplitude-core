@@ -444,7 +444,12 @@ async def load_parent_child_assignment_grades(
     total = int(await db.scalar(count_q) or 0)
 
     list_q = (
-        select(ClassroomSessionEvent, Classroom.name, ClassroomSession)
+        select(
+            ClassroomSessionEvent,
+            Classroom.name,
+            ClassroomSession.session_start,
+            ClassroomSession.session_end,
+        )
         .join(Classroom, Classroom.id == ClassroomSessionEvent.classroom_id)
         .join(
             ClassroomStudent,
@@ -470,8 +475,13 @@ async def load_parent_child_assignment_grades(
     rows = (await db.execute(list_q)).all()
 
     grades: list[ParentAssignmentGradeRow] = []
-    for ev, classroom_name, session in rows:
-        meta = ev.metadata_ or {}
+    for ev, classroom_name, session_start, session_end in rows:
+        if session_start is None:
+            session_start = ev.created_at
+        if session_end is None:
+            session_end = session_start
+        meta_raw = ev.metadata_
+        meta = meta_raw if isinstance(meta_raw, dict) else {}
         sc = meta.get("score")
         try:
             score = int(sc) if sc is not None else 0
@@ -498,9 +508,9 @@ async def load_parent_child_assignment_grades(
                 classroom_id=ev.classroom_id,
                 classroom_name=cname.strip() or "Class",
                 session_id=ev.session_id,
-                session_start=session.session_start,
-                session_end=session.session_end,
-                session_display_title=session.display_title,
+                session_start=session_start,
+                session_end=session_end,
+                session_display_title=None,
                 rubric=rub_out,
             )
         )

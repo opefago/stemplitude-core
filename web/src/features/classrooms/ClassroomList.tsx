@@ -4,6 +4,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { MoreVertical, Plus, Search, Pencil, Trash2 } from "lucide-react";
 import { KidDropdown, ModalDialog } from "../../components/ui";
 import { useAuth } from "../../providers/AuthProvider";
+import { useChildContextStudentId } from "../../lib/childContext";
 import {
   deleteClassroom,
   listClassrooms,
@@ -43,6 +44,7 @@ function deriveStatus(c: ClassroomRecord): ClassroomStatus {
 
 export function ClassroomList() {
   const { role, isSuperAdmin, subType } = useAuth();
+  const childContextStudentId = useChildContextStudentId();
   const navigate = useNavigate();
   const location = useLocation();
   const [search, setSearch] = useState("");
@@ -65,8 +67,13 @@ export function ClassroomList() {
   const canManageClassrooms =
     isSuperAdmin || role === "admin" || role === "owner" || role === "instructor";
   const canCreateClassrooms = canManageClassrooms || role === "homeschool_parent";
+  const isGuardianLearnerMode =
+    Boolean(childContextStudentId) &&
+    subType === "user" &&
+    (role === "parent" || role === "homeschool_parent");
   const useGuardianClassroomList =
     !canManageClassrooms &&
+    !isGuardianLearnerMode &&
     subType === "user" &&
     (role === "parent" || role === "homeschool_parent");
   const currentTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -323,7 +330,7 @@ export function ClassroomList() {
             ) : filtered.length === 0 ? (
               <tr>
                 <td colSpan={5} className="classroom-list__table-empty">
-                  {subType === "student"
+                  {subType === "student" || isGuardianLearnerMode
                     ? "No classrooms assigned yet."
                     : "No classrooms yet. Create one to schedule recurring sessions."}
                 </td>

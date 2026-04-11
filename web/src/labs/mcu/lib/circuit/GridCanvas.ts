@@ -206,35 +206,6 @@ export class GridCanvas {
       this.coordinateLabels.push(label);
     }
 
-    // Origin label - show (0,0) at the center
-    const originLabel = new Text({
-      text: "(0,0)",
-      style: {
-        fontSize: 10,
-        fill: 0x888888, // Slightly brighter for the origin
-        fontFamily: "Arial",
-        fontWeight: "bold",
-      },
-    });
-
-    // Position the origin label at the screen center
-    const screenCenterX = this.width / 2;
-    const screenCenterY = this.height / 2;
-    const originScreenX = screenCenterX - cameraOffsetX;
-    const originScreenY = screenCenterY - cameraOffsetY;
-
-    // Only show origin label if it's visible on screen
-    if (
-      originScreenX >= 0 &&
-      originScreenX <= this.width &&
-      originScreenY >= 0 &&
-      originScreenY <= this.height
-    ) {
-      originLabel.anchor.set(0.5, 0.5);
-      originLabel.position.set(originScreenX, originScreenY);
-      this.container.addChild(originLabel);
-      this.coordinateLabels.push(originLabel);
-    }
   }
 
   /**

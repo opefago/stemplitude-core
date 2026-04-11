@@ -1,9 +1,13 @@
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Zap, Cpu, Play, Lock, ArrowRight, Wrench, Gamepad2, Puzzle, Cuboid } from 'lucide-react';
+import { readLabLastOpenedAt } from '../lib/learnerLabStorage';
+import { resolveLabRoute } from '../features/labs/labRouting';
 import './Playground.css';
 
 const Playground = () => {
+  const navigate = useNavigate();
   const labs = [
     {
       id: 'circuit-maker',
@@ -81,6 +85,20 @@ const Playground = () => {
       path: '/playground/design-maker'
     },
   ];
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('resume') !== 'last') return;
+    let best = { id: null, ts: 0 };
+    for (const lab of labs) {
+      const t = readLabLastOpenedAt(lab.id);
+      if (t > best.ts) best = { id: lab.id, ts: t };
+    }
+    if (!best.id) return;
+    const resolved = resolveLabRoute(best.id);
+    if (!resolved) return;
+    navigate(resolved.route, { replace: true });
+  }, [navigate]);
 
   return (
     <div className="playground-page">

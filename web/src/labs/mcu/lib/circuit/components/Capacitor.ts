@@ -1,11 +1,17 @@
+import * as PIXI from "pixi.js";
 import { Graphics } from "pixi.js";
 import { CircuitComponent, CircuitProperties } from "../CircuitComponent";
+import {
+  applyIECSchematicTransform,
+  drawCapacitorPolarizedIEC,
+} from "../rendering/iecSchematicDraw";
 
 export interface CapacitorProperties extends CircuitProperties {
   capacitance: number; // Farads
   voltageRating: number; // Maximum voltage
   dielectric: string; // Dielectric material
   esr: number; // Equivalent Series Resistance (Ohms)
+  leakageResistance: number; // Equivalent parallel leakage resistance (Ohms)
   charge: number; // Current charge (Coulombs)
 }
 
@@ -32,6 +38,7 @@ export class Capacitor extends CircuitComponent {
       voltageRating,
       dielectric: "electrolytic",
       esr: 0.1, // 0.1Ω typical ESR
+      leakageResistance: 1e9, // 1GΩ default leakage path
       charge: 0,
       initialCondition: 0, // Initial voltage
     };
@@ -51,7 +58,7 @@ export class Capacitor extends CircuitComponent {
       },
       {
         id: "negative",
-        position: { x: 25, y: 0 },
+        position: { x: 30, y: 0 },
         voltage: 0,
         current: 0,
         connections: [],
@@ -62,82 +69,68 @@ export class Capacitor extends CircuitComponent {
   protected createVisuals(): void {
     this.componentGraphics.clear();
 
-    // Draw capacitor symbol (two parallel plates) - bright cyan for visibility
-    // Left terminal
-    this.componentGraphics.moveTo(-25, 0);
-    this.componentGraphics.lineTo(-10, 0);
-    this.componentGraphics.stroke({ width: 3, color: 0x44dddd });
+    const g = this.componentGraphics;
+    const isBurnt = this.circuitProps?.burnt ?? false;
+    const voltage = this.circuitProps?.voltage ?? 0;
+    const voltageRating = this.capacitorProps?.voltageRating ?? 25;
+    const vratio = voltageRating > 0 ? Math.abs(voltage) / voltageRating : 0;
 
-    // Left plate (positive)
-    this.componentGraphics.moveTo(-10, -15);
-    this.componentGraphics.lineTo(-10, 15);
-    this.componentGraphics.stroke({ width: 3, color: 0x44dddd });
+    let color = 0x44dddd;
+    if (isBurnt) {
+      color = 0x444444;
+    } else if (vratio > 1.0) {
+      color = 0xff4444;
+    } else if (vratio > 0.9) {
+      color = 0xffaa00;
+    }
 
-    // Right plate (negative)
-    this.componentGraphics.moveTo(10, -15);
-    this.componentGraphics.lineTo(10, 15);
-    this.componentGraphics.stroke({ width: 3, color: 0x44dddd });
-
-    // Right terminal
-    this.componentGraphics.moveTo(10, 0);
-    this.componentGraphics.lineTo(25, 0);
-    this.componentGraphics.stroke({ width: 3, color: 0x44dddd });
-
-    // Draw terminal dots
-    this.componentGraphics.circle(-25, 0, 2);
-    this.componentGraphics.fill(0x666666);
-    this.componentGraphics.circle(25, 0, 2);
-    this.componentGraphics.fill(0x666666);
-
-    // Draw polarity indicators for electrolytic capacitors
+    const sw = 3;
     const dielectric = this.capacitorProps?.dielectric ?? "ceramic";
+
     if (dielectric === "electrolytic") {
-      this.drawPolarityMarkers();
+      g.tint = color;
+      drawCapacitorPolarizedIEC(g);
+      applyIECSchematicTransform(g, Math.sign(g.scale.x) || 1);
+      g.hitArea = new PIXI.Rectangle(0, 0, 150, 150);
+      if (isBurnt) {
+        g.moveTo(-40, -40);
+        g.lineTo(40, 40);
+        g.moveTo(-40, 40);
+        g.lineTo(40, -40);
+        g.stroke({ width: 4, color: 0xff0000 });
+      }
+    } else {
+      g.moveTo(-30, 0);
+      g.lineTo(-8, 0);
+      g.stroke({ width: sw, color });
+      g.moveTo(-8, -15);
+      g.lineTo(-8, 15);
+      g.stroke({ width: 4, color });
+      g.moveTo(8, -15);
+      g.lineTo(8, 15);
+      g.stroke({ width: 4, color });
+      g.moveTo(8, 0);
+      g.lineTo(30, 0);
+      g.stroke({ width: sw, color });
+      if (isBurnt) {
+        g.moveTo(-12, -12);
+        g.lineTo(12, 12);
+        g.moveTo(-12, 12);
+        g.lineTo(12, -12);
+        g.stroke({ width: 3, color: 0xff0000 });
+      }
     }
 
     this.updateLabels();
   }
 
-  private drawPolarityMarkers(): void {
-    // Draw + symbol near positive terminal
-    this.componentGraphics.lineStyle(2, 0xff0000);
-    this.componentGraphics.moveTo(-18, -5);
-    this.componentGraphics.lineTo(-18, 5);
-    this.componentGraphics.moveTo(-23, 0);
-    this.componentGraphics.lineTo(-13, 0);
-
-    // Draw - symbol near negative terminal
-    this.componentGraphics.moveTo(13, 0);
-    this.componentGraphics.lineTo(23, 0);
-  }
-
   protected updateVisuals(deltaTime: number): void {
-    // Update capacitor appearance based on charge and voltage
-    let plateColor = 0x333333; // Normal
+    this.createVisuals();
 
     if (this.circuitProps.burnt) {
-      // Burnt capacitor (overvoltage)
-      plateColor = 0x000000;
-      this.componentGraphics.tint = 0x000000;
-
       if (this.burnAnimation > 0) {
-        // Add smoke/burn effect
         this.drawBurnEffect();
       }
-    } else if (
-      Math.abs(this.circuitProps.voltage) >
-      (this.capacitorProps?.voltageRating ?? 25) * 0.9
-    ) {
-      // Near voltage limit - warning color
-      plateColor = 0xff6600;
-    } else if (Math.abs(this.capacitorProps?.charge ?? 0) > 0) {
-      // Charged capacitor - slight blue tint
-      const charge = this.capacitorProps?.charge ?? 0;
-      const capacitance = this.capacitorProps?.capacitance ?? 100e-6;
-      const voltageRating = this.capacitorProps?.voltageRating ?? 25;
-      const chargeRatio = Math.abs(charge) / (capacitance * voltageRating);
-      const intensity = Math.min(chargeRatio, 1) * 0.3;
-      plateColor = this.interpolateColor(0x333333, 0x0066ff, intensity);
     }
 
     // Current flow animation (charging/discharging)
@@ -193,7 +186,7 @@ export class Capacitor extends CircuitComponent {
     // Draw moving charge indicators
     for (let i = 0; i < 4; i++) {
       const progress = (i / 4 + animationOffset * flowDirection) % 1;
-      const x = -25 + progress * 50;
+      const x = -30 + progress * 60;
       flowGraphics.drawCircle(x, -8, 1.5);
     }
 
@@ -242,25 +235,22 @@ export class Capacitor extends CircuitComponent {
     const sin = Math.sin((this.orientation * Math.PI) / 180);
 
     // Positive terminal
-    this.nodes[0].position.x = -25 * cos - 0 * sin;
-    this.nodes[0].position.y = -25 * sin + 0 * cos;
+    this.nodes[0].position.x = -30 * cos - 0 * sin;
+    this.nodes[0].position.y = -30 * sin + 0 * cos;
 
     // Negative terminal
-    this.nodes[1].position.x = 25 * cos - 0 * sin;
-    this.nodes[1].position.y = 25 * sin + 0 * cos;
+    this.nodes[1].position.x = 30 * cos - 0 * sin;
+    this.nodes[1].position.y = 30 * sin + 0 * cos;
   }
 
   protected updateNodeVoltages(): void {
-    // For a capacitor, voltage across plates equals stored voltage
-    this.nodes[0].voltage = this.circuitProps.voltage;
-    this.nodes[1].voltage = 0; // Reference
-
-    // Update node currents (same for both terminals)
+    // Node voltages are solver-driven; only sync terminal currents for display.
     this.nodes[0].current = this.circuitProps.current;
     this.nodes[1].current = -this.circuitProps.current;
   }
 
   public getImpedance(frequency: number): number {
+    if (this.circuitProps.burnt) return 1e9;
     if (frequency === 0) {
       return Infinity; // DC: capacitor is open circuit
     }

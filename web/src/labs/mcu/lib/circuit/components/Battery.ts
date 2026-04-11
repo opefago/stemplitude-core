@@ -1,6 +1,12 @@
 import { Graphics, Text } from "pixi.js";
 import { CircuitComponent, CircuitProperties } from "../CircuitComponent";
 
+// Keep warnings/errors, silence verbose dev logs for this module.
+const console = {
+  ...globalThis.console,
+  log: (..._args: unknown[]) => {},
+};
+
 export interface BatteryProperties extends CircuitProperties {
   voltage: number; // Terminal voltage (V)
   capacity: number; // Capacity in Ah
@@ -125,11 +131,14 @@ export class Battery extends CircuitComponent {
     if (foundPlusLabel) {
       this.plusLabel = foundPlusLabel;
     } else {
-      this.plusLabel = new Text("+", {
-        fontFamily: "Arial",
-        fontSize: 16,
-        fontWeight: "bold",
-        fill: 0xffffff,
+      this.plusLabel = new Text({
+        text: "+",
+        style: {
+          fontFamily: "Arial",
+          fontSize: 16,
+          fontWeight: "bold",
+          fill: 0xffffff,
+        },
       });
       this.plusLabel.anchor.set(0.5);
       this.labelContainer.addChild(this.plusLabel);
@@ -139,11 +148,14 @@ export class Battery extends CircuitComponent {
     if (foundMinusLabel) {
       this.minusLabel = foundMinusLabel;
     } else {
-      this.minusLabel = new Text("-", {
-        fontFamily: "Arial",
-        fontSize: 16,
-        fontWeight: "bold",
-        fill: 0xffffff,
+      this.minusLabel = new Text({
+        text: "-",
+        style: {
+          fontFamily: "Arial",
+          fontSize: 16,
+          fontWeight: "bold",
+          fill: 0xffffff,
+        },
       });
       this.minusLabel.anchor.set(0.5);
       this.labelContainer.addChild(this.minusLabel);
@@ -281,7 +293,11 @@ export class Battery extends CircuitComponent {
       (this.batteryProps?.chargeLevel ?? 1.0) * 100
     );
     const voltage = this.batteryProps?.voltage ?? this.circuitProps?.value ?? 9;
-    this.valueText.text = `${voltage}V (${chargePercent}%)`;
+    const vDisp =
+      typeof voltage === "number" && Number.isFinite(voltage)
+        ? voltage.toFixed(2)
+        : String(voltage);
+    this.valueText.text = `${vDisp}V (${chargePercent}%)`;
     this.valueText.style = {
       fontSize: 8,
       fill: 0xcccccc,
@@ -334,9 +350,11 @@ export class Battery extends CircuitComponent {
     // Negative terminal (reference)
     this.nodes[1].voltage = 0;
 
-    // Update node currents (current flows out of positive, into negative)
-    this.nodes[0].current = -this.circuitProps.current; // Current flows out
-    this.nodes[1].current = this.circuitProps.current; // Current flows in
+    // MNA j_vs is negative when battery drives current (exits + terminal).
+    // Convention: positive node.current = enters terminal from wire.
+    // j_vs < 0 → negative at + → exits terminal into wire ✓
+    this.nodes[0].current = this.circuitProps.current;
+    this.nodes[1].current = -this.circuitProps.current;
   }
 
   public getImpedance(_frequency: number = 0): number {

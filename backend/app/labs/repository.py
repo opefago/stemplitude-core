@@ -2,10 +2,12 @@
 
 from uuid import UUID
 
-from sqlalchemy import select, union_all
+from sqlalchemy import exists, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.classrooms.models import ClassroomStudent
+from app.students.models import ParentStudent, Student
+from app.tenants.models import Tenant
 from app.labs.models import LabAssignment, Project, SubmissionFeedback
 
 
@@ -45,9 +47,38 @@ class ProjectRepository:
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
+    async def list_by_session(
+        self,
+        tenant_id: UUID,
+        session_id: str,
+        *,
+        classroom_id: str | None = None,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> list[Project]:
+        """List projects that were created during a classroom session."""
+        from sqlalchemy import cast, String
+        query = select(Project).where(
+            Project.tenant_id == tenant_id,
+            cast(Project.metadata_["session_id"].astext, String) == session_id,
+        )
+        if classroom_id:
+            query = query.where(
+                cast(Project.metadata_["classroom_id"].astext, String) == classroom_id,
+            )
+        query = query.order_by(Project.submitted_at.desc()).offset(skip).limit(limit)
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
     async def create(self, project: Project) -> Project:
         """Create a project."""
         self.session.add(project)
+        await self.session.flush()
+        await self.session.refresh(project)
+        return project
+
+    async def update(self, project: Project) -> Project:
+        """Persist changes for an existing project."""
         await self.session.flush()
         await self.session.refresh(project)
         return project
@@ -56,6 +87,57 @@ class ProjectRepository:
         """Delete a project."""
         await self.session.delete(project)
         await self.session.flush()
+
+    async def list_revisions(
+        self,
+        project_id: UUID,
+        tenant_id: UUID,
+        *,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> list[Project]:
+        """List revision lineage: base project + derived checkpoints."""
+        query = (
+            select(Project)
+            .where(
+                Project.tenant_id == tenant_id,
+                (Project.id == project_id) | (Project.source_project_id == project_id),
+            )
+            .order_by(Project.updated_at.desc(), Project.submitted_at.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def list_public_explore_candidates(
+        self,
+        *,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> list[tuple[Project, Student, dict | None]]:
+        """List newest candidate public projects with creator + tenant settings.
+
+        Filtering for published/public flags happens in service so we can support
+        multiple metadata key shapes without hard-coding JSONB operators here.
+        """
+        blocked_parent_link = exists(
+            select(1).where(
+                ParentStudent.student_id == Project.student_id,
+                ParentStudent.allow_public_game_publishing.is_(False),
+            )
+        )
+        query = (
+            select(Project, Student, Tenant.settings)
+            .join(Student, Student.id == Project.student_id)
+            .join(Tenant, Tenant.id == Project.tenant_id)
+            .where(~blocked_parent_link)
+            .order_by(Project.submitted_at.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        result = await self.session.execute(query)
+        return list(result.all())
 
 
 class LabAssignmentRepository:

@@ -6,7 +6,7 @@
   position: fixed;
   bottom: 24px;
   right: 24px;
-  z-index: 200;
+  z-index: 10100;
   width: 340px;
   max-height: 480px;
   display: flex;

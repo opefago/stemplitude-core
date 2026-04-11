@@ -10,11 +10,15 @@
  *
  * Writer mode (readOnly=false): only authorised actors for the room.
  * Observer mode (readOnly=true): instructor or enrolled student.
+ *
+ * Token refresh: when the WebSocket disconnects (e.g. expired JWT), the hook
+ * reads a fresh token from getAccessToken() and reconnects automatically.
  */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import * as Y from "yjs";
 import { WebsocketProvider } from "y-websocket";
 import { decodeToken, getAccessToken } from "../../lib/tokens";
+import { getChildContextStudentId } from "../../lib/childContext";
 
 export interface LabSyncHandle {
   ydoc: Y.Doc;
@@ -62,6 +66,9 @@ export function getLocalActorId(): string | null {
   return payload?.sub ?? null;
 }
 
+const TOKEN_REFRESH_CHECK_MS = 30_000;
+const MAX_DISCONNECT_BEFORE_REFRESH_MS = 5_000;
+
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
 /**
@@ -80,17 +87,44 @@ export function useLabSync(
   readOnly = false,
   enabled = true,
 ): LabSyncHandle {
-  // Backward-compat: if no explicit roomId, derive a solo room from the
-  // current user's own actor ID (the original behaviour).
+  // When a parent is in learner view (child context), use the child's student
+  // ID so the room matches what the observer connects to.
+  const effectiveActorId = getChildContextStudentId() || getLocalActorId() || "";
   const resolvedRoomId = roomId ?? (
     !readOnly && sessionId
-      ? buildSoloRoomId(getLocalActorId() ?? "", sessionId)
+      ? buildSoloRoomId(effectiveActorId, sessionId)
       : null
   );
 
   const ydocRef = useRef<Y.Doc>(new Y.Doc());
   const providerRef = useRef<WebsocketProvider | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [tokenEpoch, setTokenEpoch] = useState(0);
+  const disconnectedAtRef = useRef<number | null>(null);
+
+  const refreshTokenIfNeeded = useCallback(() => {
+    const provider = providerRef.current;
+    if (!provider || provider.wsconnected) {
+      disconnectedAtRef.current = null;
+      return;
+    }
+
+    if (disconnectedAtRef.current === null) {
+      disconnectedAtRef.current = Date.now();
+      return;
+    }
+
+    if (Date.now() - disconnectedAtRef.current < MAX_DISCONNECT_BEFORE_REFRESH_MS) {
+      return;
+    }
+
+    const freshToken = getAccessToken() ?? "";
+    const currentToken = (provider.params as Record<string, string>).token ?? "";
+    if (freshToken && freshToken !== currentToken) {
+      disconnectedAtRef.current = null;
+      setTokenEpoch((e) => e + 1);
+    }
+  }, []);
 
   useEffect(() => {
     if (!enabled || !resolvedRoomId) return;
@@ -106,20 +140,35 @@ export function useLabSync(
 
     provider.on("status", ({ status }: { status: string }) => {
       setIsConnected(status === "connected");
+      if (status === "connected") {
+        disconnectedAtRef.current = null;
+      }
     });
 
     if (readOnly) {
       provider.awareness.setLocalStateField("isObserver", true);
     }
 
+    const refreshTimer = window.setInterval(refreshTokenIfNeeded, TOKEN_REFRESH_CHECK_MS);
+
     return () => {
-      provider.disconnect();
-      provider.destroy();
+      window.clearInterval(refreshTimer);
+      try {
+        provider.disconnect();
+      } catch {
+        // Ignore close races during unmount/StrictMode.
+      }
+      try {
+        provider.destroy();
+      } catch {
+        // Ignore duplicate cleanup calls.
+      }
       providerRef.current = null;
       setIsConnected(false);
+      disconnectedAtRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resolvedRoomId, readOnly, enabled]);
+  }, [resolvedRoomId, readOnly, enabled, tokenEpoch]);
 
   return {
     ydoc: ydocRef.current,

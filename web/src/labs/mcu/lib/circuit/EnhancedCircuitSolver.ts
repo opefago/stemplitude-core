@@ -6,10 +6,50 @@ import { Battery } from "./components/Battery";
 import { Inductor } from "./components/Inductor";
 import { LED } from "./components/LED";
 import { Switch } from "./components/Switch";
+import { SpdtSwitch } from "./components/SpdtSwitch";
+import { Potentiometer } from "./components/Potentiometer";
+import { ZenerDiode } from "./components/ZenerDiode";
 import { Ammeter } from "./components/Ammeter";
 import { ACSource } from "./components/ACSource";
 import { NPNTransistor } from "./components/NPNTransistor";
 import { PNPTransistor } from "./components/PNPTransistor";
+import type { SimulationSnapshot } from "./types/SimulationSnapshot";
+import { compileInteractiveWireNetGraph } from "./wire/netlistCompiler";
+import { MnaStampWriter } from "./mna/MnaStampWriter";
+import { CircuitNetlist } from "./mna/CircuitNetlist";
+import { MnaAssembler } from "./mna/MnaAssembler";
+import {
+  populateNetlistFromComponents,
+  VOLTAGE_SOURCE_COMPONENT_TYPES,
+} from "./mna/ComponentStampRegistry";
+import {
+  stampComparatorSource,
+  stampOpAmpSource,
+  type BehavioralSourceStampContext,
+} from "./mna/domains/linear";
+import {
+  stampLogicGateDigital,
+  stampTimer555Digital,
+  type BehavioralDigitalStampContext,
+} from "./mna/domains/digital";
+import {
+  stampAcSource,
+  stampRelay,
+  type LinearBehavioralStampContext,
+} from "./mna/domains/linear";
+import {
+  stampBjtSwitchModel,
+  stampLedCompanion,
+  stampMosfetSwitch,
+  stampZenerCompanion,
+  type NonlinearStampContext,
+} from "./mna/domains/nonlinear";
+
+// Keep warnings/errors, silence verbose dev logs for this module.
+const console = {
+  ...globalThis.console,
+  log: (..._args: unknown[]) => {},
+};
 
 /**
  * Enhanced Circuit Solver using Modified Nodal Analysis (MNA) with MathJS
@@ -21,11 +61,30 @@ import { PNPTransistor } from "./components/PNPTransistor";
  * - Accurate voltage and current calculations
  */
 export class EnhancedCircuitSolver {
+  private static readonly SOLVER_TUNING = {
+    maxIterations: 24,
+    // Trigger divergence only on meaningful growth to avoid over-reacting to noise.
+    divergenceGrowthFactor: 1.2,
+    divergenceRecoveryFactor: 0.9,
+    backoffTriggerCount: 3,
+    backoffScale: 0.6,
+    recoveryScale: 1.35,
+    minDtFloorScale: 1e-5,
+    maxStateFlipsPerSubstep: 3,
+  } as const;
+
   private components: Map<string, CircuitComponent>;
   private nodeMap: Map<string, number>; // Global node ID -> matrix index
   private nodeConnections: Map<string, Set<string>>; // Track which nodes are connected
   private voltageSourceCount: number = 0;
   private voltageSourceMap: Map<string, number>; // Component ID -> voltage source index
+  private comparatorState: Map<string, boolean>;
+  private relayState: Map<string, { drive: number; closed: boolean }>;
+  private spdtState: Map<string, number>;
+  private timer555State: Map<
+    string,
+    { latchSet: boolean; outputHigh: boolean; ctrlFiltered: number }
+  >;
 
   // MNA Matrices
   private G: number[][]; // Conductance matrix (n×n)
@@ -40,12 +99,25 @@ export class EnhancedCircuitSolver {
   private currentTime: number = 0;
   private previousState: Map<string, { voltage: number; current: number }>;
 
+  // Store last solve results for snapshot export
+  private lastSolveNodeVoltages: number[] = [];
+  private lastSolveSourceCurrents: number[] = [];
+  private inTransientStamping: boolean = false;
+  private stateFlipCounts: Map<string, number> = new Map();
+  private solverTelemetryEnabled: boolean = false;
+  private solverTelemetryFrameCounter: number = 0;
+  private stampWriter?: MnaStampWriter;
+
   constructor() {
     this.components = new Map();
     this.nodeMap = new Map();
     this.nodeConnections = new Map();
     this.previousState = new Map();
     this.voltageSourceMap = new Map();
+    this.comparatorState = new Map();
+    this.relayState = new Map();
+    this.spdtState = new Map();
+    this.timer555State = new Map();
 
     // Ground node is always index 0 (not included in matrix)
     this.nodeMap.set("ground", 0);
@@ -81,6 +153,11 @@ export class EnhancedCircuitSolver {
 
     // Remove component
     this.components.delete(componentId);
+    this.comparatorState.delete(componentId);
+    this.relayState.delete(componentId);
+    this.spdtState.delete(componentId);
+    this.timer555State.delete(componentId);
+    this.stateFlipCounts.clear();
 
     // Rebuild node map (simpler than selective removal)
     this.rebuildNodeMap();
@@ -114,6 +191,65 @@ export class EnhancedCircuitSolver {
     console.log(`🔗 SOLVER: Disconnected ${globalNode1} ⨯ ${globalNode2}`);
   }
 
+  /** Longest registered component id such that global id is `{id}_{node}`. */
+  private componentIdFromGlobalNodeId(globalNodeId: string): string | undefined {
+    let best: string | undefined;
+    let bestLen = -1;
+    for (const id of this.components.keys()) {
+      if (!globalNodeId.startsWith(`${id}_`)) continue;
+      if (id.length > bestLen) {
+        best = id;
+        bestLen = id.length;
+      }
+    }
+    return best;
+  }
+
+  private linkSolverNodePair(globalNode1: string, globalNode2: string): void {
+    if (globalNode1 === globalNode2) return;
+    if (!this.nodeConnections.has(globalNode1)) {
+      this.nodeConnections.set(globalNode1, new Set());
+    }
+    if (!this.nodeConnections.has(globalNode2)) {
+      this.nodeConnections.set(globalNode2, new Set());
+    }
+    this.nodeConnections.get(globalNode1)!.add(globalNode2);
+    this.nodeConnections.get(globalNode2)!.add(globalNode1);
+  }
+
+  /**
+   * Rebuild the undirected connection graph from interactive schematic wires (components + junctions).
+   * Replaces incremental connectNodes state so T-joints and multi-leg wires stay KCL-consistent.
+   *
+   * Net extraction follows the usual simulator preprocessing: undirected graph on component pins plus
+   * ideal junction vertices; each wire’s ordered `nodes` add edges between consecutive vertices.
+   * Junctions sharing the same snapped grid cell are merged (see CircuitJS-style coincident nodes).
+   */
+  public rebuildConnectionsFromInteractiveWires(
+    wires: Map<
+      string,
+      {
+        nodes: Array<{
+          type: string;
+          id: string;
+          componentId?: string;
+          nodeId?: string;
+          x?: number;
+          y?: number;
+        }>;
+      }
+    >,
+    options?: { gridPitchPx?: number },
+  ): void {
+    this.nodeConnections.clear();
+    const { edges } = compileInteractiveWireNetGraph(wires, options);
+    for (const [a, b] of edges) {
+      this.linkSolverNodePair(a, b);
+    }
+
+    this.rebuildNodeMap();
+  }
+
   /**
    * Connect two component nodes together
    */
@@ -128,16 +264,7 @@ export class EnhancedCircuitSolver {
 
     console.log(`🔗 SOLVER: Connecting ${globalNode1} ↔ ${globalNode2}`);
 
-    // Track connection
-    if (!this.nodeConnections.has(globalNode1)) {
-      this.nodeConnections.set(globalNode1, new Set());
-    }
-    if (!this.nodeConnections.has(globalNode2)) {
-      this.nodeConnections.set(globalNode2, new Set());
-    }
-
-    this.nodeConnections.get(globalNode1)!.add(globalNode2);
-    this.nodeConnections.get(globalNode2)!.add(globalNode1);
+    this.linkSolverNodePair(globalNode1, globalNode2);
 
     console.log(
       `   Before rebuild: ${this.nodeConnections.size} tracked nodes`
@@ -166,6 +293,7 @@ export class EnhancedCircuitSolver {
         );
       }
     });
+    this.warnAboutBypassedComponents();
 
     try {
       // Reset all node voltages to 0V before starting iterations
@@ -236,18 +364,158 @@ export class EnhancedCircuitSolver {
   }
 
   /**
+   * Diagnostics: detect components whose terminals collapsed to one electrical node.
+   * This usually means an explicit short path is bypassing that part.
+   */
+  private warnAboutBypassedComponents(): void {
+    for (const component of this.components.values()) {
+      const nodes = component.getNodes();
+      if (nodes.length < 2) continue;
+      const merged = new Set<number>();
+      for (const n of nodes) {
+        const idx = this.nodeMap.get(`${component.getName()}_${n.id}`);
+        if (idx !== undefined) merged.add(idx);
+      }
+      if (merged.size === 1) {
+        console.warn(
+          `[solver] ${component.getName()} (${component.getComponentType()}) terminals are on the same net (component is bypassed by an ideal short path).`
+        );
+      }
+    }
+  }
+
+  /**
    * Perform time-domain simulation step
    */
   public simulateTimeStep(deltaTime: number): boolean {
-    this.timeStep = deltaTime;
-    this.currentTime += deltaTime;
+    const subSteps = this.recommendedSubsteps(deltaTime);
+    const baseDt = deltaTime / subSteps;
+    const minDt = Math.max(
+      1e-7,
+      deltaTime * EnhancedCircuitSolver.SOLVER_TUNING.minDtFloorScale
+    );
+    let adaptiveDt = baseDt;
+    let remaining = deltaTime;
+    let usedSubsteps = 0;
+    let backoffs = 0;
+    let convergedSubsteps = 0;
+    let maxDivergence = 0;
 
+    while (remaining > 1e-12) {
+      const dt = Math.min(adaptiveDt, remaining);
+      this.timeStep = dt;
+      const result = this.simulateSingleTimeStep(dt);
+      if (!result.ok) return false;
+      usedSubsteps++;
+      if (result.converged) convergedSubsteps++;
+      maxDivergence = Math.max(maxDivergence, result.divergenceCount);
+
+      this.currentTime += dt;
+      remaining -= dt;
+
+      // Back off time step after repeated divergence in a substep.
+      if (
+        !result.converged &&
+        result.divergenceCount >= EnhancedCircuitSolver.SOLVER_TUNING.backoffTriggerCount
+      ) {
+        adaptiveDt = Math.max(
+          minDt,
+          dt * EnhancedCircuitSolver.SOLVER_TUNING.backoffScale
+        );
+        backoffs++;
+      } else if (result.converged && result.divergenceCount === 0) {
+        adaptiveDt = Math.min(
+          baseDt,
+          dt * EnhancedCircuitSolver.SOLVER_TUNING.recoveryScale
+        );
+      }
+    }
+
+    if (this.solverTelemetryEnabled) {
+      this.solverTelemetryFrameCounter++;
+      if (this.solverTelemetryFrameCounter % 60 === 0) {
+        const convergencePct =
+          usedSubsteps > 0 ? (100 * convergedSubsteps) / usedSubsteps : 100;
+        console.debug(
+          `[solver] t=${this.currentTime.toFixed(6)}s dtReq=${deltaTime.toExponential(2)} sub=${usedSubsteps}/${subSteps} conv=${convergencePct.toFixed(0)}% backoff=${backoffs} divMax=${maxDivergence}`
+        );
+      }
+    }
+    return true;
+  }
+
+  /** Dynamic substepping for sharp events (notably 555 edges). */
+  private recommendedSubsteps(deltaTime: number): number {
+    let minPeriod = Number.POSITIVE_INFINITY;
+    let edgeUrgency = 0;
+    this.components.forEach((component) => {
+      if (component.getComponentType() !== "timer555") return;
+      const props = component.getCircuitProperties() as {
+        frequency?: number;
+        mode?: string;
+      };
+      if (props.mode !== "astable") return;
+      const f = props.frequency ?? 0;
+      if (f > 0) {
+        minPeriod = Math.min(minPeriod, 1 / f);
+      }
+      edgeUrgency = Math.max(edgeUrgency, this.estimate555EdgeUrgency(component));
+    });
+    if (!Number.isFinite(minPeriod)) return edgeUrgency > 0.8 ? 4 : 1;
+
+    // Target at least ~48 points/period for stable threshold crossing behavior.
+    const pointsPerPeriod = edgeUrgency > 0.9 ? 144 : edgeUrgency > 0.6 ? 96 : 48;
+    const targetDt = minPeriod / pointsPerPeriod;
+    const raw = Math.ceil(deltaTime / Math.max(targetDt, 1e-7));
+    return Math.max(1, Math.min(raw, 64));
+  }
+
+  /**
+   * Returns 0..1 urgency score for adding transient breakpoints/substeps.
+   * High score when TRIG/THRESH/RESET are near their switching thresholds.
+   */
+  private estimate555EdgeUrgency(component: CircuitComponent): number {
+    const nodes = component.getNodes();
+    const byId = new Map(nodes.map((n) => [n.id, n.voltage]));
+    const vGnd = byId.get("gnd") ?? 0;
+    const vVcc = byId.get("vcc") ?? vGnd;
+    const vTrig = byId.get("trig") ?? vGnd;
+    const vThresh = byId.get("thresh") ?? vGnd;
+    const vRst = byId.get("rst") ?? vVcc;
+    const vCtrl = byId.get("ctrl") ?? vGnd;
+
+    const vSupply = Math.max(0, vVcc - vGnd);
+    if (vSupply < 1e-6) return 0;
+
+    const state = this.timer555State.get(component.getName());
+    const ctrlValid = Number.isFinite(vCtrl) && Math.abs(vCtrl - vGnd) > 0.05;
+    const vUpperRaw = ctrlValid
+      ? ((state?.ctrlFiltered ?? (vCtrl - vGnd)) as number)
+      : (2 / 3) * vSupply;
+    const vUpper = Math.min(Math.max(vUpperRaw, 0.2 * vSupply), 0.95 * vSupply);
+    const vLower = 0.5 * vUpper;
+
+    const dTrig = Math.abs(vTrig - vGnd - vLower);
+    const dThresh = Math.abs(vThresh - vGnd - vUpper);
+    const dReset = Math.abs(vRst - vGnd - 0.8);
+    const norm = Math.max(0.01, 0.05 * vSupply); // ~5% Vcc window
+    const d = Math.min(dTrig, dThresh, dReset);
+    return Math.max(0, Math.min(1, 1 - d / norm));
+  }
+
+  private simulateSingleTimeStep(
+    _dt: number
+  ): { ok: boolean; converged: boolean; divergenceCount: number } {
     try {
       // Iterative Newton-Raphson for non-linear components (transistors, LEDs)
       // Similar to solveDC() but preserves previous time step state for reactive components
-      const maxIterations = 20; // Increased for better convergence with high-impedance circuits
+      const maxIterations = EnhancedCircuitSolver.SOLVER_TUNING.maxIterations;
       const convergenceTolerance = 0.01; // 10mV tolerance (tight enough to ensure stability)
       const minChangeThreshold = 0.001; // 1mV minimum change to consider (ignore tiny fluctuations)
+      let converged = false;
+      let prevMaxChange = Number.POSITIVE_INFINITY;
+      let divergenceCount = 0;
+      this.stateFlipCounts.clear();
 
       // Reset node voltages to previous stable state before iteration
       // This prevents oscillations from building up
@@ -258,6 +526,8 @@ export class EnhancedCircuitSolver {
           stableVoltages.set(nodeId, node.voltage);
         });
       });
+      let bestVoltages = new Map(stableVoltages);
+      let bestMaxChange = Number.POSITIVE_INFINITY;
 
       for (let iteration = 0; iteration < maxIterations; iteration++) {
         // Store previous voltages for convergence check
@@ -274,15 +544,31 @@ export class EnhancedCircuitSolver {
         const solution = this.solveMNA();
         this.updateComponentStates(solution);
 
-        // Apply MODERATE damping to prevent oscillations (blend old and new voltages)
-        // Balance between convergence speed and stability
-        const dampingFactor = 0.5; // 50% of new solution, 50% of old (balanced)
+        // Compute raw Newton step size before damping.
+        let rawMaxChange = 0;
+        this.components.forEach((component) => {
+          component.getNodes().forEach((node) => {
+            const nodeId = `${component.getName()}_${node.id}`;
+            const oldVoltage = previousVoltages.get(nodeId) || 0;
+            rawMaxChange = Math.max(rawMaxChange, Math.abs(node.voltage - oldVoltage));
+          });
+        });
+
+        // Adaptive damping:
+        // - Large steps => stronger damping.
+        // - Repeated divergence => stronger damping.
+        // - Near convergence => lighter damping for faster finish.
+        const baseBlend =
+          rawMaxChange > 1 ? 0.2 : rawMaxChange > 0.25 ? 0.35 : rawMaxChange > 0.05 ? 0.5 : 0.7;
+        const dampingFactor = Math.max(
+          0.15,
+          Math.min(0.9, baseBlend - divergenceCount * 0.1)
+        );
         this.components.forEach((component) => {
           component.getNodes().forEach((node) => {
             const nodeId = `${component.getName()}_${node.id}`;
             const oldVoltage = previousVoltages.get(nodeId) || 0;
             const newVoltage = node.voltage;
-            // Apply damping to smooth out oscillations
             node.voltage =
               dampingFactor * newVoltage + (1 - dampingFactor) * oldVoltage;
           });
@@ -290,7 +576,6 @@ export class EnhancedCircuitSolver {
 
         // Check for convergence
         let maxChange = 0;
-        let significantChanges = 0; // Count changes above minimum threshold
         this.components.forEach((component) => {
           component.getNodes().forEach((node) => {
             const nodeId = `${component.getName()}_${node.id}`;
@@ -300,33 +585,78 @@ export class EnhancedCircuitSolver {
             // Only count significant changes (ignore tiny numerical noise)
             if (change > minChangeThreshold) {
               maxChange = Math.max(maxChange, change);
-              significantChanges++;
             }
           });
         });
 
-        // Check for convergence
-        if (maxChange < convergenceTolerance) {
-          // Converged successfully
-          break;
-        } else if (iteration === maxIterations - 1) {
-          // Did not converge - restore stable state to prevent wild oscillations
-          // Restore previous stable voltages
+        if (maxChange < bestMaxChange) {
+          bestMaxChange = maxChange;
+          bestVoltages = new Map<string, number>();
           this.components.forEach((component) => {
             component.getNodes().forEach((node) => {
               const nodeId = `${component.getName()}_${node.id}`;
-              node.voltage = stableVoltages.get(nodeId) || 0;
+              bestVoltages.set(nodeId, node.voltage);
             });
           });
         }
+
+        if (
+          maxChange >
+          prevMaxChange * EnhancedCircuitSolver.SOLVER_TUNING.divergenceGrowthFactor
+        ) {
+          divergenceCount++;
+        } else if (
+          maxChange <
+          prevMaxChange * EnhancedCircuitSolver.SOLVER_TUNING.divergenceRecoveryFactor
+        ) {
+          divergenceCount = 0;
+        }
+        prevMaxChange = Math.max(maxChange, 1e-12);
+
+        // Check for convergence.
+        if (maxChange < convergenceTolerance) {
+          converged = true;
+          break;
+        }
+      }
+
+      if (!converged) {
+        // Fall back to best iterate found this step instead of hard reset.
+        this.components.forEach((component) => {
+          component.getNodes().forEach((node) => {
+            const nodeId = `${component.getName()}_${node.id}`;
+            node.voltage = bestVoltages.get(nodeId) ?? stableVoltages.get(nodeId) ?? 0;
+          });
+        });
+      }
+
+      // Reconcile component states with the final damped/fallback node voltages.
+      // Without this, reactive history (especially C/L previousState) can lag one
+      // iteration behind and drift from the voltages we actually retained.
+      try {
+        this.buildTransientMatrices();
+        const reconciledSolution = this.solveMNA();
+        this.updateComponentStates(reconciledSolution);
+      } catch {
+        // Keep last successful iterate if reconciliation fails.
       }
 
       this.storePreviousState();
-      return true;
+      return { ok: true, converged, divergenceCount };
     } catch (error) {
       console.error("❌ Transient simulation failed:", error);
-      return false;
+      return { ok: false, converged: false, divergenceCount: 99 };
     }
+  }
+
+  private limitStateFlip(key: string, prev: boolean, next: boolean): boolean {
+    if (prev === next) return next;
+    const flips = this.stateFlipCounts.get(key) ?? 0;
+    const maxFlipsPerSubstep =
+      EnhancedCircuitSolver.SOLVER_TUNING.maxStateFlipsPerSubstep;
+    if (flips >= maxFlipsPerSubstep) return prev;
+    this.stateFlipCounts.set(key, flips + 1);
+    return next;
   }
 
   /**
@@ -369,9 +699,9 @@ export class EnhancedCircuitSolver {
     nodeGroups.forEach((group) => {
       // Check if any node in this group is a ground component
       const hasGroundComponent = Array.from(group).some((nodeId) => {
-        const [compId] = nodeId.split("_");
-        const component = this.components.get(compId);
-        return component?.getComponentType() === "ground";
+        const compId = this.componentIdFromGlobalNodeId(nodeId);
+        if (!compId) return false;
+        return this.components.get(compId)?.getComponentType() === "ground";
       });
 
       // If group contains ground, all nodes map to index 0
@@ -397,7 +727,6 @@ export class EnhancedCircuitSolver {
     const visited = new Set<string>();
     const groups: Set<string>[] = [];
 
-    // Collect all component nodes
     this.components.forEach((component) => {
       const componentId = component.getName();
       component.getNodes().forEach((node) => {
@@ -405,30 +734,36 @@ export class EnhancedCircuitSolver {
       });
     });
 
-    // DFS to find connected components
     const dfs = (nodeId: string, currentGroup: Set<string>) => {
       if (visited.has(nodeId)) return;
       visited.add(nodeId);
-      currentGroup.add(nodeId);
+      if (allNodes.has(nodeId)) currentGroup.add(nodeId);
 
       const connections = this.nodeConnections.get(nodeId);
       if (connections) {
         connections.forEach((connectedNode) => {
-          if (allNodes.has(connectedNode)) {
-            dfs(connectedNode, currentGroup);
-          }
+          dfs(connectedNode, currentGroup);
         });
       }
     };
 
-    // Find all connected groups
-    allNodes.forEach((nodeId) => {
+    const seeds = new Set<string>(allNodes);
+    for (const k of this.nodeConnections.keys()) seeds.add(k);
+    for (const neigh of this.nodeConnections.values()) {
+      for (const v of neigh) seeds.add(v);
+    }
+
+    for (const nodeId of seeds) {
       if (!visited.has(nodeId)) {
         const group = new Set<string>();
         dfs(nodeId, group);
-        if (group.size > 0) {
-          groups.push(group);
-        }
+        if (group.size > 0) groups.push(group);
+      }
+    }
+
+    allNodes.forEach((nodeId) => {
+      if (!visited.has(nodeId)) {
+        groups.push(new Set([nodeId]));
       }
     });
 
@@ -448,77 +783,49 @@ export class EnhancedCircuitSolver {
     // Clear voltage source map before rebuilding
     this.voltageSourceMap.clear();
 
-    // Initialize matrices
-    this.G = Array(numNodes)
-      .fill(0)
-      .map(() => Array(numNodes).fill(0));
-    this.B = Array(numNodes)
-      .fill(0)
-      .map(() => Array(m).fill(0));
-    this.C = Array(m)
-      .fill(0)
-      .map(() => Array(numNodes).fill(0));
-    this.D = Array(m)
-      .fill(0)
-      .map(() => Array(m).fill(0));
-    this.i = Array(numNodes).fill(0);
-    this.e = Array(m).fill(0);
+    const mna = MnaAssembler.createSystem(numNodes, m, 1e-12);
+    this.G = mna.G;
+    this.B = mna.B;
+    this.C = mna.C;
+    this.D = mna.D;
+    this.i = mna.i;
+    this.e = mna.e;
+    this.stampWriter = mna.stampWriter;
 
-    let vsIndex = 0;
-
-    // Process each component
-    this.components.forEach((component) => {
-      const type = component.getComponentType();
-
-      switch (type) {
-        case "resistor":
-          this.addResistor(component as Resistor);
-          break;
-        case "battery":
-          vsIndex = this.addBattery(component as Battery, vsIndex);
-          break;
-        case "acsource":
-          vsIndex = this.addACSource(component as ACSource, vsIndex);
-          break;
-        case "capacitor":
-          // DC analysis: capacitor is open circuit (no contribution)
-          break;
-        case "inductor":
-          // DC analysis: inductor is short circuit
-          this.addInductorDC(component as Inductor);
-          break;
-        case "led":
-          // LED: simplified model as resistor + voltage source (for kids)
-          vsIndex = this.addLEDSimplified(component as LED, vsIndex);
-          break;
-        case "npn_transistor":
-          // NPN BJT: model as controlled resistor (switch/amplifier)
-          this.addNPNTransistor(component as NPNTransistor);
-          break;
-        case "pnp_transistor":
-          // PNP BJT: model as controlled resistor (switch/amplifier)
-          this.addPNPTransistor(component as PNPTransistor);
-          break;
-        case "switch":
-          // Switch: acts as variable resistor (low when closed, high when open)
-          this.addSwitch(component as Switch);
-          break;
-        case "ammeter":
-          // Ammeter: acts as very low resistance
-          this.addAmmeter(component as Ammeter);
-          break;
-        case "voltmeter":
-        case "oscilloscope":
-          // Voltmeter/Oscilloscope: acts as very high resistance
-          this.addHighResistance(component);
-          break;
-        case "ground":
-          // Ground is handled by node 0
-          break;
-        default:
-          console.warn(`Component type ${type} not handled in MNA`);
-      }
-    });
+    const netlist = new CircuitNetlist();
+    populateNetlistFromComponents(
+      this.components,
+      netlist,
+      {
+        timeStep: this.timeStep,
+        nodeIndex: (globalNodeId) => (this.nodeMap.get(globalNodeId) ?? 0) - 1,
+        addTwoNodeConductance: (n1, n2, g) => this.addTwoNodeConductance(n1, n2, g),
+        addTwoNodeCurrentSource: (nPlus, nMinus, current) =>
+          this.addTwoNodeCurrentSource(nPlus, nMinus, current),
+        addSeriesVoltageSource: (nPlus, nMinus, vs, v, r) =>
+          this.addSeriesVoltageSource(nPlus, nMinus, vs, v, r),
+        setVoltageSourceMap: (componentId, vs) => this.voltageSourceMap.set(componentId, vs),
+        limitStateFlip: (key, prev, next) => this.limitStateFlip(key, prev, next),
+        getComparatorState: (componentId) => this.comparatorState.get(componentId),
+        setComparatorState: (componentId, isHigh) =>
+          this.comparatorState.set(componentId, isHigh),
+        getTimer555State: (componentId) => this.timer555State.get(componentId),
+        setTimer555State: (componentId, state) =>
+          this.timer555State.set(componentId, state),
+        getRelayState: (componentId) => this.relayState.get(componentId),
+        setRelayState: (componentId, state) => this.relayState.set(componentId, state),
+        getSpdtState: (componentId) => this.spdtState.get(componentId),
+        setSpdtState: (componentId, value) => this.spdtState.set(componentId, value),
+        evaluatePnCompanion: (vAnodeCathode, kneeVoltage, dynamicResistance) =>
+          this.evaluatePnCompanion(vAnodeCathode, kneeVoltage, dynamicResistance),
+      },
+      {
+        inTransientStamping: this.inTransientStamping,
+        onUnknownType: (type) =>
+          console.warn(`Component type ${type} not handled in MNA`),
+      },
+    );
+    netlist.applyAll(0);
   }
 
   /**
@@ -526,7 +833,12 @@ export class EnhancedCircuitSolver {
    */
   private buildTransientMatrices(): void {
     // Start with DC matrices
-    this.buildMNAMatrices();
+    this.inTransientStamping = true;
+    try {
+      this.buildMNAMatrices();
+    } finally {
+      this.inTransientStamping = false;
+    }
 
     // Add reactive component contributions
     this.components.forEach((component) => {
@@ -559,15 +871,7 @@ export class EnhancedCircuitSolver {
     const n1 = this.nodeMap.get(`${componentId}_${nodes[0].id}`)! - 1; // -1 because matrix starts at index 0
     const n2 = this.nodeMap.get(`${componentId}_${nodes[1].id}`)! - 1;
 
-    // Add to G matrix using stamp method
-    if (n1 >= 0) {
-      this.G[n1][n1] += conductance;
-      if (n2 >= 0) this.G[n1][n2] -= conductance;
-    }
-    if (n2 >= 0) {
-      this.G[n2][n2] += conductance;
-      if (n1 >= 0) this.G[n2][n1] -= conductance;
-    }
+    this.getStampWriter().stampTwoNodeConductance(n1, n2, conductance);
   }
 
   /**
@@ -585,43 +889,48 @@ export class EnhancedCircuitSolver {
     const n1 = this.nodeMap.get(`${componentId}_${nodes[0].id}`)! - 1; // Positive
     const n2 = this.nodeMap.get(`${componentId}_${nodes[1].id}`)! - 1; // Negative
 
-    // Voltage source stamp
-    if (n1 >= 0) {
-      this.B[n1][vsIndex] = 1;
-      this.C[vsIndex][n1] = 1;
-    }
-    if (n2 >= 0) {
-      this.B[n2][vsIndex] = -1;
-      this.C[vsIndex][n2] = -1;
-    }
-
-    this.e[vsIndex] = voltage;
+    this.getStampWriter().stampVoltageSource(n1, n2, vsIndex, voltage);
 
     return vsIndex + 1;
+  }
+
+  /**
+   * SPST switch / push button: `isClosed` must drive the MNA stamp — the
+   * `resistance` field can drift from UI state (property edits, undo, load).
+   */
+  private static readonly SPST_R_ON = 1e-3;
+  private static readonly SPST_R_OFF = 1e15;
+
+  private resolveSpstResistanceOhms(component: CircuitComponent): number {
+    const p = component.getCircuitProperties() as {
+      isClosed?: boolean;
+      resistance?: number;
+    };
+    if (typeof p.isClosed === "boolean") {
+      return p.isClosed
+        ? EnhancedCircuitSolver.SPST_R_ON
+        : EnhancedCircuitSolver.SPST_R_OFF;
+    }
+    const r = p.resistance;
+    if (r != null && Number.isFinite(r) && r > 0) {
+      return r;
+    }
+    return EnhancedCircuitSolver.SPST_R_OFF;
   }
 
   /**
    * Add inductor for DC analysis (short circuit)
    */
   private addInductorDC(inductor: Inductor): void {
-    // In DC steady state, inductor acts as short circuit (wire)
-    // Add a very small resistance to avoid singular matrix
+    // In DC steady state, inductor behaves as winding resistance (DCR).
     const nodes = inductor.getNodes();
     const componentId = inductor.getName();
+    const props = inductor.getCircuitProperties() as any;
 
     const n1 = this.nodeMap.get(`${componentId}_${nodes[0].id}`)! - 1;
     const n2 = this.nodeMap.get(`${componentId}_${nodes[1].id}`)! - 1;
-
-    const conductance = 1e6; // Very high conductance (≈ short)
-
-    if (n1 >= 0) {
-      this.G[n1][n1] += conductance;
-      if (n2 >= 0) this.G[n1][n2] -= conductance;
-    }
-    if (n2 >= 0) {
-      this.G[n2][n2] += conductance;
-      if (n1 >= 0) this.G[n2][n1] -= conductance;
-    }
+    const dcr = Math.max(props.dcResistance ?? 0.1, 1e-5);
+    this.addTwoNodeConductance(n1, n2, 1 / dcr);
   }
 
   /**
@@ -629,7 +938,7 @@ export class EnhancedCircuitSolver {
    * Acts as variable resistor based on state
    */
   private addSwitch(switchComp: Switch): void {
-    const resistance = switchComp.getCircuitProperties().resistance || 1e12;
+    const resistance = this.resolveSpstResistanceOhms(switchComp);
     const nodes = switchComp.getNodes();
     const componentId = switchComp.getName();
 
@@ -638,14 +947,66 @@ export class EnhancedCircuitSolver {
 
     const conductance = 1 / resistance;
 
-    if (n1 >= 0) {
-      this.G[n1][n1] += conductance;
-      if (n2 >= 0) this.G[n1][n2] -= conductance;
-    }
-    if (n2 >= 0) {
-      this.G[n2][n2] += conductance;
-      if (n1 >= 0) this.G[n2][n1] -= conductance;
-    }
+    this.getStampWriter().stampTwoNodeConductance(n1, n2, conductance);
+  }
+
+  /** SPDT: common to one throw low-R, other throw open */
+  private addSpdtSwitch(c: SpdtSwitch): void {
+    const props = c.getCircuitProperties() as { connectUpper?: boolean };
+    const connectUpper = props.connectUpper ?? true;
+    const nodes = c.getNodes();
+    const componentId = c.getName();
+    const rOn = 0.02;
+    const rOff = 1e9;
+    const nc = this.nodeMap.get(`${componentId}_${nodes[0].id}`)! - 1;
+    const na = this.nodeMap.get(`${componentId}_${nodes[1].id}`)! - 1;
+    const nb = this.nodeMap.get(`${componentId}_${nodes[2].id}`)! - 1;
+    const prev = this.spdtState.get(componentId) ?? (connectUpper ? 1 : 0);
+    const prevMode = prev >= 0.5;
+    const limitedMode = this.limitStateFlip(
+      `spdt:${componentId}`,
+      prevMode,
+      connectUpper
+    );
+    const target = limitedMode ? 1 : 0;
+    const tau = 2e-4; // 0.2 ms travel smoothing
+    const alpha = Math.min(1, this.timeStep / (this.timeStep + tau));
+    const wiper = prev + alpha * (target - prev);
+    this.spdtState.set(componentId, wiper);
+
+    // Break-before-make blend: keep both contacts weak near midpoint.
+    const upperClosure = wiper > 0.55 ? 1 : wiper < 0.45 ? 0 : (wiper - 0.45) / 0.1;
+    const lowerClosure =
+      wiper < 0.45 ? 1 : wiper > 0.55 ? 0 : (0.55 - wiper) / 0.1;
+    const gOn = 1 / rOn;
+    const gOff = 1 / rOff;
+    const gA = gOff + (gOn - gOff) * upperClosure;
+    const gB = gOff + (gOn - gOff) * lowerClosure;
+    this.addTwoNodeConductance(nc, na, gA);
+    this.addTwoNodeConductance(nc, nb, gB);
+  }
+
+  /** Potentiometer: two resistors end1–wiper and wiper–end2 */
+  private addPotentiometer(c: Potentiometer): void {
+    const props = c.getCircuitProperties() as {
+      totalResistance?: number;
+      value?: number;
+      wiperPosition?: number;
+    };
+    const R = props.totalResistance ?? props.value ?? 10000;
+    const alpha = props.wiperPosition ?? 0.5;
+    const R1 = Math.max(R * alpha, 1e-9);
+    const R2 = Math.max(R * (1 - alpha), 1e-9);
+    const g1 = 1 / R1;
+    const g2 = 1 / R2;
+    const nodes = c.getNodes();
+    const componentId = c.getName();
+    const n1 = this.nodeMap.get(`${componentId}_end1`)! - 1;
+    const nw = this.nodeMap.get(`${componentId}_wiper`)! - 1;
+    const n2 = this.nodeMap.get(`${componentId}_end2`)! - 1;
+
+    this.getStampWriter().stampTwoNodeConductance(n1, nw, g1);
+    this.getStampWriter().stampTwoNodeConductance(nw, n2, g2);
   }
 
   /**
@@ -662,14 +1023,7 @@ export class EnhancedCircuitSolver {
 
     const conductance = 1 / resistance;
 
-    if (n1 >= 0) {
-      this.G[n1][n1] += conductance;
-      if (n2 >= 0) this.G[n1][n2] -= conductance;
-    }
-    if (n2 >= 0) {
-      this.G[n2][n2] += conductance;
-      if (n1 >= 0) this.G[n2][n1] -= conductance;
-    }
+    this.getStampWriter().stampTwoNodeConductance(n1, n2, conductance);
   }
 
   /**
@@ -686,14 +1040,171 @@ export class EnhancedCircuitSolver {
 
     const conductance = 1 / resistance;
 
-    if (n1 >= 0) {
-      this.G[n1][n1] += conductance;
-      if (n2 >= 0) this.G[n1][n2] -= conductance;
+    this.getStampWriter().stampTwoNodeConductance(n1, n2, conductance);
+  }
+
+  private getStampWriter(): MnaStampWriter {
+    if (!this.stampWriter) {
+      this.stampWriter = new MnaStampWriter(
+        this.G,
+        this.B,
+        this.C,
+        this.D,
+        this.i,
+        this.e,
+      );
     }
-    if (n2 >= 0) {
-      this.G[n2][n2] += conductance;
-      if (n1 >= 0) this.G[n2][n1] -= conductance;
-    }
+    return this.stampWriter;
+  }
+
+  private addTwoNodeConductance(
+    n1: number,
+    n2: number,
+    conductance: number
+  ): void {
+    this.getStampWriter().stampTwoNodeConductance(n1, n2, conductance);
+  }
+
+  // Positive current flows from nPlus to nMinus.
+  private addTwoNodeCurrentSource(nPlus: number, nMinus: number, current: number): void {
+    this.getStampWriter().stampTwoNodeCurrentSource(nPlus, nMinus, current);
+  }
+
+  private nonlinearStampContext(): NonlinearStampContext {
+    return {
+      nodeIndex: (globalNodeId: string) => (this.nodeMap.get(globalNodeId) ?? 0) - 1,
+      addTwoNodeConductance: (n1, n2, g) => this.addTwoNodeConductance(n1, n2, g),
+      addTwoNodeCurrentSource: (np, nm, i) => this.addTwoNodeCurrentSource(np, nm, i),
+      evaluatePnCompanion: (v, knee, rd) => this.evaluatePnCompanion(v, knee, rd),
+    };
+  }
+
+  private behavioralSourceContext(): BehavioralSourceStampContext {
+    return {
+      nodeIndex: (globalNodeId: string) => (this.nodeMap.get(globalNodeId) ?? 0) - 1,
+      addTwoNodeConductance: (n1, n2, g) => this.addTwoNodeConductance(n1, n2, g),
+      addSeriesVoltageSource: (nPlus, nMinus, vs, v, r) =>
+        this.addSeriesVoltageSource(nPlus, nMinus, vs, v, r),
+      setVoltageSourceMap: (componentId, vs) => this.voltageSourceMap.set(componentId, vs),
+      getComparatorState: (componentId) => this.comparatorState.get(componentId),
+      setComparatorState: (componentId, isHigh) =>
+        this.comparatorState.set(componentId, isHigh),
+      limitStateFlip: (key, prev, next) => this.limitStateFlip(key, prev, next),
+    };
+  }
+
+  private behavioralDigitalContext(): BehavioralDigitalStampContext {
+    return {
+      nodeIndex: (globalNodeId: string) => (this.nodeMap.get(globalNodeId) ?? 0) - 1,
+      timeStep: this.timeStep,
+      addTwoNodeConductance: (n1, n2, g) => this.addTwoNodeConductance(n1, n2, g),
+      addSeriesVoltageSource: (nPlus, nMinus, vs, v, r) =>
+        this.addSeriesVoltageSource(nPlus, nMinus, vs, v, r),
+      setVoltageSourceMap: (componentId, vs) => this.voltageSourceMap.set(componentId, vs),
+      limitStateFlip: (key, prev, next) => this.limitStateFlip(key, prev, next),
+      getTimer555State: (componentId) => this.timer555State.get(componentId),
+      setTimer555State: (componentId, state) =>
+        this.timer555State.set(componentId, state),
+    };
+  }
+
+  private linearBehavioralContext(): LinearBehavioralStampContext {
+    return {
+      nodeIndex: (globalNodeId: string) => (this.nodeMap.get(globalNodeId) ?? 0) - 1,
+      timeStep: this.timeStep,
+      addTwoNodeConductance: (n1, n2, g) => this.addTwoNodeConductance(n1, n2, g),
+      addSeriesVoltageSource: (nPlus, nMinus, vs, v, r) =>
+        this.addSeriesVoltageSource(nPlus, nMinus, vs, v, r),
+      setVoltageSourceMap: (componentId, vs) => this.voltageSourceMap.set(componentId, vs),
+      limitStateFlip: (key, prev, next) => this.limitStateFlip(key, prev, next),
+      getRelayState: (componentId) => this.relayState.get(componentId),
+      setRelayState: (componentId, state) => this.relayState.set(componentId, state),
+    };
+  }
+
+  private evaluatePnCompanion(
+    vAnodeCathode: number,
+    kneeVoltage: number,
+    dynamicResistance: number
+  ): { g: number; i: number } {
+    // Smooth piecewise-linear knee model:
+    // below knee: tiny leakage; above knee: ~linear with dynamicResistance.
+    const rDyn = Math.max(dynamicResistance, 1e-3);
+    const gLin = 1 / rDyn;
+    const smoothV = 0.03; // ~30mV smoothing window
+    const x = Math.max(-60, Math.min(60, (vAnodeCathode - kneeVoltage) / smoothV));
+    const sigmoid = 1 / (1 + Math.exp(-x));
+    const softplus = smoothV * Math.log1p(Math.exp(x)); // ≈ max(v-knee, 0)
+    const iLeak = 1e-12 * vAnodeCathode;
+    const i = gLin * softplus + iLeak;
+    const g = Math.min(50, Math.max(1e-12, gLin * sigmoid + 1e-12));
+    return { g, i };
+  }
+
+  private addSeriesVoltageSource(
+    nPlus: number,
+    nMinus: number,
+    vsIndex: number,
+    voltage: number,
+    seriesResistance: number
+  ): void {
+    this.getStampWriter().stampVoltageSource(
+      nPlus,
+      nMinus,
+      vsIndex,
+      voltage,
+      seriesResistance,
+    );
+  }
+
+  /**
+   * Behavioral NE555-like stamp:
+   * - internal SR latch driven by TRIG/THRESH comparators
+   * - DIS pin transistor to GND when output low
+   * - OUT pin modeled as Thevenin source to GND with finite Rout
+   */
+  private addTimer555(component: CircuitComponent, vsIndex: number): number {
+    return stampTimer555Digital(this.behavioralDigitalContext(), component, vsIndex);
+  }
+
+  private addOpAmp(component: CircuitComponent, vsIndex: number): number {
+    return stampOpAmpSource(this.behavioralSourceContext(), component, vsIndex);
+  }
+
+  private addComparator(component: CircuitComponent, vsIndex: number): number {
+    return stampComparatorSource(
+      this.behavioralSourceContext(),
+      component,
+      vsIndex,
+    );
+  }
+
+  private addLogicGate(
+    component: CircuitComponent,
+    gateType: string,
+    vsIndex: number
+  ): number {
+    return stampLogicGateDigital(
+      this.behavioralDigitalContext(),
+      component,
+      gateType,
+      vsIndex,
+    );
+  }
+
+  /**
+   * Add MOSFET as a smooth voltage-controlled channel conductance.
+   * This avoids hard switching artifacts while keeping the model lightweight.
+   */
+  private addMOSFETSwitch(component: CircuitComponent): void {
+    stampMosfetSwitch(this.nonlinearStampContext(), component);
+  }
+
+  /**
+   * Add relay coil as a simple resistor between coil terminals.
+   */
+  private addRelayCoil(component: CircuitComponent): void {
+    stampRelay(this.linearBehavioralContext(), component);
   }
 
   /**
@@ -701,29 +1212,7 @@ export class EnhancedCircuitSolver {
    * Similar to battery but voltage varies with time
    */
   private addACSource(source: ACSource, vsIndex: number): number {
-    const voltage = source.getCircuitProperties().voltage; // Instantaneous voltage
-    const nodes = source.getNodes();
-    const componentId = source.getName();
-
-    // Store voltage source index for this AC source
-    this.voltageSourceMap.set(componentId, vsIndex);
-
-    const n1 = this.nodeMap.get(`${componentId}_${nodes[0].id}`)! - 1; // Positive
-    const n2 = this.nodeMap.get(`${componentId}_${nodes[1].id}`)! - 1; // Negative
-
-    // Voltage source stamp (same as battery)
-    if (n1 >= 0) {
-      this.B[n1][vsIndex] = 1;
-      this.C[vsIndex][n1] = 1;
-    }
-    if (n2 >= 0) {
-      this.B[n2][vsIndex] = -1;
-      this.C[vsIndex][n2] = -1;
-    }
-
-    this.e[vsIndex] = voltage;
-
-    return vsIndex + 1;
+    return stampAcSource(this.linearBehavioralContext(), source, vsIndex);
   }
 
   /**
@@ -735,56 +1224,18 @@ export class EnhancedCircuitSolver {
    * - Dynamic resistance (Rd): Small resistance when conducting (~25Ω)
    * - Total voltage: V_anode - V_cathode = Vf + I × Rd
    */
-  private addLEDSimplified(led: LED, vsIndex: number): number {
-    const nodes = led.getNodes();
-    const componentId = led.getName();
+  private addLEDSimplified(led: LED): void {
+    stampLedCompanion(this.nonlinearStampContext(), led);
+  }
 
-    const n1 = this.nodeMap.get(`${componentId}_${nodes[0].id}`)! - 1; // Anode
-    const n2 = this.nodeMap.get(`${componentId}_${nodes[1].id}`)! - 1; // Cathode
-
-    // Check for reverse bias: if V_anode < V_cathode, model as very high resistance
-    const vAnode = n1 >= 0 ? (nodes[0].voltage || 0) : 0;
-    const vCathode = n2 >= 0 ? (nodes[1].voltage || 0) : 0;
-    if (vAnode - vCathode < 0) {
-      const reverseR = 1e9;
-      const gReverse = 1 / reverseR;
-      if (n1 >= 0) {
-        this.G[n1][n1] += gReverse;
-        if (n2 >= 0) this.G[n1][n2] -= gReverse;
-      }
-      if (n2 >= 0) {
-        this.G[n2][n2] += gReverse;
-        if (n1 >= 0) this.G[n2][n1] -= gReverse;
-      }
-      this.voltageSourceMap.set(componentId, vsIndex);
-      return vsIndex + 1;
-    }
-
-    // Forward bias: model as voltage source (Vf) in series with dynamic resistance (Rd)
-    const forwardVoltage = led.getForwardVoltage();
-    const ledProps = led.getCircuitProperties() as any;
-    const dynamicResistance = ledProps.dynamicResistance || 25;
-
-    this.voltageSourceMap.set(componentId, vsIndex);
-
-    if (n1 >= 0) {
-      this.B[n1][vsIndex] = 1;
-    }
-    if (n2 >= 0) {
-      this.B[n2][vsIndex] = -1;
-    }
-
-    if (n1 >= 0) {
-      this.C[vsIndex][n1] = 1;
-    }
-    if (n2 >= 0) {
-      this.C[vsIndex][n2] = -1;
-    }
-
-    this.D[vsIndex][vsIndex] = -dynamicResistance;
-    this.e[vsIndex] = forwardVoltage;
-
-    return vsIndex + 1;
+  /**
+   * Add Zener diode with piecewise model:
+   * - Forward bias: Vf + dynamic resistance (like diode)
+   * - Reverse below breakdown: high resistance leakage
+   * - Reverse at/above breakdown: -Vz + dynamic resistance
+   */
+  private addZenerSimplified(zener: ZenerDiode): void {
+    stampZenerCompanion(this.nonlinearStampContext(), zener);
   }
 
   /**
@@ -795,96 +1246,7 @@ export class EnhancedCircuitSolver {
    * - Saturated (VBE > 0.7V, VCE < 0.2V): Low resistance (switch ON)
    */
   private addNPNTransistor(transistor: NPNTransistor): void {
-    const nodes = transistor.getNodes();
-    const componentId = transistor.getName();
-    const props = transistor.getBJTProperties();
-
-    // Node indices: 0=base, 1=collector, 2=emitter
-    const nBase = this.nodeMap.get(`${componentId}_${nodes[0].id}`)! - 1;
-    const nCollector = this.nodeMap.get(`${componentId}_${nodes[1].id}`)! - 1;
-    const nEmitter = this.nodeMap.get(`${componentId}_${nodes[2].id}`)! - 1;
-
-    // Get node voltages (from previous iteration or initial)
-    const vBase = nodes[0].voltage;
-    const vEmitter = nodes[2].voltage;
-    const vbe = vBase - vEmitter;
-
-    // ALWAYS add pull-down resistor from base to emitter
-    // This prevents floating base issues and ensures transistor turns off when switch opens
-    // In real circuits, you'd ALWAYS use a physical pull-down resistor (e.g. 10kΩ - 100kΩ)
-    // This is added BEFORE checking transistor state to ensure base can be pulled down
-    const rPullDown = 100e3; // 100kΩ pull-down (strong enough to ensure stable OFF state, weak enough not to interfere when driven)
-    const gPullDown = 1 / rPullDown;
-    if (nBase >= 0) {
-      this.G[nBase][nBase] += gPullDown;
-      if (nEmitter >= 0) this.G[nBase][nEmitter] -= gPullDown;
-    }
-    if (nEmitter >= 0) {
-      this.G[nEmitter][nEmitter] += gPullDown;
-      if (nBase >= 0) this.G[nEmitter][nBase] -= gPullDown;
-    }
-
-    // Determine operating region based on VBE threshold
-    if (vbe < props.vbe) {
-      // Cutoff: transistor is OFF
-      // Model base-emitter with LOW resistance to pull base to ground
-      // Model collector-emitter with VERY HIGH resistance (open circuit)
-
-      // Collector-Emitter: very high resistance (open circuit)
-      const rCE_off = 1e15; // 1 PΩ
-      const gCE_off = 1 / rCE_off;
-      if (nCollector >= 0) {
-        this.G[nCollector][nCollector] += gCE_off;
-        if (nEmitter >= 0) this.G[nCollector][nEmitter] -= gCE_off;
-      }
-      if (nEmitter >= 0) {
-        this.G[nEmitter][nEmitter] += gCE_off;
-        if (nCollector >= 0) this.G[nEmitter][nCollector] -= gCE_off;
-      }
-
-      // Base-Emitter: Model as reverse-biased diode (extremely high resistance)
-      // Use extremely high resistance to model open B-E junction when below threshold
-      // This prevents voltage divider effects with base resistors
-      // Real reverse-biased B-E junction: ~100 TΩ or more
-      const rBE_off = 1e15; // 1 PΩ (reverse-biased diode, nearly open circuit)
-      const gBE_off = 1 / rBE_off;
-      if (nBase >= 0) {
-        this.G[nBase][nBase] += gBE_off;
-        if (nEmitter >= 0) this.G[nBase][nEmitter] -= gBE_off;
-      }
-      if (nEmitter >= 0) {
-        this.G[nEmitter][nEmitter] += gBE_off;
-        if (nBase >= 0) this.G[nEmitter][nBase] -= gBE_off;
-      }
-    } else {
-      // Transistor is ON (active/saturated)
-      // Base-Emitter junction: model as diode (forward biased)
-      const rBE = 1000; // Base resistance ~1kΩ
-      const gBE = 1 / rBE;
-
-      if (nBase >= 0) {
-        this.G[nBase][nBase] += gBE;
-        if (nEmitter >= 0) this.G[nBase][nEmitter] -= gBE;
-      }
-      if (nEmitter >= 0) {
-        this.G[nEmitter][nEmitter] += gBE;
-        if (nBase >= 0) this.G[nEmitter][nBase] -= gBE;
-      }
-
-      // Collector-Emitter: model as low resistance when saturated
-      // In saturation: VCE ≈ 0.2V, acts like a closed switch
-      const rCE = 10; // 10Ω when saturated (acts as switch)
-      const gCE = 1 / rCE;
-
-      if (nCollector >= 0) {
-        this.G[nCollector][nCollector] += gCE;
-        if (nEmitter >= 0) this.G[nCollector][nEmitter] -= gCE;
-      }
-      if (nEmitter >= 0) {
-        this.G[nEmitter][nEmitter] += gCE;
-        if (nCollector >= 0) this.G[nEmitter][nCollector] -= gCE;
-      }
-    }
+    this.addBjtStamp(transistor, false);
   }
 
   /**
@@ -895,95 +1257,26 @@ export class EnhancedCircuitSolver {
    * - Saturated (VEB > 0.7V, VEC < 0.2V): Low resistance (switch ON)
    */
   private addPNPTransistor(transistor: PNPTransistor): void {
-    const nodes = transistor.getNodes();
-    const componentId = transistor.getName();
-    const props = transistor.getBJTProperties();
+    this.addBjtStamp(transistor, true);
+  }
 
-    // Node indices: 0=base, 1=collector, 2=emitter
-    const nBase = this.nodeMap.get(`${componentId}_${nodes[0].id}`)! - 1;
-    const nCollector = this.nodeMap.get(`${componentId}_${nodes[1].id}`)! - 1;
-    const nEmitter = this.nodeMap.get(`${componentId}_${nodes[2].id}`)! - 1;
-
-    // Get node voltages (PNP is opposite polarity to NPN)
-    const vBase = nodes[0].voltage;
-    const vEmitter = nodes[2].voltage;
-    const veb = vEmitter - vBase; // Note: VEB not VBE
-
-    // ALWAYS add pull-up resistor from base to emitter
-    // This prevents floating base issues and ensures transistor turns off when switch opens
-    // In real circuits, you'd ALWAYS use a physical pull-up resistor (e.g. 10kΩ - 100kΩ)
-    // This is added BEFORE checking transistor state to ensure base can be pulled up to emitter
-    const rPullUp = 100e3; // 100kΩ pull-up (strong enough to ensure stable OFF state, weak enough not to interfere when driven)
-    const gPullUp = 1 / rPullUp;
-    if (nBase >= 0) {
-      this.G[nBase][nBase] += gPullUp;
-      if (nEmitter >= 0) this.G[nBase][nEmitter] -= gPullUp;
-    }
-    if (nEmitter >= 0) {
-      this.G[nEmitter][nEmitter] += gPullUp;
-      if (nBase >= 0) this.G[nEmitter][nBase] -= gPullUp;
-    }
-
-    // Determine operating region
-    if (veb < props.vbe) {
-      // Cutoff: transistor is OFF
-      // Model emitter-collector with VERY HIGH resistance (open circuit)
-      // Model emitter-base with LOW resistance to pull base to emitter
-
-      // Emitter-Collector: very high resistance (open circuit, PNP conducts E→C)
-      const rEC_off = 1e15; // 1 PΩ
-      const gEC_off = 1 / rEC_off;
-      if (nEmitter >= 0) {
-        this.G[nEmitter][nEmitter] += gEC_off;
-        if (nCollector >= 0) this.G[nEmitter][nCollector] -= gEC_off;
-      }
-      if (nCollector >= 0) {
-        this.G[nCollector][nCollector] += gEC_off;
-        if (nEmitter >= 0) this.G[nCollector][nEmitter] -= gEC_off;
-      }
-
-      // Emitter-Base: Model as reverse-biased diode (extremely high resistance)
-      // Use extremely high resistance to model open E-B junction when below threshold
-      // This prevents voltage divider effects with base resistors
-      // Real reverse-biased E-B junction: ~100 TΩ or more
-      const rEB_off = 1e15; // 1 PΩ (reverse-biased diode, nearly open circuit)
-      const gEB_off = 1 / rEB_off;
-      if (nEmitter >= 0) {
-        this.G[nEmitter][nEmitter] += gEB_off;
-        if (nBase >= 0) this.G[nEmitter][nBase] -= gEB_off;
-      }
-      if (nBase >= 0) {
-        this.G[nBase][nBase] += gEB_off;
-        if (nEmitter >= 0) this.G[nBase][nEmitter] -= gEB_off;
-      }
-    } else {
-      // Transistor is ON
-      // Emitter-Base junction: forward biased
-      const rEB = 1000; // Base resistance ~1kΩ
-      const gEB = 1 / rEB;
-
-      if (nEmitter >= 0) {
-        this.G[nEmitter][nEmitter] += gEB;
-        if (nBase >= 0) this.G[nEmitter][nBase] -= gEB;
-      }
-      if (nBase >= 0) {
-        this.G[nBase][nBase] += gEB;
-        if (nEmitter >= 0) this.G[nBase][nEmitter] -= gEB;
-      }
-
-      // Emitter-Collector: low resistance when saturated
-      const rEC = 10; // 10Ω when saturated
-      const gEC = 1 / rEC;
-
-      if (nEmitter >= 0) {
-        this.G[nEmitter][nEmitter] += gEC;
-        if (nCollector >= 0) this.G[nEmitter][nCollector] -= gEC;
-      }
-      if (nCollector >= 0) {
-        this.G[nCollector][nCollector] += gEC;
-        if (nEmitter >= 0) this.G[nCollector][nEmitter] -= gEC;
-      }
-    }
+  private addBjtStamp(
+    transistor: NPNTransistor | PNPTransistor,
+    isPnp: boolean
+  ): void {
+    const obs = stampBjtSwitchModel(
+      this.nonlinearStampContext(),
+      transistor,
+      isPnp,
+    );
+    transistor.updateCircuitProperties({
+      isCutoff: obs.isCutoff,
+      isActive: obs.isActive,
+      isSaturated: obs.isSaturated,
+      baseCurrent: obs.baseCurrent,
+      collectorCurrent: obs.collectorCurrent,
+      emitterCurrent: obs.emitterCurrent,
+    } as any);
   }
 
   /**
@@ -991,32 +1284,29 @@ export class EnhancedCircuitSolver {
    * Use companion model: C_eq = C/Δt, I_eq = C/Δt * V_prev
    */
   private addCapacitorTransient(capacitor: Capacitor): void {
-    const capacitance = capacitor.getCircuitProperties().value;
+    const props = capacitor.getCircuitProperties() as any;
+    const capacitance = Math.max(props.value ?? 0, 1e-15);
+    const esr = Math.max(props.esr ?? 0, 0);
+    const leakageResistance = Math.max(props.leakageResistance ?? 1e9, 1e3);
     const nodes = capacitor.getNodes();
     const componentId = capacitor.getName();
 
     const n1 = this.nodeMap.get(`${componentId}_${nodes[0].id}`)! - 1;
     const n2 = this.nodeMap.get(`${componentId}_${nodes[1].id}`)! - 1;
 
-    // Companion model: treat as conductance + current source
-    const gEq = capacitance / this.timeStep;
+    // Backward-Euler companion with optional ESR folded into effective branch conductance.
+    const gIdeal = capacitance / this.timeStep;
+    const gEq = gIdeal / (1 + esr * gIdeal);
 
     // Get previous voltage
     const prevState = this.previousState.get(componentId);
     const vPrev = prevState?.voltage || 0;
     const iEq = gEq * vPrev;
+    this.addTwoNodeConductance(n1, n2, gEq);
+    this.addTwoNodeCurrentSource(n1, n2, -iEq);
 
-    // Add conductance
-    if (n1 >= 0) {
-      this.G[n1][n1] += gEq;
-      if (n2 >= 0) this.G[n1][n2] -= gEq;
-      this.i[n1] += iEq;
-    }
-    if (n2 >= 0) {
-      this.G[n2][n2] += gEq;
-      if (n1 >= 0) this.G[n2][n1] -= gEq;
-      this.i[n2] -= iEq;
-    }
+    // Dielectric leakage (parallel resistance).
+    this.addTwoNodeConductance(n1, n2, 1 / leakageResistance);
   }
 
   /**
@@ -1024,32 +1314,28 @@ export class EnhancedCircuitSolver {
    * Use companion model: G_eq = Δt/L, V_eq = I_prev * Δt/L
    */
   private addInductorTransient(inductor: Inductor): void {
-    const inductance = inductor.getCircuitProperties().value;
+    const props = inductor.getCircuitProperties() as any;
+    const inductance = Math.max(props.value ?? 0, 1e-12);
+    const dcr = Math.max(props.dcResistance ?? 0.1, 0);
     const nodes = inductor.getNodes();
     const componentId = inductor.getName();
 
     const n1 = this.nodeMap.get(`${componentId}_${nodes[0].id}`)! - 1;
     const n2 = this.nodeMap.get(`${componentId}_${nodes[1].id}`)! - 1;
 
-    // Companion model
-    const gEq = this.timeStep / inductance;
+    // Backward-Euler inductor companion with series DCR damping.
+    const alpha = this.timeStep / inductance;
+    const denom = 1 + alpha * dcr;
+    const gEq = alpha / denom;
 
     // Get previous current
     const prevState = this.previousState.get(componentId);
     const iPrev = prevState?.current || 0;
-    const vEq = iPrev * (this.timeStep / inductance);
+    const iHist = iPrev / denom;
 
-    // Add conductance (Norton companion: G_eq in parallel with current source I_prev)
-    if (n1 >= 0) {
-      this.G[n1][n1] += gEq;
-      if (n2 >= 0) this.G[n1][n2] -= gEq;
-      this.i[n1] -= iPrev;
-    }
-    if (n2 >= 0) {
-      this.G[n2][n2] += gEq;
-      if (n1 >= 0) this.G[n2][n1] -= gEq;
-      this.i[n2] += iPrev;
-    }
+    // Norton companion: i = gEq * v + iHist (from n1 -> n2).
+    this.addTwoNodeConductance(n1, n2, gEq);
+    this.addTwoNodeCurrentSource(n1, n2, iHist);
   }
 
   /**
@@ -1088,10 +1374,13 @@ export class EnhancedCircuitSolver {
       const solution = lusolve(matrixA, vectorZ) as Matrix;
       const x = solution.toArray() as number[][];
 
-      return {
-        nodeVoltages: x.slice(0, n).map((row) => row[0]),
-        sourceCurrents: x.slice(n).map((row) => row[0]),
-      };
+      const nodeVoltages = x.slice(0, n).map((row) => row[0]);
+      const sourceCurrents = x.slice(n).map((row) => row[0]);
+
+      this.lastSolveNodeVoltages = nodeVoltages;
+      this.lastSolveSourceCurrents = sourceCurrents;
+
+      return { nodeVoltages, sourceCurrents };
     } catch (error) {
       console.error("Matrix solve error:", error);
       console.log("Matrix A:", A);
@@ -1126,56 +1415,154 @@ export class EnhancedCircuitSolver {
 
       switch (type) {
         case "resistor":
-          current = voltage / component.getCircuitProperties().value;
+          {
+            const r = Math.max(
+              typeof (component as any).getImpedance === "function"
+                ? (component as any).getImpedance(0)
+                : component.getCircuitProperties().value,
+              1e-12,
+            );
+            current = voltage / r;
+          }
           break;
         case "capacitor":
-          const prevCapVoltage =
-            this.previousState.get(componentId)?.voltage || 0;
-          const capacitance = (component as Capacitor).getCircuitProperties()
-            .value;
-          current = (capacitance * (voltage - prevCapVoltage)) / this.timeStep;
+          {
+            const prevCapVoltage =
+              this.previousState.get(componentId)?.voltage || 0;
+            const capProps = (component as Capacitor).getCircuitProperties() as any;
+            const capacitance = Math.max(capProps.value ?? 0, 1e-15);
+            const esr = Math.max(capProps.esr ?? 0, 0);
+            const leakageResistance = Math.max(
+              capProps.leakageResistance ?? 1e9,
+              1e3
+            );
+            const gIdeal = capacitance / this.timeStep;
+            const gEq = gIdeal / (1 + esr * gIdeal);
+            const iDyn = gEq * (voltage - prevCapVoltage);
+            const iLeak = voltage / leakageResistance;
+            current = iDyn + iLeak;
+          }
           break;
         case "inductor":
-          const prevIndCurrent =
-            this.previousState.get(componentId)?.current || 0;
-          const inductance = (component as Inductor).getCircuitProperties()
-            .value;
-          current = prevIndCurrent + (voltage * this.timeStep) / inductance;
+          {
+            const prevIndCurrent =
+              this.previousState.get(componentId)?.current || 0;
+            const indProps = (component as Inductor).getCircuitProperties() as any;
+            const inductance = Math.max(indProps.value ?? 0, 1e-12);
+            const dcr = Math.max(indProps.dcResistance ?? 0.1, 0);
+            const alpha = this.timeStep / inductance;
+            const denom = 1 + alpha * dcr;
+            current = (prevIndCurrent + alpha * voltage) / denom;
+          }
           break;
         case "led":
-          // LED current comes from MNA solution (voltage source)
-          const ledVsIndex = this.voltageSourceMap.get(componentId);
-          if (ledVsIndex !== undefined) {
-            current = solution.sourceCurrents[ledVsIndex];
-          } else {
-            console.warn(`LED ${componentId} voltage source index not found`);
-            current = 0;
+        case "diode":
+        case "zener_diode":
+          {
+            const props = component.getCircuitProperties() as any;
+            const vAk = voltage;
+            const rdyn = Math.max(props.dynamicResistance ?? 10, 1e-3);
+            const vf = Math.abs(props.forwardVoltage ?? 0.7);
+            const fwd = this.evaluatePnCompanion(vAk, vf, rdyn);
+            current = fwd.i;
+
+            if (type === "zener_diode") {
+              const vz = Math.abs(props.breakdownVoltage ?? 5.1);
+              const vKa = -vAk;
+              if (vKa > vz) {
+                const rev = this.evaluatePnCompanion(vKa, vz, rdyn);
+                current -= rev.i;
+              }
+            }
           }
           break;
         case "npn_transistor":
         case "pnp_transistor":
-          // Transistor: current depends on operating region
-          // Simplified: when ON, I = V / R (where R is 10Ω or 1kΩ depending on junction)
-          const transProps =
-            type === "npn_transistor"
-              ? (component as NPNTransistor).getBJTProperties()
-              : (component as PNPTransistor).getBJTProperties();
-          const vbe =
-            type === "npn_transistor"
-              ? nodes[0].voltage - nodes[2].voltage
-              : nodes[2].voltage - nodes[0].voltage;
+          // Recompute BJT terminal currents from solved node voltages (this step),
+          // then publish them for snapshot/export and branch flow logic.
+          {
+            const transProps =
+              type === "npn_transistor"
+                ? (component as NPNTransistor).getBJTProperties()
+                : (component as PNPTransistor).getBJTProperties();
+            const isPnp = type === "pnp_transistor";
+            const vBase = nodes[0]?.voltage ?? 0;
+            const vCollector = nodes[1]?.voltage ?? 0;
+            const vEmitter = nodes[2]?.voltage ?? 0;
+            const vbeEff = isPnp ? vEmitter - vBase : vBase - vEmitter;
+            const vceEff = isPnp ? vEmitter - vCollector : vCollector - vEmitter;
+            const sharpness = 0.03;
+            const drive =
+              1 /
+              (1 +
+                Math.exp(
+                  -Math.max(
+                    -60,
+                    Math.min(60, (vbeEff - (transProps.vbe ?? 0.7)) / sharpness)
+                  )
+                ));
 
-          if (vbe > transProps.vbe) {
-            // Transistor ON: collector current
-            const vce = nodes[1].voltage - nodes[2].voltage;
-            current = vce / 10; // Saturated: 10Ω
-          } else {
-            // Transistor OFF
-            current = voltage / 1e12;
+            const gBe = 1e-9 + (1 / 1200 - 1e-9) * drive;
+            const gCe = 1e-9 + (1 / 8 - 1e-9) * drive;
+            const ib = gBe * (vBase - vEmitter);
+            const ic = gCe * (vCollector - vEmitter);
+            const ie = -(ib + ic);
+            const on = drive > 0.5;
+            const saturated = vceEff < (transProps.vcesat ?? 0.2);
+
+            component.updateCircuitProperties({
+              isCutoff: !on,
+              isActive: on && !saturated,
+              isSaturated: on && saturated,
+              baseCurrent: ib,
+              collectorCurrent: ic,
+              emitterCurrent: ie,
+            } as any);
+
+            current = ic;
+          }
+          break;
+        case "nmos_transistor":
+        case "pmos_transistor":
+          {
+            const gate = nodes.find((n) => n.id === "gate");
+            const drain = nodes.find((n) => n.id === "drain");
+            const source = nodes.find((n) => n.id === "source");
+            const props = component.getCircuitProperties() as any;
+            if (gate && drain && source) {
+              const gateV = gate.voltage;
+              const drainV = drain.voltage;
+              const sourceV = source.voltage;
+              const vth = Math.abs(props.vgsThreshold ?? 2);
+              const rdson = Math.max(props.rdson ?? 0.1, 1e-5);
+              const overdrive =
+                type === "nmos_transistor"
+                  ? gateV - sourceV - vth
+                  : sourceV - gateV - vth;
+              const sharpness = 0.06;
+              const sigmoid =
+                1 /
+                (1 + Math.exp(-Math.max(-60, Math.min(60, overdrive / sharpness))));
+              const gOff = 1e-9;
+              const gOn = 1 / rdson;
+              const gds = gOff + (gOn - gOff) * sigmoid;
+              current = (drainV - sourceV) * gds;
+              const on = sigmoid > 0.5;
+              component.updateCircuitProperties({ isConducting: on } as any);
+            }
           }
           break;
         case "battery":
         case "acsource":
+        case "opamp":
+        case "comparator":
+        case "timer555":
+        case "nor_gate":
+        case "nand_gate":
+        case "and_gate":
+        case "or_gate":
+        case "xor_gate":
+        case "not_gate":
           // Current through voltage source comes from MNA solution
           // Use the voltage source map to get the correct index
           const vsIndex = this.voltageSourceMap.get(componentId);
@@ -1187,13 +1574,58 @@ export class EnhancedCircuitSolver {
           }
           break;
         case "switch":
+        case "push_button":
+          {
+            const rSpst = this.resolveSpstResistanceOhms(component);
+            if (rSpst > 0 && Number.isFinite(rSpst)) {
+              current = voltage / rSpst;
+            }
+          }
+          break;
         case "ammeter":
         case "voltmeter":
         case "oscilloscope":
           // Calculate current using Ohm's law (I = V/R)
-          const resistance = component.getCircuitProperties().resistance;
-          if (resistance && resistance > 0) {
-            current = voltage / resistance;
+          {
+            const resistance = component.getCircuitProperties().resistance;
+            if (resistance && resistance > 0) {
+              current = voltage / resistance;
+            }
+          }
+          break;
+        case "spdt_switch":
+          {
+            const props = component.getCircuitProperties() as any;
+            const nCommon = nodes.find((n) => n.id === "common");
+            const nA = nodes.find((n) => n.id === "throw_a");
+            const nB = nodes.find((n) => n.id === "throw_b");
+            if (nCommon && nA && nB) {
+              const connectUpper = props.connectUpper ?? true;
+              const target = connectUpper ? 1 : 0;
+              const wiper = this.spdtState.get(componentId) ?? target;
+              const upperClosure =
+                wiper > 0.55 ? 1 : wiper < 0.45 ? 0 : (wiper - 0.45) / 0.1;
+              const lowerClosure =
+                wiper < 0.45 ? 1 : wiper > 0.55 ? 0 : (0.55 - wiper) / 0.1;
+              const gOn = 1 / 0.02;
+              const gOff = 1e-9;
+              const gA = gOff + (gOn - gOff) * upperClosure;
+              const gB = gOff + (gOn - gOff) * lowerClosure;
+              current =
+                gA * (nCommon.voltage - nA.voltage) +
+                gB * (nCommon.voltage - nB.voltage);
+            }
+          }
+          break;
+        case "relay":
+          {
+            const props = component.getCircuitProperties() as any;
+            const coil1 = nodes.find((n) => n.id === "coil1");
+            const coil2 = nodes.find((n) => n.id === "coil2");
+            if (coil1 && coil2) {
+              const rCoil = Math.max(props.coilResistance ?? 100, 1e-3);
+              current = (coil1.voltage - coil2.voltage) / rCoil;
+            }
           }
           break;
         case "ground":
@@ -1234,8 +1666,9 @@ export class EnhancedCircuitSolver {
     let count = 0;
     this.components.forEach((comp) => {
       const type = comp.getComponentType();
-      // LEDs are modeled as voltage source (Vf) in series with resistance
-      if (type === "battery" || type === "acsource" || type === "led") count++;
+      if (VOLTAGE_SOURCE_COMPONENT_TYPES.has(type)) {
+        count++;
+      }
     });
     return count;
   }
@@ -1246,6 +1679,11 @@ export class EnhancedCircuitSolver {
   public reset(): void {
     this.currentTime = 0;
     this.previousState.clear();
+    this.comparatorState.clear();
+    this.relayState.clear();
+    this.spdtState.clear();
+    this.timer555State.clear();
+    this.stateFlipCounts.clear();
 
     this.components.forEach((component) => {
       component.updateCircuitState(0, 0);
@@ -1259,6 +1697,45 @@ export class EnhancedCircuitSolver {
    */
   public getCurrentTime(): number {
     return this.currentTime;
+  }
+
+  public setSolverTelemetryEnabled(enabled: boolean): void {
+    this.solverTelemetryEnabled = enabled;
+    this.solverTelemetryFrameCounter = 0;
+  }
+
+  public isSolverTelemetryEnabled(): boolean {
+    return this.solverTelemetryEnabled;
+  }
+
+  /**
+   * True if two pins of a component share the same post-union electrical node
+   * (e.g. 555 TRIG/THR/DIS tied per classic astable).
+   */
+  public areNodesElectricallyCommon(
+    componentId: string,
+    nodeIdA: string,
+    nodeIdB: string
+  ): boolean {
+    const a = `${componentId}_${nodeIdA}`;
+    const b = `${componentId}_${nodeIdB}`;
+    const ia = this.nodeMap.get(a);
+    const ib = this.nodeMap.get(b);
+    if (ia === undefined || ib === undefined) return false;
+    return ia === ib;
+  }
+
+  /** Merged net index after union-find (same index ⇒ same electrical node). Ground group is 0. */
+  public getMergedNodeIndex(
+    componentId: string,
+    nodeId: string
+  ): number | undefined {
+    return this.nodeMap.get(`${componentId}_${nodeId}`);
+  }
+
+  /** For discrete R/C discovery (e.g. 555 astable passives). */
+  public getCircuitComponents(): ReadonlyMap<string, CircuitComponent> {
+    return this.components;
   }
 
   /**
@@ -1275,19 +1752,24 @@ export class EnhancedCircuitSolver {
   }
 
   /**
-   * Get circuit analysis results
+   * Get circuit analysis results (legacy interface, kept for compatibility)
    */
   public getAnalysisResults(): any {
     const nodeVoltages: { [key: string]: number } = {};
 
-    this.nodeMap.forEach((_index, nodeId) => {
+    this.nodeMap.forEach((index, nodeId) => {
       if (nodeId !== "ground") {
-        nodeVoltages[nodeId] = 0; // Would need to store from last solve
+        const solverIndex = index - 1;
+        nodeVoltages[nodeId] =
+          solverIndex >= 0 && solverIndex < this.lastSolveNodeVoltages.length
+            ? this.lastSolveNodeVoltages[solverIndex]
+            : 0;
       }
     });
 
     return {
       time: this.roundForDisplay(this.currentTime),
+      nodeVoltages,
       components: Array.from(this.components.entries()).map(([id, comp]) => {
         const props = comp.getCircuitProperties();
         return {
@@ -1298,8 +1780,80 @@ export class EnhancedCircuitSolver {
           power: this.roundForDisplay(props.power),
         };
       }),
-      nodeCount: this.nodeMap.size - 1, // Exclude ground
+      nodeCount: this.nodeMap.size - 1,
       voltageSourceCount: this.voltageSourceCount,
+    };
+  }
+
+  /**
+   * Get typed simulation snapshot with per-node voltages and per-terminal data.
+   */
+  public getSimulationSnapshot(): SimulationSnapshot {
+    const nodeVoltages: Record<string, number> = {};
+    this.nodeMap.forEach((index, nodeId) => {
+      if (nodeId === "ground") {
+        nodeVoltages[nodeId] = 0;
+      } else {
+        const solverIndex = index - 1;
+        nodeVoltages[nodeId] =
+          solverIndex >= 0 && solverIndex < this.lastSolveNodeVoltages.length
+            ? this.lastSolveNodeVoltages[solverIndex]
+            : 0;
+      }
+    });
+
+    const componentTerminalCurrents: Record<string, Record<string, number>> = {};
+    const componentTerminalVoltages: Record<string, Record<string, number>> = {};
+    const componentPower: Record<string, number> = {};
+
+    this.components.forEach((component, componentId) => {
+      const props = component.getCircuitProperties();
+      const nodes = component.getNodes();
+
+      componentPower[componentId] = Math.abs(props.voltage * props.current);
+
+      const terminalVoltages: Record<string, number> = {};
+      const terminalCurrents: Record<string, number> = {};
+
+      for (let ni = 0; ni < nodes.length; ni++) {
+        const node = nodes[ni];
+        const globalNodeId = `${componentId}_${node.id}`;
+        const idx = this.nodeMap.get(globalNodeId);
+        if (idx !== undefined) {
+          const solverIdx = idx - 1;
+          terminalVoltages[node.id] =
+            solverIdx >= 0 && solverIdx < this.lastSolveNodeVoltages.length
+              ? this.lastSolveNodeVoltages[solverIdx]
+              : 0;
+        } else {
+          terminalVoltages[node.id] = 0;
+        }
+
+        if (Math.abs(node.current) > 1e-12) {
+          terminalCurrents[node.id] = node.current;
+        } else if (nodes.length === 2) {
+          // Convention: positive = enters terminal from wire.
+          // All 2-terminal components use the same sign frame now:
+          //   props.current > 0 ⇒ current enters nodes[0] from wire.
+          // (For MNA voltage sources, j_vs < 0 when driving, which
+          //  correctly maps to "exits nodes[0]" = negative.)
+          const sign = ni === 0 ? 1 : -1;
+          terminalCurrents[node.id] = sign * props.current;
+        } else {
+          terminalCurrents[node.id] = 0;
+        }
+      }
+
+      componentTerminalVoltages[componentId] = terminalVoltages;
+      componentTerminalCurrents[componentId] = terminalCurrents;
+    });
+
+    return {
+      time: this.currentTime,
+      nodeVoltages,
+      componentTerminalCurrents,
+      componentTerminalVoltages,
+      componentPower,
     };
   }
 }

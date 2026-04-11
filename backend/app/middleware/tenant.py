@@ -37,8 +37,21 @@ NOTIFICATION_INBOX_PERMISSIONS = frozenset(
 )
 
 # Seeded roles often omit these; guardians in a child's workspace may have no Membership row.
+# When in learner view (X-Child-Context), the parent needs student-equivalent permissions
+# so they can fully act on behalf of the child in labs, sessions, and progress tracking.
 GUARDIAN_SHELL_EXTRA_PERMISSIONS = frozenset(
-    {"tenants:view", *NOTIFICATION_INBOX_PERMISSIONS}
+    {
+        "tenants:view",
+        *NOTIFICATION_INBOX_PERMISSIONS,
+        "gamification:view",
+        "gamification:create",
+        "labs:view",
+        "labs:create",
+        "progress:view",
+        "progress:create",
+        "assets:view",
+        "assets:create",
+    }
 )
 
 PARENT_ROLE_SLUGS_WITH_INBOX = frozenset({"parent", "homeschool_parent"})

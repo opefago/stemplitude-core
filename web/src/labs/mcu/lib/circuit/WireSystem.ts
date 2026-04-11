@@ -584,14 +584,46 @@ export class WireSystem {
   }
 
   /**
-   * Update wire states (current, voltage)
+   * Update wire states (current, voltage) from analysis results.
+   * Extracts current from component terminal data when available.
    */
   public updateWireStates(analysisResults: any): void {
+    const componentCurrents: Record<string, Record<string, number>> =
+      analysisResults?.componentTerminalCurrents ?? {};
+    const components: Array<{ id: string; current: number }> =
+      analysisResults?.components ?? [];
+
     this.wires.forEach((wire) => {
-      // Find current and voltage from analysis results
-      // This would be populated by the circuit solver
-      wire.current = 0; // Placeholder
-      wire.voltage = 0; // Placeholder
+      let current = 0;
+      let voltage = 0;
+
+      // Try to extract current from the terminal data (typed snapshot)
+      if (
+        wire.startComponentId &&
+        componentCurrents[wire.startComponentId]
+      ) {
+        const termCurrents = componentCurrents[wire.startComponentId];
+        const termId = wire.startNodeId ?? Object.keys(termCurrents)[0];
+        if (termId && termCurrents[termId] !== undefined) {
+          current = termCurrents[termId];
+        }
+      }
+
+      // Fallback: look in the legacy components array
+      if (Math.abs(current) < 1e-9 && wire.startComponentId) {
+        const comp = components.find((c: any) => c.id === wire.startComponentId);
+        if (comp) current = comp.current ?? 0;
+      }
+
+      // Voltage from node voltages
+      const nodeVoltages: Record<string, number> =
+        analysisResults?.nodeVoltages ?? {};
+      if (wire.startNodeId && nodeVoltages[wire.startNodeId] !== undefined) {
+        voltage = nodeVoltages[wire.startNodeId];
+      }
+
+      wire.current = current;
+      wire.voltage = voltage;
 
       this.drawWire(wire);
     });

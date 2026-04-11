@@ -95,7 +95,7 @@ export function InstructorDashboard() {
         session_end: end.toISOString(),
         notes: "Started from instructor dashboard",
       });
-      navigate(`/app/classrooms/${nextClassroom.classroomId}`);
+      navigate(`/app/classrooms/${nextClassroom.classroomId}/live`);
     } finally {
       setStartingClassId(null);
     }

@@ -1,5 +1,7 @@
-import { Graphics } from "pixi.js";
+import * as PIXI from "pixi.js";
 import { CircuitComponent, CircuitProperties } from "../CircuitComponent";
+import { BJT_SVG_PIVOT, BJT_SVG_SCALE } from "../rendering/bjtSchematicSvg";
+import { drawLogicInverterIEC } from "../rendering/logicGateAndZenerSchematicDraw";
 
 export interface NotGateProperties extends CircuitProperties {
   input: boolean;
@@ -33,14 +35,14 @@ export class NotGate extends CircuitComponent {
     this.nodes = [
       {
         id: "input",
-        position: { x: -40, y: 0 },
+        position: { x: -30, y: 0 },
         voltage: 0,
         current: 0,
         connections: [],
       },
       {
         id: "output",
-        position: { x: 40, y: 0 },
+        position: { x: 30, y: 0 },
         voltage: 5, // Default high output
         current: 0,
         connections: [],
@@ -48,60 +50,27 @@ export class NotGate extends CircuitComponent {
     ];
   }
 
+  protected getTerminalPinRadius(): number {
+    return 5;
+  }
+
   protected createVisuals(): void {
-    this.componentGraphics.clear();
-
-    // Enhanced NOT gate drawing from reference implementation
-    const width = 80;
-    const height = 60;
-
-    // NOT gate outline - REMOVED dark fill for visibility on black canvas
-    // this.componentGraphics.rect(-width / 2, -height / 2, width, height);
-    // this.componentGraphics.fill(0x333333);
-
-    // NOT gate symbol (triangle with circle)
-    // Triangle
-    this.componentGraphics.moveTo(-25, -15);
-    this.componentGraphics.lineTo(-25, 15);
-    this.componentGraphics.lineTo(20, 0);
-    this.componentGraphics.lineTo(-25, -15);
-    this.componentGraphics.fill(0x44ff44);
-    this.componentGraphics.stroke({ width: 2, color: 0x66ff66 });
-
-    // Inversion circle (bubble)
-    this.componentGraphics.circle(25, 0, 5);
-    this.componentGraphics.fill(0xffffff);
-    this.componentGraphics.stroke({ width: 2, color: 0x66ff66 });
-
-    // Input line
-    this.componentGraphics.moveTo(-40, 0);
-    this.componentGraphics.lineTo(-25, 0);
-    this.componentGraphics.stroke({ width: 2, color: 0xffffff });
-
-    // Output line
-    this.componentGraphics.moveTo(30, 0);
-    this.componentGraphics.lineTo(40, 0);
-    this.componentGraphics.stroke({ width: 2, color: 0xffffff });
-
-    // Update text labels
+    const g = this.componentGraphics;
+    g.clear();
+    drawLogicInverterIEC(g);
+    g.pivot.set(BJT_SVG_PIVOT, BJT_SVG_PIVOT);
+    const flipSign = Math.sign(g.scale.x) || 1;
+    g.scale.set(flipSign * BJT_SVG_SCALE, BJT_SVG_SCALE);
+    g.tint = this.gateProps?.output ? 0xaaffaa : 0xffffff;
+    g.hitArea = new PIXI.Rectangle(0, 0, 150, 150);
     this.updateLabels();
   }
 
-  protected updateVisuals(deltaTime: number): void {
-    // Only update if gateProps is initialized
+  protected updateVisuals(_deltaTime: number): void {
     if (!this.gateProps) return;
+    this.circuitProps.voltage = this.nodes[1].voltage;
 
-    // Update gate output based on input (NOT logic)
-    this.gateProps.output = !this.gateProps.input;
-
-    // Update output voltage
-    this.circuitProps.voltage = this.gateProps.output ? 5 : 0;
-
-    // Visual feedback for gate state
-    if (this.gateProps.output !== (this.nodes[1].voltage > 2.5)) {
-      this.createVisuals();
-    }
-
+    this.componentGraphics.tint = this.gateProps.output ? 0xaaffaa : 0xffffff;
     this.updateLabels();
   }
 
@@ -140,24 +109,17 @@ export class NotGate extends CircuitComponent {
     const cos = Math.cos((this.orientation * Math.PI) / 180);
     const sin = Math.sin((this.orientation * Math.PI) / 180);
 
-    // Input (left when orientation = 0)
-    this.nodes[0].position.x = -40 * cos - 0 * sin;
-    this.nodes[0].position.y = -40 * sin + 0 * cos;
+    this.nodes[0].position.x = -30 * cos;
+    this.nodes[0].position.y = -30 * sin;
 
-    // Output (right when orientation = 0)
-    this.nodes[1].position.x = 40 * cos - 0 * sin;
-    this.nodes[1].position.y = 40 * sin + 0 * cos;
+    this.nodes[1].position.x = 30 * cos;
+    this.nodes[1].position.y = 30 * sin;
   }
 
   protected updateNodeVoltages(): void {
     // Update input state based on node voltage
     this.gateProps.input = this.nodes[0].voltage > 2.5;
-
-    // Calculate output (NOT logic)
-    this.gateProps.output = !this.gateProps.input;
-
-    // Set output voltage
-    this.nodes[1].voltage = this.gateProps.output ? 5.0 : 0.0;
+    this.gateProps.output = this.nodes[1].voltage > 2.5;
 
     // Very low current consumption
     this.nodes[0].current = 0.0001;
