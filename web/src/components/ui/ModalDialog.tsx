@@ -11,6 +11,8 @@ interface ModalDialogProps {
   /** Sticky bottom area (e.g. Cancel / primary actions). Body scrolls independently. */
   footer?: ReactNode;
   contentClassName?: string;
+  /** Extra class on the backdrop (e.g. `ui-modal__backdrop--stack` for nested modals). */
+  backdropClassName?: string;
   closeVariant?: "neutral" | "danger";
   disableClose?: boolean;
 }
@@ -23,6 +25,7 @@ export function ModalDialog({
   children,
   footer,
   contentClassName = "",
+  backdropClassName = "",
   closeVariant = "neutral",
   disableClose = false,
 }: ModalDialogProps) {
@@ -41,7 +44,7 @@ export function ModalDialog({
 
   return createPortal(
     <div
-      className="ui-modal__backdrop"
+      className={`ui-modal__backdrop${backdropClassName ? ` ${backdropClassName}` : ""}`.trim()}
       onClick={() => {
         if (!disableClose) onClose();
       }}

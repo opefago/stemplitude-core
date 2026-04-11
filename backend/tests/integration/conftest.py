@@ -97,6 +97,7 @@ async def engine(pg_url):
         import app.assets.models  # noqa: F401
         import app.admin.models  # noqa: F401
         import app.integrations.models  # noqa: F401
+        import app.trials.models  # noqa: F401
 
         async with eng.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
@@ -182,6 +183,55 @@ async def db_session(engine) -> AsyncGenerator[AsyncSession, None]:
         db_module.async_session_factory = originals["factory"]
         tenant_mw.async_session_factory = originals["tenant_mw_factory"]
         students_router.async_session_factory = originals["students_factory"]
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _ensure_trial_evaluation_plan(db_session: AsyncSession) -> None:
+    """Default onboard flow provisions a trial subscription; seed the plan row."""
+    from sqlalchemy import select
+
+    from app.config import settings
+    from app.plans.models import Plan, PlanFeature, PlanLimit
+
+    if not settings.TRIAL_ENABLED:
+        return
+
+    result = await db_session.execute(
+        select(Plan).where(Plan.slug == settings.TRIAL_PLAN_SLUG_CENTER)
+    )
+    if result.scalar_one_or_none():
+        return
+
+    plan = Plan(
+        name="Evaluation trial (center)",
+        slug=settings.TRIAL_PLAN_SLUG_CENTER,
+        type="center",
+        price_monthly=None,
+        price_yearly=None,
+        trial_days=14,
+        is_active=True,
+    )
+    db_session.add(plan)
+    await db_session.flush()
+    for feature_key, enabled in (
+        ("students_feature", True),
+        ("classrooms", True),
+        ("projects", True),
+    ):
+        db_session.add(
+            PlanFeature(plan_id=plan.id, feature_key=feature_key, enabled=enabled)
+        )
+    for limit_key, limit_value in (
+        ("max_students", 12),
+        ("max_instructors", 2),
+        ("max_classrooms", 2),
+        ("max_projects", 40),
+        ("storage_mb", 1500),
+    ):
+        db_session.add(
+            PlanLimit(plan_id=plan.id, limit_key=limit_key, limit_value=limit_value)
+        )
+    await db_session.flush()
 
 
 # ---------------------------------------------------------------------------

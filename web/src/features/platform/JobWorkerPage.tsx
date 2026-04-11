@@ -32,6 +32,19 @@ function shortUuid(uuid: string): string {
   return uuid.length >= 8 ? uuid.slice(0, 8) : uuid;
 }
 
+function taskResultTitle(r: TaskResult): string {
+  return (
+    r.display_name?.trim() ||
+    r.job_type ||
+    r.task_name ||
+    r.task_id
+  );
+}
+
+function runningTaskTitle(task: ActiveTask): string {
+  return task.display_name?.trim() || task.name || "Running task";
+}
+
 function formatTimestamp(iso: string | number | null): string {
   if (iso == null) return "—";
   const d = typeof iso === "number" ? new Date(iso * 1000) : new Date(iso);
@@ -47,6 +60,40 @@ function formatTimestamp(iso: string | number | null): string {
   return d.toLocaleDateString();
 }
 
+function TaskExpandedPanels({ r }: { r: TaskResult }) {
+  const d = r.details;
+  const hasMeta = d != null && Object.keys(d).length > 0;
+  const resultEmpty = r.result === undefined || r.result === null;
+
+  return (
+    <div className="job-worker__logs-panel">
+      <h4 className="job-worker__logs-title">Return value</h4>
+      <pre className="job-worker__result-json">
+        {resultEmpty
+          ? "null"
+          : typeof r.result === "string"
+            ? r.result
+            : JSON.stringify(r.result, null, 2)}
+      </pre>
+      {hasMeta && (
+        <>
+          <h4 className="job-worker__logs-title">Execution metadata</h4>
+          <pre className="job-worker__result-json">{JSON.stringify(d, null, 2)}</pre>
+        </>
+      )}
+      {!hasMeta && resultEmpty && (
+        <p className="job-worker__detail-hint">
+          No task return value or extended metadata in Redis. For parameters (recipient, subject,
+          etc.), workers must persist extended results — see{" "}
+          <code>result_extended</code> in <code>workers/celery_app.py</code>. New{" "}
+          <code>email.send</code> tasks return a JSON summary with <code>recipient</code> and{" "}
+          <code>outcome</code>.
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function JobWorkerPage() {
   const [tab, setTab] = useState<TabId>("running");
   const [expandedResultId, setExpandedResultId] = useState<string | null>(null);
@@ -56,6 +103,10 @@ export function JobWorkerPage() {
   const [jobStats, setJobStats] = useState<JobStats | null>(null);
   const [recentResults, setRecentResults] = useState<TaskResult[]>([]);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [actionFeedback, setActionFeedback] = useState<{
+    type: "ok" | "err";
+    text: string;
+  } | null>(null);
 
   const fetchInitial = useCallback(async () => {
     setLoading(true);
@@ -102,10 +153,22 @@ export function JobWorkerPage() {
 
   const handleRetry = useCallback(
     async (taskId: string) => {
+      setActionFeedback(null);
       setActionLoading(taskId);
       try {
-        await retryJob(taskId);
+        const res = await retryJob(taskId);
         await fetchStatsAndResults();
+        const extra = res.task_id
+          ? ` New task id: ${shortUuid(res.task_id)}.`
+          : "";
+        setActionFeedback({
+          type: "ok",
+          text: (res.message ?? "Job re-queued.") + extra,
+        });
+      } catch (err) {
+        const text =
+          err instanceof Error ? err.message : "Retry failed. Check API logs.";
+        setActionFeedback({ type: "err", text });
       } finally {
         setActionLoading(null);
       }
@@ -115,10 +178,26 @@ export function JobWorkerPage() {
 
   const handleCancel = useCallback(
     async (taskId: string) => {
+      setActionFeedback(null);
       setActionLoading(taskId);
       try {
-        await cancelJob(taskId);
+        const res = await cancelJob(taskId);
         await fetchStatsAndResults();
+        if (res.success) {
+          setActionFeedback({
+            type: "ok",
+            text: res.message ?? "Cancellation requested.",
+          });
+        } else {
+          setActionFeedback({
+            type: "err",
+            text: res.error ?? "Cancel failed.",
+          });
+        }
+      } catch (err) {
+        const text =
+          err instanceof Error ? err.message : "Cancel failed.";
+        setActionFeedback({ type: "err", text });
       } finally {
         setActionLoading(null);
       }
@@ -278,6 +357,21 @@ export function JobWorkerPage() {
           className="job-worker__panel"
           aria-label="Job list"
         >
+          {actionFeedback && !loading && (
+            <div
+              role="alert"
+              className={`job-worker__banner job-worker__banner--action job-worker__banner--${actionFeedback.type === "ok" ? "success" : "error"}`}
+            >
+              <span className="job-worker__banner-text">{actionFeedback.text}</span>
+              <button
+                type="button"
+                className="job-worker__banner-dismiss"
+                onClick={() => setActionFeedback(null)}
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
           {loading ? (
             <div className="job-worker__empty">
               <Loader2
@@ -300,6 +394,8 @@ export function JobWorkerPage() {
               results={failedResults}
               onRetry={handleRetry}
               actionLoading={actionLoading}
+              expandedResultId={expandedResultId}
+              onToggleDetails={setExpandedResultId}
             />
           ) : (
             <ArchivedTab
@@ -349,15 +445,24 @@ function RunningTab({
           <article className="job-worker__card job-worker__card--running">
             <div className="job-worker__card-header">
               <div className="job-worker__card-title-row">
-                <h3 className="job-worker__card-title">{task.name}</h3>
+                <h3 className="job-worker__card-title">{runningTaskTitle(task)}</h3>
                 <span className="job-worker__badge job-worker__badge--running">
                   <Loader2 size={12} className="job-worker__badge-spinner" aria-hidden />
                   Running
                 </span>
               </div>
               <code className="job-worker__job-id">{shortUuid(task.id)}</code>
+              {task.job_type && (
+                <code className="job-worker__celery-task-name">{task.job_type}</code>
+              )}
             </div>
             <div className="job-worker__card-meta">
+              {task.name && runningTaskTitle(task) !== task.name && (
+                <span className="job-worker__meta-item" title="Celery task name">
+                  <FileText size={14} aria-hidden />
+                  {task.name}
+                </span>
+              )}
               <span className="job-worker__meta-item">
                 <Clock size={14} aria-hidden />
                 Worker: {task.worker}
@@ -415,15 +520,24 @@ function FailedTab({
           <article className="job-worker__card job-worker__card--failed">
             <div className="job-worker__card-header">
               <div className="job-worker__card-title-row">
-                <h3 className="job-worker__card-title">{r.task_name ?? r.task_id}</h3>
+                <h3 className="job-worker__card-title">{taskResultTitle(r)}</h3>
                 <span className="job-worker__badge job-worker__badge--failed">
                   <XCircle size={12} aria-hidden />
                   Failed
                 </span>
               </div>
               <code className="job-worker__job-id">{shortUuid(r.task_id)}</code>
+              {r.job_type && (
+                <code className="job-worker__celery-task-name">{r.job_type}</code>
+              )}
             </div>
             <div className="job-worker__card-meta">
+              {r.task_name && taskResultTitle(r) !== r.task_name && (
+                <span className="job-worker__meta-item" title="Celery task name">
+                  <FileText size={14} aria-hidden />
+                  {r.task_name}
+                </span>
+              )}
               {r.date_done && (
                 <span className="job-worker__meta-item">
                   <Clock size={14} aria-hidden />
@@ -431,14 +545,43 @@ function FailedTab({
                 </span>
               )}
             </div>
-            {r.result != null && (
-              <pre className="job-worker__result-preview">
-                {typeof r.result === "string"
-                  ? r.result
-                  : JSON.stringify(r.result, null, 2)}
-              </pre>
-            )}
+            {expandedResultId !== r.task_id &&
+              (() => {
+                const line =
+                  typeof r.result === "string" && r.result.trim()
+                    ? r.result.trim().slice(0, 160) +
+                      (r.result.length > 160 ? "…" : "")
+                    : r.result != null
+                      ? JSON.stringify(r.result).slice(0, 160) + "…"
+                      : r.details?.traceback
+                        ? "Open details for full traceback."
+                        : null;
+                return line ? (
+                  <p className="job-worker__detail-hint">{line}</p>
+                ) : null;
+              })()}
             <div className="job-worker__card-actions">
+              <button
+                type="button"
+                className="job-worker__btn job-worker__btn--secondary"
+                onClick={() =>
+                  onToggleDetails(expandedResultId === r.task_id ? null : r.task_id)
+                }
+                aria-label="View details"
+                aria-expanded={expandedResultId === r.task_id}
+              >
+                {expandedResultId === r.task_id ? (
+                  <>
+                    <ChevronDown size={16} aria-hidden />
+                    Hide details
+                  </>
+                ) : (
+                  <>
+                    <FileText size={16} aria-hidden />
+                    View details
+                  </>
+                )}
+              </button>
               <button
                 type="button"
                 className="job-worker__btn job-worker__btn--primary"
@@ -454,6 +597,7 @@ function FailedTab({
                 Retry
               </button>
             </div>
+            {expandedResultId === r.task_id && <TaskExpandedPanels r={r} />}
           </article>
         </li>
       ))}
@@ -485,15 +629,24 @@ function ArchivedTab({
           <article className="job-worker__card job-worker__card--completed">
             <div className="job-worker__card-header">
               <div className="job-worker__card-title-row">
-                <h3 className="job-worker__card-title">{r.task_name ?? r.task_id}</h3>
+                <h3 className="job-worker__card-title">{taskResultTitle(r)}</h3>
                 <span className="job-worker__badge job-worker__badge--completed">
                   <CheckCircle2 size={12} aria-hidden />
                   Completed
                 </span>
               </div>
               <code className="job-worker__job-id">{shortUuid(r.task_id)}</code>
+              {r.job_type && (
+                <code className="job-worker__celery-task-name">{r.job_type}</code>
+              )}
             </div>
             <div className="job-worker__card-meta">
+              {r.task_name && taskResultTitle(r) !== r.task_name && (
+                <span className="job-worker__meta-item" title="Celery task name">
+                  <FileText size={14} aria-hidden />
+                  {r.task_name}
+                </span>
+              )}
               {r.date_done && (
                 <span className="job-worker__meta-item">
                   <Clock size={14} aria-hidden />
@@ -524,16 +677,7 @@ function ArchivedTab({
                 )}
               </button>
             </div>
-            {expandedResultId === r.task_id && (
-              <div className="job-worker__logs-panel">
-                <h4 className="job-worker__logs-title">Result</h4>
-                <pre className="job-worker__result-json">
-                  {typeof r.result === "string"
-                    ? r.result
-                    : JSON.stringify(r.result, null, 2)}
-                </pre>
-              </div>
-            )}
+            {expandedResultId === r.task_id && <TaskExpandedPanels r={r} />}
           </article>
         </li>
       ))}

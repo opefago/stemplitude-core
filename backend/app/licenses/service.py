@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 
 from app.dependencies import CurrentIdentity, TenantContext
 from app.licenses.models import License, LicenseFeature, LicenseLimit, SeatUsage
+from app.subscriptions.license_sync import count_live_seats
 
 from .repository import LicenseRepository
 from .schemas import (
@@ -58,9 +59,15 @@ class LicenseService:
         identity: CurrentIdentity,
         tenant_ctx: TenantContext,
     ) -> list[SeatUsageResponse]:
-        """Get seat usage for current license."""
+        """Get seat usage for current license with live counts."""
         seats = await self.repo.list_seats_for_tenant(tenant_ctx.tenant_id)
-        return [SeatUsageResponse.model_validate(s) for s in seats]
+        results: list[SeatUsageResponse] = []
+        for s in seats:
+            live_count = await count_live_seats(self.session, tenant_ctx.tenant_id, s.seat_type)
+            resp = SeatUsageResponse.model_validate(s)
+            resp.current_count = live_count
+            results.append(resp)
+        return results
 
     async def get_by_id(
         self,

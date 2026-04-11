@@ -8,7 +8,14 @@ from app.roles.models import Permission, Role, RolePermission
 
 logger = logging.getLogger(__name__)
 from app.roles.repository import RoleRepository
-from app.roles.schemas import AssignPermissionsRequest, RoleCreate, RoleUpdate
+from app.roles.schemas import (
+    AssignPermissionsRequest,
+    PermissionResponse,
+    RoleCreate,
+    RoleResponse,
+    RoleUpdate,
+)
+from app.schemas.pagination import Paginated
 
 
 class RoleService:
@@ -95,6 +102,53 @@ class RoleService:
 
     async def list_permissions(self) -> list[Permission]:
         return await self.repo.list_permissions()
+
+    async def list_roles_paginated(
+        self,
+        tenant_id: UUID,
+        *,
+        include_inactive: bool = False,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> Paginated[RoleResponse]:
+        roles, total = await self.repo.list_roles_page(
+            tenant_id,
+            include_inactive=include_inactive,
+            skip=skip,
+            limit=limit,
+        )
+        items = [
+            RoleResponse(
+                id=r.id,
+                tenant_id=r.tenant_id,
+                name=r.name,
+                slug=r.slug,
+                is_system=r.is_system,
+                is_active=r.is_active,
+            )
+            for r in roles
+        ]
+        return Paginated(items=items, total=total, skip=skip, limit=limit)
+
+    async def list_permissions_paginated(
+        self,
+        *,
+        skip: int = 0,
+        limit: int = 200,
+    ) -> Paginated[PermissionResponse]:
+        perms, total = await self.repo.list_permissions_page(skip=skip, limit=limit)
+        items = [
+            PermissionResponse(
+                id=p.id,
+                resource=p.resource,
+                action=p.action,
+                description=p.description,
+            )
+            for p in perms
+        ]
+        return Paginated[PermissionResponse](
+            items=items, total=total, skip=skip, limit=limit
+        )
 
     async def assign_permissions(
         self, role_id: UUID, tenant_id: UUID, data: AssignPermissionsRequest

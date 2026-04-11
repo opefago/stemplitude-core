@@ -55,6 +55,12 @@ const PLATFORM_TOOLS: {
     permission: "platform.entities:view",
   },
   {
+    path: "/app/platform/member-billing-fees",
+    label: "Member billing fees",
+    iconSrc: "/assets/cartoon-icons/coin.png",
+    permission: "platform.entities:view",
+  },
+  {
     path: "/app/platform/growth",
     label: "Growth Ops",
     iconSrc: "/assets/cartoon-icons/Trail.png",

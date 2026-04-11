@@ -8,6 +8,51 @@ from sqlalchemy.orm import selectinload
 
 from app.capabilities.models import Capability, CapabilityRule
 
+# Tenant lab toggle rows may use any of these ``lab_type`` strings per logical lab.
+_LAB_TYPES_ELECTRONICS: tuple[str, ...] = (
+    "access_electronics_lab",
+    "electronics_lab",
+    "circuit-maker",
+)
+_LAB_TYPES_ROBOTICS: tuple[str, ...] = (
+    "access_robotics_lab",
+    "robotics_lab",
+    "micro-maker",
+)
+_LAB_TYPES_GAME_MAKER: tuple[str, ...] = ("access_game_maker", "game_maker", "game-maker")
+_LAB_TYPES_DESIGN_MAKER: tuple[str, ...] = (
+    "access_design_maker",
+    "design_maker",
+    "design-maker",
+    "3d_designer",
+)
+_LAB_TYPES_PYTHON: tuple[str, ...] = ("python_lab", "python-game", "access_python_lab")
+
+# Maps license/capability ``required_feature`` / plan ``feature_key`` → tenant_lab_settings lab_type aliases.
+LAB_FEATURE_TO_TENANT_LAB_TYPES: dict[str, tuple[str, ...]] = {
+    "access_electronics_lab": _LAB_TYPES_ELECTRONICS,
+    "electronics_lab": _LAB_TYPES_ELECTRONICS,
+    "access_robotics_lab": _LAB_TYPES_ROBOTICS,
+    "robotics_lab": _LAB_TYPES_ROBOTICS,
+    "access_game_maker": _LAB_TYPES_GAME_MAKER,
+    "game_maker": _LAB_TYPES_GAME_MAKER,
+    "access_design_maker": _LAB_TYPES_DESIGN_MAKER,
+    "design_maker": _LAB_TYPES_DESIGN_MAKER,
+    "3d_designer": _LAB_TYPES_DESIGN_MAKER,
+    "python_lab": _LAB_TYPES_PYTHON,
+    "access_python_lab": _LAB_TYPES_PYTHON,
+}
+
+# Capability rule ``required_feature`` → ``licenses.license_features.feature_key`` values (plan_registry uses the plan-native names).
+LICENSE_FEATURE_KEY_ALIASES: dict[str, tuple[str, ...]] = {
+    "access_electronics_lab": ("access_electronics_lab", "electronics_lab"),
+    "access_robotics_lab": ("access_robotics_lab", "robotics_lab"),
+    "access_game_maker": ("access_game_maker", "game_maker"),
+    "access_design_maker": ("access_design_maker", "3d_designer", "design_maker"),
+    "python_lab": ("python_lab", "access_python_lab"),
+    "access_python_lab": ("access_python_lab", "python_lab"),
+}
+
 
 class CapabilityRepository:
     """Repository for capability CRUD queries."""
@@ -94,7 +139,14 @@ class CapabilityEngineRepository:
         return result.scalar_one_or_none()
 
     async def has_license_feature(self, license_id: UUID, feature_key: str) -> bool:
-        """Check whether a license has a specific feature enabled."""
+        """Whether the license grants a capability ``required_feature`` (resolves plan vs access_* key names)."""
+        keys = LICENSE_FEATURE_KEY_ALIASES.get(feature_key, (feature_key,))
+        for key in keys:
+            if await self._has_license_feature_key(license_id, key):
+                return True
+        return False
+
+    async def _has_license_feature_key(self, license_id: UUID, feature_key: str) -> bool:
         from app.licenses.models import LicenseFeature
 
         result = await self.session.execute(
@@ -118,18 +170,38 @@ class CapabilityEngineRepository:
         )
         return result.scalar_one_or_none()
 
-    async def is_lab_disabled(self, tenant_id: UUID, lab_type: str) -> bool:
-        """Check whether a lab is explicitly disabled for the tenant."""
+    async def is_lab_disabled(self, tenant_id: UUID, required_feature_or_key: str) -> bool:
+        """True only when a lab is expressly turned off for this tenant.
+
+        Default is **enabled** (no rows, or only missing aliases). A row with
+        ``enabled is True`` on any alias wins over ``enabled is False`` on others.
+        """
         from app.tenants.models import TenantLabSetting
 
-        result = await self.session.execute(
-            select(TenantLabSetting).where(
-                TenantLabSetting.tenant_id == tenant_id,
-                TenantLabSetting.lab_type == lab_type,
+        keys = LAB_FEATURE_TO_TENANT_LAB_TYPES.get(required_feature_or_key)
+        if keys is None:
+            keys = (required_feature_or_key,)
+        saw_true = False
+        saw_false = False
+        for lab_type in keys:
+            result = await self.session.execute(
+                select(TenantLabSetting).where(
+                    TenantLabSetting.tenant_id == tenant_id,
+                    TenantLabSetting.lab_type == lab_type,
+                )
             )
-        )
-        setting = result.scalar_one_or_none()
-        return setting is not None and not setting.enabled
+            setting = result.scalar_one_or_none()
+            if setting is None:
+                continue
+            if setting.enabled is True:
+                saw_true = True
+            elif setting.enabled is False:
+                saw_false = True
+        if saw_true:
+            return False
+        if saw_false:
+            return True
+        return False
 
     async def get_central_child_ids(self, parent_tenant_id: UUID) -> list[UUID]:
         """Get all centrally-billed child tenant IDs for a parent."""

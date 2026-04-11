@@ -88,6 +88,10 @@
   padding: var(--spacing-sm, 8px);
 }
 
+.tenant-switcher__current--muted .tenant-switcher__current-meta {
+  line-height: 1.4;
+}
+
 .tenant-switcher__current-info {
   display: flex;
   flex-direction: column;

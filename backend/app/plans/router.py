@@ -2,11 +2,13 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.permissions import require_super_admin
 from app.database import get_db
+
+from app.schemas.pagination import Paginated
 
 from .schemas import PlanCreate, PlanResponse, PlanUpdate
 from .service import PlanService
@@ -14,13 +16,15 @@ from .service import PlanService
 router = APIRouter()
 
 
-@router.get("/", response_model=list[PlanResponse])
+@router.get("/", response_model=Paginated[PlanResponse])
 async def list_plans(
     db: AsyncSession = Depends(get_db),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
 ):
-    """List all active plans (public, no auth required)."""
+    """List active plans (public, paginated; no auth required)."""
     service = PlanService(db)
-    return await service.list_public()
+    return await service.list_public(skip=skip, limit=limit)
 
 
 @router.get("/{id}", response_model=PlanResponse)

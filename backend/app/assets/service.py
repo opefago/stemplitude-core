@@ -12,6 +12,7 @@ from app.core import blob_storage
 from app.core.pipeline import Pipeline
 from app.dependencies import CurrentIdentity, TenantContext
 from app.assets.models import Asset
+from app.tenants.franchise_governance import asset_library_read_tenant_ids
 
 from .repository import AssetRepository
 from .schemas import (
@@ -31,6 +32,20 @@ class AssetsService:
     def __init__(self, session: AsyncSession):
         self.session = session
         self.repo = AssetRepository(session)
+
+    def _asset_read_tenant_ids(self, tenant_ctx: TenantContext) -> list[UUID]:
+        return asset_library_read_tenant_ids(
+            child_tenant_id=tenant_ctx.tenant_id,
+            parent_tenant_id=tenant_ctx.parent_tenant_id,
+            governance_mode=tenant_ctx.governance_mode,
+        )
+
+    def _assert_asset_in_workspace(self, asset: Asset, workspace_tenant_id: UUID) -> None:
+        if asset.tenant_id != workspace_tenant_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Cannot modify another organization's assets.",
+            )
 
     def _owner(self, identity: CurrentIdentity) -> tuple[UUID, str]:
         """Resolve owner_id and owner_type from identity."""
@@ -162,10 +177,14 @@ class AssetsService:
         limit: int = 100,
     ) -> AssetListResponse:
         """List assets with filters."""
+        read_ids = self._asset_read_tenant_ids(tenant_ctx)
+        list_scope: UUID | list[UUID] = (
+            tenant_ctx.tenant_id if identity.sub_type == "student" else read_ids
+        )
         if identity.sub_type == "student":
             owner_id = identity.id
         assets, total = await self.repo.list_assets(
-            tenant_ctx.tenant_id,
+            list_scope,
             asset_type=asset_type,
             lab_type=lab_type,
             owner_id=owner_id,
@@ -185,7 +204,8 @@ class AssetsService:
         expires_in: int = 3600,
     ) -> AssetResponse:
         """Get asset with signed download URL."""
-        asset = await self.repo.get_by_id(asset_id, tenant_ctx.tenant_id)
+        read_ids = self._asset_read_tenant_ids(tenant_ctx)
+        asset = await self.repo.get_by_id_in_tenants(asset_id, read_ids)
         if not asset:
             logger.warning("Asset not found id=%s", asset_id)
             raise HTTPException(
@@ -205,13 +225,15 @@ class AssetsService:
         data: AssetUpdate,
     ) -> AssetResponse:
         """Update asset metadata."""
-        asset = await self.repo.get_by_id(asset_id, tenant_ctx.tenant_id)
+        read_ids = self._asset_read_tenant_ids(tenant_ctx)
+        asset = await self.repo.get_by_id_in_tenants(asset_id, read_ids)
         if not asset:
             logger.warning("Asset not found id=%s", asset_id)
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Asset not found",
             )
+        self._assert_asset_in_workspace(asset, tenant_ctx.tenant_id)
         await self._check_asset_access(asset, identity)
         for k, v in data.model_dump(exclude_unset=True, by_alias=False).items():
             if k == "metadata_":
@@ -228,13 +250,15 @@ class AssetsService:
         tenant_ctx: TenantContext,
     ) -> None:
         """Delete asset and its blob."""
-        asset = await self.repo.get_by_id(asset_id, tenant_ctx.tenant_id)
+        read_ids = self._asset_read_tenant_ids(tenant_ctx)
+        asset = await self.repo.get_by_id_in_tenants(asset_id, read_ids)
         if not asset:
             logger.warning("Asset not found id=%s", asset_id)
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Asset not found",
             )
+        self._assert_asset_in_workspace(asset, tenant_ctx.tenant_id)
         await self._check_asset_access(asset, identity)
         blob_storage.delete_file(asset.blob_key)
         await self.repo.delete(asset)
@@ -248,6 +272,7 @@ class AssetsService:
         lab_type: str | None = None,
     ) -> AssetLibraryResponse:
         """Combined view: own + tenant-shared + global assets."""
+        read_ids = self._asset_read_tenant_ids(tenant_ctx)
         owner_id, owner_type = self._owner(identity)
         own, _ = await self.repo.list_assets(
             tenant_ctx.tenant_id,
@@ -259,7 +284,7 @@ class AssetsService:
             limit=100,
         )
         tenant_assets, _ = await self.repo.list_assets(
-            tenant_ctx.tenant_id,
+            read_ids,
             owner_type="tenant",
             asset_type=asset_type,
             lab_type=lab_type,
@@ -269,7 +294,7 @@ class AssetsService:
         shared: list[Asset] = list(tenant_assets)
         if identity.sub_type == "user":
             other_user_assets, _ = await self.repo.list_assets(
-                tenant_ctx.tenant_id,
+                read_ids,
                 owner_type="user",
                 asset_type=asset_type,
                 lab_type=lab_type,

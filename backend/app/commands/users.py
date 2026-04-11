@@ -64,19 +64,43 @@ async def _resolve_global_role(session, slug: str) -> Role | None:
 
 
 async def _assign_global_role(session, user: User, role: Role, granted_by: User | None = None) -> None:
-    """Assign a global role to a user, replacing any existing one."""
-    existing = await session.execute(
-        select(UserRole).where(UserRole.user_id == user.id, UserRole.is_active == True)
+    """Assign a global role to a user, replacing any other active global role.
+
+    uq_user_role is on (user_id, role_id), so re-assigning the same role must
+    reactivate the existing row instead of inserting again.
+    """
+    existing_global = await session.execute(
+        select(UserRole)
+        .join(Role, UserRole.role_id == Role.id)
+        .where(
+            UserRole.user_id == user.id,
+            UserRole.is_active == True,
+            Role.tenant_id.is_(None),
+        )
     )
-    for ur in existing.scalars().all():
+    for ur in existing_global.scalars().all():
         ur.is_active = False
 
-    session.add(UserRole(
-        user_id=user.id,
-        role_id=role.id,
-        is_active=True,
-        granted_by=granted_by.id if granted_by else None,
-    ))
+    grant_id = granted_by.id if granted_by else None
+    pair = await session.execute(
+        select(UserRole).where(
+            UserRole.user_id == user.id,
+            UserRole.role_id == role.id,
+        )
+    )
+    row = pair.scalar_one_or_none()
+    if row:
+        row.is_active = True
+        row.granted_by = grant_id
+    else:
+        session.add(
+            UserRole(
+                user_id=user.id,
+                role_id=role.id,
+                is_active=True,
+                granted_by=grant_id,
+            )
+        )
 
     if not user.is_super_admin:
         user.is_super_admin = True

@@ -1997,6 +1997,49 @@ async def handle_subscriptions_expiring(
     }
 
 
+async def handle_subscriptions_reconcile_stripe(
+    session: AsyncSession, params: dict[str, str]
+) -> CommandResult:
+    from uuid import UUID
+
+    from app.subscriptions.stripe_reconcile import run_stripe_reconcile_for_tenant
+
+    slug = params.get("tenant")
+    tid = params.get("tenant-id")
+    if bool(slug) == bool(tid):
+        return {"ok": False, "error": "Provide exactly one of --tenant or --tenant-id"}
+    if tid:
+        try:
+            tenant_uuid = UUID(tid)
+        except ValueError:
+            return {"ok": False, "error": "Invalid UUID for --tenant-id"}
+        result = await session.execute(select(Tenant).where(Tenant.id == tenant_uuid))
+    else:
+        if not _SLUG_RE.match(slug or ""):
+            return {"ok": False, "error": "Invalid format for --tenant"}
+        result = await session.execute(select(Tenant).where(Tenant.slug == slug))
+    tenant = result.scalar_one_or_none()
+    if not tenant:
+        return {"ok": False, "error": "Tenant not found"}
+
+    try:
+        max_items = int(params.get("max-items", "200"))
+    except ValueError:
+        return {"ok": False, "error": "Invalid --max-items"}
+    max_items = max(1, min(max_items, 1000))
+
+    counts = await run_stripe_reconcile_for_tenant(
+        session, tenant.id, max_items=max_items
+    )
+    await session.flush()
+    return {
+        "ok": True,
+        "tenant_id": str(tenant.id),
+        "tenant_slug": tenant.slug,
+        **counts,
+    }
+
+
 register(
     CommandDef(
         domain="subscriptions",
@@ -2009,6 +2052,26 @@ register(
             ),
         ],
         handler=handle_subscriptions_expiring,
+    )
+)
+
+register(
+    CommandDef(
+        domain="subscriptions",
+        action="reconcile-stripe",
+        help="Reconcile Stripe-backed subscriptions + licenses for a tenant",
+        params=[
+            ParamDef(
+                name="tenant", long="--tenant", short="-t",
+                help="Tenant slug", pattern=_SLUG_RE,
+            ),
+            ParamDef(name="tenant-id", long="--tenant-id", help="Tenant UUID"),
+            ParamDef(
+                name="max-items", long="--max-items",
+                help="Max subscriptions to process (1–1000)", default="200",
+            ),
+        ],
+        handler=handle_subscriptions_reconcile_stripe,
     )
 )
 

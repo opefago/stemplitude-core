@@ -1,4 +1,17 @@
-import { getAccessToken } from "../tokens";
+import { browserCalendarTimeZone, ensureFreshAccessToken } from "./client";
+import { getChildContextStudentId } from "../childContext";
+import { decodeToken, getAccessToken, isTokenExpired } from "../tokens";
+
+const RT_DEBUG = import.meta.env.DEV;
+
+function rtDebug(message: string, extra?: Record<string, unknown>): void {
+  if (!RT_DEBUG) return;
+  if (extra && Object.keys(extra).length > 0) {
+    console.debug(`[UserRealtime] ${message}`, extra);
+  } else {
+    console.debug(`[UserRealtime] ${message}`);
+  }
+}
 
 export interface UserRealtimeEvent {
   event_type: string;
@@ -59,6 +72,26 @@ export class UserRealtimeClient {
 
   connect() {
     this.stopped = false;
+    void this.prepareAndOpen();
+  }
+
+  /**
+   * Align with {@link apiFetch}: refresh the access token when it is missing or near expiry
+   * before opening the WebSocket. Query-string auth cannot use a stale JWT while HTTP keeps
+   * working after a silent 401 refresh.
+   */
+  private async prepareAndOpen() {
+    if (this.stopped) return;
+    if (this.opts.token == null) {
+      const ok = await ensureFreshAccessToken(60);
+      if (this.stopped) return;
+      if (!ok) {
+        rtDebug("prepareAndOpen: ensureFreshAccessToken failed (sign in again)");
+        this.opts.onError?.("Session expired; cannot connect realtime.");
+        return;
+      }
+    }
+    if (this.stopped) return;
     this.openSocket();
   }
 
@@ -102,7 +135,30 @@ export class UserRealtimeClient {
   private openSocket() {
     const token = this.opts.token ?? getAccessToken();
     if (!token) {
+      rtDebug("aborted: no access token");
       this.opts.onError?.("Missing access token for realtime connection.");
+      return;
+    }
+    const decoded = decodeToken(token);
+    const calTz = browserCalendarTimeZone();
+    const childCtx = getChildContextStudentId();
+    const expired = isTokenExpired(token);
+    rtDebug("connecting", {
+      tenantId: this.opts.tenantId,
+      tokenSource: this.opts.token != null ? "options" : "localStorage",
+      subType: decoded?.sub_type,
+      role: decoded?.role,
+      accessExp: decoded?.exp ? new Date(decoded.exp * 1000).toISOString() : null,
+      isExpired: expired,
+      lastSequence: this.lastSequence,
+      calendarTz: calTz,
+      childContextStudentId: childCtx ? `${childCtx.slice(0, 8)}…` : null,
+    });
+    if (expired) {
+      rtDebug(
+        "access token past exp — skipping socket (refresh session or re-login)",
+      );
+      this.opts.onError?.("Session expired; cannot connect realtime.");
       return;
     }
     const params = new URLSearchParams({
@@ -110,15 +166,27 @@ export class UserRealtimeClient {
       tenant_id: this.opts.tenantId,
       last_sequence: String(this.lastSequence),
     });
+    if (calTz) {
+      params.set("calendar_tz", calTz);
+    }
+    if (childCtx) {
+      params.set("child_context", childCtx);
+    }
     const url = buildWsUrl(`/api/v1/realtime/ws?${params.toString()}`);
     this.ws = new WebSocket(url);
     this.shouldReconnect = true;
     this.ws.onopen = () => {
+      rtDebug("socket open");
       this.reconnectAttempt = 0;
       this.opts.onConnected?.();
       this.startHeartbeat();
     };
     this.ws.onclose = (evt) => {
+      rtDebug("socket closed", {
+        code: evt.code,
+        reason: evt.reason || "(empty)",
+        wasClean: evt.wasClean,
+      });
       this.stopHeartbeat();
       this.opts.onDisconnected?.();
       // 1008 = policy violation (auth/tenant mismatch). Don't spam retries.
@@ -129,6 +197,7 @@ export class UserRealtimeClient {
       if (!this.stopped && this.shouldReconnect) this.scheduleReconnect();
     };
     this.ws.onerror = () => {
+      rtDebug("socket error event");
       if (!this.stopped) {
         this.opts.onError?.("Realtime connection error.");
       }
@@ -188,7 +257,7 @@ export class UserRealtimeClient {
     this.reconnectAttempt += 1;
     this.reconnectTimer = window.setTimeout(() => {
       this.reconnectTimer = null;
-      if (!this.stopped) this.openSocket();
+      if (!this.stopped) void this.prepareAndOpen();
     }, delay);
   }
 }

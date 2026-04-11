@@ -1,6 +1,12 @@
 import { create } from "zustand";
 import { v4 as uuidv4 } from "uuid";
 import { BufferGeometryLoader } from "three";
+import {
+  getLearnerStorageScopeId,
+  labProjectsStorageKey,
+  readLabProjectsArray,
+  writeLabProjectsArray,
+} from "../../lib/learnerLabStorage";
 import { getFloorY, getWorldBounds, overlapsXZ } from "./dimensions";
 
 /** Wrap each rotation component (radians) to [-π, π] so UI and drag stay in ±180°. */
@@ -308,20 +314,25 @@ export function getEffectiveSelectionIdsFromState(state) {
 let objectCounter = 0;
 
 const LEGACY_STORAGE_KEY = "dml-projects";
-const PROJECT_META_KEY = "dml-projects-meta";
-const PROJECT_DB_NAME = "dml-projects-db";
+const DML_META_BASE = "dml-projects-meta";
+const LEGACY_PROJECT_DB_NAME = "dml-projects-db";
 const PROJECT_STORE_NAME = "projects";
 let projectDbPromise = null;
+let projectDbCachedName = null;
 let migrationPromise = null;
 
-function openProjectDb() {
-  if (projectDbPromise) return projectDbPromise;
-  projectDbPromise = new Promise((resolve, reject) => {
+function getProjectDbName() {
+  const scope = getLearnerStorageScopeId();
+  return scope ? `${LEGACY_PROJECT_DB_NAME}__sid_${scope}` : LEGACY_PROJECT_DB_NAME;
+}
+
+function openIndexedDb(name) {
+  return new Promise((resolve, reject) => {
     if (typeof indexedDB === "undefined") {
       reject(new Error("IndexedDB unavailable"));
       return;
     }
-    const request = indexedDB.open(PROJECT_DB_NAME, 1);
+    const request = indexedDB.open(name, 1);
     request.onupgradeneeded = () => {
       const db = request.result;
       if (!db.objectStoreNames.contains(PROJECT_STORE_NAME)) {
@@ -329,8 +340,19 @@ function openProjectDb() {
       }
     };
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error || new Error("Failed to open project DB"));
+    request.onerror = () =>
+      reject(request.error || new Error("Failed to open project DB"));
   });
+}
+
+function openProjectDb() {
+  const name = getProjectDbName();
+  if (projectDbCachedName !== name) {
+    projectDbPromise = null;
+    projectDbCachedName = name;
+  }
+  if (projectDbPromise) return projectDbPromise;
+  projectDbPromise = openIndexedDb(name);
   return projectDbPromise;
 }
 
@@ -341,23 +363,23 @@ async function putProjectRecord(project) {
     const store = tx.objectStore(PROJECT_STORE_NAME);
     const request = store.put(project);
     request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error || new Error("Failed to save project"));
+    request.onerror = () =>
+      reject(request.error || new Error("Failed to save project"));
   });
 }
 
-async function getProjectRecord(id) {
-  const db = await openProjectDb();
+function idbGet(db, id) {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(PROJECT_STORE_NAME, "readonly");
     const store = tx.objectStore(PROJECT_STORE_NAME);
     const request = store.get(id);
     request.onsuccess = () => resolve(request.result || null);
-    request.onerror = () => reject(request.error || new Error("Failed to load project"));
+    request.onerror = () =>
+      reject(request.error || new Error("Failed to load project"));
   });
 }
 
-async function deleteProjectRecord(id) {
-  const db = await openProjectDb();
+function idbDelete(db, id) {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(PROJECT_STORE_NAME, "readwrite");
     const store = tx.objectStore(PROJECT_STORE_NAME);
@@ -366,6 +388,26 @@ async function deleteProjectRecord(id) {
     request.onerror = () =>
       reject(request.error || new Error("Failed to delete project"));
   });
+}
+
+async function getProjectRecord(id) {
+  const db = await openProjectDb();
+  let row = await idbGet(db, id);
+  if (row) return row;
+  if (getProjectDbName() !== LEGACY_PROJECT_DB_NAME) {
+    const legacyDb = await openIndexedDb(LEGACY_PROJECT_DB_NAME);
+    return idbGet(legacyDb, id);
+  }
+  return null;
+}
+
+async function deleteProjectRecord(id) {
+  const db = await openProjectDb();
+  await idbDelete(db, id);
+  if (getProjectDbName() !== LEGACY_PROJECT_DB_NAME) {
+    const legacyDb = await openIndexedDb(LEGACY_PROJECT_DB_NAME);
+    await idbDelete(legacyDb, id);
+  }
 }
 
 function toProjectMeta(project) {
@@ -387,21 +429,21 @@ function loadLegacyProjectList() {
 }
 
 function loadProjectList() {
-  try {
-    const meta = JSON.parse(localStorage.getItem(PROJECT_META_KEY));
-    if (Array.isArray(meta)) return meta;
-  } catch {
-    // fall through to legacy projects
-  }
+  const rows = readLabProjectsArray(DML_META_BASE);
+  if (Array.isArray(rows) && rows.length > 0) return rows;
   return loadLegacyProjectList().map(toProjectMeta);
 }
 
 function saveProjectList(list) {
-  localStorage.setItem(PROJECT_META_KEY, JSON.stringify(list));
+  writeLabProjectsArray(DML_META_BASE, list);
 }
 
 async function migrateLegacyProjectsIfNeeded() {
-  if (localStorage.getItem(PROJECT_META_KEY)) return;
+  const scopedMeta = labProjectsStorageKey(DML_META_BASE);
+  const hasScopedMeta =
+    scopedMeta !== DML_META_BASE && localStorage.getItem(scopedMeta);
+  const hasGlobalMeta = localStorage.getItem(DML_META_BASE);
+  if (hasScopedMeta || hasGlobalMeta) return;
   const legacyProjects = loadLegacyProjectList();
   if (legacyProjects.length === 0) return;
   if (migrationPromise) return migrationPromise;

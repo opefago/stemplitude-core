@@ -21,17 +21,25 @@ import {
   ChevronRight,
   Trash2,
   Search,
+  Award,
+  Sparkles,
 } from "lucide-react";
 import {
   KidCheckbox,
   KidDropdown,
   ProgressBar,
   DatePicker,
+  DateTimePicker,
+  SearchableDropdown,
   ModalDialog,
 } from "../../components/ui";
 import { useAuth } from "../../providers/AuthProvider";
 import { useTenant } from "../../providers/TenantProvider";
-import { buildLabLaunchPath } from "../labs/labRouting";
+import { buildLabLaunchPath, isCurriculumLabUuid } from "../labs/labRouting";
+import {
+  listStudentLabProjects,
+  type StudentLabProject,
+} from "../../lib/api/labs";
 import {
   createClassroomSession,
   enrollClassroomStudent,
@@ -44,8 +52,8 @@ import {
   listClassroomRoster,
   listMyClassroomSessions,
   listClassroomSessions,
-  listClassroomSessionEvents,
   updateClassroomSessionContent,
+  createSessionAssignmentFromTemplate,
   submitAssignment,
   listClassroomAssignments,
   listMySessionSubmissions,
@@ -54,13 +62,17 @@ import {
   type ClassroomRecord,
   type ClassroomRosterStudentRecord,
   type ClassroomSessionRecord,
-  type ClassroomSessionEventRecord,
   type ClassroomAssignment,
   type SubmissionRecord,
+  type RubricCriterionPayload,
   type SessionPresenceSummary,
   type SessionTextAssignment,
   type SessionResourceEntry,
 } from "../../lib/api/classrooms";
+import {
+  listAssignmentTemplates,
+  type AssignmentTemplate,
+} from "../../lib/api/curriculum";
 import {
   getAssetById,
   getAssetLibrary,
@@ -71,6 +83,13 @@ import {
   type Asset,
 } from "../../lib/api/assets";
 import { listStudents, type StudentProfile } from "../../lib/api/students";
+import {
+  awardBadge,
+  awardXP,
+  listBadges,
+  revokeBadge,
+  type BadgeDefinition,
+} from "../../lib/api/gamification";
 import {
   AttendanceSettings,
   type AttendanceConfig,
@@ -84,7 +103,25 @@ import {
 import "../../components/ui/ui.css";
 import "./classrooms.css";
 import { ClassroomFormWizard } from "./ClassroomFormWizard";
+import { SubmissionSnapshotViewport } from "./SubmissionSnapshotViewport";
 import { useTenantRealtime } from "../../hooks/useTenantRealtime";
+
+type AssignmentWorkbench = SessionTextAssignment & {
+  lab_launcher_id?: string | null;
+  curriculum_lab_title?: string | null;
+};
+
+function resolveAssignmentLabLauncher(assignment: {
+  lab_launcher_id?: string | null;
+  lab_id?: string | null;
+}): string | null {
+  const fromApi = assignment.lab_launcher_id?.trim();
+  if (fromApi) return fromApi;
+  const lid = assignment.lab_id?.trim();
+  if (!lid) return null;
+  if (isCurriculumLabUuid(lid)) return null;
+  return lid;
+}
 
 type TabId =
   | "students"
@@ -99,6 +136,46 @@ function isLiveSession(session: ClassroomSessionRecord): boolean {
   const start = new Date(session.session_start).getTime();
   const end = new Date(session.session_end).getTime();
   return start <= Date.now() && Date.now() <= end;
+}
+
+type GradeRubricFormRow = {
+  id: string;
+  criterion_id: string;
+  label: string;
+  max_points: string;
+  points_awarded: string;
+};
+
+function newRubricRowId(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `r-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function buildGradeRubricPayload(
+  rows: GradeRubricFormRow[],
+): RubricCriterionPayload[] | undefined {
+  const out: RubricCriterionPayload[] = [];
+  for (const row of rows) {
+    const cid = row.criterion_id.trim();
+    if (!cid) continue;
+    const max = parseInt(row.max_points, 10);
+    const pts = parseInt(row.points_awarded, 10);
+    if (!Number.isFinite(max) || max < 1 || max > 1000) {
+      throw new Error(`Rubric "${cid}": max points must be 1–1000.`);
+    }
+    if (!Number.isFinite(pts) || pts < 0 || pts > max) {
+      throw new Error(`Rubric "${cid}": points earned must be 0–${max}.`);
+    }
+    const label = row.label.trim();
+    out.push({
+      criterion_id: cid,
+      label: label.length ? label : null,
+      max_points: max,
+      points_awarded: pts,
+    });
+  }
+  return out.length ? out : undefined;
 }
 
 export function ClassroomDetail() {
@@ -136,6 +213,27 @@ export function ClassroomDetail() {
   const [selectedStudentId, setSelectedStudentId] = useState("");
   const [enrollingStudent, setEnrollingStudent] = useState(false);
   const [enrollError, setEnrollError] = useState<string | null>(null);
+  const [rosterSelectedIds, setRosterSelectedIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [rosterBadgeOptions, setRosterBadgeOptions] = useState<
+    BadgeDefinition[]
+  >([]);
+  const [rosterBadgesLoading, setRosterBadgesLoading] = useState(false);
+  const [rosterGamifyModal, setRosterGamifyModal] = useState<
+    null | "xp" | "assign" | "revoke"
+  >(null);
+  const [rosterGamifyTargets, setRosterGamifyTargets] = useState<string[]>([]);
+  const [rosterGamifyXpAmount, setRosterGamifyXpAmount] = useState("25");
+  const [rosterGamifyXpReason, setRosterGamifyXpReason] = useState(
+    "Classroom recognition",
+  );
+  const [rosterGamifyBadgeSlug, setRosterGamifyBadgeSlug] = useState("");
+  const [rosterGamifyBusy, setRosterGamifyBusy] = useState(false);
+  const [rosterGamifySummary, setRosterGamifySummary] = useState<string | null>(
+    null,
+  );
+  const [rosterGamifyError, setRosterGamifyError] = useState<string | null>(null);
   const [removingStudentId, setRemovingStudentId] = useState<string | null>(
     null,
   );
@@ -182,6 +280,13 @@ export function ClassroomDetail() {
   ] = useState(false);
   const [addingAssignment, setAddingAssignment] = useState(false);
   const [showAssignmentForm, setShowAssignmentForm] = useState(false);
+  const [assignmentTemplates, setAssignmentTemplates] = useState<
+    AssignmentTemplate[]
+  >([]);
+  const [assignmentTemplatesLoading, setAssignmentTemplatesLoading] =
+    useState(false);
+  const [selectedAssignmentTemplateId, setSelectedAssignmentTemplateId] =
+    useState("");
   const [resourceUploadedAssets, setResourceUploadedAssets] = useState<Asset[]>(
     [],
   );
@@ -201,7 +306,7 @@ export function ClassroomDetail() {
 
   // ── Student assignment view ──────────────────────────────────────────────
   const [viewingAssignment, setViewingAssignment] =
-    useState<SessionTextAssignment | null>(null);
+    useState<AssignmentWorkbench | null>(null);
   const [viewingAssignmentSession, setViewingAssignmentSession] =
     useState<ClassroomSessionRecord | null>(null);
   const [submissionText, setSubmissionText] = useState("");
@@ -220,6 +325,10 @@ export function ClassroomDetail() {
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [uploadingSubmissionFile, setUploadingSubmissionFile] = useState(false);
   const submissionFileRef = useRef<HTMLInputElement>(null);
+  const [labProjectPickerOpen, setLabProjectPickerOpen] = useState(false);
+  const [labProjectPickerRows, setLabProjectPickerRows] = useState<
+    StudentLabProject[]
+  >([]);
 
   // ── Assignments tab ──────────────────────────────────────────────────────
   const [classroomAssignments, setClassroomAssignments] = useState<
@@ -241,18 +350,38 @@ export function ClassroomDetail() {
   const [gradeFeedback, setGradeFeedback] = useState("");
   const [savingGrade, setSavingGrade] = useState(false);
   const [gradeError, setGradeError] = useState<string | null>(null);
+  const [gradeRubricRows, setGradeRubricRows] = useState<GradeRubricFormRow[]>(
+    [],
+  );
+  const [assignDrillExpandedId, setAssignDrillExpandedId] = useState<
+    string | null
+  >(null);
 
   // ── Submissions tab ─────────────────────────────────────────────────────
   const [subSessionId, setSubSessionId] = useState<string>("");
-  const [submissionEvents, setSubmissionEvents] = useState<
-    ClassroomSessionEventRecord[]
+  const [sessionSubmissionsBoard, setSessionSubmissionsBoard] = useState<
+    SubmissionRecord[]
   >([]);
   const [subLoading, setSubLoading] = useState(false);
   const [subError, setSubError] = useState<string | null>(null);
   const [subView, setSubView] = useState<"assignments" | "classwork">(
     "assignments",
   );
-  const [expandedSubId, setExpandedSubId] = useState<string | null>(null);
+  const [subBoardSort, setSubBoardSort] = useState<
+    "edited_desc" | "edited_asc" | "student"
+  >("edited_desc");
+  const [subBoardFilter, setSubBoardFilter] = useState<
+    "all" | "with_snapshot" | "text_only"
+  >("all");
+  const [selectedBoardIds, setSelectedBoardIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [boardAction, setBoardAction] = useState("__noop__");
+  const [expandedBoardId, setExpandedBoardId] = useState<string | null>(null);
+  const [selectedDraftIds, setSelectedDraftIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [draftAction, setDraftAction] = useState("__noop__");
   const [sessionMessages, setSessionMessages] = useState<
     Array<{
       id: string;
@@ -300,6 +429,32 @@ export function ClassroomDetail() {
     >;
     return Boolean(gamification.points_enabled ?? settings?.points_enabled);
   }, [tenant?.settings]);
+
+  useEffect(() => {
+    if (!gradingSubmission) {
+      setGradeRubricRows([]);
+      return;
+    }
+    setGradeScore(
+      gradingSubmission.grade != null
+        ? String(gradingSubmission.grade)
+        : "100",
+    );
+    setGradeFeedback(gradingSubmission.feedback ?? "");
+    if (gradingSubmission.rubric?.length) {
+      setGradeRubricRows(
+        gradingSubmission.rubric.map((r) => ({
+          id: newRubricRowId(),
+          criterion_id: r.criterion_id,
+          label: r.label ?? "",
+          max_points: String(r.max_points),
+          points_awarded: String(r.points_awarded),
+        })),
+      );
+    } else {
+      setGradeRubricRows([]);
+    }
+  }, [gradingSubmission]);
 
   useEffect(() => {
     if (!id) return;
@@ -662,11 +817,22 @@ export function ClassroomDetail() {
       showAssignmentForm ||
       showAssetLibrary ||
       Boolean(viewingAssignment && viewingAssignmentSession) ||
-      Boolean(gradingSubmission);
+      Boolean(gradingSubmission) ||
+      Boolean(rosterGamifyModal);
     if (!anyDialogOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
+      if (rosterGamifyModal) {
+        if (!rosterGamifyBusy) {
+          setRosterGamifyModal(null);
+          setRosterGamifyTargets([]);
+          setRosterGamifyBusy(false);
+          setRosterGamifyError(null);
+          setRosterGamifySummary(null);
+        }
+        return;
+      }
       if (gradingSubmission) {
         if (!savingGrade) {
           setGradingSubmission(null);
@@ -724,12 +890,165 @@ export function ClassroomDetail() {
     submittingWork,
     gradingSubmission,
     savingGrade,
+    rosterGamifyModal,
+    rosterGamifyBusy,
   ]);
 
   const enrolledStudentIds = useMemo(
     () => new Set(students.map((s) => s.id)),
     [students],
   );
+
+  useEffect(() => {
+    setRosterSelectedIds((prev) => {
+      const next = new Set<string>();
+      for (const sid of prev) {
+        if (enrolledStudentIds.has(sid)) next.add(sid);
+      }
+      return next;
+    });
+  }, [enrolledStudentIds]);
+
+  useEffect(() => {
+    if (!isInstructorView || activeTab !== "students") return;
+    let cancelled = false;
+    setRosterBadgesLoading(true);
+    listBadges()
+      .then((rows) => {
+        if (!cancelled) setRosterBadgeOptions(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setRosterBadgeOptions([]);
+      })
+      .finally(() => {
+        if (!cancelled) setRosterBadgesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isInstructorView, activeTab]);
+
+  const openRosterGamifyModal = useCallback(
+    (mode: "xp" | "assign" | "revoke", ids: string[]) => {
+      const unique = [...new Set(ids)].filter((sid) =>
+        enrolledStudentIds.has(sid),
+      );
+      if (unique.length === 0) return;
+      setRosterGamifyError(null);
+      setRosterGamifySummary(null);
+      setRosterGamifyTargets(unique);
+      setRosterGamifyModal(mode);
+      if (mode === "assign" || mode === "revoke") {
+        setRosterGamifyBadgeSlug((prev) => {
+          const match = rosterBadgeOptions.some((b) => b.slug === prev);
+          if (match) return prev;
+          return rosterBadgeOptions[0]?.slug ?? "";
+        });
+      }
+    },
+    [enrolledStudentIds, rosterBadgeOptions],
+  );
+
+  const closeRosterGamifyModal = useCallback(() => {
+    setRosterGamifyModal(null);
+    setRosterGamifyTargets([]);
+    setRosterGamifyBusy(false);
+    setRosterGamifyError(null);
+    setRosterGamifySummary(null);
+  }, []);
+
+  const applyRosterXp = useCallback(async () => {
+    const amount = Number.parseInt(rosterGamifyXpAmount, 10);
+    if (!Number.isFinite(amount) || amount < 1 || amount > 10_000) {
+      setRosterGamifyError("Enter a valid XP amount (1–10000).");
+      return;
+    }
+    const reason = rosterGamifyXpReason.trim();
+    if (!reason) {
+      setRosterGamifyError("Add a short reason for the XP award.");
+      return;
+    }
+    setRosterGamifyBusy(true);
+    setRosterGamifyError(null);
+    let ok = 0;
+    const errors: string[] = [];
+    for (const sid of rosterGamifyTargets) {
+      try {
+        await awardXP({
+          student_id: sid,
+          amount,
+          reason,
+          source: "manual",
+        });
+        ok += 1;
+      } catch (e: unknown) {
+        errors.push(e instanceof Error ? e.message : "Failed");
+      }
+    }
+    setRosterGamifyBusy(false);
+    setRosterGamifySummary(
+      `Awarded XP to ${ok} of ${rosterGamifyTargets.length} student(s).`,
+    );
+    if (errors.length) {
+      setRosterGamifyError(
+        errors.slice(0, 3).join(" · ") + (errors.length > 3 ? "…" : ""),
+      );
+    }
+  }, [rosterGamifyTargets, rosterGamifyXpAmount, rosterGamifyXpReason]);
+
+  const applyRosterAssignBadges = useCallback(async () => {
+    const slug = rosterGamifyBadgeSlug.trim();
+    if (!slug) {
+      setRosterGamifyError("Choose a badge.");
+      return;
+    }
+    setRosterGamifyBusy(true);
+    setRosterGamifyError(null);
+    let ok = 0;
+    const errors: string[] = [];
+    for (const sid of rosterGamifyTargets) {
+      try {
+        await awardBadge({ student_id: sid, badge_slug: slug });
+        ok += 1;
+      } catch (e: unknown) {
+        errors.push(e instanceof Error ? e.message : "Failed");
+      }
+    }
+    setRosterGamifyBusy(false);
+    setRosterGamifySummary(
+      `Badge applied for ${ok} of ${rosterGamifyTargets.length} student(s). Others may already have it.`,
+    );
+    if (errors.length) {
+      setRosterGamifyError(errors.slice(0, 2).join(" · "));
+    }
+  }, [rosterGamifyTargets, rosterGamifyBadgeSlug]);
+
+  const applyRosterRevokeBadges = useCallback(async () => {
+    const slug = rosterGamifyBadgeSlug.trim();
+    if (!slug) {
+      setRosterGamifyError("Choose a badge to remove.");
+      return;
+    }
+    setRosterGamifyBusy(true);
+    setRosterGamifyError(null);
+    let ok = 0;
+    const errors: string[] = [];
+    for (const sid of rosterGamifyTargets) {
+      try {
+        await revokeBadge({ student_id: sid, badge_slug: slug });
+        ok += 1;
+      } catch (e: unknown) {
+        errors.push(e instanceof Error ? e.message : "Failed");
+      }
+    }
+    setRosterGamifyBusy(false);
+    setRosterGamifySummary(
+      `Removed badge for ${ok} of ${rosterGamifyTargets.length} student(s) (where it existed).`,
+    );
+    if (errors.length) {
+      setRosterGamifyError(errors.slice(0, 2).join(" · "));
+    }
+  }, [rosterGamifyTargets, rosterGamifyBadgeSlug]);
 
   useEffect(() => {
     if (activeTab !== "assignments" || !id) return;
@@ -781,17 +1100,24 @@ export function ClassroomDetail() {
   }, [selectedAssignment, id]);
 
   useEffect(() => {
+    setAssignDrillExpandedId(null);
+  }, [selectedAssignment?.id, selectedAssignment?.session_id]);
+
+  useEffect(() => {
+    setSelectedDraftIds(new Set());
+  }, [viewingAssignment?.id, viewingAssignmentSession?.id]);
+
+  useEffect(() => {
     if (activeTab !== "submissions" || !subSessionId || !id) return;
     let mounted = true;
     setSubLoading(true);
     setSubError(null);
-    setSubmissionEvents([]);
-    void listClassroomSessionEvents(id, subSessionId, {
-      event_type: "student.submission.submitted",
-      limit: 500,
-    })
-      .then((events) => {
-        if (mounted) setSubmissionEvents(events);
+    setSessionSubmissionsBoard([]);
+    setSelectedBoardIds(new Set());
+    setExpandedBoardId(null);
+    void listSessionSubmissions(id, subSessionId)
+      .then((rows) => {
+        if (mounted) setSessionSubmissionsBoard(rows);
       })
       .catch((e: unknown) => {
         if (mounted)
@@ -1052,6 +1378,7 @@ export function ClassroomDetail() {
     setNewAssignmentTitle("");
     setNewAssignmentInstructions("");
     setNewAssignmentDueAt("");
+    setSelectedAssignmentTemplateId("");
     setNewAssignmentRequirement("none");
     setNewAssignmentAllowEditAfterSubmit(false);
     setResourceUploadedAssets([]);
@@ -1288,8 +1615,76 @@ export function ClassroomDetail() {
     setSelectedLibraryAssetId("");
   };
 
+  const loadAssignmentTemplateOptions = async () => {
+    setAssignmentTemplatesLoading(true);
+    try {
+      const courseId = classroom?.curriculum_id ?? undefined;
+      const rows = await listAssignmentTemplates({
+        limit: 300,
+        ...(courseId ? { course_id: courseId } : {}),
+      });
+      setAssignmentTemplates(rows);
+    } catch {
+      // Keep dialog usable for custom assignments even if template fetch fails.
+      setAssignmentTemplates([]);
+    } finally {
+      setAssignmentTemplatesLoading(false);
+    }
+  };
+
+  const openAssignmentForm = () => {
+    setNewAssignmentRequirement("none");
+    setNewAssignmentLabId(selectedSessionLab || permittedLabs[0] || "");
+    setNewAssignmentAllowEditAfterSubmit(false);
+    setNewAssignmentTitle("");
+    setNewAssignmentInstructions("");
+    setNewAssignmentDueAt("");
+    setSelectedAssignmentTemplateId("");
+    setShowAssignmentForm(true);
+    void loadAssignmentTemplateOptions();
+  };
+
   const handleAddTextAssignment = async () => {
-    if (!id || !resourcesSession || !newAssignmentTitle.trim()) return;
+    if (!id || !resourcesSession) return;
+    if (selectedAssignmentTemplateId) {
+      setAddingAssignment(true);
+      setResourcesError(null);
+      try {
+        await createSessionAssignmentFromTemplate(id, resourcesSession.id, {
+          template_id: selectedAssignmentTemplateId,
+          due_at: newAssignmentDueAt
+            ? new Date(newAssignmentDueAt).toISOString()
+            : null,
+          title: newAssignmentTitle.trim() || null,
+        });
+        const refreshed = await listClassroomSessions(id);
+        setSessions(refreshed);
+        const assignmentRows = await listClassroomAssignments(id);
+        setClassroomAssignments(assignmentRows);
+        setResourcesSession(
+          refreshed.find((s) => s.id === resourcesSession.id) ?? null,
+        );
+        setShowAssignmentForm(false);
+        setSelectedAssignmentTemplateId("");
+        setNewAssignmentTitle("");
+        setNewAssignmentInstructions("");
+        setNewAssignmentDueAt("");
+      } catch (e: unknown) {
+        setResourcesError(
+          e instanceof Error ? e.message : "Failed to add assignment",
+        );
+      } finally {
+        setAddingAssignment(false);
+      }
+      return;
+    }
+    if (!isContentWindowOpen(resourcesSession)) {
+      setResourcesError(
+        "This session is closed for manual edits. Select an existing template to add an assignment.",
+      );
+      return;
+    }
+    if (!newAssignmentTitle.trim()) return;
     const requiresLab =
       newAssignmentRequirement === "lab" || newAssignmentRequirement === "both";
     const requiresAssets =
@@ -1326,6 +1721,8 @@ export function ClassroomDetail() {
       setSessions((prev) =>
         prev.map((s) => (s.id === updated.id ? updated : s)),
       );
+      const assignmentRows = await listClassroomAssignments(id);
+      setClassroomAssignments(assignmentRows);
       setResourcesSession(updated);
       setNewAssignmentTitle("");
       setNewAssignmentInstructions("");
@@ -1370,7 +1767,7 @@ export function ClassroomDetail() {
 
   // ── Student assignment view handlers ────────────────────────────────────
   const handleOpenAssignment = (
-    assignment: SessionTextAssignment,
+    assignment: AssignmentWorkbench,
     session: ClassroomSessionRecord,
   ) => {
     setViewingAssignment(assignment);
@@ -1381,6 +1778,8 @@ export function ClassroomDetail() {
     setSubmitError(null);
     setSubmitSuccess(false);
     setSavedSubmissions([]);
+    setLabProjectPickerOpen(false);
+    setLabProjectPickerRows([]);
   };
 
   const parseSubmissionPayload = (
@@ -1419,15 +1818,21 @@ export function ClassroomDetail() {
     }
   };
 
-  const handleSaveDraftAndOpenLab = async () => {
-    if (
-      !id ||
-      !viewingAssignment ||
-      !viewingAssignmentSession ||
-      !viewingAssignment.lab_id
-    ) {
+  const runDraftAndLaunch = async (savedProjectId: string | null) => {
+    if (!id || !viewingAssignment || !viewingAssignmentSession) return;
+    const launcher = resolveAssignmentLabLauncher(viewingAssignment);
+    if (!launcher) {
+      setSubmitError(
+        "This lab is not linked to an app launcher yet. Ask your instructor.",
+      );
+      setLabProjectPickerOpen(false);
       return;
     }
+    const curriculumLabId = isCurriculumLabUuid(viewingAssignment.lab_id ?? "")
+      ? viewingAssignment.lab_id!.trim()
+      : undefined;
+
+    setLabProjectPickerOpen(false);
     setSubmittingWork(true);
     setSubmitError(null);
     try {
@@ -1436,6 +1841,7 @@ export function ClassroomDetail() {
         : JSON.stringify({
             type: "lab_draft",
             lab_id: viewingAssignment.lab_id,
+            saved_project_id: savedProjectId,
             note: "Draft saved before opening lab",
             opened_at: new Date().toISOString(),
             attached_asset_id: submissionAssetId,
@@ -1447,13 +1853,20 @@ export function ClassroomDetail() {
         viewingAssignment.id,
         content,
         "draft",
+        {
+          lab_id: viewingAssignment.lab_id ?? undefined,
+        },
       );
-      const launchPath = buildLabLaunchPath(viewingAssignment.lab_id, {
-        classroomId: id,
-        sessionId: viewingAssignmentSession.id,
-        referrer: "assignment_view",
-      });
-      navigate(launchPath);
+      navigate(
+        buildLabLaunchPath(launcher, {
+          classroomId: id,
+          sessionId: viewingAssignmentSession.id,
+          referrer: "assignment_view",
+          assignmentId: viewingAssignment.id,
+          curriculumLabId,
+          savedProjectId: savedProjectId ?? undefined,
+        }),
+      );
     } catch (err: unknown) {
       setSubmitError(
         err instanceof Error ? err.message : "Failed to save draft",
@@ -1461,6 +1874,44 @@ export function ClassroomDetail() {
     } finally {
       setSubmittingWork(false);
     }
+  };
+
+  const handleSaveDraftAndOpenLab = async () => {
+    if (!id || !viewingAssignment || !viewingAssignmentSession) return;
+    if (!viewingAssignment.lab_id) return;
+
+    const launcher = resolveAssignmentLabLauncher(viewingAssignment);
+    if (!launcher) {
+      setSubmitError(
+        "This lab is not linked to an app launcher yet. Ask your instructor.",
+      );
+      return;
+    }
+    const curriculumLabId = isCurriculumLabUuid(viewingAssignment.lab_id ?? "")
+      ? viewingAssignment.lab_id!.trim()
+      : undefined;
+
+    if (curriculumLabId) {
+      setSubmittingWork(true);
+      setSubmitError(null);
+      try {
+        const projects = await listStudentLabProjects({
+          lab_id: curriculumLabId,
+          limit: 40,
+        });
+        if (projects.length > 0) {
+          setLabProjectPickerRows(projects);
+          setLabProjectPickerOpen(true);
+          return;
+        }
+      } catch {
+        /* open without picker */
+      } finally {
+        setSubmittingWork(false);
+      }
+    }
+
+    await runDraftAndLaunch(null);
   };
 
   const handleSubmissionFileUpload = async (
@@ -1609,6 +2060,120 @@ export function ClassroomDetail() {
         !viewingAssignment.allow_edit_after_submit &&
         latestSubmittedSubmission,
     ) && !isInstructorView;
+
+  const submissionBoardFiltered = useMemo(() => {
+    let rows = [...sessionSubmissionsBoard];
+    if (subBoardFilter === "with_snapshot") {
+      rows = rows.filter((r) => Boolean(r.preview_image?.trim()));
+    } else if (subBoardFilter === "text_only") {
+      rows = rows.filter((r) => !r.preview_image?.trim());
+    }
+    const nameOf = (r: SubmissionRecord) =>
+      (r.student_display_name ?? r.student_id).toLowerCase();
+    rows.sort((a, b) => {
+      if (subBoardSort === "student") {
+        return nameOf(a).localeCompare(nameOf(b));
+      }
+      const ta = new Date(a.submitted_at).getTime();
+      const tb = new Date(b.submitted_at).getTime();
+      return subBoardSort === "edited_desc" ? tb - ta : ta - tb;
+    });
+    return rows;
+  }, [sessionSubmissionsBoard, subBoardFilter, subBoardSort]);
+
+  const getBoardSelectionRows = useCallback(() => {
+    return submissionBoardFiltered.filter((r) => selectedBoardIds.has(r.event_id));
+  }, [submissionBoardFiltered, selectedBoardIds]);
+
+  const runBoardBulkExportJson = useCallback(() => {
+    const rows = getBoardSelectionRows();
+    if (rows.length === 0) return;
+    const payload = rows.map((r) => ({
+      event_id: r.event_id,
+      student: r.student_display_name ?? r.student_id,
+      assignment_id: r.assignment_id,
+      status: r.status,
+      submitted_at: r.submitted_at,
+      lab_id: r.lab_id,
+      content: r.content,
+      has_preview: Boolean(r.preview_image),
+    }));
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `submissions-${subSessionId || "session"}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [getBoardSelectionRows, subSessionId]);
+
+  const runBoardBulkDownloadSnapshots = useCallback(async () => {
+    const rows = getBoardSelectionRows().filter((r) => r.preview_image);
+    for (const r of rows) {
+      try {
+        const res = await fetch(r.preview_image!);
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        const safe = (r.student_display_name ?? r.student_id).replace(
+          /[^\w\-]+/g,
+          "_",
+        );
+        a.download = `snapshot-${safe}-${r.event_id.slice(0, 8)}.${blob.type.includes("png") ? "png" : "jpg"}`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } catch {
+        /* ignore per row */
+      }
+    }
+  }, [getBoardSelectionRows]);
+
+  const getDraftSelectionRows = useCallback(() => {
+    return savedSubmissions.filter((r) => selectedDraftIds.has(r.event_id));
+  }, [savedSubmissions, selectedDraftIds]);
+
+  const runDraftBulkExportJson = useCallback(() => {
+    const rows = getDraftSelectionRows();
+    if (rows.length === 0) return;
+    const payload = rows.map((r) => ({
+      event_id: r.event_id,
+      status: r.status,
+      submitted_at: r.submitted_at,
+      lab_id: r.lab_id,
+      content: r.content,
+      has_preview: Boolean(r.preview_image),
+    }));
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `my-submissions-${viewingAssignment?.id ?? "assignment"}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [getDraftSelectionRows, viewingAssignment?.id]);
+
+  const runDraftBulkDownloadSnapshots = useCallback(async () => {
+    const rows = getDraftSelectionRows().filter((r) => r.preview_image);
+    for (const r of rows) {
+      try {
+        const res = await fetch(r.preview_image!);
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `my-snapshot-${r.event_id.slice(0, 8)}.${blob.type.includes("png") ? "png" : "jpg"}`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [getDraftSelectionRows]);
 
   const filteredLibraryAssets = useMemo(() => {
     const search = librarySearch.trim().toLowerCase();
@@ -1771,45 +2336,174 @@ export function ClassroomDetail() {
                   No students enrolled yet.
                 </p>
               ) : (
-                <ul className="classroom-detail__student-list" role="list">
-                  {students.slice(0, 12).map((student, index) => {
-                    const studentName =
-                      student.display_name ||
-                      `${student.first_name} ${student.last_name}`.trim() ||
-                      `Student #${index + 1}`;
-                    return (
-                      <li
-                        key={student.id}
-                        className="classroom-detail__student-item"
-                        role="listitem"
+                <>
+                  <div className="classroom-detail__roster-toolbar">
+                    <div className="classroom-detail__roster-toolbar-left">
+                      <KidCheckbox
+                        compact
+                        ariaLabel="Select all students in this class"
+                        checked={
+                          students.length > 0 &&
+                          students.every((s) => rosterSelectedIds.has(s.id))
+                        }
+                        onChange={(on) => {
+                          if (on) {
+                            setRosterSelectedIds(
+                              new Set(students.map((s) => s.id)),
+                            );
+                          } else {
+                            setRosterSelectedIds(new Set());
+                          }
+                        }}
+                      />
+                      <span className="classroom-detail__roster-count">
+                        {rosterSelectedIds.size} selected
+                      </span>
+                    </div>
+                    <div className="classroom-detail__roster-toolbar-actions">
+                      <button
+                        type="button"
+                        className="classroom-list__create-btn classroom-list__create-btn--ghost"
+                        disabled={rosterSelectedIds.size === 0}
+                        onClick={() =>
+                          openRosterGamifyModal(
+                            "assign",
+                            Array.from(rosterSelectedIds),
+                          )
+                        }
                       >
-                        <span className="classroom-detail__student-name">
-                          {studentName}
-                        </span>
-                        <ProgressBar
-                          value={Math.min(100, 45 + index * 7)}
-                          showPercent
-                          variant="default"
-                        />
-                        <div className="classroom-detail__student-item-actions">
-                          <button
-                            type="button"
-                            className="classroom-list__create-btn classroom-list__create-btn--ghost classroom-list__create-btn--danger classroom-detail__student-remove-btn"
-                            onClick={() => {
-                              void handleRemoveStudent(student);
-                            }}
-                            disabled={removingStudentId === student.id}
-                          >
-                            <Trash2 size={14} aria-hidden />
-                            {removingStudentId === student.id
-                              ? "Removing..."
-                              : "Remove"}
-                          </button>
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
+                        <Award size={14} aria-hidden />
+                        Award badge
+                      </button>
+                      <button
+                        type="button"
+                        className="classroom-list__create-btn classroom-list__create-btn--ghost"
+                        disabled={rosterSelectedIds.size === 0}
+                        onClick={() =>
+                          openRosterGamifyModal(
+                            "xp",
+                            Array.from(rosterSelectedIds),
+                          )
+                        }
+                      >
+                        <Sparkles size={14} aria-hidden />
+                        Give XP
+                      </button>
+                      <button
+                        type="button"
+                        className="classroom-list__create-btn classroom-list__create-btn--ghost"
+                        disabled={rosterSelectedIds.size === 0}
+                        onClick={() =>
+                          openRosterGamifyModal(
+                            "revoke",
+                            Array.from(rosterSelectedIds),
+                          )
+                        }
+                      >
+                        Remove badge
+                      </button>
+                    </div>
+                  </div>
+                  {rosterBadgesLoading && (
+                    <p className="classroom-detail__resources-label">
+                      Loading badge list…
+                    </p>
+                  )}
+                  {!rosterBadgesLoading && rosterBadgeOptions.length === 0 && (
+                    <p className="classroom-detail__resources-label">
+                      No badges are defined for this organization yet. Ask an
+                      admin to add badges in gamification settings.
+                    </p>
+                  )}
+                  <ul className="classroom-detail__student-list" role="list">
+                    {students.map((student, index) => {
+                      const studentName =
+                        student.display_name ||
+                        `${student.first_name} ${student.last_name}`.trim() ||
+                        `Student #${index + 1}`;
+                      const picked = rosterSelectedIds.has(student.id);
+                      return (
+                        <li
+                          key={student.id}
+                          className="classroom-detail__student-item classroom-detail__student-item--roster"
+                          role="listitem"
+                        >
+                          <div className="classroom-detail__student-item-main">
+                            <KidCheckbox
+                              compact
+                              ariaLabel={`Select ${studentName}`}
+                              checked={picked}
+                              onChange={(on) => {
+                                setRosterSelectedIds((prev) => {
+                                  const next = new Set(prev);
+                                  if (on) next.add(student.id);
+                                  else next.delete(student.id);
+                                  return next;
+                                });
+                              }}
+                            />
+                            <span className="classroom-detail__student-name">
+                              {studentName}
+                            </span>
+                          </div>
+                          <ProgressBar
+                            value={Math.min(100, 45 + index * 7)}
+                            showPercent
+                            variant="default"
+                          />
+                          <div className="classroom-detail__student-item-actions">
+                            <div className="classroom-detail__roster-inline-actions">
+                              <button
+                                type="button"
+                                className="classroom-detail__roster-link-btn"
+                                onClick={() =>
+                                  openRosterGamifyModal("assign", [
+                                    student.id,
+                                  ])
+                                }
+                              >
+                                Badge
+                              </button>
+                              <button
+                                type="button"
+                                className="classroom-detail__roster-link-btn"
+                                onClick={() =>
+                                  openRosterGamifyModal("xp", [student.id])
+                                }
+                              >
+                                XP
+                              </button>
+                              <button
+                                type="button"
+                                className="classroom-detail__roster-link-btn"
+                                onClick={() =>
+                                  openRosterGamifyModal("revoke", [
+                                    student.id,
+                                  ])
+                                }
+                              >
+                                Strip badge
+                              </button>
+                            </div>
+                            <button
+                              type="button"
+                              className="classroom-list__create-btn classroom-list__create-btn--ghost classroom-list__create-btn--danger classroom-detail__student-remove-btn"
+                              onClick={() => {
+                                void handleRemoveStudent(student);
+                              }}
+                              disabled={removingStudentId === student.id}
+                            >
+                              <Trash2 size={14} aria-hidden />
+                              {removingStudentId === student.id
+                                ? "Removing..."
+                                : "Remove"}
+                            </button>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </>
               )}
               {enrollError && (
                 <p className="classroom-list__empty">{enrollError}</p>
@@ -1957,7 +2651,7 @@ export function ClassroomDetail() {
                                 className="classroom-list__create-btn classroom-list__create-btn--ghost"
                                 onClick={() => {
                                   setSubSessionId(session.id);
-                                  setExpandedSubId(null);
+                                  setExpandedBoardId(null);
                                   setActiveTab("submissions");
                                 }}
                               >
@@ -2649,7 +3343,7 @@ export function ClassroomDetail() {
                 <h2 className="classroom-detail__panel-title">Submissions</h2>
               </div>
 
-              {/* Session picker */}
+              {/* Session picker + board tools */}
               <div className="classroom-detail__sub-controls">
                 <span className="classroom-detail__sub-label">Session</span>
                 <div className="classroom-detail__sub-dropdown">
@@ -2657,7 +3351,7 @@ export function ClassroomDetail() {
                     value={subSessionId}
                     onChange={(v) => {
                       setSubSessionId(v);
-                      setExpandedSubId(null);
+                      setExpandedBoardId(null);
                     }}
                     ariaLabel="Select session"
                     placeholder="— Select a session —"
@@ -2676,32 +3370,139 @@ export function ClassroomDetail() {
                 </div>
 
                 {subSessionId && (
-                  <div
-                    className="classroom-detail__sub-pills"
-                    role="group"
-                    aria-label="Submission view"
-                  >
-                    <button
-                      type="button"
-                      className={`classroom-detail__sub-pill ${subView === "assignments" ? "classroom-detail__sub-pill--active" : ""}`}
-                      onClick={() => {
-                        setSubView("assignments");
-                        setExpandedSubId(null);
-                      }}
+                  <>
+                    <div
+                      className="classroom-detail__sub-pills"
+                      role="group"
+                      aria-label="Submission view"
                     >
-                      By Assignment
-                    </button>
-                    <button
-                      type="button"
-                      className={`classroom-detail__sub-pill ${subView === "classwork" ? "classroom-detail__sub-pill--active" : ""}`}
-                      onClick={() => {
-                        setSubView("classwork");
-                        setExpandedSubId(null);
-                      }}
+                      <button
+                        type="button"
+                        className={`classroom-detail__sub-pill ${subView === "assignments" ? "classroom-detail__sub-pill--active" : ""}`}
+                        onClick={() => {
+                          setSubView("assignments");
+                          setExpandedBoardId(null);
+                        }}
+                      >
+                        By Assignment
+                      </button>
+                      <button
+                        type="button"
+                        className={`classroom-detail__sub-pill ${subView === "classwork" ? "classroom-detail__sub-pill--active" : ""}`}
+                        onClick={() => {
+                          setSubView("classwork");
+                          setExpandedBoardId(null);
+                        }}
+                      >
+                        All Work
+                      </button>
+                    </div>
+                    <div
+                      className="classroom-detail__sub-board-toolbar"
+                      role="toolbar"
+                      aria-label="Filter and sort submissions"
                     >
-                      All Work
-                    </button>
-                  </div>
+                      <div
+                        className="classroom-detail__sub-pills classroom-detail__sub-pills--dense"
+                        role="group"
+                        aria-label="Filter by snapshot"
+                      >
+                        <button
+                          type="button"
+                          className={`classroom-detail__sub-pill ${subBoardFilter === "all" ? "classroom-detail__sub-pill--active" : ""}`}
+                          onClick={() => setSubBoardFilter("all")}
+                        >
+                          All
+                        </button>
+                        <button
+                          type="button"
+                          className={`classroom-detail__sub-pill ${subBoardFilter === "with_snapshot" ? "classroom-detail__sub-pill--active" : ""}`}
+                          onClick={() => setSubBoardFilter("with_snapshot")}
+                        >
+                          With snapshot
+                        </button>
+                        <button
+                          type="button"
+                          className={`classroom-detail__sub-pill ${subBoardFilter === "text_only" ? "classroom-detail__sub-pill--active" : ""}`}
+                          onClick={() => setSubBoardFilter("text_only")}
+                        >
+                          Text only
+                        </button>
+                      </div>
+                      <KidDropdown
+                        value={subBoardSort}
+                        onChange={(v) =>
+                          setSubBoardSort(
+                            v as "edited_desc" | "edited_asc" | "student",
+                          )
+                        }
+                        ariaLabel="Sort submissions"
+                        placeholder="Sort"
+                        minWidth={160}
+                        options={[
+                          { value: "edited_desc", label: "Edited (newest)" },
+                          { value: "edited_asc", label: "Edited (oldest)" },
+                          { value: "student", label: "Student name" },
+                        ]}
+                      />
+                      <div className="classroom-detail__sub-board-select-row">
+                        <KidCheckbox
+                          compact
+                          ariaLabel="Select all visible submissions"
+                          checked={
+                            submissionBoardFiltered.length > 0 &&
+                            submissionBoardFiltered.every((r) =>
+                              selectedBoardIds.has(r.event_id),
+                            )
+                          }
+                          onChange={(on) => {
+                            if (on) {
+                              setSelectedBoardIds(
+                                new Set(
+                                  submissionBoardFiltered.map((r) => r.event_id),
+                                ),
+                              );
+                            } else {
+                              setSelectedBoardIds(new Set());
+                            }
+                          }}
+                        />
+                        <span className="classroom-detail__sub-board-select-label">
+                          Select all
+                        </span>
+                        <KidDropdown
+                          value={boardAction}
+                          onChange={(v) => {
+                            if (v === "__noop__") return;
+                            if (v === "export_json") runBoardBulkExportJson();
+                            if (v === "download_snaps")
+                              void runBoardBulkDownloadSnapshots();
+                            if (v === "clear_sel")
+                              setSelectedBoardIds(new Set());
+                            setBoardAction("__noop__");
+                          }}
+                          ariaLabel="Group actions"
+                          placeholder="Actions…"
+                          minWidth={200}
+                          disabled={selectedBoardIds.size === 0}
+                          options={[
+                            {
+                              value: "export_json",
+                              label: "Export selected (JSON)",
+                            },
+                            {
+                              value: "download_snaps",
+                              label: "Download snapshots",
+                            },
+                            {
+                              value: "clear_sel",
+                              label: "Clear selection",
+                            },
+                          ]}
+                        />
+                      </div>
+                    </div>
+                  </>
                 )}
               </div>
 
@@ -2722,63 +3523,100 @@ export function ClassroomDetail() {
               {subSessionId &&
                 !subLoading &&
                 !subError &&
-                submissionEvents.length === 0 && (
+                submissionBoardFiltered.length === 0 && (
                   <p className="classroom-list__empty">
-                    No submissions found for this session.
+                    No submissions match this filter for this session.
                   </p>
                 )}
 
               {subSessionId &&
                 !subLoading &&
                 !subError &&
-                submissionEvents.length > 0 &&
+                submissionBoardFiltered.length > 0 &&
                 (() => {
-                  type SubMeta = {
-                    assignment_id?: string;
-                    content?: string;
-                    status?: string;
+                  const renderDesignCard = (sub: SubmissionRecord) => {
+                    const checked = selectedBoardIds.has(sub.event_id);
+                    const isExpanded = expandedBoardId === sub.event_id;
+                    const statusLabel =
+                      sub.status === "submitted" ? "Submitted" : "Draft";
+                    return (
+                      <div
+                        key={sub.event_id}
+                        className="classroom-detail__sub-design-card"
+                      >
+                        <div className="classroom-detail__sub-design-card__chrome">
+                          <KidCheckbox
+                            compact
+                            ariaLabel={`Select submission from ${sub.student_display_name ?? sub.student_id}`}
+                            checked={checked}
+                            onChange={(on) => {
+                              setSelectedBoardIds((prev) => {
+                                const next = new Set(prev);
+                                if (on) next.add(sub.event_id);
+                                else next.delete(sub.event_id);
+                                return next;
+                              });
+                            }}
+                          />
+                        </div>
+                        <SubmissionSnapshotViewport
+                          imageSrc={sub.preview_image}
+                          label={`${sub.student_display_name ?? "Student"} lab snapshot`}
+                        />
+                        <div className="classroom-detail__sub-design-card__meta">
+                          <div className="classroom-detail__sub-design-card__title-row">
+                            <span className="classroom-detail__sub-design-card__student">
+                              {sub.student_display_name ?? sub.student_id}
+                            </span>
+                            <span
+                              className={`classroom-detail__assign-status-badge classroom-detail__assign-status-badge--${sub.status === "submitted" ? "submitted" : "draft"}`}
+                            >
+                              {statusLabel}
+                            </span>
+                          </div>
+                          <p className="classroom-detail__sub-design-card__edited">
+                            {new Date(sub.submitted_at).toLocaleString()}
+                          </p>
+                          {sub.lab_id && (
+                            <span className="classroom-detail__sub-design-card__lab">
+                              {sub.lab_id}
+                            </span>
+                          )}
+                          {sub.assignment_id && (
+                            <p className="classroom-detail__sub-design-card__assign">
+                              Assignment: {sub.assignment_id}
+                            </p>
+                          )}
+                          <button
+                            type="button"
+                            className="classroom-list__create-btn classroom-list__create-btn--ghost classroom-detail__sub-toggle"
+                            onClick={() =>
+                              setExpandedBoardId(isExpanded ? null : sub.event_id)
+                            }
+                          >
+                            {isExpanded ? "Hide details" : "View details"}
+                          </button>
+                          {isExpanded && (
+                            <pre className="classroom-detail__sub-content classroom-detail__sub-content--in-card">
+                              {sub.content || "(no text payload)"}
+                            </pre>
+                          )}
+                        </div>
+                      </div>
+                    );
                   };
 
                   if (subView === "assignments") {
-                    // Group by assignment_id (null = unassigned), then deduplicate per student keeping latest
-                    const grouped = new Map<
-                      string,
-                      ClassroomSessionEventRecord[]
-                    >();
-                    for (const ev of submissionEvents) {
-                      const meta = (ev.metadata ?? {}) as SubMeta;
-                      const key = meta.assignment_id ?? "(no assignment)";
+                    const grouped = new Map<string, SubmissionRecord[]>();
+                    for (const sub of submissionBoardFiltered) {
+                      const key = sub.assignment_id ?? "(no assignment)";
                       if (!grouped.has(key)) grouped.set(key, []);
-                      grouped.get(key)!.push(ev);
+                      grouped.get(key)!.push(sub);
                     }
-                    // Within each group keep only latest per student
-                    const dedupe = (evs: ClassroomSessionEventRecord[]) => {
-                      const byStudent = new Map<
-                        string,
-                        ClassroomSessionEventRecord
-                      >();
-                      for (const ev of evs) {
-                        const sid = String(ev.student_id ?? ev.actor_id);
-                        const existing = byStudent.get(sid);
-                        if (
-                          !existing ||
-                          new Date(ev.created_at) >
-                            new Date(existing.created_at)
-                        ) {
-                          byStudent.set(sid, ev);
-                        }
-                      }
-                      return Array.from(byStudent.values()).sort(
-                        (a, b) =>
-                          new Date(a.created_at).getTime() -
-                          new Date(b.created_at).getTime(),
-                      );
-                    };
-
                     return (
                       <div className="classroom-detail__sub-groups">
                         {Array.from(grouped.entries()).map(
-                          ([assignmentId, evs]) => (
+                          ([assignmentId, subs]) => (
                             <div
                               key={assignmentId}
                               className="classroom-detail__sub-group"
@@ -2788,49 +3626,12 @@ export function ClassroomDetail() {
                                   ? "Unassigned work"
                                   : `Assignment: ${assignmentId}`}
                                 <span className="classroom-detail__sub-count">
-                                  {dedupe(evs).length} submission
-                                  {dedupe(evs).length !== 1 ? "s" : ""}
+                                  {subs.length} submission
+                                  {subs.length !== 1 ? "s" : ""}
                                 </span>
                               </h3>
-                              <div className="classroom-detail__sub-list">
-                                {dedupe(evs).map((ev) => {
-                                  const meta = (ev.metadata ?? {}) as SubMeta;
-                                  const isExpanded = expandedSubId === ev.id;
-                                  return (
-                                    <div
-                                      key={ev.id}
-                                      className="classroom-detail__sub-card"
-                                    >
-                                      <div className="classroom-detail__sub-card-header">
-                                        <span className="classroom-detail__sub-student">
-                                          {ev.student_display_name ??
-                                            ev.actor_display_name}
-                                        </span>
-                                        <span className="classroom-detail__sub-time">
-                                          {new Date(
-                                            ev.created_at,
-                                          ).toLocaleTimeString()}
-                                        </span>
-                                        <button
-                                          type="button"
-                                          className="classroom-list__create-btn classroom-list__create-btn--ghost classroom-detail__sub-toggle"
-                                          onClick={() =>
-                                            setExpandedSubId(
-                                              isExpanded ? null : ev.id,
-                                            )
-                                          }
-                                        >
-                                          {isExpanded ? "Hide" : "View"}
-                                        </button>
-                                      </div>
-                                      {isExpanded && (
-                                        <pre className="classroom-detail__sub-content">
-                                          {meta.content ?? "(no content)"}
-                                        </pre>
-                                      )}
-                                    </div>
-                                  );
-                                })}
+                              <div className="classroom-detail__sub-design-grid">
+                                {subs.map((s) => renderDesignCard(s))}
                               </div>
                             </div>
                           ),
@@ -2839,70 +3640,9 @@ export function ClassroomDetail() {
                     );
                   }
 
-                  // "All work" view — deduplicate per student keeping latest, sort by student name
-                  const byStudent = new Map<
-                    string,
-                    ClassroomSessionEventRecord
-                  >();
-                  for (const ev of submissionEvents) {
-                    const sid = String(ev.student_id ?? ev.actor_id);
-                    const existing = byStudent.get(sid);
-                    if (
-                      !existing ||
-                      new Date(ev.created_at) > new Date(existing.created_at)
-                    ) {
-                      byStudent.set(sid, ev);
-                    }
-                  }
-                  const sorted = Array.from(byStudent.values()).sort((a, b) =>
-                    (
-                      a.student_display_name ?? a.actor_display_name
-                    ).localeCompare(
-                      b.student_display_name ?? b.actor_display_name,
-                    ),
-                  );
-
                   return (
-                    <div className="classroom-detail__sub-list">
-                      {sorted.map((ev) => {
-                        const meta = (ev.metadata ?? {}) as SubMeta;
-                        const isExpanded = expandedSubId === ev.id;
-                        return (
-                          <div
-                            key={ev.id}
-                            className="classroom-detail__sub-card"
-                          >
-                            <div className="classroom-detail__sub-card-header">
-                              <span className="classroom-detail__sub-student">
-                                {ev.student_display_name ??
-                                  ev.actor_display_name}
-                              </span>
-                              {meta.assignment_id && (
-                                <span className="classroom-detail__sub-badge">
-                                  Assignment
-                                </span>
-                              )}
-                              <span className="classroom-detail__sub-time">
-                                {new Date(ev.created_at).toLocaleTimeString()}
-                              </span>
-                              <button
-                                type="button"
-                                className="classroom-list__create-btn classroom-list__create-btn--ghost classroom-detail__sub-toggle"
-                                onClick={() =>
-                                  setExpandedSubId(isExpanded ? null : ev.id)
-                                }
-                              >
-                                {isExpanded ? "Hide" : "View"}
-                              </button>
-                            </div>
-                            {isExpanded && (
-                              <pre className="classroom-detail__sub-content">
-                                {meta.content ?? "(no content)"}
-                              </pre>
-                            )}
-                          </div>
-                        );
-                      })}
+                    <div className="classroom-detail__sub-design-grid">
+                      {submissionBoardFiltered.map((s) => renderDesignCard(s))}
                     </div>
                   );
                 })()}
@@ -2929,6 +3669,7 @@ export function ClassroomDetail() {
                       onClick={() => {
                         setSelectedAssignment(null);
                         setAssignmentSubmissions([]);
+                        setAssignDrillExpandedId(null);
                       }}
                     >
                       <ArrowLeft size={14} aria-hidden /> All assignments
@@ -2975,55 +3716,87 @@ export function ClassroomDetail() {
                         No submissions yet for this assignment.
                       </p>
                     ) : (
-                      <div className="classroom-detail__sub-list">
-                        {assignmentSubmissions.map((sub) => (
-                          <div
-                            key={sub.event_id}
-                            className="classroom-detail__sub-card"
-                          >
-                            <div className="classroom-detail__sub-card-header">
-                              <span className="classroom-detail__sub-student">
-                                {sub.student_display_name ?? sub.student_id}
-                              </span>
-                              <span
-                                className={`classroom-detail__assign-status-badge classroom-detail__assign-status-badge--${sub.status}`}
-                              >
-                                {sub.status === "submitted"
-                                  ? "Submitted"
-                                  : "Draft"}
-                              </span>
-                              <span className="classroom-detail__sub-time">
-                                {new Date(sub.submitted_at).toLocaleString()}
-                              </span>
-                              {sub.grade != null ? (
-                                <span className="classroom-detail__grade-badge">
-                                  {sub.grade}/100
-                                </span>
-                              ) : (
-                                <button
-                                  type="button"
-                                  className="classroom-list__create-btn classroom-list__create-btn--ghost classroom-detail__sub-toggle"
-                                  onClick={() => {
-                                    setGradingSubmission(sub);
-                                    setGradeScore("100");
-                                    setGradeFeedback("");
-                                    setGradeError(null);
-                                  }}
-                                >
-                                  Grade
-                                </button>
-                              )}
+                      <div className="classroom-detail__sub-design-grid">
+                        {assignmentSubmissions.map((sub) => {
+                          const ex = assignDrillExpandedId === sub.event_id;
+                          return (
+                            <div
+                              key={sub.event_id}
+                              className="classroom-detail__sub-design-card"
+                            >
+                              <SubmissionSnapshotViewport
+                                imageSrc={sub.preview_image}
+                                label={`${sub.student_display_name ?? "Student"} snapshot`}
+                              />
+                              <div className="classroom-detail__sub-design-card__meta">
+                                <div className="classroom-detail__sub-design-card__title-row">
+                                  <span className="classroom-detail__sub-design-card__student">
+                                    {sub.student_display_name ?? sub.student_id}
+                                  </span>
+                                  <span
+                                    className={`classroom-detail__assign-status-badge classroom-detail__assign-status-badge--${sub.status === "submitted" ? "submitted" : "draft"}`}
+                                  >
+                                    {sub.status === "submitted"
+                                      ? "Submitted"
+                                      : "Draft"}
+                                  </span>
+                                </div>
+                                <p className="classroom-detail__sub-design-card__edited">
+                                  {new Date(sub.submitted_at).toLocaleString()}
+                                </p>
+                                <div className="classroom-detail__sub-design-card__actions">
+                                  {sub.grade != null ? (
+                                    <span className="classroom-detail__grade-badge">
+                                      {sub.grade}/100
+                                    </span>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      className="classroom-list__create-btn classroom-list__create-btn--ghost classroom-detail__sub-toggle"
+                                      onClick={() => {
+                                        setGradingSubmission(sub);
+                                        setGradeError(null);
+                                      }}
+                                    >
+                                      Grade
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    className="classroom-list__create-btn classroom-list__create-btn--ghost classroom-detail__sub-toggle"
+                                    onClick={() =>
+                                      setAssignDrillExpandedId(
+                                        ex ? null : sub.event_id,
+                                      )
+                                    }
+                                  >
+                                    {ex ? "Hide details" : "Details"}
+                                  </button>
+                                </div>
+                                {ex && (
+                                  <pre className="classroom-detail__sub-content classroom-detail__sub-content--in-card">
+                                    {sub.content || "(no content)"}
+                                  </pre>
+                                )}
+                                {sub.feedback && (
+                                  <p className="classroom-detail__grade-feedback">
+                                    <strong>Feedback:</strong> {sub.feedback}
+                                  </p>
+                                )}
+                                {sub.rubric && sub.rubric.length > 0 ? (
+                                  <ul className="classroom-detail__rubric-readout">
+                                    {sub.rubric.map((rc) => (
+                                      <li key={rc.criterion_id}>
+                                        <strong>{rc.label || rc.criterion_id}:</strong>{" "}
+                                        {rc.points_awarded}/{rc.max_points}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                ) : null}
+                              </div>
                             </div>
-                            <pre className="classroom-detail__sub-content">
-                              {sub.content || "(no content)"}
-                            </pre>
-                            {sub.feedback && (
-                              <p className="classroom-detail__grade-feedback">
-                                <strong>Feedback:</strong> {sub.feedback}
-                              </p>
-                            )}
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -3189,6 +3962,234 @@ export function ClassroomDetail() {
             )}
           </div>
 
+          {/* ── Roster gamification (badges / XP) ───────────────────────── */}
+          <ModalDialog
+            isOpen={rosterGamifyModal === "xp"}
+            onClose={() => !rosterGamifyBusy && closeRosterGamifyModal()}
+            title="Give XP"
+            ariaLabel="Give XP to students"
+            contentClassName="classroom-list__create-form classroom-list__create-form--dialog classroom-detail__end-dialog"
+            closeVariant="neutral"
+            disableClose={rosterGamifyBusy}
+            footer={
+              <div className="classroom-list__create-actions">
+                <button
+                  type="button"
+                  className="classroom-list__create-btn classroom-list__create-btn--ghost"
+                  onClick={closeRosterGamifyModal}
+                  disabled={rosterGamifyBusy}
+                >
+                  {rosterGamifySummary ? "Close" : "Cancel"}
+                </button>
+                {!rosterGamifySummary ? (
+                  <button
+                    type="button"
+                    className="classroom-list__create-btn"
+                    disabled={rosterGamifyBusy}
+                    onClick={() => void applyRosterXp()}
+                  >
+                    {rosterGamifyBusy ? "Applying…" : "Award XP"}
+                  </button>
+                ) : null}
+              </div>
+            }
+          >
+            <p className="classroom-detail__end-dialog-copy">
+              <strong>{rosterGamifyTargets.length}</strong> student
+              {rosterGamifyTargets.length !== 1 ? "s" : ""} selected.
+            </p>
+            {rosterGamifySummary && (
+              <p className="classroom-detail__roster-gamify-summary">
+                {rosterGamifySummary}
+              </p>
+            )}
+            {rosterGamifyError && (
+              <p
+                className="classroom-list__empty"
+                style={{ color: "var(--color-error, red)" }}
+              >
+                {rosterGamifyError}
+              </p>
+            )}
+            {!rosterGamifySummary && (
+              <>
+                <div className="classroom-list__create-field">
+                  <label htmlFor="roster-xp-amount">XP amount</label>
+                  <input
+                    id="roster-xp-amount"
+                    type="number"
+                    min={1}
+                    max={10_000}
+                    className="classroom-list__create-input"
+                    value={rosterGamifyXpAmount}
+                    onChange={(e) => setRosterGamifyXpAmount(e.target.value)}
+                  />
+                </div>
+                <div className="classroom-list__create-field">
+                  <label htmlFor="roster-xp-reason">Reason</label>
+                  <input
+                    id="roster-xp-reason"
+                    type="text"
+                    className="classroom-list__create-input"
+                    value={rosterGamifyXpReason}
+                    onChange={(e) => setRosterGamifyXpReason(e.target.value)}
+                    placeholder="Shown on the student timeline"
+                  />
+                </div>
+              </>
+            )}
+          </ModalDialog>
+
+          <ModalDialog
+            isOpen={rosterGamifyModal === "assign"}
+            onClose={() => !rosterGamifyBusy && closeRosterGamifyModal()}
+            title="Award badge"
+            ariaLabel="Award badge to students"
+            contentClassName="classroom-list__create-form classroom-list__create-form--dialog classroom-detail__end-dialog"
+            closeVariant="neutral"
+            disableClose={rosterGamifyBusy}
+            footer={
+              <div className="classroom-list__create-actions">
+                <button
+                  type="button"
+                  className="classroom-list__create-btn classroom-list__create-btn--ghost"
+                  onClick={closeRosterGamifyModal}
+                  disabled={rosterGamifyBusy}
+                >
+                  {rosterGamifySummary ? "Close" : "Cancel"}
+                </button>
+                {!rosterGamifySummary ? (
+                  <button
+                    type="button"
+                    className="classroom-list__create-btn"
+                    disabled={
+                      rosterGamifyBusy || rosterBadgeOptions.length === 0
+                    }
+                    onClick={() => void applyRosterAssignBadges()}
+                  >
+                    {rosterGamifyBusy ? "Applying…" : "Award badge"}
+                  </button>
+                ) : null}
+              </div>
+            }
+          >
+            <p className="classroom-detail__end-dialog-copy">
+              <strong>{rosterGamifyTargets.length}</strong> student
+              {rosterGamifyTargets.length !== 1 ? "s" : ""}. Students who
+              already have this badge are skipped.
+            </p>
+            {rosterGamifySummary && (
+              <p className="classroom-detail__roster-gamify-summary">
+                {rosterGamifySummary}
+              </p>
+            )}
+            {rosterGamifyError && (
+              <p
+                className="classroom-list__empty"
+                style={{ color: "var(--color-error, red)" }}
+              >
+                {rosterGamifyError}
+              </p>
+            )}
+            {!rosterGamifySummary && rosterBadgeOptions.length > 0 && (
+              <div className="classroom-list__create-field">
+                <label htmlFor="roster-badge-assign">Badge</label>
+                <KidDropdown
+                  value={rosterGamifyBadgeSlug}
+                  onChange={setRosterGamifyBadgeSlug}
+                  ariaLabel="Select badge to award"
+                  placeholder="Choose a badge"
+                  fullWidth
+                  options={rosterBadgeOptions.map((b) => ({
+                    value: b.slug,
+                    label: `${b.name} (+${b.xp_reward} XP)`,
+                  }))}
+                />
+              </div>
+            )}
+            {!rosterGamifySummary && rosterBadgeOptions.length === 0 && (
+              <p className="classroom-list__empty">
+                No badges available. Create badge definitions for your tenant
+                first.
+              </p>
+            )}
+          </ModalDialog>
+
+          <ModalDialog
+            isOpen={rosterGamifyModal === "revoke"}
+            onClose={() => !rosterGamifyBusy && closeRosterGamifyModal()}
+            title="Remove badge"
+            ariaLabel="Remove badge from students"
+            contentClassName="classroom-list__create-form classroom-list__create-form--dialog classroom-detail__end-dialog"
+            closeVariant="neutral"
+            disableClose={rosterGamifyBusy}
+            footer={
+              <div className="classroom-list__create-actions">
+                <button
+                  type="button"
+                  className="classroom-list__create-btn classroom-list__create-btn--ghost"
+                  onClick={closeRosterGamifyModal}
+                  disabled={rosterGamifyBusy}
+                >
+                  {rosterGamifySummary ? "Close" : "Cancel"}
+                </button>
+                {!rosterGamifySummary ? (
+                  <button
+                    type="button"
+                    className="classroom-list__create-btn classroom-list__create-btn--danger"
+                    disabled={
+                      rosterGamifyBusy || rosterBadgeOptions.length === 0
+                    }
+                    onClick={() => void applyRosterRevokeBadges()}
+                  >
+                    {rosterGamifyBusy ? "Removing…" : "Remove badge"}
+                  </button>
+                ) : null}
+              </div>
+            }
+          >
+            <p className="classroom-detail__end-dialog-copy">
+              Removes the badge from the profile for{" "}
+              <strong>{rosterGamifyTargets.length}</strong> student
+              {rosterGamifyTargets.length !== 1 ? "s" : ""}. XP already earned
+              from that badge is not taken back.
+            </p>
+            {rosterGamifySummary && (
+              <p className="classroom-detail__roster-gamify-summary">
+                {rosterGamifySummary}
+              </p>
+            )}
+            {rosterGamifyError && (
+              <p
+                className="classroom-list__empty"
+                style={{ color: "var(--color-error, red)" }}
+              >
+                {rosterGamifyError}
+              </p>
+            )}
+            {!rosterGamifySummary && rosterBadgeOptions.length > 0 && (
+              <div className="classroom-list__create-field">
+                <label htmlFor="roster-badge-revoke">Badge to remove</label>
+                <KidDropdown
+                  value={rosterGamifyBadgeSlug}
+                  onChange={setRosterGamifyBadgeSlug}
+                  ariaLabel="Select badge to remove"
+                  placeholder="Choose a badge"
+                  fullWidth
+                  options={rosterBadgeOptions.map((b) => ({
+                    value: b.slug,
+                    label: b.name,
+                  }))}
+                />
+              </div>
+            )}
+            {!rosterGamifySummary && rosterBadgeOptions.length === 0 && (
+              <p className="classroom-list__empty">
+                No badges in the catalogue to remove.
+              </p>
+            )}
+          </ModalDialog>
+
           {/* ── Grading Modal ──────────────────────────────────────────────── */}
           <ModalDialog
             isOpen={Boolean(gradingSubmission)}
@@ -3217,6 +4218,16 @@ export function ClassroomDetail() {
                       if (!id || !selectedAssignment) return;
                       setSavingGrade(true);
                       setGradeError(null);
+                      let rubricPayload: RubricCriterionPayload[] | undefined;
+                      try {
+                        rubricPayload = buildGradeRubricPayload(gradeRubricRows);
+                      } catch (e: unknown) {
+                        setGradeError(
+                          e instanceof Error ? e.message : "Invalid rubric",
+                        );
+                        setSavingGrade(false);
+                        return;
+                      }
                       void gradeSubmission(
                         id,
                         selectedAssignment.session_id,
@@ -3225,6 +4236,9 @@ export function ClassroomDetail() {
                           score: Number(gradeScore),
                           feedback: gradeFeedback || null,
                           assignment_id: gradingSubmission.assignment_id,
+                          ...(rubricPayload?.length
+                            ? { rubric: rubricPayload }
+                            : {}),
                         },
                       )
                         .then(() => {
@@ -3235,6 +4249,7 @@ export function ClassroomDetail() {
                                     ...s,
                                     grade: Number(gradeScore),
                                     feedback: gradeFeedback || null,
+                                    rubric: rubricPayload ?? null,
                                   }
                                 : s,
                             ),
@@ -3306,71 +4321,192 @@ export function ClassroomDetail() {
                     placeholder="Leave feedback for the student..."
                   />
                 </div>
+                <div className="classroom-detail__grade-rubric">
+                  <div className="classroom-detail__grade-rubric-header">
+                    <span id="grade-rubric-heading">Rubric breakdown (optional)</span>
+                    <button
+                      type="button"
+                      className="classroom-list__create-btn classroom-list__create-btn--ghost"
+                      onClick={() =>
+                        setGradeRubricRows((prev) => [
+                          ...prev,
+                          {
+                            id: newRubricRowId(),
+                            criterion_id: "",
+                            label: "",
+                            max_points: "10",
+                            points_awarded: "10",
+                          },
+                        ])
+                      }
+                    >
+                      Add criterion
+                    </button>
+                  </div>
+                  <p
+                    className="classroom-detail__grade-rubric-hint"
+                    id="grade-rubric-desc"
+                  >
+                    Rows with an id feed organization analytics (compliance vs max points). Leave empty to grade with
+                    score only.
+                  </p>
+                  {gradeRubricRows.length === 0 ? (
+                    <p className="classroom-list__empty" style={{ marginTop: 8 }}>
+                      No rubric rows — holistic score only.
+                    </p>
+                  ) : (
+                    <ul
+                      className="classroom-detail__grade-rubric-list"
+                      aria-labelledby="grade-rubric-heading"
+                      aria-describedby="grade-rubric-desc"
+                    >
+                      {gradeRubricRows.map((row, idx) => (
+                        <li key={row.id} className="classroom-detail__grade-rubric-row">
+                          <div className="classroom-list__create-field">
+                            <label htmlFor={`rubric-id-${row.id}`}>Criterion id</label>
+                            <input
+                              id={`rubric-id-${row.id}`}
+                              type="text"
+                              className="classroom-list__create-input"
+                              value={row.criterion_id}
+                              onChange={(e) =>
+                                setGradeRubricRows((prev) =>
+                                  prev.map((r) =>
+                                    r.id === row.id
+                                      ? { ...r, criterion_id: e.target.value }
+                                      : r,
+                                  ),
+                                )
+                              }
+                              placeholder="e.g. clarity"
+                              autoComplete="off"
+                            />
+                          </div>
+                          <div className="classroom-list__create-field">
+                            <label htmlFor={`rubric-label-${row.id}`}>Label (optional)</label>
+                            <input
+                              id={`rubric-label-${row.id}`}
+                              type="text"
+                              className="classroom-list__create-input"
+                              value={row.label}
+                              onChange={(e) =>
+                                setGradeRubricRows((prev) =>
+                                  prev.map((r) =>
+                                    r.id === row.id ? { ...r, label: e.target.value } : r,
+                                  ),
+                                )
+                              }
+                              placeholder="Display name"
+                              autoComplete="off"
+                            />
+                          </div>
+                          <div className="classroom-detail__grade-rubric-points">
+                            <div className="classroom-list__create-field">
+                              <label htmlFor={`rubric-max-${row.id}`}>Max</label>
+                              <input
+                                id={`rubric-max-${row.id}`}
+                                type="number"
+                                min={1}
+                                max={1000}
+                                className="classroom-list__create-input"
+                                value={row.max_points}
+                                onChange={(e) =>
+                                  setGradeRubricRows((prev) =>
+                                    prev.map((r) =>
+                                      r.id === row.id
+                                        ? { ...r, max_points: e.target.value }
+                                        : r,
+                                    ),
+                                  )
+                                }
+                              />
+                            </div>
+                            <div className="classroom-list__create-field">
+                              <label htmlFor={`rubric-pts-${row.id}`}>Earned</label>
+                              <input
+                                id={`rubric-pts-${row.id}`}
+                                type="number"
+                                min={0}
+                                className="classroom-list__create-input"
+                                value={row.points_awarded}
+                                onChange={(e) =>
+                                  setGradeRubricRows((prev) =>
+                                    prev.map((r) =>
+                                      r.id === row.id
+                                        ? { ...r, points_awarded: e.target.value }
+                                        : r,
+                                    ),
+                                  )
+                                }
+                              />
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            className="classroom-list__create-btn classroom-list__create-btn--ghost classroom-detail__grade-rubric-remove"
+                            onClick={() =>
+                              setGradeRubricRows((prev) =>
+                                prev.filter((r) => r.id !== row.id),
+                              )
+                            }
+                            aria-label={`Remove rubric row ${idx + 1}`}
+                          >
+                            Remove
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
               </>
             ) : null}
           </ModalDialog>
 
-          {showEndDialog && activeSession && (
-            <div
-              className="classroom-list__dialog-overlay"
-              onClick={() => setShowEndDialog(false)}
-            >
-              <div
-                className="classroom-list__create-form classroom-list__create-form--dialog classroom-detail__end-dialog"
-                role="dialog"
-                aria-modal="true"
-                aria-label="End session confirmation"
-                onClick={(e) => e.stopPropagation()}
-              >
+          <ModalDialog
+            isOpen={showEndDialog && Boolean(activeSession)}
+            onClose={() => setShowEndDialog(false)}
+            title="End active session"
+            ariaLabel="End session confirmation"
+            contentClassName="classroom-list__create-form classroom-list__create-form--dialog classroom-detail__end-dialog"
+            closeVariant="neutral"
+            disableClose={endingSession}
+            footer={
+              <div className="classroom-list__create-actions">
                 <button
                   type="button"
-                  className="classroom-list__dialog-close"
+                  className="classroom-list__create-btn classroom-list__create-btn--ghost"
                   onClick={() => setShowEndDialog(false)}
-                  aria-label="Close dialog"
                   disabled={endingSession}
                 >
-                  <X size={28} aria-hidden />
+                  Cancel
                 </button>
-                <h3 className="classroom-list__create-title">
-                  End active session
-                </h3>
-                {forceEndRequired ? (
-                  <p className="classroom-detail__end-dialog-copy">
-                    {presenceSummary?.active_students ?? 0} student(s) are still
-                    in the session. Ending now will end the meeting for
-                    everyone.
-                  </p>
-                ) : (
-                  <p className="classroom-detail__end-dialog-copy">
-                    No students are currently active in this session. Confirm to
-                    end it now.
-                  </p>
-                )}
-                <div className="classroom-list__create-actions">
-                  <button
-                    type="button"
-                    className="classroom-list__create-btn classroom-list__create-btn--ghost"
-                    onClick={() => setShowEndDialog(false)}
-                    disabled={endingSession}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    className="classroom-list__create-btn classroom-list__create-btn--danger"
-                    onClick={handleConfirmEndSession}
-                    disabled={endingSession}
-                  >
-                    {endingSession
-                      ? "Ending..."
-                      : forceEndRequired
-                        ? "End for all"
-                        : "End session"}
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  className="classroom-list__create-btn classroom-list__create-btn--danger"
+                  onClick={handleConfirmEndSession}
+                  disabled={endingSession}
+                >
+                  {endingSession
+                    ? "Ending..."
+                    : forceEndRequired
+                      ? "End for all"
+                      : "End session"}
+                </button>
               </div>
-            </div>
-          )}
+            }
+          >
+            {forceEndRequired ? (
+              <p className="classroom-detail__end-dialog-copy">
+                {presenceSummary?.active_students ?? 0} student(s) are still in
+                the session. Ending now will end the meeting for everyone.
+              </p>
+            ) : (
+              <p className="classroom-detail__end-dialog-copy">
+                No students are currently active in this session. Confirm to end
+                it now.
+              </p>
+            )}
+          </ModalDialog>
 
           {classroom && id ? (
             <ClassroomFormWizard
@@ -3519,24 +4655,16 @@ export function ClassroomDetail() {
                 <div className="classroom-detail__resources-section">
                   <div className="classroom-detail__resources-section-header">
                     <h4>Assignments</h4>
-                    {isContentWindowOpen(resourcesSession) &&
-                      !showAssignmentForm && (
-                        <button
-                          type="button"
-                          className="classroom-list__create-btn classroom-list__create-btn--ghost classroom-detail__resources-add-btn"
-                          onClick={() => {
-                            setNewAssignmentRequirement("none");
-                            setNewAssignmentLabId(
-                              selectedSessionLab || permittedLabs[0] || "",
-                            );
-                            setNewAssignmentAllowEditAfterSubmit(false);
-                            setShowAssignmentForm(true);
-                          }}
-                        >
-                          <Plus size={14} aria-hidden />
-                          Add assignment
-                        </button>
-                      )}
+                    {!showAssignmentForm && (
+                      <button
+                        type="button"
+                        className="classroom-list__create-btn classroom-list__create-btn--ghost classroom-detail__resources-add-btn"
+                        onClick={openAssignmentForm}
+                      >
+                        <Plus size={14} aria-hidden />
+                        Add assignment
+                      </button>
+                    )}
                   </div>
 
                   {(() => {
@@ -3604,34 +4732,78 @@ export function ClassroomDetail() {
             </div>
           )}
 
-          {showAssignmentForm && resourcesSession && (
-            <div
-              className="classroom-list__dialog-overlay"
-              onClick={() => setShowAssignmentForm(false)}
-            >
-              <div
-                className="classroom-list__create-form classroom-list__create-form--dialog classroom-detail__assignment-create-dialog"
-                role="dialog"
-                aria-modal="true"
-                aria-label="Add assignment"
-                onClick={(e) => e.stopPropagation()}
-              >
+          <ModalDialog
+            isOpen={showAssignmentForm && Boolean(resourcesSession)}
+            onClose={() => !addingAssignment && setShowAssignmentForm(false)}
+            title="Add assignment"
+            ariaLabel="Add assignment"
+            contentClassName="classroom-list__create-form classroom-list__create-form--dialog classroom-detail__assignment-create-dialog"
+            closeVariant="neutral"
+            disableClose={addingAssignment}
+            footer={
+              <div className="classroom-list__create-actions">
                 <button
                   type="button"
-                  className="classroom-list__dialog-close"
-                  onClick={() => setShowAssignmentForm(false)}
-                  aria-label="Close"
+                  className="classroom-list__create-btn classroom-list__create-btn--ghost"
+                  onClick={() => {
+                    setShowAssignmentForm(false);
+                    setNewAssignmentTitle("");
+                    setNewAssignmentInstructions("");
+                    setNewAssignmentDueAt("");
+                    setNewAssignmentLabId("");
+                    setNewAssignmentRequirement("none");
+                    setNewAssignmentAllowEditAfterSubmit(false);
+                    setSelectedAssignmentTemplateId("");
+                  }}
+                  disabled={addingAssignment}
                 >
-                  <X size={28} aria-hidden />
+                  Cancel
                 </button>
-                <h3 className="classroom-list__create-title">Add assignment</h3>
+                <button
+                  type="button"
+                  className="classroom-list__create-btn"
+                  onClick={() => void handleAddTextAssignment()}
+                  disabled={
+                    addingAssignment ||
+                    (!selectedAssignmentTemplateId && !newAssignmentTitle.trim())
+                  }
+                >
+                  {addingAssignment ? "Adding..." : "Add assignment"}
+                </button>
+              </div>
+            }
+          >
+            {resourcesSession ? (
+              <>
                 <p className="classroom-detail__resources-date">
-                  Session:{" "}
-                  {new Date(
-                    resourcesSession.session_start,
-                  ).toLocaleDateString()}
+                  Session: {new Date(resourcesSession.session_start).toLocaleDateString()}
                 </p>
-
+                {!isContentWindowOpen(resourcesSession) && (
+                  <p className="classroom-detail__window-warning">
+                    This session is closed for manual edits. You can still add an assignment from an existing template.
+                  </p>
+                )}
+                <div className="classroom-list__create-field">
+                  <label>Existing assignment template (optional)</label>
+                  <SearchableDropdown
+                    value={selectedAssignmentTemplateId}
+                    onChange={setSelectedAssignmentTemplateId}
+                    ariaLabel="Choose assignment template"
+                    placeholder={
+                      assignmentTemplatesLoading
+                        ? "Loading templates..."
+                        : "Select an existing template"
+                    }
+                    searchPlaceholder="Search templates..."
+                    emptyLabel="No templates found"
+                    fullWidth
+                    options={assignmentTemplates.map((template) => ({
+                      value: template.id,
+                      label: template.title,
+                      searchText: `${template.instructions ?? ""} ${template.course_id ?? ""} ${template.lesson_id ?? ""}`,
+                    }))}
+                  />
+                </div>
                 <div className="classroom-list__create-field">
                   <label htmlFor="new-assign-title">Title</label>
                   <input
@@ -3640,117 +4812,105 @@ export function ClassroomDetail() {
                     className="classroom-list__create-input"
                     value={newAssignmentTitle}
                     onChange={(e) => setNewAssignmentTitle(e.target.value)}
-                    placeholder="Assignment title"
+                    placeholder={
+                      selectedAssignmentTemplateId
+                        ? "Optional title override"
+                        : "Assignment title"
+                    }
                     autoFocus
+                    disabled={
+                      !isContentWindowOpen(resourcesSession) &&
+                      !selectedAssignmentTemplateId
+                    }
                   />
                 </div>
-                <div className="classroom-list__create-field">
-                  <label>Submission requirement</label>
-                  <KidDropdown
-                    value={newAssignmentRequirement}
-                    onChange={(value) => {
-                      const next = value as "none" | "lab" | "assets" | "both";
-                      setNewAssignmentRequirement(next);
-                      if (
-                        (next === "lab" || next === "both") &&
-                        !newAssignmentLabId
-                      ) {
-                        setNewAssignmentLabId(
-                          selectedSessionLab || permittedLabs[0] || "",
-                        );
-                      }
-                    }}
-                    ariaLabel="Assignment requirement type"
-                    minWidth={240}
-                    options={[
-                      { value: "none", label: "Flexible (no requirement)" },
-                      { value: "lab", label: "Requires lab" },
-                      { value: "assets", label: "Requires assets/files" },
-                      { value: "both", label: "Requires lab + assets" },
-                    ]}
-                  />
-                </div>
-                <div className="classroom-list__create-field">
-                  <KidCheckbox
-                    checked={newAssignmentAllowEditAfterSubmit}
-                    onChange={setNewAssignmentAllowEditAfterSubmit}
-                  >
-                    Allow edits after student submits
-                  </KidCheckbox>
-                </div>
-                {permittedLabs.length > 0 &&
-                  (newAssignmentRequirement === "lab" ||
-                    newAssignmentRequirement === "both") && (
+                {isContentWindowOpen(resourcesSession) && (
+                  <>
                     <div className="classroom-list__create-field">
-                      <label>Linked lab</label>
+                      <label>Submission requirement</label>
                       <KidDropdown
-                        value={newAssignmentLabId}
-                        onChange={setNewAssignmentLabId}
-                        ariaLabel="Select a lab for this assignment"
+                        value={newAssignmentRequirement}
+                        onChange={(value) => {
+                          const next =
+                            value as "none" | "lab" | "assets" | "both";
+                          setNewAssignmentRequirement(next);
+                          if (
+                            (next === "lab" || next === "both") &&
+                            !newAssignmentLabId
+                          ) {
+                            setNewAssignmentLabId(
+                              selectedSessionLab || permittedLabs[0] || "",
+                            );
+                          }
+                        }}
+                        ariaLabel="Assignment requirement type"
                         minWidth={240}
                         options={[
-                          { value: "", label: "No lab" },
-                          ...permittedLabs.map((lab) => ({
-                            value: lab,
-                            label: lab
-                              .replace(/-/g, " ")
-                              .replace(/\b\w/g, (c) => c.toUpperCase()),
-                          })),
+                          { value: "none", label: "Flexible (no requirement)" },
+                          { value: "lab", label: "Requires lab" },
+                          { value: "assets", label: "Requires assets/files" },
+                          { value: "both", label: "Requires lab + assets" },
                         ]}
                       />
                     </div>
-                  )}
+                    <div className="classroom-list__create-field">
+                      <KidCheckbox
+                        checked={newAssignmentAllowEditAfterSubmit}
+                        onChange={setNewAssignmentAllowEditAfterSubmit}
+                      >
+                        Allow edits after student submits
+                      </KidCheckbox>
+                    </div>
+                    {permittedLabs.length > 0 &&
+                      (newAssignmentRequirement === "lab" ||
+                        newAssignmentRequirement === "both") && (
+                        <div className="classroom-list__create-field">
+                          <label>Linked lab</label>
+                          <KidDropdown
+                            value={newAssignmentLabId}
+                            onChange={setNewAssignmentLabId}
+                            ariaLabel="Select a lab for this assignment"
+                            minWidth={240}
+                            options={[
+                              { value: "", label: "No lab" },
+                              ...permittedLabs.map((lab) => ({
+                                value: lab,
+                                label: lab
+                                  .replace(/-/g, " ")
+                                  .replace(/\b\w/g, (c) => c.toUpperCase()),
+                              })),
+                            ]}
+                          />
+                        </div>
+                      )}
+                    <div className="classroom-list__create-field">
+                      <label htmlFor="new-assign-instructions">Instructions</label>
+                      <textarea
+                        id="new-assign-instructions"
+                        className="classroom-list__create-input classroom-detail__textarea"
+                        value={newAssignmentInstructions}
+                        onChange={(e) =>
+                          setNewAssignmentInstructions(e.target.value)
+                        }
+                        placeholder="Describe what students need to do"
+                        rows={3}
+                      />
+                    </div>
+                  </>
+                )}
                 <div className="classroom-list__create-field">
-                  <label htmlFor="new-assign-instructions">Instructions</label>
-                  <textarea
-                    id="new-assign-instructions"
-                    className="classroom-list__create-input classroom-detail__textarea"
-                    value={newAssignmentInstructions}
-                    onChange={(e) =>
-                      setNewAssignmentInstructions(e.target.value)
-                    }
-                    placeholder="Describe what students need to do"
-                    rows={3}
-                  />
-                </div>
-                <div className="classroom-list__create-field">
-                  <label htmlFor="new-assign-due">Due date (optional)</label>
-                  <DatePicker
+                  <label htmlFor="new-assign-due">Due date & time (optional)</label>
+                  <DateTimePicker
                     id="new-assign-due"
                     value={newAssignmentDueAt}
                     onChange={setNewAssignmentDueAt}
-                    placeholder="Pick a due date"
+                    datePlaceholder="Pick due date"
+                    timePlaceholder="Pick due time"
                   />
                 </div>
-                <div className="classroom-list__create-actions">
-                  <button
-                    type="button"
-                    className="classroom-list__create-btn classroom-list__create-btn--ghost"
-                    onClick={() => {
-                      setShowAssignmentForm(false);
-                      setNewAssignmentTitle("");
-                      setNewAssignmentInstructions("");
-                      setNewAssignmentDueAt("");
-                      setNewAssignmentLabId("");
-                      setNewAssignmentRequirement("none");
-                      setNewAssignmentAllowEditAfterSubmit(false);
-                    }}
-                    disabled={addingAssignment}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    className="classroom-list__create-btn"
-                    onClick={() => void handleAddTextAssignment()}
-                    disabled={addingAssignment || !newAssignmentTitle.trim()}
-                  >
-                    {addingAssignment ? "Adding..." : "Add assignment"}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
+              </>
+            ) : null}
+          </ModalDialog>
 
           {showAssetLibrary && resourcesSession && (
             <div
@@ -3918,6 +5078,8 @@ export function ClassroomDetail() {
               onClick={() => {
                 setViewingAssignment(null);
                 setViewingAssignmentSession(null);
+                setLabProjectPickerOpen(false);
+                setLabProjectPickerRows([]);
               }}
             >
               <div
@@ -3951,6 +5113,8 @@ export function ClassroomDetail() {
                       onClick={() => {
                         setViewingAssignment(null);
                         setViewingAssignmentSession(null);
+                        setLabProjectPickerOpen(false);
+                        setLabProjectPickerRows([]);
                       }}
                       aria-label="Close"
                     >
@@ -4007,9 +5171,11 @@ export function ClassroomDetail() {
                         {submittingWork
                           ? "Saving draft..."
                           : "Save draft & open"}{" "}
-                        {viewingAssignment.lab_id
-                          .replace(/-/g, " ")
-                          .replace(/\b\w/g, (c) => c.toUpperCase())}
+                        {(viewingAssignment.curriculum_lab_title?.trim() ||
+                          viewingAssignment.lab_launcher_id?.trim() ||
+                          (!isCurriculumLabUuid(viewingAssignment.lab_id)
+                            ? viewingAssignment.lab_id
+                            : "lab")) ?? "lab"}
                         <ChevronRight size={16} aria-hidden />
                       </button>
                     </section>
@@ -4075,78 +5241,182 @@ export function ClassroomDetail() {
                           No saved drafts yet.
                         </p>
                       ) : (
-                        <div className="classroom-detail__av-resource-list">
-                          {savedSubmissions.map((sub) => {
-                            const parsed = parseSubmissionPayload(sub.content);
-                            const labToOpen =
-                              parsed.labId || viewingAssignment.lab_id;
-                            return (
-                              <div
-                                key={sub.event_id}
-                                className="classroom-detail__av-resource-btn"
-                              >
-                                <span>
-                                  {sub.status === "submitted"
-                                    ? "Submitted"
-                                    : "Draft"}{" "}
-                                  -{" "}
-                                  {new Date(sub.submitted_at).toLocaleString()}
-                                </span>
-                                {(sub.grade != null || sub.feedback) && (
-                                  <span className="classroom-detail__resources-label">
-                                    {sub.grade != null
-                                      ? `Grade: ${sub.grade}/100`
-                                      : ""}
-                                    {sub.grade != null && sub.feedback
-                                      ? " - "
-                                      : ""}
-                                    {sub.feedback
-                                      ? `Feedback: ${sub.feedback}`
-                                      : ""}
-                                  </span>
-                                )}
-                                <div className="classroom-detail__resources-header-actions">
-                                  <button
-                                    type="button"
-                                    className="classroom-list__create-btn classroom-list__create-btn--ghost classroom-detail__resources-add-btn"
-                                    onClick={() => {
-                                      setSubmissionText(parsed.note);
-                                      setSubmissionAssetId(parsed.assetId);
-                                      setSubmissionAssetName(parsed.assetName);
-                                    }}
-                                    disabled={
-                                      submissionLocked &&
-                                      sub.status === "submitted"
-                                    }
-                                  >
-                                    {submissionLocked &&
-                                    sub.status === "submitted"
-                                      ? "Locked"
-                                      : "Load"}
-                                  </button>
-                                  {labToOpen && (
-                                    <button
-                                      type="button"
-                                      className="classroom-list__create-btn classroom-list__create-btn--ghost classroom-detail__resources-add-btn"
-                                      onClick={() =>
-                                        navigate(
-                                          buildLabLaunchPath(labToOpen, {
-                                            classroomId: id,
-                                            sessionId:
-                                              viewingAssignmentSession.id,
-                                            referrer: "assignment_view",
-                                          }),
-                                        )
-                                      }
-                                    >
-                                      Open lab
-                                    </button>
-                                  )}
+                        <>
+                          <div className="classroom-detail__sub-board-toolbar classroom-detail__sub-board-toolbar--student">
+                            <div className="classroom-detail__sub-board-select-row">
+                              <KidCheckbox
+                                compact
+                                ariaLabel="Select all my drafts"
+                                checked={
+                                  savedSubmissions.length > 0 &&
+                                  savedSubmissions.every((r) =>
+                                    selectedDraftIds.has(r.event_id),
+                                  )
+                                }
+                                onChange={(on) => {
+                                  if (on) {
+                                    setSelectedDraftIds(
+                                      new Set(
+                                        savedSubmissions.map((r) => r.event_id),
+                                      ),
+                                    );
+                                  } else {
+                                    setSelectedDraftIds(new Set());
+                                  }
+                                }}
+                              />
+                              <span className="classroom-detail__sub-board-select-label">
+                                Select all
+                              </span>
+                              <KidDropdown
+                                value={draftAction}
+                                onChange={(v) => {
+                                  if (v === "__noop__") return;
+                                  if (v === "export_json")
+                                    runDraftBulkExportJson();
+                                  if (v === "download_snaps")
+                                    void runDraftBulkDownloadSnapshots();
+                                  if (v === "clear_sel")
+                                    setSelectedDraftIds(new Set());
+                                  setDraftAction("__noop__");
+                                }}
+                                ariaLabel="Actions on selected drafts"
+                                placeholder="Actions…"
+                                minWidth={200}
+                                disabled={selectedDraftIds.size === 0}
+                                options={[
+                                  {
+                                    value: "export_json",
+                                    label: "Export selected (JSON)",
+                                  },
+                                  {
+                                    value: "download_snaps",
+                                    label: "Download snapshots",
+                                  },
+                                  {
+                                    value: "clear_sel",
+                                    label: "Clear selection",
+                                  },
+                                ]}
+                              />
+                            </div>
+                          </div>
+                          <div className="classroom-detail__sub-design-grid classroom-detail__sub-design-grid--student">
+                            {savedSubmissions.map((sub) => {
+                              const parsed = parseSubmissionPayload(sub.content);
+                              const labToOpen =
+                                parsed.labId || viewingAssignment.lab_id;
+                              const picked = selectedDraftIds.has(sub.event_id);
+                              return (
+                                <div
+                                  key={sub.event_id}
+                                  className="classroom-detail__sub-design-card"
+                                >
+                                  <div className="classroom-detail__sub-design-card__chrome">
+                                    <KidCheckbox
+                                      compact
+                                      ariaLabel="Select this draft"
+                                      checked={picked}
+                                      onChange={(on) => {
+                                        setSelectedDraftIds((prev) => {
+                                          const next = new Set(prev);
+                                          if (on) next.add(sub.event_id);
+                                          else next.delete(sub.event_id);
+                                          return next;
+                                        });
+                                      }}
+                                    />
+                                  </div>
+                                  <SubmissionSnapshotViewport
+                                    imageSrc={sub.preview_image}
+                                    label="My lab snapshot"
+                                  />
+                                  <div className="classroom-detail__sub-design-card__meta">
+                                    <div className="classroom-detail__sub-design-card__title-row">
+                                      <span className="classroom-detail__sub-design-card__student">
+                                        {sub.status === "submitted"
+                                          ? "Submitted"
+                                          : "Draft"}
+                                      </span>
+                                    </div>
+                                    <p className="classroom-detail__sub-design-card__edited">
+                                      {new Date(
+                                        sub.submitted_at,
+                                      ).toLocaleString()}
+                                    </p>
+                                    {(sub.grade != null || sub.feedback) && (
+                                      <p className="classroom-detail__resources-label">
+                                        {sub.grade != null
+                                          ? `Grade: ${sub.grade}/100`
+                                          : ""}
+                                        {sub.grade != null && sub.feedback
+                                          ? " — "
+                                          : ""}
+                                        {sub.feedback
+                                          ? `Feedback: ${sub.feedback}`
+                                          : ""}
+                                      </p>
+                                    )}
+                                    <div className="classroom-detail__resources-header-actions">
+                                      <button
+                                        type="button"
+                                        className="classroom-list__create-btn classroom-list__create-btn--ghost classroom-detail__resources-add-btn"
+                                        onClick={() => {
+                                          setSubmissionText(parsed.note);
+                                          setSubmissionAssetId(parsed.assetId);
+                                          setSubmissionAssetName(
+                                            parsed.assetName,
+                                          );
+                                        }}
+                                        disabled={
+                                          submissionLocked &&
+                                          sub.status === "submitted"
+                                        }
+                                      >
+                                        {submissionLocked &&
+                                        sub.status === "submitted"
+                                          ? "Locked"
+                                          : "Load"}
+                                      </button>
+                                      {labToOpen &&
+                                        (() => {
+                                          const ln = resolveAssignmentLabLauncher({
+                                            lab_launcher_id:
+                                              viewingAssignment.lab_launcher_id,
+                                            lab_id: labToOpen,
+                                          });
+                                          return ln ? (
+                                            <button
+                                              type="button"
+                                              className="classroom-list__create-btn classroom-list__create-btn--ghost classroom-detail__resources-add-btn"
+                                              onClick={() =>
+                                                navigate(
+                                                  buildLabLaunchPath(ln, {
+                                                    classroomId: id!,
+                                                    sessionId:
+                                                      viewingAssignmentSession.id,
+                                                    referrer: "assignment_view",
+                                                    assignmentId:
+                                                      viewingAssignment.id,
+                                                    curriculumLabId:
+                                                      isCurriculumLabUuid(labToOpen)
+                                                        ? labToOpen
+                                                        : undefined,
+                                                  }),
+                                                )
+                                              }
+                                            >
+                                              Open lab
+                                            </button>
+                                          ) : null;
+                                        })()}
+                                    </div>
+                                  </div>
                                 </div>
-                              </div>
-                            );
-                          })}
-                        </div>
+                              );
+                            })}
+                          </div>
+                        </>
                       )}
                     </section>
                   )}
@@ -4289,6 +5559,65 @@ export function ClassroomDetail() {
               </div>
             </div>
           )}
+
+          <ModalDialog
+            isOpen={labProjectPickerOpen}
+            onClose={() => {
+              if (!submittingWork) {
+                setLabProjectPickerOpen(false);
+                setLabProjectPickerRows([]);
+              }
+            }}
+            title="Use a saved project?"
+            ariaLabel="Choose saved lab project"
+            backdropClassName="ui-modal__backdrop--stack"
+            contentClassName="classroom-list__create-form classroom-list__create-form--dialog"
+            disableClose={submittingWork}
+            footer={
+              <div className="classroom-list__create-actions">
+                <button
+                  type="button"
+                  className="classroom-list__create-btn classroom-list__create-btn--ghost"
+                  disabled={submittingWork}
+                  onClick={() => {
+                    setLabProjectPickerOpen(false);
+                    setLabProjectPickerRows([]);
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="classroom-list__create-btn"
+                  disabled={submittingWork}
+                  onClick={() => void runDraftAndLaunch(null)}
+                >
+                  Start fresh
+                </button>
+              </div>
+            }
+          >
+            <p className="classroom-detail__resources-label">
+              Pick an existing submission for this lab, or start fresh.
+            </p>
+            <ul className="classroom-detail__lab-project-pick-list" role="list">
+              {labProjectPickerRows.map((p) => (
+                <li key={p.id}>
+                  <button
+                    type="button"
+                    className="classroom-detail__lab-project-pick-btn"
+                    disabled={submittingWork}
+                    onClick={() => void runDraftAndLaunch(p.id)}
+                  >
+                    <strong>{p.title}</strong>
+                    <span>
+                      {new Date(p.submitted_at).toLocaleDateString()}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </ModalDialog>
 
           <ModalDialog
             isOpen={showEnrollDialog}

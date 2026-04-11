@@ -12,6 +12,7 @@ import {
   Users,
   XCircle,
 } from "lucide-react";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   createParentInvite,
   createUserInvite,
@@ -37,6 +38,8 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 export function InvitationsPage() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const { tenant } = useTenant();
 
   const [invites, setInvites] = useState<InvitationResponse[]>([]);
@@ -107,6 +110,26 @@ export function InvitationsPage() {
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const intent = params.get("create");
+    if (intent === "parent") {
+      setShowInviteParent(true);
+    } else if (intent === "user" || intent === "1") {
+      setShowInviteUser(true);
+    } else {
+      return;
+    }
+    params.delete("create");
+    navigate(
+      {
+        pathname: location.pathname,
+        search: params.toString() ? `?${params.toString()}` : "",
+      },
+      { replace: true },
+    );
+  }, [location.pathname, location.search, navigate]);
 
   const filtered = useMemo(() => {
     return invites.filter((inv) => {

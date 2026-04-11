@@ -148,11 +148,16 @@ class ConversationService:
         self,
         identity: CurrentIdentity,
         tenant_ctx: TenantContext,
+        *,
+        skip: int = 0,
+        limit: int = 50,
     ) -> ConversationListResponse:
         if identity.sub_type != "user":
-            return ConversationListResponse(items=[], total=0)
+            return ConversationListResponse(items=[], total=0, skip=skip, limit=limit)
 
-        conversations = await self.repo.list_for_user(identity.id, tenant_ctx.tenant_id)
+        conversations, total = await self.repo.list_for_user(
+            identity.id, tenant_ctx.tenant_id, skip=skip, limit=limit
+        )
         items = []
         for conv in conversations:
             members = await self.repo.get_members(conv.id)
@@ -160,7 +165,7 @@ class ConversationService:
             unread = await self.repo.get_unread_count(conv.id, identity.id)
             items.append(_build_summary(conv, members, last_msg, unread, identity.id))
 
-        return ConversationListResponse(items=items, total=len(items))
+        return ConversationListResponse(items=items, total=total, skip=skip, limit=limit)
 
     async def get_conversation(
         self,

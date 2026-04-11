@@ -328,6 +328,15 @@ const COMMAND_HINTS: CommandHint[] = [
           { long: "--id", required: true, help: "Subscription UUID" },
         ],
       },
+      {
+        action: "reconcile-stripe",
+        help: "Reconcile Stripe-backed subscriptions + licenses (exactly one of --tenant or --tenant-id)",
+        params: [
+          { long: "--tenant", short: "-t", help: "Tenant slug" },
+          { long: "--tenant-id", help: "Tenant UUID" },
+          { long: "--max-items", help: "Max subscriptions to process (1–1000)", default: "200" },
+        ],
+      },
     ],
   },
   {
@@ -477,15 +486,217 @@ function groupByTime(items: CommandHistoryItem[]): Record<string, CommandHistory
   return groups;
 }
 
+const PRIMARY_ARRAY_KEYS = [
+  "items",
+  "subscriptions",
+  "commands",
+  "results",
+  "tenants",
+  "plans",
+  "roles",
+  "permissions",
+  "assignments",
+  "entries",
+  "events",
+  "job_types",
+  "active_tasks",
+  "providers",
+  "blobs",
+  "folders",
+  "users",
+  "students",
+  "instructors",
+  "members",
+];
+
+function isArrayOfRecords(val: unknown): val is Record<string, unknown>[] {
+  return (
+    Array.isArray(val) &&
+    val.length > 0 &&
+    typeof val[0] === "object" &&
+    val[0] !== null &&
+    !Array.isArray(val[0])
+  );
+}
+
+function pickPrimaryArray(
+  data: Record<string, unknown>
+): { key: string; items: Record<string, unknown>[] } | null {
+  for (const key of PRIMARY_ARRAY_KEYS) {
+    const v = data[key];
+    if (isArrayOfRecords(v)) return { key, items: v };
+  }
+  for (const key of Object.keys(data)) {
+    if (
+      key === "ok" ||
+      key === "message" ||
+      key === "count" ||
+      key === "changes" ||
+      key === "window_days" ||
+      key === "slash_commands"
+    ) {
+      continue;
+    }
+    const v = data[key];
+    if (isArrayOfRecords(v)) return { key, items: v };
+  }
+  return null;
+}
+
 function formatCellValue(val: unknown): string {
   if (val === null || val === undefined) return "—";
   if (typeof val === "boolean") return val ? "Yes" : "No";
+  if (Array.isArray(val)) {
+    if (val.length === 0) return "—";
+    if (val.every((x) => typeof x === "string")) return val.join("\n");
+    if (
+      val.every(
+        (x) => typeof x === "object" && x !== null && !Array.isArray(x)
+      )
+    ) {
+      return (val as Record<string, unknown>[])
+        .map((p) => {
+          const flag = String(p.long ?? "");
+          const short = p.short != null && p.short !== "" ? ` (${String(p.short)})` : "";
+          const req = p.required ? " · required" : "";
+          const help = p.help != null && String(p.help) !== "" ? ` — ${String(p.help)}` : "";
+          const def =
+            p.default != null && String(p.default) !== ""
+              ? ` [default: ${String(p.default)}]`
+              : "";
+          return `${flag}${short}${req}${help}${def}`.trim() || "—";
+        })
+        .join("\n");
+    }
+    return JSON.stringify(val);
+  }
   if (typeof val === "object") return JSON.stringify(val);
   return String(val);
 }
 
+function cellClassForColumn(col: string, formatted: string): string {
+  if (
+    formatted.includes("\n") ||
+    col === "help" ||
+    col === "params" ||
+    col === "description" ||
+    col === "error" ||
+    col === "result_summary"
+  ) {
+    return "admin-tasks__cell-multiline";
+  }
+  return "";
+}
+
+function SlashHelpSummary({ data }: { data: Record<string, unknown> }) {
+  return (
+    <div className="admin-tasks__formatted-card">
+      {data.title != null ? (
+        <h3 className="admin-tasks__formatted-title">{String(data.title)}</h3>
+      ) : null}
+      {Array.isArray(data.slash_commands) ? (
+        <ul className="admin-tasks__formatted-list">
+          {(data.slash_commands as unknown[]).map((line, i) => (
+            <li key={i}>{String(line)}</li>
+          ))}
+        </ul>
+      ) : null}
+      {data.command_format != null ? (
+        <p className="admin-tasks__formatted-meta">
+          <span className="admin-tasks__formatted-label">Command format</span>{" "}
+          <code className="admin-tasks__formatted-code">{String(data.command_format)}</code>
+        </p>
+      ) : null}
+      {data.example != null ? (
+        <p className="admin-tasks__formatted-meta">
+          <span className="admin-tasks__formatted-label">Example</span>{" "}
+          <code className="admin-tasks__formatted-code">{String(data.example)}</code>
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function PrimaryArrayTable({
+  arrayKey,
+  items,
+  data,
+}: {
+  arrayKey: string;
+  items: Record<string, unknown>[];
+  data: Record<string, unknown>;
+}) {
+  const columns = Object.keys(items[0] as Record<string, unknown>);
+  const count = data.count !== undefined ? Number(data.count) : items.length;
+  return (
+    <div className="admin-tasks__table-wrap">
+      {data.message != null && String(data.message) !== "" ? (
+        <div className="admin-tasks__table-message">{String(data.message)}</div>
+      ) : null}
+      <div className="admin-tasks__table-count">
+        {arrayKey.replace(/_/g, " ")} · {count} row{count !== 1 ? "s" : ""}
+      </div>
+      <table className="admin-tasks__result-table">
+        <thead>
+          <tr>
+            {columns.map((col) => (
+              <th key={col}>{col.replace(/_/g, " ")}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((row, i) => (
+            <tr key={i}>
+              {columns.map((col) => {
+                const formatted = formatCellValue(row[col]);
+                return (
+                  <td key={col} className={cellClassForColumn(col, formatted)}>
+                    {formatted}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function ResultTable({ data }: { data: Record<string, unknown> }) {
-  const items = data.items ?? data.subscriptions;
+  const nonOkKeys = Object.keys(data).filter((k) => k !== "ok");
+  if (nonOkKeys.length === 0 && data.ok === true) {
+    return (
+      <div className="admin-tasks__result-ok" role="status">
+        Command completed successfully.
+      </div>
+    );
+  }
+
+  const slashHelp = Array.isArray(data.slash_commands);
+  const primary = pickPrimaryArray(data);
+
+  if (slashHelp && primary) {
+    return (
+      <div className="admin-tasks__formatted-stack">
+        <SlashHelpSummary data={data} />
+        <PrimaryArrayTable arrayKey={primary.key} items={primary.items} data={data} />
+      </div>
+    );
+  }
+
+  if (slashHelp) {
+    return (
+      <div className="admin-tasks__formatted-stack">
+        <SlashHelpSummary data={data} />
+      </div>
+    );
+  }
+
+  if (primary) {
+    return <PrimaryArrayTable arrayKey={primary.key} items={primary.items} data={data} />;
+  }
+
   const singleKey = Object.keys(data).find(
     (k) =>
       k !== "ok" &&
@@ -498,38 +709,6 @@ function ResultTable({ data }: { data: Record<string, unknown> }) {
       !Array.isArray(data[k])
   );
   const singleObject = singleKey ? (data[singleKey] as Record<string, unknown>) : null;
-
-  if (Array.isArray(items) && items.length > 0) {
-    const columns = Object.keys(items[0] as Record<string, unknown>);
-    return (
-      <div className="admin-tasks__table-wrap">
-        {data.message && (
-          <div className="admin-tasks__table-message">{String(data.message)}</div>
-        )}
-        {data.count !== undefined && (
-          <div className="admin-tasks__table-count">{String(data.count)} result{Number(data.count) !== 1 ? "s" : ""}</div>
-        )}
-        <table className="admin-tasks__result-table">
-          <thead>
-            <tr>
-              {columns.map((col) => (
-                <th key={col}>{col.replace(/_/g, " ")}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {(items as Record<string, unknown>[]).map((row, i) => (
-              <tr key={i}>
-                {columns.map((col) => (
-                  <td key={col}>{formatCellValue(row[col])}</td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    );
-  }
 
   if (singleObject) {
     const entries = Object.entries(singleObject);
@@ -560,7 +739,14 @@ function ResultTable({ data }: { data: Record<string, unknown> }) {
                         <tbody>
                           {(val as Record<string, unknown>[]).map((subRow, si) => (
                             <tr key={si}>
-                              {subCols.map((c) => <td key={c}>{formatCellValue(subRow[c])}</td>)}
+                              {subCols.map((c) => {
+                                const subF = formatCellValue(subRow[c]);
+                                return (
+                                  <td key={c} className={cellClassForColumn(c, subF)}>
+                                    {subF}
+                                  </td>
+                                );
+                              })}
                             </tr>
                           ))}
                         </tbody>
@@ -576,22 +762,26 @@ function ResultTable({ data }: { data: Record<string, unknown> }) {
                     <td>
                       <table className="admin-tasks__result-table admin-tasks__result-table--nested">
                         <tbody>
-                          {Object.entries(val as Record<string, unknown>).map(([sk, sv]) => (
-                            <tr key={sk}>
-                              <td className="admin-tasks__kv-key">{sk.replace(/_/g, " ")}</td>
-                              <td>{formatCellValue(sv)}</td>
-                            </tr>
-                          ))}
+                          {Object.entries(val as Record<string, unknown>).map(([sk, sv]) => {
+                            const nv = formatCellValue(sv);
+                            return (
+                              <tr key={sk}>
+                                <td className="admin-tasks__kv-key">{sk.replace(/_/g, " ")}</td>
+                                <td className={cellClassForColumn(sk, nv)}>{nv}</td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </td>
                   </tr>
                 );
               }
+              const vf = formatCellValue(val);
               return (
                 <tr key={key}>
                   <td className="admin-tasks__kv-key">{key.replace(/_/g, " ")}</td>
-                  <td>{formatCellValue(val)}</td>
+                  <td className={cellClassForColumn(key, vf)}>{vf}</td>
                 </tr>
               );
             })}
@@ -613,12 +803,15 @@ function ResultTable({ data }: { data: Record<string, unknown> }) {
             </tr>
           </thead>
           <tbody>
-            {topEntries.map(([key, val]) => (
-              <tr key={key}>
-                <td className="admin-tasks__kv-key">{key.replace(/_/g, " ")}</td>
-                <td>{formatCellValue(val)}</td>
-              </tr>
-            ))}
+            {topEntries.map(([key, val]) => {
+              const vf = formatCellValue(val);
+              return (
+                <tr key={key}>
+                  <td className="admin-tasks__kv-key">{key.replace(/_/g, " ")}</td>
+                  <td className={cellClassForColumn(key, vf)}>{vf}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -626,6 +819,33 @@ function ResultTable({ data }: { data: Record<string, unknown> }) {
   }
 
   return <span className="admin-tasks__output-empty">No data to display.</span>;
+}
+
+function FormattedOutput({
+  data,
+  isRunning,
+}: {
+  data: Record<string, unknown>;
+  isRunning: boolean;
+}) {
+  if (typeof data._error === "string") {
+    return (
+      <div
+        className={`admin-tasks__output admin-tasks__output--formatted ${isRunning ? "admin-tasks__output--running" : ""}`}
+      >
+        <div className="admin-tasks__result-error" role="alert">
+          {data._error}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div
+      className={`admin-tasks__output admin-tasks__output--formatted ${isRunning ? "admin-tasks__output--running" : ""}`}
+    >
+      <ResultTable data={data} />
+    </div>
+  );
 }
 
 export function AdminTasksPage() {
@@ -639,7 +859,7 @@ export function AdminTasksPage() {
   const [showHistory, setShowHistory] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedSuggestionIdx, setSelectedSuggestionIdx] = useState(-1);
-  const [outputMode, setOutputMode] = useState<"raw" | "table">("table");
+  const [outputMode, setOutputMode] = useState<"raw" | "formatted">("formatted");
   const [resultData, setResultData] = useState<Record<string, unknown> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const historyPanelRef = useRef<HTMLDivElement>(null);
@@ -771,16 +991,28 @@ export function AdminTasksPage() {
 
       try {
         const res = await executeCommand(trimmed);
-        if (res.ok && res.result) {
+        if (
+          res.ok &&
+          res.result != null &&
+          typeof res.result === "object" &&
+          !Array.isArray(res.result)
+        ) {
           outputText = JSON.stringify(res.result, null, 2);
           structured = res.result as Record<string, unknown>;
+        } else if (res.ok) {
+          outputText = JSON.stringify(res, null, 2);
+          structured = { ok: true };
         } else if (res.error) {
           outputText = `Error: ${res.error}`;
+          structured = { _error: res.error } as Record<string, unknown>;
         } else {
           outputText = JSON.stringify(res, null, 2);
+          structured = null;
         }
       } catch (err: unknown) {
-        outputText = `Request failed: ${err instanceof Error ? err.message : String(err)}`;
+        const msg = err instanceof Error ? err.message : String(err);
+        outputText = `Request failed: ${msg}`;
+        structured = { _error: `Request failed: ${msg}` } as Record<string, unknown>;
       }
 
       setOutput(outputText);
@@ -884,7 +1116,7 @@ export function AdminTasksPage() {
               ref={inputRef}
               type="text"
               className="admin-tasks__input"
-              placeholder='domain:action --flag value  (e.g. tenants:create -n "My Org" -s my-org -c CODE01)'
+              placeholder='domain:action --flags  ·  /commands  ·  /help  ·  e.g. tenants:list'
               value={commandInput}
               onChange={(e) => handleInputChange(e.target.value)}
               onKeyDown={handleInputKeyDown}
@@ -959,14 +1191,14 @@ export function AdminTasksPage() {
               <div className="admin-tasks__view-toggle" role="radiogroup" aria-label="Output format">
                 <button
                   type="button"
-                  className={`admin-tasks__view-btn ${outputMode === "table" ? "admin-tasks__view-btn--active" : ""}`}
-                  onClick={() => setOutputMode("table")}
-                  aria-checked={outputMode === "table"}
+                  className={`admin-tasks__view-btn ${outputMode === "formatted" ? "admin-tasks__view-btn--active" : ""}`}
+                  onClick={() => setOutputMode("formatted")}
+                  aria-checked={outputMode === "formatted"}
                   role="radio"
-                  title="Table view"
+                  title="Formatted tables and cards"
                 >
                   <Table size={13} aria-hidden />
-                  Table
+                  Formatted
                 </button>
                 <button
                   type="button"
@@ -1108,9 +1340,7 @@ export function AdminTasksPage() {
             {output || "Run a command to see output here."}
           </pre>
         ) : (
-          <div className={`admin-tasks__output admin-tasks__output--table ${isRunning ? "admin-tasks__output--running" : ""}`}>
-            {resultData ? <ResultTable data={resultData} /> : <span className="admin-tasks__output-empty">Run a command to see output here.</span>}
-          </div>
+          <FormattedOutput data={resultData} isRunning={isRunning} />
         )}
       </div>
 
@@ -1141,7 +1371,8 @@ export function AdminTasksPage() {
       <section className="admin-tasks__section" aria-label="Command reference">
         <h2 className="admin-tasks__section-title">Available Commands</h2>
         <p className="admin-tasks__format-hint">
-          Format: <code>domain:action --flag value</code> &mdash; use short flags like <code>-n</code> instead of <code>--name</code>
+          Format: <code>domain:action --flag value</code> (short flags like <code>-n</code>). Slash helpers in the same box:{" "}
+          <code>/commands</code> lists everything, <code>/help</code> summarizes, <code>/help tenants</code> filters by domain.
         </p>
         <div className="admin-tasks__hint-filter">
           <Search size={16} className="admin-tasks__search-icon" aria-hidden />

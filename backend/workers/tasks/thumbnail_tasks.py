@@ -1,7 +1,7 @@
-import asyncio
 import io
 import logging
 
+from workers.async_db import run_async_db
 from workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -80,8 +80,11 @@ def generate_thumbnail(self, asset_table: str, asset_id: str):
         asset_table: "assets" or "global_assets"
         asset_id: UUID string of the asset record
     """
+    async def _run():
+        await _generate_thumbnail_async(asset_table, asset_id)
+
     try:
-        asyncio.run(_generate_thumbnail_async(asset_table, asset_id))
+        run_async_db(_run)
     except Exception as exc:
         logger.exception("Thumbnail generation failed for %s/%s", asset_table, asset_id)
         raise self.retry(exc=exc)
@@ -92,15 +95,16 @@ async def _generate_thumbnail_async(asset_table: str, asset_id: str):
 
     from sqlalchemy import select
 
+    import app.database as db_mod
+
     from app.core import blob_storage
-    from app.database import async_session_factory
 
     if asset_table == "global_assets":
         from app.admin.models import GlobalAsset as Model
     else:
         from app.assets.models import Asset as Model
 
-    async with async_session_factory() as db:
+    async with db_mod.async_session_factory() as db:
         result = await db.execute(
             select(Model).where(Model.id == _UUID(asset_id))
         )

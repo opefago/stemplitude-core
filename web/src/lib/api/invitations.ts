@@ -9,6 +9,7 @@ export interface InvitationResponse {
   expires_at: string;
   created_at: string;
   accepted_at: string | null;
+  role_id: string | null;
   role_name: string | null;
   student_names: string[] | null;
   invite_link: string;
@@ -42,10 +43,11 @@ export async function createUserInvite(data: {
   email: string;
   role_id: string;
   first_name?: string;
+  personal_message?: string;
 }): Promise<InvitationResponse> {
   return apiFetch<InvitationResponse>("/invitations/users", {
     method: "POST",
-    body: JSON.stringify(data),
+    body: data,
   });
 }
 
@@ -56,7 +58,7 @@ export async function createParentInvite(data: {
 }): Promise<InvitationResponse> {
   return apiFetch<InvitationResponse>("/invitations/parents", {
     method: "POST",
-    body: JSON.stringify(data),
+    body: data,
   });
 }
 

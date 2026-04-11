@@ -38,6 +38,15 @@ def global_asset_key(asset_id: UUID, filename: str) -> str:
     return f"global/assets/{asset_id}/{filename}"
 
 
+def tenant_session_recording_key(
+    tenant_id: UUID,
+    session_id: UUID,
+    recording_id: UUID,
+    filename: str,
+) -> str:
+    return f"tenants/{tenant_id}/recordings/{session_id}/{recording_id}/{filename}"
+
+
 def thumbnail_key_for(blob_key: str) -> str:
     """Derive a thumbnail S3 key from the original blob key."""
     parts = blob_key.rsplit("/", 1)

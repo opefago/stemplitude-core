@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:secure": "vite build --mode production",
+    "package": "npm run build:secure",
     "lint": "eslint .",
     "preview": "vite preview"
   },
@@ -24,11 +26,13 @@
     "@tippyjs/react": "^4.2.6",
     "@tsparticles/react": "^3.0.0",
     "@tsparticles/slim": "^3.9.1",
+    "@xyflow/react": "^12.10.1",
     "blockly": "^12.4.1",
     "codemirror": "^6.0.2",
     "dagre": "^0.8.5",
     "framer-motion": "^11.18.0",
     "js-base64": "^3.7.8",
+    "livekit-client": "^2.18.0",
     "lucide-react": "^0.468.0",
     "mathjs": "^14.9.1",
     "partycles": "^1.2.6",
@@ -63,6 +67,8 @@
     "eslint-plugin-react-hooks": "^5.1.0",
     "eslint-plugin-react-refresh": "^0.4.18",
     "globals": "^15.14.0",
+    "javascript-obfuscator": "^4.1.1",
+    "terser": "^5.44.0",
     "vite": "^7.3.1"
   }
 }

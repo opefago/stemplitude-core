@@ -15,17 +15,24 @@ import { loadSkulpt, runPythonCode } from '../labs/python-game/skulptRunner';
 import { examples } from '../labs/python-game/examples';
 import SpritePanel from '../labs/python-game/SpritePanel';
 import HelpPanel from '../labs/python-game/HelpPanel';
+import { emitLabEventThrottled } from '../lib/api/gamification';
+import { useChildContextStudentId } from '../lib/childContext';
+import {
+  migrateLegacyLabProjectsIfNeeded,
+  readLabProjectsArray,
+  writeLabProjectsArray,
+} from '../lib/learnerLabStorage';
+import { useAuth } from '../providers/AuthProvider';
 import './PythonGameLab.css';
 
-const PROJECTS_KEY = 'stemplitude_pygame_projects';
-const loadProjectsFromStorage = () => {
-  try { return JSON.parse(localStorage.getItem(PROJECTS_KEY) || '[]'); }
-  catch { return []; }
-};
+const PROJECTS_BASE_KEY = 'stemplitude_pygame_projects';
+const loadProjectsFromStorage = () => readLabProjectsArray(PROJECTS_BASE_KEY);
 
 const collabCompartment = new Compartment();
 
 const PythonGameLab = () => {
+  const childCtx = useChildContextStudentId();
+  const { user } = useAuth();
   const { exitLab, panel, classroomContext } = useLabSession();
   const { ydoc, provider } = useLabSync(null, classroomContext?.sessionId, false, !!classroomContext);
   const canvasRef = useRef(null);
@@ -59,6 +66,11 @@ const PythonGameLab = () => {
   useEffect(() => {
     return assetManagerRef.current.onChange(() => setAssetVersion(v => v + 1));
   }, []);
+
+  useEffect(() => {
+    migrateLegacyLabProjectsIfNeeded(PROJECTS_BASE_KEY);
+    setSavedProjects(loadProjectsFromStorage());
+  }, [childCtx, user?.id, user?.subType]);
 
   const customSprites = useMemo(() => assetManagerRef.current.list('sprite'), [assetVersion]);
   const customBackgrounds = useMemo(() => assetManagerRef.current.list('background'), [assetVersion]);
@@ -186,13 +198,22 @@ const PythonGameLab = () => {
     setGameTitle('My Game');
 
     const code = editorViewRef.current.state.doc.toString();
+    emitLabEventThrottled({
+      lab_id: 'python-game-maker',
+      lab_type: 'python-game',
+      event_type: 'SCRIPT_RUN',
+      context: {
+        code_length: code.length,
+        session_id: classroomContext?.sessionId ?? null,
+      },
+    }, 1000);
     runPythonCode(
       code,
       engineRef.current,
       () => {},
       (err) => { console.warn('[Game Error]', err); setIsRunning(false); }
     );
-  }, [skulptReady]);
+  }, [skulptReady, classroomContext?.sessionId]);
 
   const handleStop = useCallback(() => {
     if (engineRef.current) engineRef.current.stop();
@@ -214,7 +235,7 @@ const PythonGameLab = () => {
     const project = { id: projectId, name: projectName, code, updatedAt: now,
       createdAt: idx >= 0 ? projects[idx].createdAt : now };
     if (idx >= 0) projects[idx] = project; else projects.unshift(project);
-    localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
+    writeLabProjectsArray(PROJECTS_BASE_KEY, projects);
     setSavedProjects(projects);
     setSaveStatus('saved');
     setTimeout(() => setSaveStatus(null), 1500);
@@ -235,7 +256,7 @@ const PythonGameLab = () => {
 
   const handleDeleteProject = useCallback((id) => {
     const projects = loadProjectsFromStorage().filter(p => p.id !== id);
-    localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
+    writeLabProjectsArray(PROJECTS_BASE_KEY, projects);
     setSavedProjects(projects);
   }, []);
 

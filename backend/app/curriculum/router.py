@@ -9,20 +9,26 @@ from app.core.permissions import require_permission
 from app.database import get_db
 from app.dependencies import TenantContext, get_tenant_context
 from app.curriculum.schemas import (
+    AssignmentTemplateCreate,
+    AssignmentTemplateResponse,
+    AssignmentTemplateUpdate,
     CourseCreate,
     CourseResponse,
     CourseUpdate,
+    CurriculumBulkAssignProgramRequest,
+    CurriculumBulkAssignProgramResponse,
     LabCreate,
     LabResponse,
     LabUpdate,
-    CurriculumBulkAssignProgramRequest,
-    CurriculumBulkAssignProgramResponse,
     LessonCreate,
     LessonResponse,
     LessonUpdate,
     ModuleCreate,
     ModuleResponse,
     ModuleUpdate,
+    RubricTemplateCreate,
+    RubricTemplateResponse,
+    RubricTemplateUpdate,
 )
 from app.curriculum.service import CurriculumService
 
@@ -52,7 +58,12 @@ async def create_course(
 ):
     """Create a course."""
     service = CurriculumService(db)
-    return await service.create_course(tenant.tenant_id, data.model_dump())
+    return await service.create_course(
+        tenant.tenant_id,
+        data.model_dump(),
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
 
 
 @router.get(
@@ -76,6 +87,8 @@ async def list_courses(
         limit=limit,
         is_published=is_published,
         program_id=program_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
     )
 
 
@@ -91,7 +104,12 @@ async def get_course(
 ):
     """Get course by ID."""
     service = CurriculumService(db)
-    return await service.get_course(id, tenant.tenant_id)
+    return await service.get_course(
+        id,
+        tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
 
 
 @router.patch(
@@ -107,7 +125,13 @@ async def update_course(
 ):
     """Update a course."""
     service = CurriculumService(db)
-    return await service.update_course(id, tenant.tenant_id, data.model_dump(exclude_unset=True))
+    return await service.update_course(
+        id,
+        tenant.tenant_id,
+        data.model_dump(exclude_unset=True),
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
 
 
 @router.delete(
@@ -122,7 +146,12 @@ async def delete_course(
 ):
     """Delete a course."""
     service = CurriculumService(db)
-    await service.delete_course(id, tenant.tenant_id)
+    await service.delete_course(
+        id,
+        tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
 
 
 @router.post(
@@ -141,6 +170,8 @@ async def bulk_assign_program(
         tenant_id=tenant.tenant_id,
         course_ids=data.course_ids,
         program_id=data.program_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
     )
     return CurriculumBulkAssignProgramResponse(updated_count=updated_count)
 
@@ -160,7 +191,13 @@ async def create_module(
 ):
     """Create a module in a course."""
     service = CurriculumService(db)
-    return await service.create_module(course_id, tenant.tenant_id, data.model_dump())
+    return await service.create_module(
+        course_id,
+        tenant.tenant_id,
+        data.model_dump(),
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
 
 
 @router.get(
@@ -175,7 +212,12 @@ async def list_modules(
 ):
     """List modules for a course."""
     service = CurriculumService(db)
-    return await service.list_modules(course_id)
+    return await service.list_modules(
+        course_id,
+        workspace_tenant_id=tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
 
 
 @router.patch(
@@ -191,7 +233,13 @@ async def update_module(
 ):
     """Update a module."""
     service = CurriculumService(db)
-    return await service.update_module(id, data.model_dump(exclude_unset=True))
+    return await service.update_module(
+        id,
+        data.model_dump(exclude_unset=True),
+        workspace_tenant_id=tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
 
 
 @router.delete(
@@ -206,7 +254,12 @@ async def delete_module(
 ):
     """Delete a module."""
     service = CurriculumService(db)
-    await service.delete_module(id)
+    await service.delete_module(
+        id,
+        workspace_tenant_id=tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
 
 
 # --- Lessons (nested under modules) ---
@@ -224,7 +277,13 @@ async def create_lesson(
 ):
     """Create a lesson in a module."""
     service = CurriculumService(db)
-    return await service.create_lesson(module_id, data.model_dump())
+    return await service.create_lesson(
+        module_id,
+        data.model_dump(),
+        workspace_tenant_id=tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
 
 
 @router.get(
@@ -239,7 +298,12 @@ async def list_lessons(
 ):
     """List lessons for a module."""
     service = CurriculumService(db)
-    return await service.list_lessons(module_id)
+    return await service.list_lessons(
+        module_id,
+        workspace_tenant_id=tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
 
 
 @router.patch(
@@ -255,7 +319,13 @@ async def update_lesson(
 ):
     """Update a lesson."""
     service = CurriculumService(db)
-    return await service.update_lesson(id, data.model_dump(exclude_unset=True))
+    return await service.update_lesson(
+        id,
+        data.model_dump(exclude_unset=True),
+        workspace_tenant_id=tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
 
 
 @router.delete(
@@ -270,7 +340,12 @@ async def delete_lesson(
 ):
     """Delete a lesson."""
     service = CurriculumService(db)
-    await service.delete_lesson(id)
+    await service.delete_lesson(
+        id,
+        workspace_tenant_id=tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
 
 
 # --- Labs (nested under lessons) ---
@@ -288,7 +363,13 @@ async def create_lab(
 ):
     """Create a lab in a lesson."""
     service = CurriculumService(db)
-    return await service.create_lab(lesson_id, data.model_dump())
+    return await service.create_lab(
+        lesson_id,
+        data.model_dump(),
+        workspace_tenant_id=tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
 
 
 @router.get(
@@ -303,7 +384,12 @@ async def list_labs(
 ):
     """List labs for a lesson."""
     service = CurriculumService(db)
-    return await service.list_labs(lesson_id)
+    return await service.list_labs(
+        lesson_id,
+        workspace_tenant_id=tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
 
 
 @router.patch(
@@ -319,7 +405,13 @@ async def update_lab(
 ):
     """Update a lab."""
     service = CurriculumService(db)
-    return await service.update_lab(id, data.model_dump(exclude_unset=True))
+    return await service.update_lab(
+        id,
+        data.model_dump(exclude_unset=True),
+        workspace_tenant_id=tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
 
 
 @router.delete(
@@ -334,4 +426,226 @@ async def delete_lab(
 ):
     """Delete a lab."""
     service = CurriculumService(db)
-    await service.delete_lab(id)
+    await service.delete_lab(
+        id,
+        workspace_tenant_id=tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
+
+
+# --- Rubric templates ---
+
+
+@router.post(
+    "/rubric-templates",
+    response_model=RubricTemplateResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[_require_tenant(), require_permission("curriculum", "create")],
+)
+async def create_rubric_template(
+    data: RubricTemplateCreate,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(get_tenant_context),
+):
+    service = CurriculumService(db)
+    return await service.create_rubric_template(
+        data.model_dump(),
+        workspace_tenant_id=tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
+
+
+@router.get(
+    "/rubric-templates",
+    response_model=list[RubricTemplateResponse],
+    dependencies=[_require_tenant(), require_permission("curriculum", "view")],
+)
+async def list_rubric_templates(
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(get_tenant_context),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+):
+    service = CurriculumService(db)
+    rows = await service.list_rubric_templates(
+        workspace_tenant_id=tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+        skip=skip,
+        limit=limit,
+    )
+    return [RubricTemplateResponse.model_validate(r) for r in rows]
+
+
+@router.get(
+    "/rubric-templates/{id}",
+    response_model=RubricTemplateResponse,
+    dependencies=[_require_tenant(), require_permission("curriculum", "view")],
+)
+async def get_rubric_template(
+    id: UUID,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(get_tenant_context),
+):
+    service = CurriculumService(db)
+    row = await service.get_rubric_template(
+        id,
+        workspace_tenant_id=tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
+    return RubricTemplateResponse.model_validate(row)
+
+
+@router.patch(
+    "/rubric-templates/{id}",
+    response_model=RubricTemplateResponse,
+    dependencies=[_require_tenant(), require_permission("curriculum", "update")],
+)
+async def update_rubric_template(
+    id: UUID,
+    data: RubricTemplateUpdate,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(get_tenant_context),
+):
+    service = CurriculumService(db)
+    row = await service.update_rubric_template(
+        id,
+        data.model_dump(exclude_unset=True),
+        workspace_tenant_id=tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
+    return RubricTemplateResponse.model_validate(row)
+
+
+@router.delete(
+    "/rubric-templates/{id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[_require_tenant(), require_permission("curriculum", "delete")],
+)
+async def delete_rubric_template(
+    id: UUID,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(get_tenant_context),
+):
+    service = CurriculumService(db)
+    await service.delete_rubric_template(
+        id,
+        workspace_tenant_id=tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
+
+
+# --- Assignment templates ---
+
+
+@router.post(
+    "/assignment-templates",
+    response_model=AssignmentTemplateResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[_require_tenant(), require_permission("curriculum", "create")],
+)
+async def create_assignment_template(
+    data: AssignmentTemplateCreate,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(get_tenant_context),
+):
+    service = CurriculumService(db)
+    row = await service.create_assignment_template(
+        data.model_dump(),
+        workspace_tenant_id=tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
+    return AssignmentTemplateResponse.model_validate(row)
+
+
+@router.get(
+    "/assignment-templates",
+    response_model=list[AssignmentTemplateResponse],
+    dependencies=[_require_tenant(), require_permission("curriculum", "view")],
+)
+async def list_assignment_templates(
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(get_tenant_context),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    course_id: UUID | None = Query(None),
+    lesson_id: UUID | None = Query(None),
+):
+    service = CurriculumService(db)
+    rows = await service.list_assignment_templates(
+        workspace_tenant_id=tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+        course_id=course_id,
+        lesson_id=lesson_id,
+        skip=skip,
+        limit=limit,
+    )
+    return [AssignmentTemplateResponse.model_validate(r) for r in rows]
+
+
+@router.get(
+    "/assignment-templates/{id}",
+    response_model=AssignmentTemplateResponse,
+    dependencies=[_require_tenant(), require_permission("curriculum", "view")],
+)
+async def get_assignment_template(
+    id: UUID,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(get_tenant_context),
+):
+    service = CurriculumService(db)
+    row = await service.get_assignment_template(
+        id,
+        workspace_tenant_id=tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
+    return AssignmentTemplateResponse.model_validate(row)
+
+
+@router.patch(
+    "/assignment-templates/{id}",
+    response_model=AssignmentTemplateResponse,
+    dependencies=[_require_tenant(), require_permission("curriculum", "update")],
+)
+async def update_assignment_template(
+    id: UUID,
+    data: AssignmentTemplateUpdate,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(get_tenant_context),
+):
+    service = CurriculumService(db)
+    row = await service.update_assignment_template(
+        id,
+        data.model_dump(exclude_unset=True),
+        workspace_tenant_id=tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
+    return AssignmentTemplateResponse.model_validate(row)
+
+
+@router.delete(
+    "/assignment-templates/{id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[_require_tenant(), require_permission("curriculum", "delete")],
+)
+async def delete_assignment_template(
+    id: UUID,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(get_tenant_context),
+):
+    service = CurriculumService(db)
+    await service.delete_assignment_template(
+        id,
+        workspace_tenant_id=tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )

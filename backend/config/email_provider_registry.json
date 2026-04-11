@@ -3,6 +3,8 @@
   "providers": [
     { "provider": "postmark", "priority": 1 },
     { "provider": "mailgun", "priority": 2 },
-    { "provider": "ses", "priority": 3 }
+    { "provider": "ses", "priority": 3 },
+    { "provider": "sendgrid", "priority": 4 },
+    { "provider": "resend", "priority": 5 }
   ]
 }

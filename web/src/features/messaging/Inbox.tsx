@@ -1,13 +1,33 @@
-import { useEffect, useState } from "react";
-import { Link, Outlet, useParams } from "react-router-dom";
+import { useCallback, useEffect, useLayoutEffect, useState } from "react";
+import { Link, Outlet, useParams, useSearchParams } from "react-router-dom";
 import { Hash, MessageSquarePlus, Search, Users } from "lucide-react";
 import { useAuth } from "../../providers/AuthProvider";
 import {
   listConversations,
   type Conversation,
 } from "../../lib/api/messaging";
+import {
+  listNotifications,
+  type NotificationRecord,
+} from "../../lib/api/notifications";
 import { ComposeModal } from "./ComposeModal";
+import { ParentEventsHub, useParentEventsWeekIndicator } from "./ParentEventsHub";
+import { ParentAttendancePanel } from "../parent/ParentAttendancePanel";
+import { subscribeMessagesInvalidate } from "../../lib/messagesInvalidate";
 import "./messaging.css";
+
+type HubTab = "updates" | "messages" | "events" | "attendance";
+
+const PARENT_HUB_TABS: readonly HubTab[] = [
+  "updates",
+  "messages",
+  "events",
+  "attendance",
+] as const;
+
+function isParentHubTab(value: string | null): value is HubTab {
+  return value != null && (PARENT_HUB_TABS as readonly string[]).includes(value);
+}
 
 function timeAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -108,29 +128,102 @@ function ConvItem({ conv, active }: ConvItemProps) {
   );
 }
 
-export function Inbox() {
+export function Inbox({ variant = "default" }: { variant?: "default" | "parent" }) {
   const { id: activeId } = useParams<{ id: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [composeOpen, setComposeOpen] = useState(false);
+  const [hubTab, setHubTab] = useState<HubTab>("messages");
+  const [updates, setUpdates] = useState<NotificationRecord[]>([]);
+  const [updatesLoading, setUpdatesLoading] = useState(false);
+
+  const loadConversations = useCallback(async () => {
+    setLoading(true);
+    try {
+      const limit = 100;
+      let skip = 0;
+      const all: Conversation[] = [];
+      for (;;) {
+        const res = await listConversations({ skip, limit });
+        all.push(...res.items);
+        if (res.items.length < limit || all.length >= res.total) break;
+        skip += limit;
+      }
+      setConversations(all);
+    } catch {
+      /* keep prior list */
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
+    if (variant !== "parent" || !activeId) return;
+    setHubTab("messages");
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("hub");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [variant, activeId, setSearchParams]);
+
+  useLayoutEffect(() => {
+    if (variant !== "parent" || activeId) return;
+    const raw = searchParams.get("hub");
+    if (isParentHubTab(raw)) setHubTab(raw);
+    else setHubTab("messages");
+  }, [variant, activeId, searchParams]);
+
+  const selectParentHubTab = useCallback(
+    (key: HubTab) => {
+      setHubTab(key);
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (key === "messages") next.delete("hub");
+          else next.set("hub", key);
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+
+  useEffect(() => {
+    void loadConversations();
+  }, [loadConversations]);
+
+  useEffect(() => {
+    return subscribeMessagesInvalidate(() => {
+      void loadConversations();
+    });
+  }, [loadConversations]);
+
+  useEffect(() => {
+    if (variant !== "parent" || hubTab !== "updates") return;
     let mounted = true;
-    setLoading(true);
-    listConversations()
+    setUpdatesLoading(true);
+    listNotifications({ limit: 40 })
       .then((res) => {
-        if (mounted) setConversations(res.items);
+        if (mounted) setUpdates(res.items);
       })
-      .catch(() => {})
+      .catch(() => {
+        if (mounted) setUpdates([]);
+      })
       .finally(() => {
-        if (mounted) setLoading(false);
+        if (mounted) setUpdatesLoading(false);
       });
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [variant, hubTab]);
 
   const filtered = conversations.filter((c) =>
     c.display_name.toLowerCase().includes(search.toLowerCase())
@@ -140,10 +233,90 @@ export function Inbox() {
   const directMessages = filtered.filter((c) => c.type === "dm");
 
   const hasConversation = !!activeId;
+  const isParentHub = variant === "parent";
+  const eventsWeekIndicator = useParentEventsWeekIndicator(isParentHub);
 
   return (
-    <div className="msg-layout">
-      {/* ── Sidebar ────────────────────────────────────────────────────── */}
+    <div
+      className={
+        isParentHub ? "msg-layout msg-layout--parent-hub" : "msg-layout"
+      }
+    >
+      {isParentHub ? (
+        <div className="msg-hub-tabs" role="tablist" aria-label="Updates and messages">
+          {(
+            [
+              ["updates", "Updates"],
+              ["messages", "Messages"],
+              ["events", "Events"],
+              ["attendance", "Attendance"],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={hubTab === key}
+              className={`msg-hub-tabs__btn${hubTab === key ? " msg-hub-tabs__btn--active" : ""}`}
+              onClick={() => selectParentHubTab(key)}
+            >
+              <span className="msg-hub-tabs__btn-inner">
+                {label}
+                {key === "events" && eventsWeekIndicator ? (
+                  <span
+                    className="msg-hub-tabs__events-dot"
+                    aria-label="Class session scheduled this week"
+                  />
+                ) : null}
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {isParentHub && hubTab === "updates" ? (
+        <main className="msg-hub-panel" aria-label="Important updates">
+          <h2 className="msg-hub-panel__title">Important updates</h2>
+          <p className="msg-hub-panel__desc">
+            Notifications from your school and workspace. For threads, open the Messages
+            tab.
+          </p>
+          {updatesLoading ? (
+            <p className="msg-hub-panel__muted">Loading…</p>
+          ) : updates.length === 0 ? (
+            <p className="msg-hub-panel__muted">No notifications yet.</p>
+          ) : (
+            <ul className="msg-hub-updates" role="list">
+              {updates.map((n) => (
+                <li key={n.id} className="msg-hub-updates__item" role="listitem">
+                  <span className="msg-hub-updates__title">{n.title}</span>
+                  {n.body ? (
+                    <span className="msg-hub-updates__body">{n.body}</span>
+                  ) : null}
+                  <span className="msg-hub-updates__time">
+                    {timeAgo(n.created_at)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <Link to="/app/notifications" className="msg-hub-panel__link">
+            Open all notifications
+          </Link>
+        </main>
+      ) : null}
+
+      {isParentHub && hubTab === "events" ? <ParentEventsHub /> : null}
+
+      {isParentHub && hubTab === "attendance" ? <ParentAttendancePanel /> : null}
+
+      {/* ── Sidebar + compose + thread ──────────────────────────────────── */}
+      {(!isParentHub || hubTab === "messages") && (
+      <div
+        className={
+          isParentHub ? "msg-layout__split" : "msg-layout__split--pass"
+        }
+      >
       <aside className="msg-sidebar" aria-label="Conversations">
         <div className="msg-sidebar__header">
           <div className="msg-sidebar__title-row">
@@ -247,6 +420,8 @@ export function Inbox() {
           </div>
         )}
       </main>
+      </div>
+      )}
     </div>
   );
 }

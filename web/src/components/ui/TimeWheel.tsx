@@ -1,8 +1,8 @@
 import { useLayoutEffect, useRef } from "react";
 import "./time-picker.css";
 
-const ITEM_H = 44;
-const VISIBLE = 5;
+const ITEM_H = 40;
+const VISIBLE = 3;
 const PADDING = ITEM_H * Math.floor(VISIBLE / 2);
 
 interface DrumProps {

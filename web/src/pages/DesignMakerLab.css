@@ -728,6 +728,27 @@
   transform: scale(0.96);
 }
 
+.dml-header-btn--primary {
+  background: linear-gradient(180deg, #5ad7ff, #0ea5e9);
+  border-color: #0284c7;
+  color: #0c1222;
+}
+
+.dml-header-btn--primary:hover {
+  background: linear-gradient(180deg, #7fe0ff, #38bdf8);
+  color: #0c1222;
+  border-color: #0369a1;
+}
+
+.dml-classroom-submit-error {
+  margin: 0;
+  padding: 8px 16px;
+  background: rgba(248, 81, 73, 0.12);
+  color: var(--dml-danger, #f85149);
+  font-size: 13px;
+  font-weight: 600;
+}
+
 .dml-header-btn.icon-only {
   padding: 6px 8px;
 }

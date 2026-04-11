@@ -553,10 +553,93 @@
   color: var(--color-warning, #f59e0b);
 }
 
+.admin-tasks__output--formatted,
 .admin-tasks__output--table {
-  font-family: inherit;
+  font-family: var(--font-sans, system-ui, sans-serif);
   white-space: normal;
   word-break: normal;
+}
+
+.admin-tasks__result-error {
+  margin: 0;
+  padding: var(--spacing-md);
+  border-radius: var(--radius-md);
+  border: 1px solid color-mix(in srgb, var(--color-error, #ef4444) 45%, transparent);
+  background: color-mix(in srgb, var(--color-error, #ef4444) 12%, transparent);
+  color: var(--color-error, #f87171);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.admin-tasks__result-ok {
+  margin: 0;
+  padding: var(--spacing-md);
+  border-radius: var(--radius-md);
+  border: 1px solid color-mix(in srgb, var(--color-success, #22c55e) 40%, transparent);
+  background: color-mix(in srgb, var(--color-success, #22c55e) 10%, transparent);
+  color: #86efac;
+  font-size: 0.875rem;
+}
+
+.admin-tasks__formatted-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+}
+
+.admin-tasks__formatted-card {
+  padding: var(--spacing-md);
+  border-radius: var(--radius-md);
+  border: 1px solid #313244;
+  background: #181825;
+}
+
+.admin-tasks__formatted-title {
+  margin: 0 0 var(--spacing-sm);
+  font-size: 1rem;
+  font-weight: 700;
+  color: #cba6f7;
+}
+
+.admin-tasks__formatted-list {
+  margin: 0 0 var(--spacing-md);
+  padding-left: 1.25rem;
+  color: #cdd6f4;
+  font-size: 0.875rem;
+  line-height: 1.55;
+}
+
+.admin-tasks__formatted-list li {
+  margin-bottom: 0.35rem;
+}
+
+.admin-tasks__formatted-meta {
+  margin: 0.35rem 0 0;
+  font-size: 0.8125rem;
+  color: #a6adc8;
+}
+
+.admin-tasks__formatted-label {
+  font-weight: 600;
+  color: #89b4fa;
+  margin-right: 0.35rem;
+}
+
+.admin-tasks__formatted-code {
+  font-family: "Monaco", "Menlo", "Consolas", monospace;
+  font-size: 0.78em;
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  background: #313244;
+  color: #f9e2af;
+}
+
+.admin-tasks__cell-multiline {
+  white-space: pre-wrap;
+  overflow: visible;
+  text-overflow: unset;
+  max-width: min(40rem, 100%);
+  word-break: break-word;
 }
 
 .admin-tasks__output-empty {

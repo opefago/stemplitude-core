@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   Settings,
   Link2,
@@ -8,8 +9,15 @@ import {
   Key,
   RefreshCw,
   Trash2,
+  ExternalLink,
 } from "lucide-react";
 import { disconnectConnection, getConnectUrl, listOAuthConnections } from "../../lib/api/integrations";
+import {
+  getMemberBillingIntegrationsSummary,
+  startMemberBillingOnboarding,
+  type MemberBillingIntegrationsSummary,
+} from "../../lib/api/memberBilling";
+import { useAuth } from "../../providers/AuthProvider";
 import { KidDropdown } from "../../components/ui";
 import "../../components/ui/ui.css";
 import "./integrations.css";
@@ -30,7 +38,14 @@ const INTEGRATIONS: IntegrationDefinition[] = [
   { id: "zoom", name: "Zoom", description: "Launch virtual classes directly from your dashboard", letter: "Z", color: "#2d8cff" },
 ];
 
+function roleCanManageMemberStripe(role: string | null): boolean {
+  const r = (role ?? "").toLowerCase();
+  return r === "admin" || r === "owner" || r === "homeschool_parent";
+}
+
 export function IntegrationsPage() {
+  const { role } = useAuth();
+  const canManageStripe = roleCanManageMemberStripe(role);
   const [connections, setConnections] = useState<
     { id: string; provider: string; created_at: string }[]
   >([]);
@@ -38,6 +53,11 @@ export function IntegrationsPage() {
   const [error, setError] = useState<string | null>(null);
   const [configuringId, setConfiguringId] = useState<string | null>(null);
   const [configForm, setConfigForm] = useState<Record<string, { apiKey: string; webhookUrl: string; syncFrequency: string }>>({});
+
+  const [stripeSummary, setStripeSummary] = useState<MemberBillingIntegrationsSummary | null | "forbidden">(
+    null,
+  );
+  const [stripeConnectBusy, setStripeConnectBusy] = useState(false);
 
   const loadConnections = useMemo(
     () => async () => {
@@ -58,6 +78,33 @@ export function IntegrationsPage() {
   useEffect(() => {
     void loadConnections();
   }, [loadConnections]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const s = await getMemberBillingIntegrationsSummary();
+        if (!cancelled) setStripeSummary(s);
+      } catch {
+        if (!cancelled) setStripeSummary("forbidden");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const onStripeConnect = async () => {
+    setStripeConnectBusy(true);
+    setError(null);
+    try {
+      const { url } = await startMemberBillingOnboarding();
+      window.location.href = url;
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Could not open Stripe Connect");
+      setStripeConnectBusy(false);
+    }
+  };
 
   const openConfig = (id: string, provider: string) => {
     setConfiguringId(id);
@@ -111,6 +158,111 @@ export function IntegrationsPage() {
       </header>
 
       <div className="integrations-page__grid">
+        {stripeSummary !== "forbidden" && stripeSummary != null ? (
+          <div
+            className={`integrations-page__card ${
+              stripeSummary.connect_account_linked && stripeSummary.charges_enabled
+                ? "integrations-page__card--connected"
+                : ""
+            }`}
+          >
+            <div className="integrations-page__card-header">
+              <div
+                className="integrations-page__icon"
+                style={{ backgroundColor: "#635BFF" }}
+                aria-hidden
+              >
+                S
+              </div>
+              <div className="integrations-page__card-meta">
+                <h3 className="integrations-page__card-title">Stripe (family payments)</h3>
+                <span
+                  className={`integrations-page__status integrations-page__status--${
+                    stripeSummary.connect_account_linked && stripeSummary.charges_enabled
+                      ? "connected"
+                      : "disconnected"
+                  }`}
+                >
+                  {stripeSummary.connect_account_linked && stripeSummary.charges_enabled ? (
+                    <>
+                      <Check size={14} aria-hidden /> Ready to charge
+                    </>
+                  ) : stripeSummary.connect_account_linked ? (
+                    <>Onboarding in progress</>
+                  ) : (
+                    <>Not connected</>
+                  )}
+                </span>
+              </div>
+            </div>
+            <p className="integrations-page__description">
+              Connect your organization to Stripe so families pay on Stripe Checkout (no card data stored in
+              STEMplitude). The platform API key lives on the server—your org never pastes secret keys.
+            </p>
+            <ul className="integrations-page__description" style={{ margin: "0 0 0.75rem", paddingLeft: "1.25rem" }}>
+              <li>
+                Platform Stripe:{" "}
+                {stripeSummary.platform_stripe_configured ? (
+                  <strong>configured</strong>
+                ) : (
+                  <strong>not configured</strong>
+                )}{" "}
+                (hosting / ops)
+              </li>
+              <li>
+                Your Connect account:{" "}
+                {stripeSummary.connect_account_linked ? <strong>linked</strong> : <strong>not linked</strong>}
+              </li>
+              <li>
+                Member billing:{" "}
+                {stripeSummary.member_billing_enabled ? <strong>on</strong> : <strong>off</strong>} (toggle in
+                settings)
+              </li>
+            </ul>
+            <div className="integrations-page__actions">
+              <Link
+                to="/app/settings/member-billing"
+                className="integrations-page__btn integrations-page__btn--secondary"
+                style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "0.35rem" }}
+              >
+                <ExternalLink size={16} aria-hidden /> Open member billing
+              </Link>
+              {canManageStripe &&
+              stripeSummary.platform_stripe_configured &&
+              !stripeSummary.charges_enabled ? (
+                <button
+                  type="button"
+                  className="integrations-page__btn integrations-page__btn--primary"
+                  onClick={() => void onStripeConnect()}
+                  disabled={stripeConnectBusy || loading}
+                >
+                  <Link2 size={16} aria-hidden />
+                  {stripeConnectBusy
+                    ? "Opening Stripe…"
+                    : stripeSummary.connect_account_linked
+                      ? "Continue Stripe setup"
+                      : "Connect with Stripe"}
+                </button>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+        {stripeSummary === null ? (
+          <div className="integrations-page__card" aria-busy>
+            <div className="integrations-page__card-header">
+              <div className="integrations-page__icon" style={{ backgroundColor: "#635BFF" }} aria-hidden>
+                S
+              </div>
+              <div className="integrations-page__card-meta">
+                <h3 className="integrations-page__card-title">Stripe (family payments)</h3>
+                <span className="integrations-page__status integrations-page__status--disconnected">
+                  Loading…
+                </span>
+              </div>
+            </div>
+            <p className="integrations-page__description">Checking Stripe Connect status…</p>
+          </div>
+        ) : null}
         {INTEGRATIONS.map((int) => {
           const activeConnection = connections.find((c) => c.provider === int.id);
           const status: IntegrationStatus = activeConnection ? "connected" : "disconnected";

@@ -13,6 +13,14 @@ import { loadSkulpt, runPythonCode } from '../labs/python-game/skulptRunner';
 import SpritePanel from '../labs/python-game/SpritePanel';
 import SoundMixer from '../labs/python-game/SoundMixer';
 import { getSpriteNames, getSpriteInfo, renderPixelArt } from '../labs/python-game/sprites';
+import { emitLabEventThrottled } from '../lib/api/gamification';
+import { useChildContextStudentId } from '../lib/childContext';
+import {
+  migrateLegacyLabProjectsIfNeeded,
+  readLabProjectsArray,
+  writeLabProjectsArray,
+} from '../lib/learnerLabStorage';
+import { useAuth } from '../providers/AuthProvider';
 import 'tippy.js/animations/shift-away.css';
 import './GameMakerLab.css';
 
@@ -45,11 +53,8 @@ const tipProps = {
   duration: [200, 150],
 };
 
-const PROJECTS_KEY = 'stemplitude_gamemaker_projects';
-const loadProjectsFromStorage = () => {
-  try { return JSON.parse(localStorage.getItem(PROJECTS_KEY) || '[]'); }
-  catch { return []; }
-};
+const PROJECTS_BASE_KEY = 'stemplitude_gamemaker_projects';
+const loadProjectsFromStorage = () => readLabProjectsArray(PROJECTS_BASE_KEY);
 
 let blocksRegistered = false;
 
@@ -190,6 +195,8 @@ function loadStarterBlocks(workspace) {
 }
 
 const GameMakerLab = () => {
+  const childCtx = useChildContextStudentId();
+  const { user } = useAuth();
   const { exitLab, panel, classroomContext } = useLabSession();
   const { ydoc, provider } = useLabSync(null, classroomContext?.sessionId, false, !!classroomContext);
   const yjsApplyingRef = useRef(false);
@@ -216,6 +223,11 @@ const GameMakerLab = () => {
   const [showProjects, setShowProjects] = useState(false);
   const [savedProjects, setSavedProjects] = useState(loadProjectsFromStorage);
   const [saveStatus, setSaveStatus] = useState(null);
+
+  useEffect(() => {
+    migrateLegacyLabProjectsIfNeeded(PROJECTS_BASE_KEY);
+    setSavedProjects(loadProjectsFromStorage());
+  }, [childCtx, user?.id, user?.subType]);
 
   const [promptDialog, setPromptDialog] = useState(null);
   const promptInputRef = useRef(null);
@@ -418,6 +430,16 @@ const GameMakerLab = () => {
       try {
         const code = generateCode(workspace);
         setGeneratedCode(code);
+        emitLabEventThrottled({
+          lab_id: 'game-maker',
+          lab_type: 'game-maker',
+          event_type: 'LOGIC_CONNECTED',
+          context: {
+            code_length: code.length,
+            block_count: workspace.getAllBlocks(false).length,
+            source: 'workspace_change',
+          },
+        }, 2000);
       } catch (e) {
         console.warn('Code gen error:', e);
       }
@@ -518,6 +540,15 @@ const GameMakerLab = () => {
 
     const code = generateCode(workspaceRef.current);
     setGeneratedCode(code);
+    emitLabEventThrottled({
+      lab_id: 'game-maker',
+      lab_type: 'game-maker',
+      event_type: 'SCENE_BUILT',
+      context: {
+        code_length: code.length,
+        session_id: classroomContext?.sessionId ?? null,
+      },
+    }, 1200);
     runPythonCode(
       code,
       engineRef.current,
@@ -528,7 +559,7 @@ const GameMakerLab = () => {
         setIsRunning(false);
       }
     );
-  }, [skulptReady, addConsoleEntry]);
+  }, [skulptReady, addConsoleEntry, classroomContext?.sessionId]);
 
   const handleStop = useCallback(() => {
     if (engineRef.current) {
@@ -553,7 +584,7 @@ const GameMakerLab = () => {
     const project = { id: projectId, name: projectName, workspace: state, assets: serializeAssets(assetManagerRef.current), updatedAt: now,
       createdAt: idx >= 0 ? projects[idx].createdAt : now };
     if (idx >= 0) projects[idx] = project; else projects.unshift(project);
-    localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
+    writeLabProjectsArray(PROJECTS_BASE_KEY, projects);
     setSavedProjects(projects);
     setSaveStatus('saved');
     setTimeout(() => setSaveStatus(null), 1500);
@@ -578,7 +609,7 @@ const GameMakerLab = () => {
 
   const handleDeleteProject = useCallback((id) => {
     const projects = loadProjectsFromStorage().filter(p => p.id !== id);
-    localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
+    writeLabProjectsArray(PROJECTS_BASE_KEY, projects);
     setSavedProjects(projects);
   }, []);
 

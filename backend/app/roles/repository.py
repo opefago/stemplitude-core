@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.roles.models import Permission, Role, RolePermission
@@ -40,6 +40,29 @@ class RoleRepository:
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
+    async def list_roles_page(
+        self,
+        tenant_id: UUID | None,
+        *,
+        include_inactive: bool = False,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> tuple[list[Role], int]:
+        conditions = [Role.tenant_id == tenant_id]
+        if not include_inactive:
+            conditions.append(Role.is_active == True)  # noqa: E712
+        count_stmt = select(func.count()).select_from(Role).where(*conditions)
+        total = int((await self.session.execute(count_stmt)).scalar() or 0)
+        query = (
+            select(Role)
+            .where(*conditions)
+            .order_by(Role.is_system.desc(), Role.name)
+            .offset(skip)
+            .limit(limit)
+        )
+        result = await self.session.execute(query)
+        return list(result.scalars().all()), total
+
     async def create_role(self, role: Role) -> Role:
         self.session.add(role)
         await self.session.flush()
@@ -51,6 +74,22 @@ class RoleRepository:
             select(Permission).order_by(Permission.resource, Permission.action)
         )
         return list(result.scalars().all())
+
+    async def list_permissions_page(
+        self,
+        *,
+        skip: int = 0,
+        limit: int = 200,
+    ) -> tuple[list[Permission], int]:
+        count_stmt = select(func.count()).select_from(Permission)
+        total = int((await self.session.execute(count_stmt)).scalar() or 0)
+        result = await self.session.execute(
+            select(Permission)
+            .order_by(Permission.resource, Permission.action)
+            .offset(skip)
+            .limit(limit)
+        )
+        return list(result.scalars().all()), total
 
     async def get_permission_by_id(self, permission_id: UUID) -> Permission | None:
         result = await self.session.execute(

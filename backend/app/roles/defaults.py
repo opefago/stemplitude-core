@@ -7,7 +7,8 @@ SYSTEM_PERMISSIONS = [
     ("labs", "view"), ("labs", "create"), ("labs", "edit"), ("labs", "delete"),
     ("labs", "assign"), ("labs", "grade"),
     ("progress", "view"), ("progress", "create"), ("progress", "edit"), ("progress", "delete"),
-    ("messages", "view"), ("messages", "create"), ("messages", "edit"), ("messages", "delete"),
+    ("gamification", "view"), ("gamification", "create"), ("gamification", "edit"), ("gamification", "delete"),
+    ("messages", "view"), ("messages", "create"), ("messages", "update"), ("messages", "edit"), ("messages", "delete"),
     ("attendance", "view"), ("attendance", "create"), ("attendance", "edit"), ("attendance", "delete"),
     ("settings", "view"), ("settings", "create"), ("settings", "edit"), ("settings", "delete"),
     ("members", "view"), ("members", "create"), ("members", "edit"), ("members", "delete"),
@@ -15,6 +16,8 @@ SYSTEM_PERMISSIONS = [
     ("assets", "view"), ("assets", "create"), ("assets", "edit"), ("assets", "delete"),
     ("programs", "view"), ("programs", "create"), ("programs", "edit"), ("programs", "delete"),
     ("sessions", "cancel"), ("sessions", "reschedule"),
+    ("member_billing", "view"), ("member_billing", "manage"), ("member_billing", "collect"),
+    ("analytics", "view"), ("analytics", "export"),
 ]
 
 DEFAULT_ROLES = {
@@ -26,7 +29,8 @@ DEFAULT_ROLES = {
         "name": "Admin",
         "permissions": [
             f"{r}:{a}" for r, a in SYSTEM_PERMISSIONS
-            if r not in ("roles",) or a in ("view",)
+            if (r not in ("roles", "analytics") or a in ("view",))
+            and not (r == "analytics" and a == "export")
         ],
     },
     "instructor": {
@@ -37,11 +41,13 @@ DEFAULT_ROLES = {
             "curriculum:view", "curriculum:create", "curriculum:edit",
             "labs:view", "labs:create", "labs:edit", "labs:assign", "labs:grade",
             "progress:view", "progress:create", "progress:edit",
-            "messages:view", "messages:create",
+            "gamification:view", "gamification:create", "gamification:delete",
+            "messages:view", "messages:create", "messages:update",
             "attendance:view", "attendance:create", "attendance:edit",
             "assets:view", "assets:create", "assets:edit",
             "programs:view",
             "sessions:cancel", "sessions:reschedule",
+            "member_billing:view",
         ],
     },
     "parent": {
@@ -49,9 +55,11 @@ DEFAULT_ROLES = {
         "permissions": [
             "students:view",
             "progress:view",
-            "messages:view", "messages:create",
+            "gamification:view",
+            "messages:view", "messages:create", "messages:update",
             "classrooms:view",
             "assets:view",
+            "notifications:view", "notifications:update",
             "sessions:cancel", "sessions:reschedule",
         ],
     },
@@ -60,10 +68,15 @@ DEFAULT_ROLES = {
         "permissions": [
             "students:view", "students:create", "students:edit",
             "progress:view",
-            "messages:view", "messages:create",
+            "gamification:view",
+            "messages:view", "messages:create", "messages:update",
             "classrooms:view", "classrooms:create", "classrooms:edit",
+            "curriculum:view",
             "labs:view", "labs:assign", "labs:grade",
             "assets:view", "assets:create",
+            "settings:view", "settings:edit",
+            "member_billing:view", "member_billing:manage",
+            "notifications:view", "notifications:update",
             "sessions:cancel", "sessions:reschedule",
         ],
     },

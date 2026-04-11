@@ -48,6 +48,563 @@
   margin-top: var(--spacing-md, 16px);
 }
 
+.parent-dashboard.dashboard-bento {
+  max-width: 100%;
+  width: 100%;
+}
+
+/* Row 1: Upcoming (2 cols) | stack: progress + merged insights. Row 2: Quick links (2 cols) | stack continues. */
+.parent-dashboard__main-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-rows: minmax(260px, 1fr) minmax(220px, 1fr);
+  grid-auto-rows: unset;
+  align-items: stretch;
+  min-height: clamp(28rem, calc(100vh - 14rem), 48rem);
+}
+
+.parent-dashboard__main-grid > .dashboard-bento__card {
+  min-height: 0;
+  height: 100%;
+}
+
+.parent-dashboard__progress-activity-stack {
+  grid-column: 3 / span 2;
+  grid-row: 1 / span 2;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md, 16px);
+  min-height: 0;
+  height: 100%;
+  align-self: stretch;
+}
+
+.parent-dashboard__progress-activity-stack > .dashboard-bento__card {
+  min-height: 0;
+}
+
+.parent-dashboard__progress-activity-stack > .parent-dashboard__cell-progress.dashboard-bento__card {
+  flex: 0 0 auto;
+  height: auto;
+  align-self: stretch;
+  padding: var(--spacing-md, 16px) var(--spacing-lg, 20px);
+  gap: var(--spacing-sm, 10px);
+}
+
+.parent-dashboard__progress-activity-stack > .parent-dashboard__cell-progress .parent-dashboard__progress-main {
+  flex: 0 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  margin: var(--spacing-sm, 8px) 0;
+}
+
+.parent-dashboard__progress-activity-stack > .parent-dashboard__cell-progress .parent-dashboard__progress-stats {
+  margin-top: 0;
+  flex-shrink: 0;
+}
+
+.parent-dashboard__progress-activity-stack > .parent-dashboard__cell-insights.dashboard-bento__card {
+  flex: 1 1 0;
+  min-height: 0;
+  height: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Child progress — sunny yellow / orange (aligned with student dashboard XP & orange cards) */
+.parent-dashboard__card--child-progress.dashboard-bento__card {
+  background: #fef3c7;
+  border-color: color-mix(
+    in srgb,
+    var(--bento-accent-orange, #ff9600) 40%,
+    var(--color-border, #e8e8e8)
+  );
+  box-shadow:
+    0 3px 0 color-mix(in srgb, var(--bento-accent-orange, #ff9600) 32%, var(--color-border, #e8e8e8)),
+    0 6px 16px color-mix(in srgb, #f59e0b 10%, transparent);
+}
+
+.parent-dashboard__card--child-progress.dashboard-bento__card:hover {
+  border-color: var(--bento-accent-orange, #ff9600);
+  box-shadow:
+    0 4px 0 color-mix(in srgb, var(--bento-accent-orange, #ff9600) 45%, var(--color-border, #e0e8ef)),
+    0 8px 18px color-mix(in srgb, #ea580c 8%, transparent);
+}
+
+.parent-dashboard__card--child-progress .dashboard-bento__card-title {
+  color: #78350f;
+}
+
+.parent-dashboard__card--child-progress.dashboard-bento__card--orange .dashboard-bento__card-icon {
+  background: #fde68a;
+  border: 2px solid color-mix(in srgb, white 45%, var(--bento-accent-orange, #ff9600));
+  box-shadow: none;
+}
+
+/* Match student dashboard XP bar (golden fill + soft track) */
+.parent-dashboard__card--child-progress .progress-bar--xp {
+  --progress-bar-height: 16px;
+  --progress-bar-bg: #d1d5db;
+}
+
+.parent-dashboard__card--child-progress .progress-bar--xp .progress-bar__track {
+  border: none;
+  box-shadow: inset 0 1px 2px rgb(15 23 42 / 14%);
+}
+
+.parent-dashboard__card--child-progress .progress-bar--xp .progress-bar__fill {
+  background: #f2b51d;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 18%);
+}
+
+.parent-dashboard__cell-upcoming {
+  grid-column: 1 / span 2;
+  grid-row: 1;
+  align-self: stretch;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.parent-dashboard__cell-quicklinks {
+  grid-column: 1 / span 2;
+  grid-row: 2;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.parent-dashboard__cell-quicklinks .parent-dashboard__controls-label {
+  flex-shrink: 0;
+}
+
+.parent-dashboard__cell-quicklinks .parent-dashboard__quick-links {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  align-content: start;
+}
+
+.parent-dashboard__quick-links-card.dashboard-bento__card {
+  padding: 12px 14px;
+  gap: 8px;
+}
+
+.parent-dashboard__quick-links--compact {
+  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  gap: 8px;
+}
+
+.parent-dashboard__cell-insights {
+  min-height: 0;
+}
+
+.parent-dashboard__insights-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: var(--spacing-md, 16px) var(--spacing-lg, 20px);
+  gap: 12px;
+  border-color: color-mix(in srgb, #a78bfa 28%, var(--color-border, #e8e8e8));
+  background: #faf5ff;
+  box-shadow:
+    0 3px 0 color-mix(in srgb, #c4b5fd 22%, var(--color-border, #e8e8e8)),
+    0 4px 14px color-mix(in srgb, #a78bfa 8%, transparent);
+}
+
+.parent-dashboard__insights-card:hover {
+  border-color: color-mix(in srgb, #a78bfa 42%, var(--color-border, #e8e8e8));
+}
+
+/* Kid-style tab rail: chunky pills, playful colors */
+.parent-dashboard__insights-tabs {
+  display: flex;
+  gap: 10px;
+  flex-shrink: 0;
+  padding: 6px;
+  border-radius: 18px;
+  background: #ede9fe;
+  border: 2px dashed color-mix(in srgb, #c4b5fd 55%, transparent);
+  box-shadow: none;
+}
+
+.parent-dashboard__insights-tab {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 54px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--color-surface, #fff) 88%, transparent);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.8125rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  line-height: 1.15;
+  color: var(--color-muted, #64748b);
+  transition:
+    transform 0.14s ease,
+    box-shadow 0.14s ease,
+    background 0.14s ease,
+    color 0.14s ease;
+  box-shadow: 0 2px 0 color-mix(in srgb, var(--color-border, #e8e8e8) 85%, transparent);
+}
+
+.parent-dashboard__insights-tab:hover {
+  transform: translateY(-1px);
+}
+
+.parent-dashboard__insights-tab:focus-visible {
+  outline: 3px solid color-mix(in srgb, #a78bfa 50%, transparent);
+  outline-offset: 2px;
+}
+
+.parent-dashboard__insights-tab--activity.parent-dashboard__insights-tab--active {
+  color: #9a3412;
+  background: #ffedd5;
+  box-shadow: 0 3px 0 #f97316;
+}
+
+.parent-dashboard__insights-tab--badges.parent-dashboard__insights-tab--active {
+  color: #5b21b6;
+  background: #ddd6fe;
+  box-shadow: 0 3px 0 #8b5cf6;
+}
+
+.parent-dashboard__insights-tab-icon {
+  flex-shrink: 0;
+}
+
+.parent-dashboard__insights-tab-label {
+  text-align: center;
+  max-width: 11rem;
+}
+
+/* Fills space below tabs so switching activity ↔ badges does not resize the card */
+.parent-dashboard__insights-panels {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.parent-dashboard__insights-panel-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* HTML [hidden] loses to display:flex above (same specificity; author CSS wins). Force hide. */
+.parent-dashboard__insights-panel-wrap[hidden],
+.parent-dashboard__insights-panel[hidden] {
+  display: none !important;
+}
+
+.parent-dashboard__insights-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: var(--color-surface, #fff);
+  border: 2px solid color-mix(in srgb, var(--color-border, #e8e8e8) 60%, transparent);
+  box-shadow: 0 2px 0 var(--color-border, #e8e8e8);
+}
+
+.parent-dashboard__insights-panel-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-shrink: 0;
+  margin-bottom: 10px;
+}
+
+.parent-dashboard__insights-panel-hint {
+  font-size: 0.8125rem;
+  font-weight: 800;
+  color: color-mix(in srgb, var(--color-text, #1e293b) 78%, var(--color-muted, #64748b));
+}
+
+.parent-dashboard__insights-panel-link {
+  margin-top: 0;
+  flex-shrink: 0;
+  font-size: 0.8125rem;
+  white-space: nowrap;
+}
+
+.parent-dashboard__insights-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+  margin-right: -4px;
+}
+
+.parent-dashboard__insights-panel .parent-dashboard__digest {
+  flex-shrink: 0;
+}
+
+.parent-dashboard__insights-panel .parent-dashboard__activity-scroll--in-insights {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.parent-dashboard__activity-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.parent-dashboard__main-grid .parent-dashboard__peek-card {
+  min-height: 0;
+  max-height: none;
+  height: 100%;
+}
+
+/* Upcoming this week: fills left column (rows 1 height); list scrolls inside */
+.parent-dashboard__main-grid .parent-dashboard__cell-upcoming.parent-dashboard__peek-card {
+  align-self: stretch;
+}
+
+.parent-dashboard__main-grid .parent-dashboard__cell-upcoming .parent-dashboard__scroll-region {
+  flex: 1 1 auto;
+  min-height: 8rem;
+  height: auto;
+  max-height: none;
+}
+
+.parent-dashboard__main-grid .parent-dashboard__cell-upcoming .parent-dashboard__session-text {
+  font-size: 1.0625rem;
+  line-height: 1.45;
+}
+
+.parent-dashboard__main-grid .parent-dashboard__cell-upcoming .parent-dashboard__session-row {
+  padding: 12px 0;
+  gap: 12px;
+}
+
+.parent-dashboard__main-grid .parent-dashboard__cell-upcoming .dashboard-bento__card-icon-img {
+  width: 28px;
+  height: 28px;
+}
+
+.parent-dashboard__main-grid .parent-dashboard__peek-card .dashboard-bento__card-header {
+  flex-shrink: 0;
+}
+
+/* This week — Classes | Assignments (orange card) */
+.parent-dashboard__peek-tabs {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+  margin: 0 0 10px;
+  padding: 6px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--bento-accent-orange, #ff9600) 14%, #fff7ed);
+  border: 2px dashed color-mix(in srgb, var(--bento-accent-orange, #ff9600) 38%, transparent);
+}
+
+.parent-dashboard__peek-tab {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 48px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--color-surface, #fff) 90%, transparent);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  line-height: 1.15;
+  color: var(--color-text-secondary, #64748b);
+  transition:
+    transform 0.14s ease,
+    box-shadow 0.14s ease,
+    background 0.14s ease,
+    color 0.14s ease;
+  box-shadow: 0 2px 0 color-mix(in srgb, var(--color-border, #e8e8e8) 85%, transparent);
+}
+
+.parent-dashboard__peek-tab:hover {
+  transform: translateY(-1px);
+}
+
+.parent-dashboard__peek-tab:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--bento-accent-orange, #ff9600) 45%, transparent);
+  outline-offset: 2px;
+}
+
+.parent-dashboard__peek-tab--classes.parent-dashboard__peek-tab--active {
+  color: #9a3412;
+  background: #ffedd5;
+  box-shadow: 0 3px 0 #ea580c;
+}
+
+.parent-dashboard__peek-tab--assignments.parent-dashboard__peek-tab--active {
+  color: #1e3a5f;
+  background: #dbeafe;
+  box-shadow: 0 3px 0 #2563eb;
+}
+
+.parent-dashboard__peek-tab-icon {
+  flex-shrink: 0;
+  color: inherit;
+}
+
+.parent-dashboard__peek-tab-label {
+  text-align: center;
+}
+
+.parent-dashboard__main-grid .parent-dashboard__cell-upcoming .parent-dashboard__peek-panel-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.parent-dashboard__main-grid .parent-dashboard__cell-upcoming .parent-dashboard__peek-panel-wrap[hidden] {
+  display: none !important;
+}
+
+.parent-dashboard__assignment-row {
+  align-items: flex-start;
+}
+
+.parent-dashboard__assignment-row .parent-dashboard__session-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+
+.parent-dashboard__assignment-title {
+  font-weight: 800;
+  font-size: 0.9375rem;
+  line-height: 1.3;
+}
+
+.parent-dashboard__assignment-meta {
+  display: block;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-text-secondary, #64748b);
+  line-height: 1.35;
+}
+
+.parent-dashboard__assignment-row-icon {
+  flex-shrink: 0;
+  margin-top: 3px;
+  color: var(--color-text-secondary, #64748b);
+}
+
+a.parent-dashboard__assignment-open.parent-dashboard__session-excusal {
+  text-decoration: none;
+  flex-shrink: 0;
+}
+
+.parent-dashboard__main-grid .parent-dashboard__scroll-region,
+.parent-dashboard__main-grid .parent-dashboard__scroll-region--badges {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 7rem;
+  max-height: none;
+}
+
+@media (max-width: 1024px) {
+  .parent-dashboard__main-grid {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: none;
+    min-height: 0;
+  }
+
+  .parent-dashboard__progress-activity-stack {
+    display: contents;
+  }
+
+  .parent-dashboard__cell-upcoming {
+    grid-column: 1 / span 2;
+    grid-row: auto;
+  }
+
+  .parent-dashboard__cell-quicklinks {
+    grid-column: 1 / span 2;
+    grid-row: auto;
+  }
+
+  .parent-dashboard__cell-progress {
+    grid-column: 1 / span 2;
+    grid-row: auto;
+  }
+
+  .parent-dashboard__cell-insights {
+    grid-column: 1 / span 2;
+    grid-row: auto;
+    min-height: min(24rem, 52vh);
+  }
+
+  /* Stack is display:contents — no flex parent; reserve tab body height so tabs don’t jump */
+  .parent-dashboard__cell-insights .parent-dashboard__insights-panels {
+    flex: 1 1 auto;
+    min-height: clamp(15rem, 42vh, 24rem);
+  }
+
+  .parent-dashboard__cell-progress.dashboard-bento__card,
+  .parent-dashboard__cell-insights.dashboard-bento__card {
+    height: auto;
+  }
+
+  .parent-dashboard__cell-progress .parent-dashboard__progress-main {
+    flex: 0 1 auto;
+    margin: var(--spacing-md, 16px) 0;
+  }
+
+  .parent-dashboard__cell-progress .parent-dashboard__progress-stats {
+    margin-top: 0;
+  }
+}
+
+@media (max-width: 600px) {
+  .parent-dashboard__main-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .parent-dashboard__progress-activity-stack {
+    display: contents;
+  }
+
+  .parent-dashboard__cell-upcoming,
+  .parent-dashboard__cell-progress,
+  .parent-dashboard__cell-quicklinks,
+  .parent-dashboard__cell-insights {
+    grid-column: 1;
+    grid-row: auto;
+  }
+}
+
 .parent-dashboard__progress-main {
   margin: var(--spacing-md, 16px) 0;
 }
@@ -87,7 +644,7 @@
   color: var(--color-text, #1e293b);
 }
 
-.parent-dashboard__session-cancel {
+.parent-dashboard__session-excusal {
   padding: 6px 10px;
   border: 2px solid var(--color-border, #e5e5e5);
   border-radius: 8px;
@@ -102,44 +659,9 @@
   transition: all var(--transition-fast, 120ms ease);
 }
 
-.parent-dashboard__session-cancel:hover {
-  border-color: var(--color-error, #ff4b4b);
-  color: var(--color-error, #ff4b4b);
-}
-
-.parent-dashboard__messages-preview {
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-sm, 10px);
-  flex: 1;
-  min-height: 0;
-}
-
-.parent-dashboard__message-preview {
-  padding: 10px 12px;
-  background: color-mix(in srgb, #1cb0f6 6%, transparent);
-  border-radius: 12px;
-}
-
-.parent-dashboard__message-preview--unread {
-  border-left: 3px solid #1cb0f6;
-}
-
-.parent-dashboard__message-from {
-  font-weight: 600;
-  font-size: 1rem;
-  color: var(--color-text, #1e293b);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.parent-dashboard__message-unread {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #1cb0f6;
-  flex-shrink: 0;
+.parent-dashboard__session-excusal:hover {
+  border-color: color-mix(in srgb, var(--color-primary, #58cc02) 55%, var(--color-border, #e5e5e5));
+  color: var(--color-primary, #58cc02);
 }
 
 .parent-dashboard__message-text {
@@ -153,4 +675,282 @@
 
 .parent-dashboard__achievement-badge {
   font-size: 1.375rem;
+}
+
+.parent-dashboard__digest {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.parent-dashboard__digest-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  background: color-mix(in srgb, #ff4b4b 12%, transparent);
+  color: var(--color-text, #1e293b);
+}
+
+.parent-dashboard__activity-detail {
+  font-weight: 500;
+  color: var(--color-text-secondary, #64748b);
+}
+
+/* Taller cards, fixed scroll viewport (~3 session rows / ~3 badge rows), scroll for overflow */
+.parent-dashboard__peek-card {
+  min-height: 17.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm, 10px);
+}
+
+.parent-dashboard__card-action--header {
+  margin-top: 0;
+  flex-shrink: 0;
+}
+
+.parent-dashboard__scroll-region {
+  flex: 0 0 auto;
+  height: 12.5rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+  margin-right: -4px;
+}
+
+/* ~3 rows of wrapped badge chips */
+.parent-dashboard__scroll-region--badges {
+  height: 10.5rem;
+}
+
+.parent-dashboard__scroll-list {
+  flex: none;
+  min-height: 0;
+}
+
+.parent-dashboard__badges-scroll {
+  margin: 0;
+}
+
+.parent-dashboard__message-text--in-scroll {
+  margin: 0;
+  white-space: normal;
+}
+
+.parent-dashboard__controls-card {
+  padding: 14px 18px;
+}
+
+.parent-dashboard__controls-label {
+  display: block;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--color-text-secondary, #64748b);
+  margin-bottom: 8px;
+}
+
+/* Quick links: flat tiles with per-link accent */
+.parent-dashboard__quick-links {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(158px, 1fr));
+  gap: 12px;
+}
+
+button.parent-dashboard__quick-link {
+  font: inherit;
+  width: 100%;
+  cursor: pointer;
+  text-align: inherit;
+}
+
+button.parent-dashboard__quick-link:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+button.parent-dashboard__quick-link:disabled:hover {
+  transform: none;
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--ql-accent) 14%, var(--color-border, #e5e5e5));
+}
+
+.parent-dashboard__quick-link {
+  --ql-accent: #ff9600;
+  --ql-accent-dim: color-mix(in srgb, var(--ql-accent) 22%, transparent);
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 14px 13px;
+  border-radius: 14px;
+  text-decoration: none;
+  color: var(--color-text, #1e293b);
+  background: color-mix(in srgb, var(--color-surface, #fff) 90%, var(--ql-accent-dim));
+  border: 1px solid color-mix(in srgb, var(--ql-accent) 28%, var(--color-border, #e5e5e5));
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--ql-accent) 14%, var(--color-border, #e5e5e5));
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    border-color 0.18s ease;
+}
+
+.parent-dashboard__quick-link:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--ql-accent) 45%, var(--color-border, #e5e5e5));
+  box-shadow: 0 5px 0 color-mix(in srgb, var(--ql-accent) 22%, var(--color-border, #e5e5e5));
+}
+
+.parent-dashboard__quick-link:active {
+  transform: translateY(-1px);
+}
+
+.parent-dashboard__quick-link:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--ql-accent) 55%, transparent);
+  outline-offset: 2px;
+}
+
+.parent-dashboard__quick-link-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--ql-accent) 16%, var(--color-surface, #fff));
+  color: color-mix(in srgb, var(--ql-accent) 92%, #1a1a1a);
+  box-shadow: none;
+}
+
+.parent-dashboard__quick-link-icon--img img {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+}
+
+.parent-dashboard__quick-link-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  text-align: left;
+}
+
+.parent-dashboard__quick-link-label {
+  font-size: 0.9375rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.parent-dashboard__quick-link-hint {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-secondary, #64748b);
+  line-height: 1.25;
+}
+
+.parent-dashboard__quick-link--events {
+  --ql-accent: #7c3aed;
+}
+
+.parent-dashboard__quick-link--excusal-range {
+  --ql-accent: #ec4899;
+}
+
+.parent-dashboard__quick-link--attendance {
+  --ql-accent: #0d9488;
+}
+
+.parent-dashboard__quick-link--messages {
+  --ql-accent: #1cb0f6;
+}
+
+.parent-dashboard__quick-link--notifications {
+  --ql-accent: #f59e0b;
+}
+
+.parent-dashboard__quick-link--billing {
+  --ql-accent: #58cc02;
+}
+
+.parent-dashboard__quick-link--settings {
+  --ql-accent: #64748b;
+}
+
+.parent-dashboard__quick-link--pay {
+  --ql-accent: #ff4b4b;
+}
+
+.parent-dashboard__quick-link--invoices {
+  --ql-accent: #0d9488;
+}
+
+.parent-dashboard__grades-preview {
+  margin-top: var(--spacing-sm, 8px);
+  padding-top: var(--spacing-sm, 8px);
+  border-top: 1px solid var(--color-border, #e5e5e5);
+}
+
+.parent-dashboard__insights-panel-toolbar--tight {
+  margin-bottom: 6px;
+}
+
+.parent-dashboard__grades-preview-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 11rem;
+  overflow: auto;
+}
+
+.parent-dashboard__grades-preview-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.8125rem;
+  line-height: 1.35;
+}
+
+.parent-dashboard__grades-preview-row--muted {
+  color: var(--color-text-secondary, #64748b);
+}
+
+.parent-dashboard__grades-preview-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 10px;
+  min-width: 0;
+}
+
+.parent-dashboard__grades-preview-main strong {
+  font-weight: 800;
+  color: var(--color-text, #1e293b);
+}
+
+.parent-dashboard__grades-preview-class {
+  font-weight: 600;
+  color: var(--color-text-secondary, #64748b);
+}
+
+.parent-dashboard__grades-preview-session {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary, #94a3b8);
+  width: 100%;
+}
+
+.parent-dashboard__grades-preview-when {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  color: var(--color-text-secondary, #94a3b8);
+  white-space: nowrap;
 }

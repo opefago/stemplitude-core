@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
+
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -61,6 +63,11 @@ class AwardBadgeRequest(BaseModel):
     badge_slug: str
 
 
+class RevokeBadgeRequest(BaseModel):
+    student_id: uuid.UUID
+    badge_slug: str
+
+
 # ── XP schemas ────────────────────────────────────────────────────────────────
 
 class XPTransactionOut(BaseModel):
@@ -82,9 +89,21 @@ class AwardXPRequest(BaseModel):
 
 # ── Streak schemas ────────────────────────────────────────────────────────────
 
+class StreakDaySummaryOut(BaseModel):
+    date: date
+    weekday: str
+    # True when this local calendar day is part of the current consecutive streak
+    # (matches current_streak / last_activity_date), not merely “had activity this week”.
+    active: bool
+    is_today: bool
+
+
 class StreakOut(BaseModel):
     current_streak: int
     best_streak: int
+    # Calendar date in the zone used when the streak was last updated (X-Calendar-TZ / tenant).
+    last_activity_date: date | None = None
+    seven_day_summary: list[StreakDaySummaryOut] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 
@@ -188,3 +207,104 @@ class GamificationStats(BaseModel):
 
 
 GamificationProfile.model_rebuild()
+
+
+# ── Tenant-focused gamification config + goals ───────────────────────────────
+
+LabType = str
+RewardType = str
+
+
+class TenantGamificationConfig(BaseModel):
+    mode: str = Field(default="balanced", pattern="^(academic|light|balanced|full)$")
+    enabled: bool = True
+    enabled_labs: list[LabType] = Field(default_factory=list)
+    max_points_per_event: int = Field(default=50, ge=1, le=500)
+    allow_badges: bool = True
+    allow_live_recognition: bool = True
+    allow_leaderboard: bool = True
+    allow_streaks: bool = True
+
+
+class UpdateTenantGamificationConfigRequest(BaseModel):
+    mode: str | None = Field(default=None, pattern="^(academic|light|balanced|full)$")
+    enabled: bool | None = None
+    enabled_labs: list[LabType] | None = None
+    max_points_per_event: int | None = Field(default=None, ge=1, le=500)
+    allow_badges: bool | None = None
+    allow_live_recognition: bool | None = None
+    allow_leaderboard: bool | None = None
+    allow_streaks: bool | None = None
+
+
+class GoalEventMap(BaseModel):
+    events: list[str] = Field(min_length=1)
+    context_match: dict[str, str | int | float | bool] = Field(default_factory=dict)
+
+
+class GoalReward(BaseModel):
+    type: RewardType = Field(pattern="^(points|reward)$")
+    value: int | None = Field(default=None, ge=1, le=500)
+    reward_kind: str | None = Field(default=None, pattern="^(badge|hi-five|sticker|custom)$")
+    badge_slug: str | None = None
+    icon: str | None = None
+
+
+class GamificationGoalCreateRequest(BaseModel):
+    lab_type: str = Field(min_length=2, max_length=60)
+    name: str = Field(min_length=1, max_length=140)
+    description: str = Field(default="", max_length=2000)
+    is_active: bool = True
+    event_map: GoalEventMap
+    conditions: list[str | dict[str, Any]] = Field(default_factory=list)
+    reward: GoalReward
+
+
+class GamificationGoalUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=140)
+    description: str | None = Field(default=None, max_length=2000)
+    is_active: bool | None = None
+    event_map: GoalEventMap | None = None
+    conditions: list[str | dict[str, Any]] | None = None
+    reward: GoalReward | None = None
+
+
+class GamificationGoalOut(BaseModel):
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    lab_type: str
+    name: str
+    description: str
+    is_active: bool
+    event_map: GoalEventMap
+    conditions: list[str | dict[str, Any]]
+    reward: GoalReward
+    created_by_id: uuid.UUID | None = None
+    updated_by_id: uuid.UUID | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class LabEventIngestRequest(BaseModel):
+    event_type: str = Field(min_length=1, max_length=80)
+    lab_id: str = Field(min_length=1, max_length=120)
+    lab_type: str = Field(min_length=1, max_length=60)
+    context: dict = Field(default_factory=dict)
+    timestamp: datetime
+    dry_run: bool = False
+
+
+class LabEventGoalMatch(BaseModel):
+    goal_id: uuid.UUID
+    goal_name: str
+    reward_type: str
+    points_awarded: int = 0
+    reward_kind: str | None = None
+
+
+class LabEventIngestResponse(BaseModel):
+    processed: bool
+    points_awarded_total: int
+    matched_goals: list[LabEventGoalMatch]

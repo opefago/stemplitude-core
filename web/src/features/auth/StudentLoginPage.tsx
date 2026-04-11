@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useAuth } from "../../providers/AuthProvider";
 import type { StudentLoginData } from "../../lib/api/auth";
+import { hostSubdomainLabel, resolveTenantFromHost } from "../../lib/hostTenant";
 import "./auth.css";
 
 type LoginMode = "code" | "email";
@@ -17,6 +18,22 @@ export function StudentLoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [hostTenant, setHostTenant] = useState<{ slug: string; name: string } | null>(null);
+
+  useEffect(() => {
+    if (!hostSubdomainLabel()) {
+      setHostTenant(null);
+      return;
+    }
+    let on = true;
+    resolveTenantFromHost().then((t) => {
+      if (!on) return;
+      setHostTenant(t ? { slug: t.slug, name: t.name } : null);
+    });
+    return () => {
+      on = false;
+    };
+  }, []);
 
   function getFriendlyLoginError(err: unknown): string {
     const raw = err instanceof Error ? err.message : "";
@@ -47,8 +64,12 @@ export function StudentLoginPage() {
     setError(null);
 
     if (mode === "code") {
-      if (!username || !code || !password) {
+      if (!username || !password) {
         setError("Please fill in all fields.");
+        return;
+      }
+      if (!hostTenant && !code) {
+        setError("Please enter your class code.");
         return;
       }
     } else {
@@ -62,7 +83,9 @@ export function StudentLoginPage() {
     try {
       const data: StudentLoginData =
         mode === "code"
-          ? { username, tenant_code: code, password }
+          ? hostTenant
+            ? { username, tenant_slug: hostTenant.slug, password }
+            : { username, tenant_code: code, password }
           : { email, password };
       await studentLogin(data);
       navigate("/app");
@@ -82,7 +105,11 @@ export function StudentLoginPage() {
         transition={{ duration: 0.3 }}
       >
         <h1 className="auth-title">Student sign in</h1>
-        <p className="auth-subtitle">Welcome back! Choose how you'd like to log in</p>
+        <p className="auth-subtitle">
+          {hostTenant
+            ? `Signing in to ${hostTenant.name}`
+            : "Welcome back! Choose how you'd like to log in"}
+        </p>
 
         <div className="auth-toggle">
           <button
@@ -119,21 +146,27 @@ export function StudentLoginPage() {
                   disabled={isLoading}
                 />
               </div>
-              <div className="auth-form-group">
-                <label htmlFor="code" className="auth-label">
-                  Class code
-                </label>
-                <input
-                  id="code"
-                  type="text"
-                  className="auth-input auth-input--student"
-                  placeholder="e.g. ABC-123"
-                  value={code}
-                  onChange={(e) => setCode(e.target.value.toUpperCase())}
-                  autoComplete="off"
-                  disabled={isLoading}
-                />
-              </div>
+              {!hostTenant ? (
+                <div className="auth-form-group">
+                  <label htmlFor="code" className="auth-label">
+                    Class code
+                  </label>
+                  <input
+                    id="code"
+                    type="text"
+                    className="auth-input auth-input--student"
+                    placeholder="e.g. ABC-123"
+                    value={code}
+                    onChange={(e) => setCode(e.target.value.toUpperCase())}
+                    autoComplete="off"
+                    disabled={isLoading}
+                  />
+                </div>
+              ) : (
+                <p className="auth-subtitle" style={{ marginTop: 0, fontSize: "0.875rem" }}>
+                  Your school link is set — username and password are enough.
+                </p>
+              )}
             </>
           ) : (
             <div className="auth-form-group">

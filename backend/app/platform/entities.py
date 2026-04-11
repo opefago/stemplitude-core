@@ -81,7 +81,17 @@ _reg(EntityDef(
 
 _reg(EntityDef(
     key="tenants", label="Tenants", model=Tenant, icon="Building2",
-    display_columns=["id", "name", "slug", "code", "type", "is_active", "created_at"],
+    display_columns=[
+        "id",
+        "name",
+        "slug",
+        "code",
+        "type",
+        "is_active",
+        "member_billing_application_fee_bps",
+        "member_billing_application_fee_use_platform_default",
+        "created_at",
+    ],
     filters=[
         FilterDef(column="name", label="Name"),
         FilterDef(column="slug", label="Slug"),

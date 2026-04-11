@@ -5,9 +5,21 @@ import {
   clearTokens,
   decodeToken,
 } from "../tokens";
+import { getChildContextStudentId } from "../childContext";
 
 const BASE = "/api/v1";
 const TENANT_KEY = "tenant_id";
+
+/** Thrown by {@link apiFetch} for non-OK HTTP responses (after optional 401 refresh). */
+export class ApiHttpError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiHttpError";
+    this.status = status;
+  }
+}
 
 export type ApiErrorKind = "auth" | "network" | "server";
 
@@ -29,6 +41,26 @@ function emitApiError(event: ApiErrorEvent) {
   _errorListeners.forEach((fn) => fn(event));
 }
 
+/** IANA zone for streak day boundaries; matches gamification ?calendar_tz= and WS ?calendar_tz=. */
+export function browserCalendarTimeZone(): string | null {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return typeof tz === "string" && tz.trim() ? tz.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveChildContextForRequest(
+  override: string | null | undefined,
+): string | null {
+  if (override === undefined) {
+    return getChildContextStudentId()?.trim() || null;
+  }
+  const t = override?.trim();
+  return t || null;
+}
+
 function resolveTenantId(
   explicitTenantId?: string,
   token?: string | null,
@@ -42,7 +74,7 @@ function resolveTenantId(
 }
 
 export async function refreshAccessToken(): Promise<boolean> {
-  const refresh = getRefreshToken();
+  const refresh = getRefreshToken()?.trim();
   if (!refresh) return false;
   const res = await fetch(`${BASE}/auth/refresh`, {
     method: "POST",
@@ -51,35 +83,59 @@ export async function refreshAccessToken(): Promise<boolean> {
   });
   if (!res.ok) return false;
   const data = await res.json();
-  if (data.access_token && data.refresh_token) {
-    setTokens(data.access_token, data.refresh_token);
-    return true;
-  }
-  return false;
+  const access = typeof data.access_token === "string" ? data.access_token.trim() : "";
+  if (!access) return false;
+  const nextRefresh =
+    typeof data.refresh_token === "string" && data.refresh_token.trim()
+      ? data.refresh_token.trim()
+      : refresh;
+  setTokens(access, nextRefresh);
+  return true;
 }
 
 export async function ensureFreshAccessToken(minValiditySeconds = 60): Promise<boolean> {
-  const token = getAccessToken();
-  if (!token) return false;
-  const payload = decodeToken(token);
+  let access = getAccessToken()?.trim() || null;
+  if (!access) {
+    return refreshAccessToken();
+  }
+  const payload = decodeToken(access);
+  if (!payload) {
+    return refreshAccessToken();
+  }
   const nowSec = Date.now() / 1000;
-  const remainingSec = (payload?.exp ?? 0) - nowSec;
+  const remainingSec = (payload.exp ?? 0) - nowSec;
   if (remainingSec > minValiditySeconds) return true;
   return refreshAccessToken();
 }
 
 export interface ApiFetchOptions extends Omit<RequestInit, "body"> {
+  /** Plain object or array — do not pass JSON.stringify output (would double-encode). */
   body?: unknown;
   skipAuth?: boolean;
+  /** Do not send ``X-Tenant-ID`` (e.g. ``POST /tenants`` before a workspace is selected). */
+  skipTenantHeader?: boolean;
   /** Override tenant ID for this request (e.g. when switching tenants) */
   tenantId?: string;
+  /**
+   * Guardians: send this value as ``X-Child-Context`` instead of the persisted learner id.
+   * Omit for default (localStorage). Pass ``null`` to omit the header on this request.
+   */
+  childContextOverride?: string | null;
 }
 
 export async function apiFetch<T>(
   path: string,
   options: ApiFetchOptions = {}
 ): Promise<T> {
-  const { body, skipAuth = false, headers: optHeaders = {}, tenantId: optTenantId, ...rest } = options;
+  const {
+    body,
+    skipAuth = false,
+    skipTenantHeader = false,
+    headers: optHeaders = {},
+    tenantId: optTenantId,
+    childContextOverride,
+    ...rest
+  } = options;
   const url = path.startsWith("/") ? `${BASE}${path}` : `${BASE}/${path}`;
 
   const headers: Record<string, string> = {
@@ -88,10 +144,20 @@ export async function apiFetch<T>(
   };
 
   if (!skipAuth) {
-    const token = getAccessToken();
+    let token = getAccessToken()?.trim() || null;
+    if (!token) {
+      await refreshAccessToken();
+      token = getAccessToken()?.trim() || null;
+    }
     if (token) headers["Authorization"] = `Bearer ${token}`;
-    const tenantId = resolveTenantId(optTenantId, token);
-    if (tenantId) headers["X-Tenant-ID"] = tenantId;
+    if (!skipTenantHeader) {
+      const tenantId = resolveTenantId(optTenantId, token);
+      if (tenantId) headers["X-Tenant-ID"] = tenantId;
+    }
+    const childCtxResolved = resolveChildContextForRequest(childContextOverride);
+    if (childCtxResolved) headers["X-Child-Context"] = childCtxResolved;
+    const calTz = browserCalendarTimeZone();
+    if (calTz) headers["X-Calendar-TZ"] = calTz;
   }
 
   const init: RequestInit = {
@@ -114,15 +180,25 @@ export async function apiFetch<T>(
     if (refreshed) {
       const newToken = getAccessToken();
       if (newToken) headers["Authorization"] = `Bearer ${newToken}`;
-      const tenantId = resolveTenantId(optTenantId, newToken);
-      if (tenantId) {
-        headers["X-Tenant-ID"] = tenantId;
+      if (!skipTenantHeader) {
+        const tenantId = resolveTenantId(optTenantId, newToken);
+        if (tenantId) {
+          headers["X-Tenant-ID"] = tenantId;
+        }
+      } else {
+        delete headers["X-Tenant-ID"];
       }
+      const childCtxRetry = resolveChildContextForRequest(childContextOverride);
+      if (childCtxRetry) headers["X-Child-Context"] = childCtxRetry;
+      else delete headers["X-Child-Context"];
+      const calTzRetry = browserCalendarTimeZone();
+      if (calTzRetry) headers["X-Calendar-TZ"] = calTzRetry;
+      else delete headers["X-Calendar-TZ"];
       res = await fetch(url, { ...init, headers });
     } else {
       clearTokens();
       emitApiError({ kind: "auth", message: "Your session has expired. Please log in again.", status: 401 });
-      throw new Error("Session expired");
+      throw new ApiHttpError("Session expired", 401);
     }
   }
 
@@ -139,12 +215,21 @@ export async function apiFetch<T>(
     if (res.status >= 500) {
       emitApiError({ kind: "server", message: finalMsg, status: res.status });
     }
-    throw new Error(finalMsg);
+    throw new ApiHttpError(finalMsg, res.status);
+  }
+
+  // 204/205 and similar: no body — do not call .json() (empty body throws in browsers)
+  if (res.status === 204 || res.status === 205) {
+    return undefined as T;
   }
 
   const ct = res.headers.get("Content-Type");
   if (ct?.includes("application/json")) {
-    return res.json() as Promise<T>;
+    const text = await res.text();
+    if (!text.trim()) {
+      return undefined as T;
+    }
+    return JSON.parse(text) as T;
   }
   return res.text() as unknown as T;
 }

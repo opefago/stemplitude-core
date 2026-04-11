@@ -7,7 +7,8 @@ Industry-style split (high signal vs noise):
   without a Celery worker; gamification and other events may still use Celery tasks.
 
 Classroom enrollment uses :func:`persist_classroom_enrollment_notifications` (same transaction as
-enroll or unenroll). Email for that flow is still sent via Celery when configured.
+enroll or unenroll). Email is enqueued via :func:`app.email.outbox.enqueue_transactional_email`
+(presets + Celery) when configured.
 """
 
 from __future__ import annotations
@@ -17,9 +18,10 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.email.outbox import enqueue_transactional_email
+from app.email.presets import build_classroom_enrollment_email
 from app.notifications.models import Notification
 from app.realtime.user_events import publish_notifications_changed
-from workers.tasks.email_tasks import send_email_task
 from workers.tasks.notification_tasks import create_student_notification_task
 
 logger = logging.getLogger(__name__)
@@ -91,20 +93,26 @@ async def persist_classroom_enrollment_notifications(
         except Exception:
             logger.exception("publish notifications.changed failed user=%s", uid)
 
-    email_subject = f"Class enrollment update: {short}"
-    plain = f"{student_first_name or 'A student'} was {action} {short}."
-    html = f"<p>{plain}</p>"
+    prepared = build_classroom_enrollment_email(
+        classroom_id=classroom_id,
+        classroom_display_name=classroom_name,
+        student_first_name=student_first_name,
+        added=added,
+    )
 
     if student_email and student_email.strip():
-        send_email_task.delay(
-            student_email.strip(),
-            email_subject,
-            plain,
-            html,
+        enqueue_transactional_email(
+            to_email=student_email.strip(),
+            prepared=prepared,
+            tenant_id=tenant_id,
         )
     for em in parent_emails:
         if em and em.strip():
-            send_email_task.delay(em.strip(), email_subject, plain, html)
+            enqueue_transactional_email(
+                to_email=em.strip(),
+                prepared=prepared,
+                tenant_id=tenant_id,
+            )
 
 
 def enqueue_student_in_app_only(

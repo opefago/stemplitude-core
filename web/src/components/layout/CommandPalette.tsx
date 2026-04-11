@@ -106,7 +106,21 @@ export function CommandPalette() {
         { id: "classrooms", label: "Go to Classrooms", iconSrc: "/assets/cartoon-icons/bag.png", action: () => navigate("/app/classrooms"), keywords: ["classrooms", "classroom", "class"] },
         { id: "members", label: "Go to Users", iconSrc: "/assets/cartoon-icons/Players.png", action: () => navigate("/app/members"), keywords: ["users", "members", "people"] },
         { id: "curriculum", label: "Go to Curriculum", iconSrc: "/assets/cartoon-icons/Books.png", action: () => navigate("/app/curriculum"), keywords: ["curriculum", "course", "content"] },
+        {
+          id: "curriculum-authoring",
+          label: "Rubric & assignment templates",
+          iconSrc: "/assets/cartoon-icons/Books.png",
+          action: () => navigate("/app/curriculum/authoring"),
+          keywords: ["rubric", "rubrics", "assignment", "assignments", "templates", "grading", "authoring"],
+        },
         { id: "programs", label: "Go to Programs", iconSrc: "/assets/cartoon-icons/Globe.png", action: () => navigate("/app/programs"), keywords: ["programs"] },
+        {
+          id: "insights",
+          label: "Go to Organization insights",
+          iconSrc: "/assets/cartoon-icons/Trail.png",
+          action: () => navigate("/app/analytics"),
+          keywords: ["insights", "analytics", "metrics", "reports", "stats"],
+        },
         { id: "assets", label: "Go to Assets", iconSrc: "/assets/cartoon-icons/Chest.png", action: () => navigate("/app/assets"), keywords: ["assets"] },
         { id: "settings", label: "Go to Settings", iconSrc: "/assets/cartoon-icons/settings.png", action: () => navigate("/app/settings"), keywords: ["settings", "setting", "preferences"] },
         { id: "integrations", label: "Go to Integrations", iconSrc: "/assets/cartoon-icons/Thunder.png", action: () => navigate("/app/integrations"), keywords: ["integrations"] },
@@ -124,17 +138,62 @@ export function CommandPalette() {
         { id: "classrooms", label: "Go to Classrooms", iconSrc: "/assets/cartoon-icons/bag.png", action: () => navigate("/app/classrooms"), keywords: ["classrooms", "classroom", "class"] },
         { id: "students", label: "Go to Students", iconSrc: "/assets/cartoon-icons/Players.png", action: () => navigate("/app/students"), keywords: ["students"] },
         { id: "curriculum", label: "Go to Curriculum", iconSrc: "/assets/cartoon-icons/Books.png", action: () => navigate("/app/curriculum"), keywords: ["curriculum", "course"] },
+        {
+          id: "curriculum-authoring",
+          label: "Rubric & assignment templates",
+          iconSrc: "/assets/cartoon-icons/Books.png",
+          action: () => navigate("/app/curriculum/authoring"),
+          keywords: ["rubric", "rubrics", "assignment", "assignments", "templates", "grading", "authoring"],
+        },
         { id: "messages", label: "Go to Messages", iconSrc: "/assets/cartoon-icons/Information.png", action: () => navigate("/app/messages"), keywords: ["messages", "message", "inbox"] },
         ...sessionCommands,
         ...base,
       ];
     }
 
-    if (role === "parent" || role === "homeschool_parent") {
+    if (role === "parent") {
       return [
         { id: "dashboard", label: "Go to Dashboard", iconSrc: "/assets/cartoon-icons/house.png", action: () => navigate("/app"), keywords: ["home", "dashboard"] },
         { id: "children", label: "Go to Children", iconSrc: "/assets/cartoon-icons/Players.png", action: () => navigate("/app/children"), keywords: ["children", "kids"] },
-        { id: "messages", label: "Go to Messages", iconSrc: "/assets/cartoon-icons/Information.png", action: () => navigate("/app/messages"), keywords: ["messages", "message", "inbox"] },
+        { id: "messages", label: "Go to Updates & Messages", iconSrc: "/assets/cartoon-icons/Information.png", action: () => navigate("/app/messages"), keywords: ["messages", "message", "inbox", "updates"] },
+        {
+          id: "attendance",
+          label: "Go to Attendance",
+          iconSrc: "/assets/cartoon-icons/Callendar.png",
+          action: () => navigate({ pathname: "/app/messages", search: "?hub=attendance" }),
+          keywords: ["attendance", "absent", "excusal", "excuse", "absence"],
+        },
+        { id: "notifications", label: "Go to Notifications", iconSrc: "/assets/cartoon-icons/Bell.png", action: () => navigate("/app/notifications"), keywords: ["notifications"] },
+        ...sessionCommands,
+        ...base,
+      ];
+    }
+
+    if (role === "homeschool_parent") {
+      return [
+        { id: "dashboard", label: "Go to Dashboard", iconSrc: "/assets/cartoon-icons/house.png", action: () => navigate("/app"), keywords: ["home", "dashboard"] },
+        { id: "students", label: "Go to Students", iconSrc: "/assets/cartoon-icons/Players.png", action: () => navigate("/app/students"), keywords: ["students", "learners"] },
+        { id: "classrooms", label: "Go to Classrooms", iconSrc: "/assets/cartoon-icons/bag.png", action: () => navigate("/app/classrooms"), keywords: ["classrooms", "class"] },
+        { id: "curriculum", label: "Go to Curriculum", iconSrc: "/assets/cartoon-icons/Books.png", action: () => navigate("/app/curriculum"), keywords: ["curriculum", "courses"] },
+        {
+          id: "curriculum-authoring-hs",
+          label: "Rubric & assignment templates",
+          iconSrc: "/assets/cartoon-icons/Books.png",
+          action: () => navigate("/app/curriculum/authoring"),
+          keywords: ["rubric", "rubrics", "assignment", "assignments", "templates", "grading", "authoring"],
+        },
+        { id: "labs", label: "Go to Labs", iconSrc: "/assets/cartoon-icons/telescope.png", action: () => navigate("/app/labs"), keywords: ["labs", "lab"] },
+        { id: "children", label: "Go to Children", iconSrc: "/assets/cartoon-icons/Players.png", action: () => navigate("/app/children"), keywords: ["children", "kids"] },
+        { id: "billing", label: "Go to Billing", iconSrc: "/assets/cartoon-icons/coin.png", action: () => navigate("/app/billing"), keywords: ["billing", "subscription", "plan"] },
+        { id: "settings", label: "Go to Settings", iconSrc: "/assets/cartoon-icons/Lock.png", action: () => navigate("/app/settings"), keywords: ["settings", "tenant"] },
+        { id: "messages", label: "Go to Updates & Messages", iconSrc: "/assets/cartoon-icons/Information.png", action: () => navigate("/app/messages"), keywords: ["messages", "message", "inbox", "updates"] },
+        {
+          id: "attendance",
+          label: "Go to Attendance",
+          iconSrc: "/assets/cartoon-icons/Callendar.png",
+          action: () => navigate({ pathname: "/app/messages", search: "?hub=attendance" }),
+          keywords: ["attendance", "absent", "excusal", "excuse", "absence"],
+        },
         { id: "notifications", label: "Go to Notifications", iconSrc: "/assets/cartoon-icons/Bell.png", action: () => navigate("/app/notifications"), keywords: ["notifications"] },
         ...sessionCommands,
         ...base,
@@ -144,7 +203,7 @@ export function CommandPalette() {
     return [
       { id: "dashboard", label: "Go to Dashboard", iconSrc: "/assets/cartoon-icons/house.png", action: () => navigate("/app"), keywords: ["home", "dashboard"] },
       { id: "labs", label: "Go to Labs", iconSrc: "/assets/cartoon-icons/telescope.png", action: () => navigate("/app/labs"), keywords: ["labs", "lab", "workspace"] },
-      { id: "achievements", label: "Go to Achievements", iconSrc: "/assets/cartoon-icons/trophy.png", action: () => navigate("/app/achievements"), keywords: ["achievements", "achievement", "badges"] },
+      { id: "achievements", label: "Go to Achievements", iconSrc: "/assets/cartoon-icons/trophy.png", action: () => navigate("/app/achievements"), keywords: ["achievements", "achievement", "badges", "stickers"] },
       { id: "messages", label: "Go to Messages", iconSrc: "/assets/cartoon-icons/Information.png", action: () => navigate("/app/messages"), keywords: ["messages", "message", "inbox"] },
       ...sessionCommands,
       ...base,

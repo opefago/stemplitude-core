@@ -6,6 +6,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from app.core.redis import get_redis
+from app.middleware.path_skips import request_context_middleware_skip_paths
 from app.core.security import decode_token
 from app.dependencies import BLACKLIST_JTI_PREFIX, CurrentIdentity
 
@@ -18,7 +19,7 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
     Runs before TenantMiddleware so tenant resolution can reference the identity.
     """
 
-    SKIP_PATHS = {"/health", "/api/docs", "/api/redoc", "/api/openapi.json"}
+    SKIP_PATHS = request_context_middleware_skip_paths()
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         if request.url.path in self.SKIP_PATHS:

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ComponentType } from "react";
-import type { Engine } from "@tsparticles/engine";
+import { initParticlesEngine } from "@tsparticles/react";
+import { loadSlim } from "@tsparticles/slim";
 import type { ActiveRewardAnimation } from "../engine/rewardEngine";
 import { getTsParticlesPreset } from "../animations/tsparticlesPresets";
 
@@ -9,22 +10,24 @@ interface RewardRendererProps {
 
 type ParticlesComponent = ComponentType<{
   id?: string;
-  init?: (engine: Engine) => Promise<void>;
-  options: unknown;
+  options?: unknown;
 }>;
 
 export function RewardRenderer({ animation }: RewardRendererProps) {
   const [Particles, setParticles] = useState<ParticlesComponent | null>(null);
-  const [loadSlimFn, setLoadSlimFn] = useState<((engine: Engine) => Promise<void>) | null>(null);
+  const [particlesReady, setParticlesReady] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
 
   useEffect(() => {
     let active = true;
-    void Promise.all([import("@tsparticles/react"), import("@tsparticles/slim")])
-      .then(([reactMod, slimMod]) => {
+    void import("@tsparticles/react")
+      .then(async (reactMod) => {
         if (!active) return;
+        await initParticlesEngine(async (engine) => {
+          await loadSlim(engine);
+        });
         setParticles(() => reactMod.default);
-        setLoadSlimFn(() => slimMod.loadSlim);
+        setParticlesReady(true);
       })
       .catch(() => {
         if (!active) return;
@@ -37,10 +40,10 @@ export function RewardRenderer({ animation }: RewardRendererProps) {
 
   const options = useMemo(
     () => getTsParticlesPreset(animation.type, animation.intensity),
-    [animation.type, animation.intensity],
+    [animation.id, animation.type, animation.intensity],
   );
 
-  if (!Particles || !loadSlimFn) {
+  if (!Particles || !particlesReady) {
     const symbols =
       animation.type === "rocket"
         ? ["🚀", "✨", "💫", "⭐", "✨", "💫", "🚀", "⭐"]
@@ -73,8 +76,8 @@ export function RewardRenderer({ animation }: RewardRendererProps) {
   return (
     <div className="reward-overlay__particles">
       <Particles
+        key={animation.id}
         id={`reward-${animation.id}`}
-        init={loadSlimFn}
         options={options}
       />
     </div>

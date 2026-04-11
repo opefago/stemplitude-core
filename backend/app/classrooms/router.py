@@ -11,6 +11,7 @@ from app.dependencies import TenantContext, get_tenant_context
 from app.classrooms.schemas import (
     ClassroomAssignmentResponse,
     ClassroomCreate,
+    CreateAssignmentFromTemplateRequest,
     ClassroomRosterStudentResponse,
     ClassroomResponse,
     ClassroomStudentResponse,
@@ -37,10 +38,17 @@ from app.classrooms.schemas import (
     SessionEventResponse,
     SessionResponse,
     AttendanceResponse,
+    RealtimeEventEnvelope,
     SubmissionGradeRequest,
     SubmissionRecord,
+    SessionVideoTokenResponse,
+    SessionRecordingResponse,
+    SessionRecordingStartRequest,
+    SessionRecordingStopRequest,
+    SessionRecordingAccessResponse,
 )
 from app.dependencies import CurrentIdentity, get_current_identity
+from app.students.me_student import parse_optional_child_context_uuid
 from app.classrooms.service import ClassroomService
 from app.classrooms.realtime import classroom_session_ws_handler
 
@@ -69,7 +77,12 @@ async def create_classroom(
 ):
     """Create a classroom."""
     service = ClassroomService(db)
-    return await service.create(data, tenant.tenant_id)
+    return await service.create(
+        data,
+        tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
 
 
 @router.get(
@@ -161,6 +174,8 @@ async def bulk_assign_curriculum(
         tenant_id=tenant.tenant_id,
         classroom_ids=data.classroom_ids,
         curriculum_id=data.curriculum_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
     )
     return ClassroomBulkAssignCurriculumResponse(updated_count=updated_count)
 
@@ -193,7 +208,13 @@ async def update_classroom(
 ):
     """Update a classroom."""
     service = ClassroomService(db)
-    return await service.update(id, data, tenant.tenant_id)
+    return await service.update(
+        id,
+        data,
+        tenant.tenant_id,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
+    )
 
 
 @router.delete(
@@ -242,6 +263,161 @@ async def list_sessions(
     """List sessions for a classroom."""
     service = ClassroomService(db)
     return await service.list_sessions(id, tenant.tenant_id, limit=limit)
+
+
+@router.post(
+    "/{id}/sessions/{session_id}/video-token",
+    response_model=SessionVideoTokenResponse,
+    dependencies=[_require_tenant()],
+)
+async def issue_session_video_token(
+    request: Request,
+    id: UUID,
+    session_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(get_tenant_context),
+    identity: CurrentIdentity = Depends(get_current_identity),
+):
+    """Issue a LiveKit access token for this classroom session."""
+    service = ClassroomService(db)
+    child_ctx = parse_optional_child_context_uuid(request)
+    return await service.issue_session_video_token(
+        classroom_id=id,
+        session_id=session_id,
+        tenant_id=tenant.tenant_id,
+        identity=identity,
+        child_context_student_id=child_ctx,
+    )
+
+
+@router.get(
+    "/{id}/sessions/{session_id}/recordings",
+    response_model=list[SessionRecordingResponse],
+    dependencies=[_require_tenant()],
+)
+async def list_session_recordings(
+    request: Request,
+    id: UUID,
+    session_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(get_tenant_context),
+    identity: CurrentIdentity = Depends(get_current_identity),
+):
+    service = ClassroomService(db)
+    child_ctx = parse_optional_child_context_uuid(request)
+    return await service.list_session_recordings(
+        classroom_id=id,
+        session_id=session_id,
+        tenant_id=tenant.tenant_id,
+        identity=identity,
+        child_context_student_id=child_ctx,
+    )
+
+
+@router.post(
+    "/{id}/sessions/{session_id}/recordings/start",
+    response_model=SessionRecordingResponse,
+    dependencies=[_require_tenant()],
+)
+async def start_session_recording(
+    request: Request,
+    id: UUID,
+    session_id: UUID,
+    data: SessionRecordingStartRequest,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(get_tenant_context),
+    identity: CurrentIdentity = Depends(get_current_identity),
+):
+    service = ClassroomService(db)
+    child_ctx = parse_optional_child_context_uuid(request)
+    return await service.start_session_recording(
+        classroom_id=id,
+        session_id=session_id,
+        tenant_id=tenant.tenant_id,
+        identity=identity,
+        data=data,
+        child_context_student_id=child_ctx,
+    )
+
+
+@router.post(
+    "/{id}/sessions/{session_id}/recordings/{recording_id}/stop",
+    response_model=SessionRecordingResponse,
+    dependencies=[_require_tenant()],
+)
+async def stop_session_recording(
+    request: Request,
+    id: UUID,
+    session_id: UUID,
+    recording_id: UUID,
+    data: SessionRecordingStopRequest,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(get_tenant_context),
+    identity: CurrentIdentity = Depends(get_current_identity),
+):
+    service = ClassroomService(db)
+    child_ctx = parse_optional_child_context_uuid(request)
+    return await service.stop_session_recording(
+        classroom_id=id,
+        session_id=session_id,
+        recording_id=recording_id,
+        tenant_id=tenant.tenant_id,
+        identity=identity,
+        data=data,
+        child_context_student_id=child_ctx,
+    )
+
+
+@router.post(
+    "/{id}/sessions/{session_id}/recordings/{recording_id}/access-link",
+    response_model=SessionRecordingAccessResponse,
+    dependencies=[_require_tenant()],
+)
+async def create_session_recording_access_link(
+    request: Request,
+    id: UUID,
+    session_id: UUID,
+    recording_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(get_tenant_context),
+    identity: CurrentIdentity = Depends(get_current_identity),
+):
+    service = ClassroomService(db)
+    child_ctx = parse_optional_child_context_uuid(request)
+    return await service.create_session_recording_access_link(
+        classroom_id=id,
+        session_id=session_id,
+        recording_id=recording_id,
+        tenant_id=tenant.tenant_id,
+        identity=identity,
+        child_context_student_id=child_ctx,
+    )
+
+
+@router.delete(
+    "/{id}/sessions/{session_id}/recordings/{recording_id}",
+    response_model=SessionRecordingResponse,
+    dependencies=[_require_tenant()],
+)
+async def delete_session_recording(
+    request: Request,
+    id: UUID,
+    session_id: UUID,
+    recording_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(get_tenant_context),
+    identity: CurrentIdentity = Depends(get_current_identity),
+):
+    service = ClassroomService(db)
+    child_ctx = parse_optional_child_context_uuid(request)
+    return await service.delete_session_recording(
+        classroom_id=id,
+        session_id=session_id,
+        recording_id=recording_id,
+        tenant_id=tenant.tenant_id,
+        identity=identity,
+        child_context_student_id=child_ctx,
+    )
 
 
 @router.post(
@@ -366,11 +542,17 @@ async def list_session_events(
     session_id: UUID,
     db: AsyncSession = Depends(get_db),
     tenant: TenantContext = Depends(get_tenant_context),
-    event_type: str | None = Query(None),
+    event_type: str | None = Query(
+        None,
+        description="Single type or comma-separated list (e.g. student.submission.saved,student.submission.submitted).",
+    ),
     limit: int = Query(500, ge=1, le=1000),
 ):
     service = ClassroomService(db)
-    event_types = [event_type] if event_type else None
+    event_types: list[str] | None = None
+    if event_type:
+        parts = [p.strip() for p in event_type.split(",") if p.strip()]
+        event_types = parts or None
     return await service.list_session_events(
         classroom_id=id,
         session_id=session_id,
@@ -454,6 +636,36 @@ async def cancel_session(
         id, session_id, tenant.tenant_id,
         tenant_settings=tenant_settings,
         caller_role=caller_role,
+    )
+
+
+@router.post(
+    "/{id}/sessions/{session_id}/assignments/from-template",
+    response_model=RealtimeEventEnvelope,
+    dependencies=[_require_tenant(), require_permission("classrooms", "update")],
+)
+async def create_session_assignment_from_template(
+    id: UUID,
+    session_id: UUID,
+    data: CreateAssignmentFromTemplateRequest,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(get_tenant_context),
+    identity: CurrentIdentity = Depends(get_current_identity),
+):
+    """Add or update a session assignment from a curriculum assignment template (rubric snapshot copied)."""
+    service = ClassroomService(db)
+    return await service.create_session_assignment_from_template(
+        classroom_id=id,
+        session_id=session_id,
+        tenant_id=tenant.tenant_id,
+        identity=identity,
+        template_id=data.template_id,
+        due_at=data.due_at,
+        title_override=data.title,
+        assignment_id=data.assignment_id,
+        rubric_snapshot_override=data.rubric_snapshot,
+        parent_tenant_id=tenant.parent_tenant_id,
+        governance_mode=tenant.governance_mode,
     )
 
 
@@ -651,15 +863,20 @@ async def regenerate_meeting(
     dependencies=[_require_tenant()],
 )
 async def list_classroom_assignments(
+    request: Request,
     id: UUID,
     db: AsyncSession = Depends(get_db),
     tenant: TenantContext = Depends(get_tenant_context),
     identity: CurrentIdentity = Depends(get_current_identity),
 ):
-    """List all assignments across every session of a classroom (instructor view)."""
+    """List all assignments across every session of a classroom (instructor or enrolled learner)."""
     service = ClassroomService(db)
+    child_ctx = parse_optional_child_context_uuid(request)
     items = await service.list_classroom_assignments(
-        classroom_id=id, tenant_id=tenant.tenant_id, identity=identity
+        classroom_id=id,
+        tenant_id=tenant.tenant_id,
+        identity=identity,
+        child_context_student_id=child_ctx,
     )
     return [ClassroomAssignmentResponse.model_validate(i) for i in items]
 
@@ -702,6 +919,9 @@ async def grade_submission(
 ):
     """Record a grade for a student submission."""
     service = ClassroomService(db)
+    rubric_payload = None
+    if data.rubric:
+        rubric_payload = [r.model_dump(mode="json") for r in data.rubric]
     return await service.grade_submission(
         classroom_id=id,
         session_id=session_id,
@@ -711,6 +931,7 @@ async def grade_submission(
         score=data.score,
         feedback=data.feedback,
         assignment_id=data.assignment_id,
+        rubric=rubric_payload,
     )
 
 

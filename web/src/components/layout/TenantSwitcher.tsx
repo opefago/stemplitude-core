@@ -13,13 +13,16 @@ import {
 import { useAuth } from "../../providers/AuthProvider";
 import { useTenant } from "../../providers/TenantProvider";
 import { useWorkspace } from "../../providers/WorkspaceProvider";
-import { listUserTenants } from "../../lib/api/tenants";
-import { getTenantById } from "../../lib/api/tenants";
+import { listUserTenants, getTenantById } from "../../lib/api/tenants";
 import type { TenantInfo } from "../../providers/TenantProvider";
+import { useChildContextStudentId } from "../../lib/childContext";
+import { TenantInviteMembersModal } from "./TenantInviteMembersModal";
+import { TenantCreateOrganizationModal } from "./TenantCreateOrganizationModal";
 import "./tenant-switcher.css";
 
 export function TenantSwitcher() {
-  const { user, isSuperAdmin } = useAuth();
+  const { user, isSuperAdmin, refreshProfile } = useAuth();
+  const learnerContextStudentId = useChildContextStudentId();
   const { tenant, setTenant } = useTenant();
   const { workspaceMode, setWorkspaceMode, isPlatformView } = useWorkspace();
   const navigate = useNavigate();
@@ -31,11 +34,19 @@ export function TenantSwitcher() {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
+  const [createOrgModalOpen, setCreateOrgModalOpen] = useState(false);
+  const [inviteModalOpen, setInviteModalOpen] = useState(false);
+
   const isAdmin = isSuperAdmin || user?.role === "admin" || user?.role === "owner";
-  const showSwitcher = isAdmin;
+  const isParentLike =
+    user?.role === "parent" || user?.role === "homeschool_parent";
+  const isInstructor = user?.role === "instructor";
+  const showSwitcher = isAdmin || isParentLike || isInstructor;
+  /** Parents (tenant context): inline create. Super admins: always — avoids sending “Add organization” to /app/settings. */
+  const showInlineCreate = (isParentLike && !isPlatformView) || isSuperAdmin;
 
   useEffect(() => {
-    if (!open || !isAdmin) return;
+    if (!open || !showSwitcher) return;
     setLoading(true);
     listUserTenants()
       .then((items) =>
@@ -45,9 +56,8 @@ export function TenantSwitcher() {
       )
       .catch(() => setTenants([]))
       .finally(() => setLoading(false));
-  }, [open, isAdmin]);
+  }, [open, showSwitcher]);
 
-  // Position dropdown below the trigger to avoid overlapping it
   useEffect(() => {
     if (!open || !triggerRef.current) return;
     const rect = triggerRef.current.getBoundingClientRect();
@@ -94,12 +104,23 @@ export function TenantSwitcher() {
       setTenant(tenantInfo);
       setWorkspaceMode(t.id);
       setOpen(false);
+      await refreshProfile();
       navigate("/app");
     } catch {
-      // keep dropdown open on error
+      /* keep dropdown open */
     } finally {
       setLoading(false);
     }
+  };
+
+  const createOrgTenantType =
+    user?.role === "homeschool_parent" ? "parent" : "center";
+
+  const handleCreateOrgSuccess = async (info: TenantInfo) => {
+    setTenant(info);
+    setWorkspaceMode(info.id);
+    await refreshProfile();
+    navigate("/app");
   };
 
   const displayName = isPlatformView
@@ -109,12 +130,16 @@ export function TenantSwitcher() {
 
   if (!showSwitcher) return null;
 
-  // Merge API tenants with current tenant (ensure user's tenant is always shown)
   const tenantIds = new Set(tenants.map((t) => t.id));
   const tenantsWithCurrent =
     tenant && !tenantIds.has(tenant.id)
       ? [{ id: tenant.id, name: tenant.name, slug: tenant.slug }, ...tenants]
       : tenants;
+
+  const listGroupLabel =
+    isSuperAdmin || isParentLike || isInstructor
+      ? "Your organizations"
+      : "Organization";
 
   return (
     <div className="tenant-switcher" ref={ref}>
@@ -125,7 +150,7 @@ export function TenantSwitcher() {
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-haspopup="listbox"
-        aria-label="Switch workspace"
+        aria-label="Switch organization"
       >
         {tenant?.logoUrl && !isPlatformView ? (
           <img
@@ -154,130 +179,174 @@ export function TenantSwitcher() {
         />
       </button>
 
+      {tenant?.id ? (
+        <TenantInviteMembersModal
+          isOpen={inviteModalOpen}
+          onClose={() => setInviteModalOpen(false)}
+          tenantId={tenant.id}
+          tenantName={tenant.name}
+        />
+      ) : null}
+
+      <TenantCreateOrganizationModal
+        isOpen={createOrgModalOpen}
+        onClose={() => setCreateOrgModalOpen(false)}
+        tenantType={createOrgTenantType}
+        onCreated={handleCreateOrgSuccess}
+      />
+
       {open &&
         createPortal(
           <div
             ref={dropdownRef}
             className="tenant-switcher__dropdown"
             role="listbox"
-            aria-label="Workspaces"
+            aria-label="Organizations"
             style={{
               top: dropdownPosition.top,
               left: dropdownPosition.left,
             }}
           >
-          {/* Current workspace - only for tenant view */}
-          {!isPlatformView && (
-            <>
-              <div className="tenant-switcher__current">
-                <div className="tenant-switcher__current-info">
-                  <span className="tenant-switcher__current-name">{displayName}</span>
-                  <span className="tenant-switcher__current-meta">
-                    {`${tenant?.type ?? "Organization"} · Manage members & classes`}
+            {!isPlatformView && isAdmin && (
+              <>
+                <div className="tenant-switcher__current">
+                  <div className="tenant-switcher__current-info">
+                    <span className="tenant-switcher__current-name">{displayName}</span>
+                    <span className="tenant-switcher__current-meta">
+                      {`${tenant?.type ?? "Organization"} · Manage members & classes`}
+                    </span>
+                  </div>
+                  <div className="tenant-switcher__actions">
+                    <button
+                      type="button"
+                      className="tenant-switcher__action-btn"
+                      onClick={() => {
+                        setOpen(false);
+                        navigate("/app/settings");
+                      }}
+                    >
+                      <Settings size={14} aria-hidden />
+                      Settings
+                    </button>
+                    <button
+                      type="button"
+                      className="tenant-switcher__action-btn"
+                      onClick={() => {
+                        setOpen(false);
+                        setInviteModalOpen(true);
+                      }}
+                    >
+                      <UserPlus size={14} aria-hidden />
+                      Invite members
+                    </button>
+                  </div>
+                </div>
+                <div className="tenant-switcher__divider" />
+              </>
+            )}
+
+            {!isPlatformView && (isParentLike || isInstructor) && !isAdmin && (
+              <>
+                <div className="tenant-switcher__current tenant-switcher__current--muted">
+                  <div className="tenant-switcher__current-info">
+                    <span className="tenant-switcher__current-name">{displayName}</span>
+                    <span className="tenant-switcher__current-meta">
+                      {isParentLike
+                        ? "You can switch between organizations you belong to, or create your own."
+                        : "Switch between organizations where you teach."}
+                    </span>
+                  </div>
+                </div>
+                <div className="tenant-switcher__divider" />
+              </>
+            )}
+
+            {isSuperAdmin && (
+              <>
+                <div className="tenant-switcher__group-label">Workspaces</div>
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={isPlatformView}
+                  className={`tenant-switcher__option ${isPlatformView ? "tenant-switcher__option--active" : ""}`}
+                  onClick={handleSelectPlatform}
+                >
+                  <div className="tenant-switcher__option-logo tenant-switcher__option-logo--platform">
+                    <Shield size={16} aria-hidden />
+                  </div>
+                  <span className="tenant-switcher__option-name">
+                    Platform Admin
                   </span>
-                </div>
-                <div className="tenant-switcher__actions">
-                  <button
-                    type="button"
-                    className="tenant-switcher__action-btn"
-                    onClick={() => {
-                      setOpen(false);
-                      navigate("/app/settings");
-                    }}
-                  >
-                    <Settings size={14} aria-hidden />
-                    Settings
-                  </button>
-                  <button
-                    type="button"
-                    className="tenant-switcher__action-btn"
-                    onClick={() => {
-                      setOpen(false);
-                      navigate("/app/members");
-                    }}
-                  >
-                    <UserPlus size={14} aria-hidden />
-                    Invite members
-                  </button>
-                </div>
+                  {isPlatformView && (
+                    <Check size={14} className="tenant-switcher__option-check" aria-hidden />
+                  )}
+                </button>
+              </>
+            )}
+
+            <div className="tenant-switcher__group-label">{listGroupLabel}</div>
+            {loading ? (
+              <div className="tenant-switcher__loading">
+                <Loader2 size={18} className="tenant-switcher__spinner" aria-hidden />
+                Loading...
               </div>
-              <div className="tenant-switcher__divider" />
-            </>
-          )}
+            ) : (
+              tenantsWithCurrent.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  role="option"
+                  aria-selected={!isPlatformView && workspaceMode === t.id}
+                  className={`tenant-switcher__option ${!isPlatformView && workspaceMode === t.id ? "tenant-switcher__option--active" : ""}`}
+                  onClick={() => handleSelectTenant(t)}
+                >
+                  <div className="tenant-switcher__option-logo">
+                    {t.name.charAt(0)}
+                  </div>
+                  <span className="tenant-switcher__option-name">{t.name}</span>
+                  {!isPlatformView && workspaceMode === t.id && (
+                    <Check size={14} className="tenant-switcher__option-check" aria-hidden />
+                  )}
+                </button>
+              ))
+            )}
 
-          {/* Workspaces - Platform Admin + tenant list */}
-          {isSuperAdmin && (
-            <>
-              <div className="tenant-switcher__group-label">Workspaces</div>
-              <button
-                type="button"
-                role="option"
-                aria-selected={isPlatformView}
-                className={`tenant-switcher__option ${isPlatformView ? "tenant-switcher__option--active" : ""}`}
-                onClick={handleSelectPlatform}
-              >
-                <div className="tenant-switcher__option-logo tenant-switcher__option-logo--platform">
-                  <Shield size={16} aria-hidden />
-                </div>
-                <span className="tenant-switcher__option-name">
-                  Platform Admin
-                </span>
-                {isPlatformView && (
-                  <Check size={14} className="tenant-switcher__option-check" aria-hidden />
-                )}
-              </button>
-            </>
-          )}
+            {isParentLike && !isPlatformView && !learnerContextStudentId && (
+              <>
+                <div className="tenant-switcher__divider" />
+                <button
+                  type="button"
+                  className="tenant-switcher__add"
+                  onClick={() => {
+                    setOpen(false);
+                    navigate("/app/child");
+                  }}
+                >
+                  <UserPlus size={14} aria-hidden />
+                  View as learner
+                </button>
+              </>
+            )}
 
-          {/* Tenant list */}
-          <div className="tenant-switcher__group-label">
-            {isSuperAdmin ? "Your organizations" : "Organization"}
-          </div>
-          {loading ? (
-            <div className="tenant-switcher__loading">
-              <Loader2 size={18} className="tenant-switcher__spinner" aria-hidden />
-              Loading...
-            </div>
-          ) : (
-            tenantsWithCurrent.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                role="option"
-                aria-selected={!isPlatformView && workspaceMode === t.id}
-                className={`tenant-switcher__option ${!isPlatformView && workspaceMode === t.id ? "tenant-switcher__option--active" : ""}`}
-                onClick={() => handleSelectTenant(t)}
-              >
-                <div className="tenant-switcher__option-logo">
-                  {t.name.charAt(0)}
-                </div>
-                <span className="tenant-switcher__option-name">{t.name}</span>
-                {!isPlatformView && workspaceMode === t.id && (
-                  <Check size={14} className="tenant-switcher__option-check" aria-hidden />
-                )}
-              </button>
-            ))
-          )}
-
-          {isSuperAdmin && (
-            <>
-              <div className="tenant-switcher__divider" />
-              <button
-                type="button"
-                className="tenant-switcher__add"
-                onClick={() => {
-                  setOpen(false);
-                  navigate("/app/settings");
-                }}
-              >
-                <Plus size={14} aria-hidden />
-                Add organization
-              </button>
-            </>
-          )}
-        </div>,
-        document.body,
-      )}
+            {showInlineCreate && (
+              <>
+                <div className="tenant-switcher__divider" />
+                <button
+                  type="button"
+                  className="tenant-switcher__add"
+                  onClick={() => {
+                    setOpen(false);
+                    setCreateOrgModalOpen(true);
+                  }}
+                >
+                  <Plus size={14} aria-hidden />
+                  Create new organization
+                </button>
+              </>
+            )}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

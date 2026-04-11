@@ -71,7 +71,7 @@ class TestListUserTenants:
     async def test_returns_list(self, service, mock_repos):
         t1 = MagicMock()
         t1.id = uuid4()
-        mock_repos["repo"].list_user_tenants.return_value = [t1]
+        mock_repos["repo"].list_user_accessible_tenants.return_value = [t1]
 
         result = await service.list_user_tenants(uuid4())
 

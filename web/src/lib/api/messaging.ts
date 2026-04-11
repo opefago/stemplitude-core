@@ -36,6 +36,8 @@ export interface Conversation {
 export interface ConversationListResponse {
   items: Conversation[];
   total: number;
+  skip: number;
+  limit: number;
 }
 
 export interface ConversationMessageListResponse {
@@ -45,8 +47,16 @@ export interface ConversationMessageListResponse {
 
 // ── API functions ─────────────────────────────────────────────────────────────
 
-export async function listConversations(): Promise<ConversationListResponse> {
-  return apiFetch<ConversationListResponse>("/conversations/");
+export async function listConversations(
+  params?: { skip?: number; limit?: number },
+): Promise<ConversationListResponse> {
+  const query = new URLSearchParams();
+  if (params?.skip != null) query.set("skip", String(params.skip));
+  if (params?.limit != null) query.set("limit", String(params.limit));
+  const qs = query.toString();
+  return apiFetch<ConversationListResponse>(
+    `/conversations/${qs ? `?${qs}` : ""}`,
+  );
 }
 
 export async function getConversation(id: string): Promise<Conversation> {

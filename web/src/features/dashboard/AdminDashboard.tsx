@@ -1,16 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import {
-  Users,
-  GraduationCap,
-  School,
-  DollarSign,
-  TrendingUp,
-  ArrowRight,
-  Megaphone,
-  Activity,
-  AlertTriangle,
-} from "lucide-react";
+import { ArrowRight, AlertTriangle, ClipboardList } from "lucide-react";
 import { useAuth } from "../../providers/AuthProvider";
 import { useTenant } from "../../providers/TenantProvider";
 import {
@@ -18,7 +8,13 @@ import {
   listClassroomSessions,
   listClassroomStudents,
 } from "../../lib/api/classrooms";
-import { listStudents, type StudentProfile } from "../../lib/api/students";
+import {
+  listStudents,
+  listAttendanceExcusalRequestsStaff,
+  reviewAttendanceExcusalRequest,
+  type AttendanceExcusalStaffRow,
+  type StudentProfile,
+} from "../../lib/api/students";
 import { listUsers } from "../../lib/api/users";
 import { listNotifications, type NotificationRecord } from "../../lib/api/notifications";
 import { useTenantRealtime } from "../../hooks/useTenantRealtime";
@@ -48,11 +44,16 @@ export function AdminDashboard() {
   const { tenant } = useTenant();
   const [loading, setLoading] = useState(true);
   const [activeClasses, setActiveClasses] = useState<
-    Array<{ id: string; name: string; students: number }>
+    Array<{ id: string; name: string; students: number; isLive: boolean }>
   >([]);
   const [allStudents, setAllStudents] = useState<StudentProfile[]>([]);
   const [totalUsers, setTotalUsers] = useState(0);
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
+  const [pendingExcusals, setPendingExcusals] = useState<AttendanceExcusalStaffRow[]>([]);
+  const [excusalsLoading, setExcusalsLoading] = useState(false);
+  const [denyingId, setDenyingId] = useState<string | null>(null);
+  const [denyNote, setDenyNote] = useState("");
+  const [excusalActionId, setExcusalActionId] = useState<string | null>(null);
 
   const tenantName = tenant?.name ?? "Organization";
   const greeting = user?.firstName
@@ -63,6 +64,10 @@ export function AdminDashboard() {
     [notifications],
   );
   const totalMembers = totalUsers + allStudents.length;
+  const ongoingClass = useMemo(
+    () => activeClasses.find((klass) => klass.isLive) ?? null,
+    [activeClasses],
+  );
 
   const tenantId = tenant?.id ?? user?.tenantId;
 
@@ -78,6 +83,19 @@ export function AdminDashboard() {
       setAllStudents(students);
       setTotalUsers(usersResult.total ?? usersResult.items.length);
       setNotifications(notificationResult.items);
+
+      setExcusalsLoading(true);
+      try {
+        const pending = await listAttendanceExcusalRequestsStaff({
+          status: "pending",
+          limit: 20,
+        });
+        setPendingExcusals(pending);
+      } catch {
+        setPendingExcusals([]);
+      } finally {
+        setExcusalsLoading(false);
+      }
 
       const classSessions = await Promise.all(
         classrooms.slice(0, 20).map(async (klass) => ({
@@ -97,6 +115,9 @@ export function AdminDashboard() {
             id: classroom.id,
             name: classroom.name,
             students: roster.length,
+            isLive: classSessions
+              .find((entry) => entry.classroom.id === classroom.id)
+              ?.sessions.some((s) => isLiveSession(s.session_start, s.session_end, s.status)) ?? false,
           };
         }),
       );
@@ -120,8 +141,47 @@ export function AdminDashboard() {
     enabled: Boolean(user && tenantId),
     onSessionsInvalidate: loadDashboard,
     onNotificationsInvalidate: loadDashboard,
-    onMessagesInvalidate: loadDashboard,
   });
+
+  const refreshExcusals = useCallback(async () => {
+    setExcusalsLoading(true);
+    try {
+      const pending = await listAttendanceExcusalRequestsStaff({
+        status: "pending",
+        limit: 20,
+      });
+      setPendingExcusals(pending);
+    } catch {
+      setPendingExcusals([]);
+    } finally {
+      setExcusalsLoading(false);
+    }
+  }, []);
+
+  const approveExcusal = async (id: string) => {
+    setExcusalActionId(id);
+    try {
+      await reviewAttendanceExcusalRequest(id, { decision: "approved" });
+      await refreshExcusals();
+    } finally {
+      setExcusalActionId(null);
+    }
+  };
+
+  const submitDeny = async (id: string) => {
+    setExcusalActionId(id);
+    try {
+      await reviewAttendanceExcusalRequest(id, {
+        decision: "denied",
+        review_notes: denyNote.trim() || null,
+      });
+      setDenyingId(null);
+      setDenyNote("");
+      await refreshExcusals();
+    } finally {
+      setExcusalActionId(null);
+    }
+  };
 
   return (
     <div
@@ -134,10 +194,16 @@ export function AdminDashboard() {
           <h1 className="dashboard-bento__greeting">{greeting}</h1>
           <p className="dashboard-bento__subtitle">{tenantName}</p>
         </div>
-        <Link to="/app/members" className="admin-dashboard__header-btn">
-          <img src="/assets/cartoon-icons/Players.png" alt="" className="dashboard-bento__card-icon-img" aria-hidden />
-          Enroll Student
-        </Link>
+        <div className="admin-dashboard__header-actions">
+          <Link to="/app/analytics" className="admin-dashboard__header-btn admin-dashboard__header-btn--secondary">
+            <img src="/assets/cartoon-icons/Trail.png" alt="" className="dashboard-bento__card-icon-img" aria-hidden />
+            Insights
+          </Link>
+          <Link to="/app/members" className="admin-dashboard__header-btn">
+            <img src="/assets/cartoon-icons/Players.png" alt="" className="dashboard-bento__card-icon-img" aria-hidden />
+            Enroll Student
+          </Link>
+        </div>
       </header>
       {unreadAnnouncements.length > 0 ? (
         <section className="admin-dashboard__announcement-banner" aria-live="polite">
@@ -166,6 +232,41 @@ export function AdminDashboard() {
               <img src="/assets/cartoon-icons/bag.png" alt="" className="dashboard-bento__card-icon-img" aria-hidden />
             </div>
           </div>
+          {ongoingClass ? (
+            <div className="admin-dashboard__class-focus admin-dashboard__class-focus--live" aria-label="Ongoing class">
+              <div className="admin-dashboard__class-focus-top">
+                <span className="admin-dashboard__class-tag admin-dashboard__class-tag--active">Live Now</span>
+                <span className="admin-dashboard__class-focus-meta">{ongoingClass.students} students</span>
+              </div>
+              <h3 className="admin-dashboard__class-focus-title">{ongoingClass.name}</h3>
+              <Link
+                to={`/app/classrooms/${ongoingClass.id}/live`}
+                className="admin-dashboard__class-focus-cta admin-dashboard__class-focus-cta--live"
+              >
+                Open live room <ArrowRight size={18} aria-hidden />
+              </Link>
+            </div>
+          ) : (
+            <div className="admin-dashboard__class-focus admin-dashboard__class-focus--empty" aria-label="No live session">
+              <div className="admin-dashboard__class-focus-top">
+                <span className="admin-dashboard__class-tag admin-dashboard__class-tag--idle">
+                  {loading ? "Checking" : "No Live Session"}
+                </span>
+                <AlertTriangle size={16} aria-hidden />
+              </div>
+              <h3 className="admin-dashboard__class-focus-title">
+                {loading ? "Checking classrooms..." : "No class is live right now"}
+              </h3>
+              <p className="admin-dashboard__class-focus-sub">
+                {loading
+                  ? "Please wait while we fetch live session data."
+                  : "Start a session from any classroom to see it highlighted here."}
+              </p>
+              <Link to="/app/classrooms" className="admin-dashboard__class-focus-cta admin-dashboard__class-focus-cta--idle">
+                Open classrooms <ArrowRight size={16} aria-hidden />
+              </Link>
+            </div>
+          )}
           <Link
             to="/app/classrooms"
             className="dashboard-bento__card-action"
@@ -184,12 +285,17 @@ export function AdminDashboard() {
               </li>
             ) : activeClasses.map((c) => (
               <li key={c.id} className="admin-dashboard__class-item" role="listitem">
-                <div className="admin-dashboard__class-info">
-                  <span className="admin-dashboard__class-name">{c.name}</span>
-                  <span className="admin-dashboard__class-meta">
-                    {c.students} students
+                <Link to={`/app/classrooms/${c.id}`} className="admin-dashboard__class-link">
+                  <span className="admin-dashboard__class-info">
+                    <span className="admin-dashboard__class-name">{c.name}</span>
+                    <span className="admin-dashboard__class-meta">
+                      {c.students} students
+                    </span>
                   </span>
-                </div>
+                  <span className={`admin-dashboard__class-tag admin-dashboard__class-tag--${c.isLive ? "active" : "idle"}`}>
+                    {c.isLive ? "Live" : "Class"}
+                  </span>
+                </Link>
               </li>
             ))}
           </ul>
@@ -313,6 +419,101 @@ export function AdminDashboard() {
           >
             View all <ArrowRight size={14} aria-hidden />
           </Link>
+        </div>
+
+        <div className="dashboard-bento__card dashboard-bento__card--orange admin-dashboard__card--excusals">
+          <div className="dashboard-bento__card-header">
+            <h2 className="dashboard-bento__card-title">Parent excusal requests</h2>
+            <div className="dashboard-bento__card-icon">
+              <ClipboardList size={22} aria-hidden />
+            </div>
+          </div>
+          <p className="admin-dashboard__excusals-intro">
+            When guardians submit an absence excuse, approve it to record the learner as excused for
+            that session, or deny with an optional note.
+          </p>
+          {excusalsLoading ? (
+            <p className="dashboard-bento__card-desc">Loading…</p>
+          ) : pendingExcusals.length === 0 ? (
+            <p className="dashboard-bento__card-desc">No pending requests.</p>
+          ) : (
+            <ul className="admin-dashboard__excusal-list" role="list">
+              {pendingExcusals.map((row) => (
+                <li key={row.id} className="admin-dashboard__excusal-item" role="listitem">
+                  <div className="admin-dashboard__excusal-top">
+                    <strong className="admin-dashboard__excusal-student">{row.student_display_name}</strong>
+                    <span className="admin-dashboard__excusal-meta">
+                      {row.classroom_name} ·{" "}
+                      {new Date(row.created_at).toLocaleString(undefined, {
+                        month: "short",
+                        day: "numeric",
+                        hour: "numeric",
+                        minute: "2-digit",
+                      })}
+                    </span>
+                  </div>
+                  <p className="admin-dashboard__excusal-reason">{row.reason}</p>
+                  {denyingId === row.id ? (
+                    <div className="admin-dashboard__excusal-deny-box">
+                      <label className="admin-dashboard__excusal-label" htmlFor={`deny-note-${row.id}`}>
+                        Optional note to guardian
+                      </label>
+                      <textarea
+                        id={`deny-note-${row.id}`}
+                        className="admin-dashboard__excusal-textarea"
+                        rows={2}
+                        value={denyNote}
+                        onChange={(e) => setDenyNote(e.target.value)}
+                        maxLength={1000}
+                      />
+                      <div className="admin-dashboard__excusal-actions">
+                        <button
+                          type="button"
+                          className="admin-dashboard__excusal-btn admin-dashboard__excusal-btn--ghost"
+                          onClick={() => {
+                            setDenyingId(null);
+                            setDenyNote("");
+                          }}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          className="admin-dashboard__excusal-btn admin-dashboard__excusal-btn--danger"
+                          disabled={excusalActionId === row.id}
+                          onClick={() => void submitDeny(row.id)}
+                        >
+                          {excusalActionId === row.id ? "Saving…" : "Confirm deny"}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="admin-dashboard__excusal-actions">
+                      <button
+                        type="button"
+                        className="admin-dashboard__excusal-btn admin-dashboard__excusal-btn--primary"
+                        disabled={excusalActionId === row.id}
+                        onClick={() => void approveExcusal(row.id)}
+                      >
+                        {excusalActionId === row.id ? "Saving…" : "Approve"}
+                      </button>
+                      <button
+                        type="button"
+                        className="admin-dashboard__excusal-btn admin-dashboard__excusal-btn--ghost"
+                        disabled={excusalActionId != null}
+                        onClick={() => {
+                          setDenyingId(row.id);
+                          setDenyNote("");
+                        }}
+                      >
+                        Deny
+                      </button>
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </div>
     </div>

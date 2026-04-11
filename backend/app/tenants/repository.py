@@ -7,7 +7,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.repository import BaseRepository
-from app.tenants.models import Membership, SupportAccessGrant, Tenant, TenantHierarchy, TenantLabSetting
+from app.students.models import ParentStudent, StudentMembership
+from app.tenants.models import (
+    Membership,
+    SupportAccessGrant,
+    Tenant,
+    TenantHierarchy,
+    TenantHierarchyRequest,
+    TenantLabSetting,
+)
 from app.users.models import User
 from app.roles.models import Role
 
@@ -35,6 +43,32 @@ class TenantRepository(BaseRepository[Tenant]):
         result = await self.session.execute(select(Tenant).where(Tenant.code == code))
         return result.scalar_one_or_none()
 
+    async def get_by_public_host_subdomain(self, label: str) -> Tenant | None:
+        """Resolve tenant by DNS label (e.g. ``academy`` for academy.example.com)."""
+        key = (label or "").strip().lower()
+        if not key:
+            return None
+        result = await self.session.execute(
+            select(Tenant).where(
+                Tenant.public_host_subdomain == key,
+                Tenant.is_active == True,  # noqa: E712
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_custom_domain(self, host: str) -> Tenant | None:
+        """Resolve tenant by verified custom hostname (no port)."""
+        key = (host or "").strip().lower().split(":")[0]
+        if not key:
+            return None
+        result = await self.session.execute(
+            select(Tenant).where(
+                Tenant.custom_domain == key,
+                Tenant.is_active == True,  # noqa: E712
+            )
+        )
+        return result.scalar_one_or_none()
+
     async def list_user_tenants(self, user_id: UUID) -> list[Tenant]:
         """List tenants the user is a member of."""
         result = await self.session.execute(
@@ -48,6 +82,30 @@ class TenantRepository(BaseRepository[Tenant]):
             .order_by(Tenant.name)
         )
         return list(result.scalars().all())
+
+    async def list_parent_linked_tenants(self, user_id: UUID) -> list[Tenant]:
+        """Tenants where the user is a linked guardian of a student with active enrollment."""
+        result = await self.session.execute(
+            select(Tenant)
+            .distinct()
+            .join(StudentMembership, StudentMembership.tenant_id == Tenant.id)
+            .join(ParentStudent, ParentStudent.student_id == StudentMembership.student_id)
+            .where(
+                ParentStudent.user_id == user_id,
+                StudentMembership.is_active == True,  # noqa: E712
+                Tenant.is_active == True,  # noqa: E712
+            )
+        )
+        return list(result.scalars().all())
+
+    async def list_user_accessible_tenants(self, user_id: UUID) -> list[Tenant]:
+        """Membership tenants plus guardian-linked enrollments (deduped)."""
+        members = await self.list_user_tenants(user_id)
+        linked = await self.list_parent_linked_tenants(user_id)
+        by_id: dict[UUID, Tenant] = {t.id: t for t in members}
+        for t in linked:
+            by_id.setdefault(t.id, t)
+        return sorted(by_id.values(), key=lambda x: (x.name or "").lower())
 
     async def create(self, **kwargs) -> Tenant:
         """Create a tenant."""
@@ -267,12 +325,16 @@ class TenantHierarchyRepository:
         child_tenant_id: UUID,
         billing_mode: str,
         seat_allocations: dict | None,
+        governance_mode: str = "child_managed",
+        governance: dict | None = None,
     ) -> TenantHierarchy:
         link = TenantHierarchy(
             parent_tenant_id=parent_tenant_id,
             child_tenant_id=child_tenant_id,
             billing_mode=billing_mode,
             seat_allocations=seat_allocations,
+            governance_mode=governance_mode,
+            governance=governance,
         )
         self.session.add(link)
         await self.session.flush()
@@ -296,6 +358,46 @@ class TenantHierarchyRepository:
             )
         )
         return list(result.scalars().all())
+
+
+class TenantHierarchyRequestRepository:
+    """Franchise / district join requests."""
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def create(self, row: TenantHierarchyRequest) -> TenantHierarchyRequest:
+        self.session.add(row)
+        await self.session.flush()
+        await self.session.refresh(row)
+        return row
+
+    async def get_by_id(self, request_id: UUID) -> TenantHierarchyRequest | None:
+        result = await self.session.execute(
+            select(TenantHierarchyRequest).where(TenantHierarchyRequest.id == request_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def list_for_parent(
+        self, parent_tenant_id: UUID, status: str | None = None
+    ) -> list[TenantHierarchyRequest]:
+        q = select(TenantHierarchyRequest).where(
+            TenantHierarchyRequest.parent_tenant_id == parent_tenant_id
+        )
+        if status:
+            q = q.where(TenantHierarchyRequest.status == status)
+        q = q.order_by(TenantHierarchyRequest.created_at.desc())
+        result = await self.session.execute(q)
+        return list(result.scalars().all())
+
+    async def get_pending_for_child(self, child_tenant_id: UUID) -> TenantHierarchyRequest | None:
+        result = await self.session.execute(
+            select(TenantHierarchyRequest).where(
+                TenantHierarchyRequest.child_tenant_id == child_tenant_id,
+                TenantHierarchyRequest.status == "pending",
+            )
+        )
+        return result.scalar_one_or_none()
 
 
 def slugify(text: str) -> str:

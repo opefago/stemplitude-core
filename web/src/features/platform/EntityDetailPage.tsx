@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   ChevronLeft,
@@ -8,7 +8,8 @@ import {
   Database,
   AlertCircle,
 } from "lucide-react";
-import { getEntityDetail } from "../../lib/api/platform";
+import { getEntityDetail, updateTenantMemberBillingFee } from "../../lib/api/platform";
+import { KidCheckbox } from "../../components/ui";
 import "./entity-browser.css";
 
 /* -------------------------------------------------------------------------- */
@@ -59,16 +60,32 @@ export function EntityDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [feeInput, setFeeInput] = useState("");
+  const [feeUsePlatformDefault, setFeeUsePlatformDefault] = useState(false);
+  const [feeMsg, setFeeMsg] = useState<string | null>(null);
+  const [feeBusy, setFeeBusy] = useState(false);
 
-  useEffect(() => {
-    if (!entityKey || !entityId) return;
+  const loadDetail = useCallback(() => {
+    if (!entityKey || !entityId) return Promise.resolve();
     setLoading(true);
     setError(null);
-    getEntityDetail(entityKey, entityId)
+    return getEntityDetail(entityKey, entityId)
       .then((res) => setData(res.data))
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load entity"))
       .finally(() => setLoading(false));
   }, [entityKey, entityId]);
+
+  useEffect(() => {
+    void loadDetail();
+  }, [loadDetail]);
+
+  useEffect(() => {
+    if (!data) return;
+    if (typeof data.member_billing_application_fee_bps === "number") {
+      setFeeInput(String(data.member_billing_application_fee_bps));
+    }
+    setFeeUsePlatformDefault(Boolean(data.member_billing_application_fee_use_platform_default));
+  }, [data]);
 
   const jsonText = data ? JSON.stringify(data, null, 2) : "";
 
@@ -80,6 +97,30 @@ export function EntityDetailPage() {
 
   const handleBack = () => {
     navigate(`/app/platform/entities?selected=${encodeURIComponent(entityKey ?? "")}`);
+  };
+
+  const saveMemberBillingFee = async () => {
+    if (!entityId || entityKey !== "tenants") return;
+    const n = Number.parseInt(feeInput, 10);
+    if (!feeUsePlatformDefault && (Number.isNaN(n) || n < 0 || n > 10000)) {
+      setFeeMsg("Use 0–10000 basis points (100 = 1%).");
+      return;
+    }
+    setFeeBusy(true);
+    setFeeMsg(null);
+    try {
+      await updateTenantMemberBillingFee(entityId, {
+        member_billing_application_fee_use_platform_default: feeUsePlatformDefault,
+        ...(!feeUsePlatformDefault ? { member_billing_application_fee_bps: n } : {}),
+      });
+      const res = await getEntityDetail(entityKey, entityId);
+      setData(res.data);
+      setFeeMsg("Saved.");
+    } catch (err) {
+      setFeeMsg(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setFeeBusy(false);
+    }
   };
 
   return (
@@ -111,6 +152,63 @@ export function EntityDetailPage() {
         </div>
       ) : data ? (
         <div className="eb__detail-content">
+          {entityKey === "tenants" && entityId ? (
+            <div className="eb__kv-section" style={{ marginBottom: "var(--spacing-md)" }}>
+              <h3 className="eb__kv-title">Member billing — platform fee (Stripe Connect)</h3>
+              <p
+                style={{
+                  margin: "0 0 0.75rem",
+                  fontSize: "0.9rem",
+                  color: "var(--color-text-secondary)",
+                }}
+              >
+                Basis points retained by the platform on this organization&apos;s family checkouts and
+                subscriptions. 100 bps = 1%. Use the platform default from Platform → Member billing fees, or
+                set a custom rate below.
+              </p>
+              <div style={{ marginBottom: "0.75rem" }}>
+                <KidCheckbox
+                  checked={feeUsePlatformDefault}
+                  onChange={setFeeUsePlatformDefault}
+                  disabled={feeBusy}
+                >
+                  Use platform default fee
+                </KidCheckbox>
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: "0.5rem",
+                  alignItems: "flex-end",
+                }}
+              >
+                <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                  <span style={{ fontSize: "0.75rem", fontWeight: 600 }}>Custom basis points</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={10000}
+                    value={feeInput}
+                    onChange={(e) => setFeeInput(e.target.value)}
+                    disabled={feeBusy || feeUsePlatformDefault}
+                    className="eb__filter-input eb__filter-input--sm"
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="eb__back-btn"
+                  onClick={() => void saveMemberBillingFee()}
+                  disabled={feeBusy}
+                >
+                  {feeBusy ? "Saving…" : "Save fee"}
+                </button>
+              </div>
+              {feeMsg ? (
+                <p style={{ margin: "0.5rem 0 0", fontSize: "0.875rem" }}>{feeMsg}</p>
+              ) : null}
+            </div>
+          ) : null}
           {/* Key-value table */}
           <div className="eb__kv-section">
             <div className="eb__kv-header">

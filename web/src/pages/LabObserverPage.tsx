@@ -45,7 +45,13 @@ export function LabObserverPage() {
 
   const classroomContext = useMemo<LabClassroomContext | null>(() => {
     if (!classroomId || !sessionId) return null;
-    return { classroomId, sessionId, referrer: "classroom_live_session", labType: null };
+    return {
+      classroomId,
+      sessionId,
+      referrer: "classroom_live_session",
+      labType: null,
+      assignmentId: null,
+    };
   }, [classroomId, sessionId]);
 
   const exitObserver = useCallback(() => {

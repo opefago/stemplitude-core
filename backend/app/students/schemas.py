@@ -1,7 +1,10 @@
-from datetime import date
+from datetime import date, datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
+
+GuardianMessagingScope = Literal["instructors_only", "classmates", "disabled"]
 
 
 class StudentCreate(BaseModel):
@@ -231,6 +234,29 @@ class StudentProfile(BaseModel):
         ...,
         description="Whether the account is active",
     )
+    grade_level: str | None = Field(
+        None,
+        max_length=20,
+        description="Grade in the current workspace (when listing children in a tenant)",
+    )
+
+
+class GuardianChildControlsResponse(BaseModel):
+    """Guardian-editable preferences for a linked learner (per parent_students row when present)."""
+
+    student_id: UUID
+    messaging_scope: GuardianMessagingScope
+    allow_public_game_publishing: bool
+    grade_level: str | None
+    has_parent_link: bool
+
+
+class GuardianChildControlsPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    messaging_scope: GuardianMessagingScope | None = None
+    allow_public_game_publishing: bool | None = None
+    grade_level: str | None = Field(None, max_length=20)
 
 
 class StudentMembershipCreate(BaseModel):
@@ -362,6 +388,10 @@ class ParentResponse(BaseModel):
         ...,
         description="Whether this parent is the primary contact",
     )
+    user_email: str | None = Field(
+        None,
+        description="Guardian email when loaded for admin UIs (billing, comms).",
+    )
 
 
 class ResetPasswordRequest(BaseModel):
@@ -394,3 +424,156 @@ class UsernameCheckResponse(BaseModel):
         ...,
         description="The username that was checked",
     )
+
+
+class ParentWeeklyDigest(BaseModel):
+    """Rolling-window counts for the parent dashboard."""
+
+    period_start: datetime
+    period_end: datetime
+    lessons_completed: int
+    labs_completed: int
+    badges_earned: int
+    xp_earned: int
+    sessions_attended: int
+    assignments_submitted: int = 0
+
+
+ParentActivityKind = Literal[
+    "lesson_completed",
+    "lab_completed",
+    "assignment_submitted",
+    "sticker_earned",
+    "xp_earned",
+    "attendance",
+]
+
+
+class ParentActivityItem(BaseModel):
+    kind: ParentActivityKind
+    occurred_at: datetime
+    title: str
+    detail: str | None = None
+    ref_id: str | None = None
+    classroom_id: str | None = None
+    class_name: str | None = None
+
+
+class ParentEnrolledClassroomRef(BaseModel):
+    """Classrooms the learner is enrolled in (for guardian activity filters)."""
+
+    id: str
+    name: str
+
+
+class ParentChildActivityResponse(BaseModel):
+    items: list[ParentActivityItem]
+    weekly_digest: ParentWeeklyDigest
+    enrolled_classrooms: list[ParentEnrolledClassroomRef] = Field(
+        default_factory=list,
+        description="Current enrollments; independent of the activity date window.",
+    )
+    total: int = Field(0, ge=0, description="Total activity events in the merged feed")
+    skip: int = 0
+    limit: int = 40
+
+
+class ParentAssignmentGradeRow(BaseModel):
+    """Single graded submission visible to a guardian."""
+
+    graded_at: datetime
+    score: int = Field(..., ge=0, le=100)
+    feedback: str | None = None
+    assignment_id: str | None = None
+    classroom_id: UUID
+    classroom_name: str
+    session_id: UUID
+    session_start: datetime
+    session_end: datetime
+    session_display_title: str | None = None
+    rubric: list[dict] | None = Field(
+        None,
+        description="Instructor rubric breakdown (criterion_id, max_points, points_awarded) when provided.",
+    )
+
+
+class ParentChildAssignmentGradesResponse(BaseModel):
+    grades: list[ParentAssignmentGradeRow]
+    total: int = Field(0, ge=0)
+    skip: int = 0
+    limit: int = 50
+
+
+# --- Guardian attendance & excusal requests ---
+
+
+class GuardianExcusalSummary(BaseModel):
+    id: UUID
+    status: str
+    reason: str
+    review_notes: str | None = None
+    created_at: datetime
+    reviewed_at: datetime | None = None
+
+
+class GuardianAttendanceSessionRow(BaseModel):
+    session_id: UUID
+    classroom_id: UUID
+    classroom_name: str
+    session_start: datetime
+    session_end: datetime
+    session_status: str
+    attendance_status: str | None = None
+    attendance_notes: str | None = None
+    excusal: GuardianExcusalSummary | None = None
+
+
+class GuardianAttendanceOverviewResponse(BaseModel):
+    rows: list[GuardianAttendanceSessionRow]
+
+
+class AttendanceExcusalCreate(BaseModel):
+    session_id: UUID
+    classroom_id: UUID
+    reason: str = Field(..., min_length=1, max_length=2000)
+
+
+class AttendanceExcusalRow(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    tenant_id: UUID
+    student_id: UUID
+    session_id: UUID
+    classroom_id: UUID
+    submitted_by_user_id: UUID
+    reason: str
+    status: str
+    review_notes: str | None = None
+    reviewed_by_user_id: UUID | None = None
+    created_at: datetime
+    reviewed_at: datetime | None = None
+
+
+ExcusalDecision = Literal["approved", "denied"]
+
+
+class AttendanceExcusalReview(BaseModel):
+    decision: ExcusalDecision
+    review_notes: str | None = Field(None, max_length=1000)
+
+
+class AttendanceExcusalStaffRow(BaseModel):
+    id: UUID
+    student_id: UUID
+    student_display_name: str
+    session_id: UUID
+    classroom_id: UUID
+    classroom_name: str
+    reason: str
+    status: str
+    submitted_by_user_id: UUID
+    review_notes: str | None = None
+    created_at: datetime
+    reviewed_at: datetime | None = None
+    reviewed_by_user_id: UUID | None = None

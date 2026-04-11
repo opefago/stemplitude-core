@@ -3,7 +3,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class ClassroomBase(BaseModel):
@@ -30,7 +30,7 @@ class ClassroomBase(BaseModel):
     mode: str = Field(
         default="online",
         max_length=20,
-        description="Delivery mode: 'online' or 'in-person'.",
+        description="Delivery mode: 'online', 'hybrid', or 'in-person'.",
     )
     recurrence_type: str | None = Field(
         None,
@@ -40,7 +40,7 @@ class ClassroomBase(BaseModel):
     meeting_provider: str | None = Field(
         None,
         max_length=20,
-        description="Video meeting provider (e.g., 'zoom', 'meet', 'teams').",
+        description="Video meeting provider: 'built_in' (platform video), 'zoom', 'meet', or 'teams'.",
     )
     meeting_link: str | None = Field(
         None,
@@ -141,7 +141,7 @@ class ClassroomUpdate(BaseModel):
     mode: str | None = Field(
         None,
         max_length=20,
-        description="Updated delivery mode: 'online' or 'in-person'.",
+        description="Updated delivery mode: 'online', 'hybrid', or 'in-person'.",
     )
     recurrence_type: str | None = Field(
         None,
@@ -151,7 +151,7 @@ class ClassroomUpdate(BaseModel):
     meeting_provider: str | None = Field(
         None,
         max_length=20,
-        description="Updated meeting provider.",
+        description="Updated meeting provider: 'built_in', 'zoom', 'meet', or 'teams'.",
     )
     meeting_link: str | None = Field(
         None,
@@ -486,6 +486,11 @@ class SessionEditRequest(BaseModel):
     session_end: datetime | None = Field(None, description="New end time (ISO 8601 datetime).")
     meeting_link: str | None = Field(None, max_length=500, description="Meeting URL.")
     notes: str | None = Field(None, max_length=2000, description="Session notes.")
+    display_title: str | None = Field(
+        None,
+        max_length=200,
+        description="Optional label shown instead of raw dates (e.g. 'Week 3 — Line follower').",
+    )
 
 
 class SessionResponse(BaseModel):
@@ -505,6 +510,10 @@ class SessionResponse(BaseModel):
         description="External meeting ID from the provider.",
     )
     notes: str | None = Field(None, description="Session notes.")
+    display_title: str | None = Field(
+        None,
+        description="Instructor-defined session label; UI may show this with an ordinal (Class 1, Class 2, …).",
+    )
     session_content: dict | None = Field(
         None,
         description="Session-linked shared/downloadable asset references.",
@@ -512,6 +521,10 @@ class SessionResponse(BaseModel):
     canceled_at: datetime | None = Field(
         None,
         description="When the session was canceled, if applicable.",
+    )
+    classroom_name: str | None = Field(
+        None,
+        description="Class display name when the list endpoint joins classroom metadata.",
     )
 
 
@@ -567,6 +580,67 @@ class EndSessionRequest(BaseModel):
         default=False,
         description="Must be true when ending while students are still active.",
     )
+
+
+class SessionVideoTokenResponse(BaseModel):
+    provider: str = Field(..., description="Video provider mode.")
+    room_name: str = Field(..., description="Provider room name.")
+    participant_identity: str = Field(..., description="Participant identity used in provider token.")
+    participant_name: str = Field(..., description="Participant display name.")
+    ws_url: str = Field(..., description="LiveKit websocket URL.")
+    token: str = Field(..., description="Signed provider access token.")
+    expires_at: datetime = Field(..., description="Token expiration timestamp.")
+
+
+class SessionRecordingStartRequest(BaseModel):
+    provider_recording_id: str | None = Field(
+        None,
+        max_length=255,
+        description="Optional provider recording identifier when recording starts.",
+    )
+
+
+class SessionRecordingStopRequest(BaseModel):
+    status: str = Field(
+        default="ready",
+        max_length=32,
+        description="Final status after stop (usually ready or failed).",
+    )
+    blob_key: str | None = Field(
+        None,
+        max_length=1024,
+        description="Storage object key for the recording file.",
+    )
+    duration_seconds: int | None = Field(None, ge=0, description="Recording length in seconds.")
+    size_bytes: int | None = Field(None, ge=0, description="File size in bytes.")
+    provider_recording_id: str | None = Field(None, max_length=255, description="Provider recording id.")
+
+
+class SessionRecordingResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    tenant_id: UUID
+    classroom_id: UUID
+    session_id: UUID
+    created_by_id: UUID | None = None
+    provider: str
+    provider_room_name: str | None = None
+    provider_recording_id: str | None = None
+    status: str
+    blob_key: str | None = None
+    duration_seconds: int | None = None
+    size_bytes: int | None = None
+    retention_expires_at: datetime | None = None
+    deleted_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class SessionRecordingAccessResponse(BaseModel):
+    recording_id: UUID = Field(..., description="Session recording id.")
+    download_url: str = Field(..., description="Presigned download URL.")
+    expires_in_seconds: int = Field(..., ge=1, description="Link validity in seconds.")
 
 
 class SessionTextAssignment(BaseModel):
@@ -724,20 +798,79 @@ class ClassroomAssignmentResponse(BaseModel):
     instructions: str | None = None
     due_at: str | None = None
     lab_id: str | None = None
+    lab_launcher_id: str | None = None
+    curriculum_lab_title: str | None = None
     requires_lab: bool = False
     requires_assets: bool = False
     allow_edit_after_submit: bool = False
+    use_rubric: bool = True
+    rubric_template_id: str | None = None
+    rubric_snapshot: list | None = None
+    assignment_template_id: str | None = None
     session_id: str
     session_start: str
     session_end: str
     session_status: str
+    session_display_title: str | None = None
     submission_count: int = 0
+
+
+class CreateAssignmentFromTemplateRequest(BaseModel):
+    """Create or replace a session assignment from a curriculum assignment template."""
+
+    template_id: UUID = Field(..., description="Assignment template ID.")
+    due_at: str | None = Field(None, description="ISO 8601 due date for this instance.")
+    title: str | None = Field(None, max_length=200, description="Override template title.")
+    assignment_id: str | None = Field(
+        None,
+        description="Stable assignment id for idempotent upserts (defaults to new UUID).",
+    )
+    rubric_snapshot: list[dict] | None = Field(
+        None,
+        description=(
+            "When the template uses a rubric but has no linked rubric template, "
+            "provide criterion rows here (criterion_id, max_points, optional label)."
+        ),
+    )
+
+
+class RubricCriterionInput(BaseModel):
+    """Single row in a scoring rubric (optional breakdown alongside holistic score)."""
+
+    criterion_id: str = Field(..., min_length=1, max_length=80, description="Stable id, e.g. clarity.")
+    label: str | None = Field(None, max_length=200, description="Human-readable criterion name.")
+    max_points: int = Field(..., ge=1, le=1000, description="Maximum points for this row.")
+    points_awarded: int = Field(..., ge=0, description="Points earned (must be <= max_points).")
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class SubmissionGradeRequest(BaseModel):
     score: int = Field(..., ge=0, le=100, description="Numeric grade 0–100.")
     feedback: str | None = Field(None, max_length=1000, description="Optional feedback note.")
     assignment_id: str | None = Field(None, description="Assignment this grade applies to.")
+    rubric: list[RubricCriterionInput] | None = Field(
+        default=None,
+        description="Optional rubric rows; compliance is aggregated in analytics as points/max per submission.",
+    )
+
+    @model_validator(mode="after")
+    def _rubric_points_cap(self):
+        if self.rubric:
+            for row in self.rubric:
+                if row.points_awarded > row.max_points:
+                    raise ValueError(
+                        f"points_awarded ({row.points_awarded}) exceeds max_points ({row.max_points}) "
+                        f"for criterion {row.criterion_id!r}"
+                    )
+        return self
+
+
+class RubricCriterionScore(BaseModel):
+    criterion_id: str
+    label: str | None = None
+    max_points: int
+    points_awarded: int
 
 
 class SubmissionRecord(BaseModel):
@@ -754,3 +887,9 @@ class SubmissionRecord(BaseModel):
     grade: int | None = None
     feedback: str | None = None
     graded_at: str | None = None
+    rubric: list[RubricCriterionScore] | None = None
+    preview_image: str | None = Field(
+        default=None,
+        description="Optional data URL snapshot of lab work (not sent over realtime).",
+    )
+    lab_id: str | None = Field(default=None, description="Source lab identifier when provided.")

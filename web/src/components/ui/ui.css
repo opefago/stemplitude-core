@@ -55,15 +55,26 @@
   flex-direction: column;
   align-items: center;
   gap: var(--spacing-xs);
-  padding: var(--spacing-md);
+  padding: var(--spacing-sm, 0.75rem) var(--spacing-md, 1rem);
   background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
+  border: 2px solid color-mix(in srgb, var(--color-border) 75%, var(--color-secondary) 25%);
+  border-radius: 14px;
+  border-top: 3px solid var(--color-primary);
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--color-border) 88%, white);
   min-width: 0;
+}
+
+.stat-card--title-first {
+  align-items: stretch;
+  text-align: left;
 }
 
 .stat-card__icon {
   color: var(--color-text-secondary);
+}
+
+.stat-card--title-first .stat-card__icon {
+  align-self: flex-start;
 }
 
 .stat-card__icon svg {
@@ -77,10 +88,103 @@
   line-height: 1.2;
 }
 
+.stat-card--title-first .stat-card__value {
+  align-self: flex-start;
+  text-align: left;
+}
+
 .stat-card__label {
   font-size: 0.8125rem;
   color: var(--color-text-secondary);
   text-align: center;
+}
+
+.stat-card--title-first .stat-card__label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  text-align: left;
+  width: 100%;
+}
+
+.stat-card__hint {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  text-align: center;
+  width: 100%;
+  line-height: 1.35;
+}
+
+.stat-card--title-first .stat-card__hint {
+  text-align: left;
+}
+
+/* Kid primary / ghost buttons — same language as classroom CTAs */
+button.kid-button,
+a.kid-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-sm, 8px);
+  padding: var(--spacing-sm, 8px) var(--spacing-md, 16px);
+  background: var(--color-primary, #58cc02);
+  color: #fff;
+  border: 2px solid var(--color-primary-dark, #46a302);
+  border-radius: 14px;
+  font-size: 0.875rem;
+  font-weight: 800;
+  font-family: inherit;
+  box-shadow: 0 3px 0 var(--color-primary-dark, #46a302);
+  cursor: pointer;
+  text-decoration: none;
+  box-sizing: border-box;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+button.kid-button:hover:not(:disabled),
+a.kid-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 0 var(--color-primary-dark, #46a302);
+}
+
+button.kid-button:active:not(:disabled),
+a.kid-button:active {
+  transform: translateY(1px);
+  box-shadow: 0 1px 0 var(--color-primary-dark, #46a302);
+}
+
+button.kid-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  background: color-mix(in srgb, var(--color-border, #e2e8f0) 88%, white);
+  color: var(--color-text-secondary, #64748b);
+  border-color: var(--color-border, #e2e8f0);
+  box-shadow: none;
+  transform: none;
+}
+
+.kid-button--ghost {
+  background: var(--color-surface, #fff);
+  color: var(--color-text, #1e293b);
+  border: 2px solid var(--color-border, #e2e8f0);
+  box-shadow: 0 3px 0 var(--color-border, #e2e8f0);
+}
+
+.kid-button--ghost:hover:not(:disabled),
+a.kid-button--ghost:hover {
+  background: var(--color-surface-hover, #f8fafc);
+  border-color: #cbd5e1;
+  box-shadow: 0 4px 0 #cbd5e1;
+}
+
+.kid-button--ghost:active:not(:disabled),
+a.kid-button--ghost:active {
+  transform: translateY(1px);
+  box-shadow: 0 1px 0 var(--color-border, #e2e8f0);
 }
 
 /* Kid dropdown */
@@ -354,6 +458,11 @@
   padding: 20px;
 }
 
+/** Nested modal (e.g. calendar picker on top of another ModalDialog). */
+.ui-modal__backdrop--stack {
+  z-index: 1300;
+}
+
 .ui-modal__content {
   display: flex;
   flex-direction: column;
@@ -374,8 +483,11 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  padding: var(--spacing-lg, 24px);
-  padding-bottom: var(--spacing-md, 16px);
+  padding: var(--spacing-sm, 12px) var(--spacing-lg, 24px)
+    var(--spacing-xs, 8px);
+  border-bottom: 1px solid
+    color-mix(in srgb, var(--color-border, #e2e8f0) 88%, transparent);
+  box-shadow: 0 4px 10px -10px rgba(15, 23, 42, 0.45);
 }
 
 .ui-modal__title {
@@ -392,7 +504,8 @@
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
-  padding: 0 var(--spacing-lg, 24px) var(--spacing-lg, 24px);
+  padding: var(--spacing-sm, 12px) var(--spacing-lg, 24px)
+    var(--spacing-lg, 24px);
 }
 
 .ui-modal__content--with-footer .ui-modal__body {
@@ -401,12 +514,14 @@
 
 .ui-modal__footer {
   flex-shrink: 0;
-  padding: var(--spacing-md, 16px) var(--spacing-lg, 24px) var(--spacing-lg, 24px);
+  padding: var(--spacing-sm, 10px) var(--spacing-lg, 24px)
+    var(--spacing-sm, 12px);
   border-top: 1px solid color-mix(in srgb, var(--color-border, #e2e8f0) 85%, transparent);
 }
 
 .ui-modal__footer .ui-form-actions {
   padding-top: 0;
+  margin-top: 4px;
 }
 
 .ui-modal__close {
@@ -662,6 +777,13 @@
 }
 
 /* Shared app tooltip (Tippy.js theme wrapper) */
+.ui-tooltip__ref-anchor {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 100%;
+}
+
 .ui-tooltip__content {
   display: grid;
   gap: 6px;

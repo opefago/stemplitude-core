@@ -1,5 +1,6 @@
 import logging
 
+from workers.async_db import run_async_db
 from workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -9,17 +10,21 @@ logger = logging.getLogger(__name__)
 def process_stripe_webhook_task(event_type: str, event_data: dict):
     """Process Stripe webhook events asynchronously.
 
-    Handles: checkout.session.completed, invoice.paid, invoice.payment_failed,
-    customer.subscription.updated, customer.subscription.deleted
+    Handles: checkout.session.completed, checkout.session.async_payment_succeeded, invoice.paid,
+    invoice.payment_failed, customer.subscription.updated, customer.subscription.deleted
+
+    Platform checkout fulfillment matches the HTTP webhook handler (``subscriptions/router.py``).
     """
     logger.info("process_stripe_webhook_task started event_type=%s", event_type)
-    import asyncio
-    from app.database import async_session_factory
-
     async def _process():
-        async with async_session_factory() as db:
-            if event_type == "checkout.session.completed":
-                await _handle_checkout_completed(db, event_data)
+        import app.database as db_mod
+
+        async with db_mod.async_session_factory() as db:
+            if event_type in (
+                "checkout.session.completed",
+                "checkout.session.async_payment_succeeded",
+            ):
+                await _handle_checkout_session_for_fulfillment(db, event_data)
             elif event_type == "invoice.paid":
                 await _handle_invoice_paid(db, event_data)
             elif event_type == "invoice.payment_failed":
@@ -30,17 +35,27 @@ def process_stripe_webhook_task(event_type: str, event_data: dict):
                 await _handle_subscription_deleted(db, event_data)
 
     try:
-        asyncio.run(_process())
+        run_async_db(_process)
         logger.info("process_stripe_webhook_task completed event_type=%s", event_type)
     except Exception as exc:
         logger.error("process_stripe_webhook_task failed event_type=%s: %s", event_type, exc)
         raise
 
 
-async def _handle_checkout_completed(db, data):
-    """Provision subscription and license after successful checkout."""
-    logger.info("checkout.session.completed subscription lifecycle")
-    pass  # Handled synchronously in webhook endpoint for now
+async def _handle_checkout_session_for_fulfillment(db, data: dict):
+    """Provision tenant subscription + license (same logic as HTTP Stripe webhook)."""
+    from app.subscriptions.stripe_checkout_fulfillment import (
+        checkout_session_view_from_dict,
+        fulfill_checkout_session_webhook,
+    )
+
+    session = checkout_session_view_from_dict(data)
+    ok = await fulfill_checkout_session_webhook(db, session)
+    if ok:
+        await db.commit()
+        logger.info("checkout session fulfillment committed (async job)")
+    else:
+        await db.rollback()
 
 
 async def _handle_invoice_paid(db, data):
@@ -63,65 +78,77 @@ async def _handle_invoice_paid(db, data):
 
 
 async def _handle_payment_failed(db, data):
-    """Update subscription status on failed payment."""
+    """Sync subscription from Stripe after a failed invoice payment (includes period fields)."""
     from sqlalchemy import select
-    from app.subscriptions.models import Subscription
 
-    stripe_sub_id = data.get("subscription")
-    if not stripe_sub_id:
+    from app.subscriptions.license_sync import sync_license_from_subscription
+    from app.subscriptions.models import Subscription
+    from app.subscriptions.stripe_client import retrieve_subscription
+    from app.subscriptions.stripe_invoice_sync import stripe_invoice_subscription_id
+    from app.subscriptions.stripe_subscription_sync import sync_local_subscription_from_stripe_payload
+
+    sid = stripe_invoice_subscription_id(data)
+    if not sid:
         return
 
-    result = await db.execute(
-        select(Subscription).where(Subscription.stripe_subscription_id == stripe_sub_id)
-    )
+    stripe_sub = retrieve_subscription(sid)
+    if stripe_sub:
+        sub = await sync_local_subscription_from_stripe_payload(db, stripe_sub)
+        if sub:
+            await db.commit()
+        logger.warning("invoice.payment_failed synced from Stripe subscription_id=%s", sid)
+        return
+
+    result = await db.execute(select(Subscription).where(Subscription.stripe_subscription_id == sid))
     subscription = result.scalar_one_or_none()
     if subscription:
         subscription.status = "past_due"
+        await sync_license_from_subscription(db, subscription)
         await db.commit()
-        logger.warning("invoice.payment_failed billing attempt failed subscription_id=%s", stripe_sub_id)
+        logger.warning("invoice.payment_failed (retrieve failed) marked past_due subscription_id=%s", sid)
 
 
 async def _handle_subscription_updated(db, data):
-    """Sync subscription status changes from Stripe."""
-    from sqlalchemy import select
-    from app.subscriptions.models import Subscription
+    """Sync subscription row + license from Stripe (status, billing period, trial)."""
+    from app.subscriptions.stripe_subscription_sync import sync_local_subscription_from_stripe_payload
 
     stripe_sub_id = data.get("id")
     if not stripe_sub_id:
         return
 
-    result = await db.execute(
-        select(Subscription).where(Subscription.stripe_subscription_id == stripe_sub_id)
-    )
-    subscription = result.scalar_one_or_none()
-    if subscription:
-        stripe_status = data.get("status", "")
-        status_map = {
-            "active": "active",
-            "trialing": "trialing",
-            "past_due": "past_due",
-            "canceled": "canceled",
-            "unpaid": "past_due",
-        }
-        subscription.status = status_map.get(stripe_status, subscription.status)
+    sub = await sync_local_subscription_from_stripe_payload(db, data)
+    if sub:
         await db.commit()
-        logger.info("customer.subscription.updated subscription lifecycle subscription_id=%s status=%s", stripe_sub_id, subscription.status)
+        logger.info(
+            "customer.subscription.updated synced local subscription_id=%s status=%s",
+            stripe_sub_id,
+            sub.status,
+        )
+    else:
+        logger.warning(
+            "customer.subscription.updated: no local row for stripe subscription_id=%s",
+            stripe_sub_id,
+        )
 
 
 async def _handle_subscription_deleted(db, data):
-    """Mark subscription as expired when Stripe deletes it."""
-    from sqlalchemy import select
-    from app.subscriptions.models import Subscription
+    """Apply final Stripe subscription payload (usually canceled) and refresh license."""
+    from app.subscriptions.stripe_subscription_sync import sync_local_subscription_from_stripe_payload
 
     stripe_sub_id = data.get("id")
     if not stripe_sub_id:
         return
 
-    result = await db.execute(
-        select(Subscription).where(Subscription.stripe_subscription_id == stripe_sub_id)
-    )
-    subscription = result.scalar_one_or_none()
-    if subscription:
-        subscription.status = "expired"
+    sub = await sync_local_subscription_from_stripe_payload(db, data)
+    if sub:
         await db.commit()
-        logger.info("customer.subscription.deleted subscription lifecycle subscription_id=%s expired", stripe_sub_id)
+        logger.info(
+            "customer.subscription.deleted synced subscription_id=%s status=%s",
+            stripe_sub_id,
+            sub.status,
+        )
+    else:
+        logger.warning(
+            "customer.subscription.deleted: no local row for stripe subscription_id=%s",
+            stripe_sub_id,
+        )

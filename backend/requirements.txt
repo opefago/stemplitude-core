@@ -24,6 +24,7 @@ python-jose[cryptography]>=3.3.0
 pydantic>=2.10.0
 pydantic-settings>=2.7.0
 email-validator>=2.2.0
+tldextract>=5.1.0
 
 # Stripe
 stripe>=11.4.0
@@ -35,6 +36,7 @@ botocore>=1.35.0
 # Email Providers
 postmarker>=1.0
 requests>=2.32.0
+svix>=1.40.0
 
 # Feature Flags
 flagsmith>=3.7.0
@@ -59,6 +61,7 @@ typer>=0.15.0
 
 # Utilities
 python-dotenv>=1.0.1
+python-dateutil>=2.9.0
 
 # Yjs collaborative sync
 pycrdt>=0.12.0

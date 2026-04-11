@@ -300,6 +300,18 @@ class StudentProfile(BaseModel):
         default="student",
         description="Identity type (always 'student')",
     )
+    tenant_id: UUID | None = Field(
+        default=None,
+        description="Current tenant ID for tenant-scoped student sessions",
+    )
+    tenant_slug: str | None = Field(
+        default=None,
+        description="Current tenant slug for tenant-scoped student sessions",
+    )
+    tenant_name: str | None = Field(
+        default=None,
+        description="Current tenant display name for tenant-scoped student sessions",
+    )
     resolved_ui_mode: str | None = Field(
         None,
         description="Resolved UI mode: kids, explorer, or pro (from student override > tenant setting > age default)",

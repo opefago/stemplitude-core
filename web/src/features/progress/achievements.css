@@ -69,6 +69,36 @@
 .achievements__stats-section   { margin-bottom: var(--spacing-xl); }
 .achievements__streak-section  { margin-bottom: var(--spacing-xl); }
 .achievements__badges-section  { margin-bottom: var(--spacing-xl); }
+
+.achievements__guardian-filters {
+  margin: calc(-1 * var(--spacing-xs)) 0 var(--spacing-md);
+}
+
+.achievements__filter-label {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.achievements__filter-text {
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
+}
+
+.achievements__filter-select {
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 2px solid var(--color-border, #e5e5e5);
+  font-size: 0.875rem;
+  font-weight: 700;
+  background: var(--color-surface, #fff);
+  color: var(--color-text);
+  min-width: 200px;
+}
 .achievements__xp-section      { margin-bottom: var(--spacing-xl); }
 .achievements__shoutouts-section { margin-bottom: var(--spacing-xl); }
 .achievements__hof-section       { margin-bottom: var(--spacing-xl); }

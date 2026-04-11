@@ -210,6 +210,7 @@ export interface RolePermissions {
 }
 
 export interface GlobalRole {
+  id: string;
   slug: string;
   name: string;
   is_system: boolean;
@@ -239,6 +240,63 @@ export async function getRoleAssignments(): Promise<{ assignments: UserAssignmen
   return apiFetch<{ assignments: UserAssignment[] }>("/platform/roles/users");
 }
 
+export interface GlobalPermission {
+  id: string;
+  resource: string;
+  action: string;
+  description: string | null;
+}
+
+export async function getGlobalPermissions(): Promise<{ permissions: GlobalPermission[] }> {
+  return apiFetch<{ permissions: GlobalPermission[] }>("/platform/roles/permissions");
+}
+
+export async function createGlobalRole(payload: {
+  name: string;
+  slug: string;
+}): Promise<{ id: string; name: string; slug: string }> {
+  return apiFetch("/platform/roles", {
+    method: "POST",
+    body: payload,
+  });
+}
+
+export async function updateGlobalRole(
+  roleId: string,
+  payload: { name?: string; is_active?: boolean }
+): Promise<{ id: string; name: string; slug: string; is_active: boolean }> {
+  return apiFetch(`/platform/roles/${encodeURIComponent(roleId)}`, {
+    method: "PATCH",
+    body: payload,
+  });
+}
+
+export async function deleteGlobalRole(roleId: string): Promise<{ ok: boolean }> {
+  return apiFetch(`/platform/roles/${encodeURIComponent(roleId)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function assignGlobalRolePermissions(
+  roleId: string,
+  permissionIds: string[]
+): Promise<{ ok: boolean; added: number }> {
+  return apiFetch(`/platform/roles/${encodeURIComponent(roleId)}/permissions`, {
+    method: "POST",
+    body: { permission_ids: permissionIds },
+  });
+}
+
+export async function revokeGlobalRolePermission(
+  roleId: string,
+  permissionId: string
+): Promise<{ ok: boolean }> {
+  return apiFetch(
+    `/platform/roles/${encodeURIComponent(roleId)}/permissions/${encodeURIComponent(permissionId)}`,
+    { method: "DELETE" }
+  );
+}
+
 export async function assignRole(
   email: string,
   role_slug: string
@@ -255,6 +313,35 @@ export async function removeRole(
   return apiFetch("/platform/roles/remove", {
     method: "POST",
     body: { email },
+  });
+}
+
+export interface PlatformEmailProvider {
+  id: string;
+  provider: string;
+  is_active: boolean;
+  priority: number;
+  config: Record<string, unknown>;
+  last_error: string | null;
+  last_used_at: string | null;
+  updated_at: string;
+}
+
+export async function getPlatformEmailProviders(): Promise<{ providers: PlatformEmailProvider[] }> {
+  return apiFetch<{ providers: PlatformEmailProvider[] }>("/platform/email/providers");
+}
+
+export async function updatePlatformEmailProvider(
+  providerId: string,
+  payload: {
+    is_active?: boolean;
+    priority?: number;
+    config?: Record<string, unknown>;
+  }
+): Promise<PlatformEmailProvider> {
+  return apiFetch(`/platform/email/providers/${encodeURIComponent(providerId)}`, {
+    method: "PATCH",
+    body: payload,
   });
 }
 
@@ -330,7 +417,12 @@ export interface JobType {
 
 export interface ActiveTask {
   id: string;
+  /** Celery task name (module path or registered name). */
   name: string;
+  /** Registry description or humanized name for UI. */
+  display_name?: string | null;
+  /** Job registry key when known (e.g. ``email.send``). */
+  job_type?: string | null;
   worker: string;
   started_at?: number;
 }
@@ -344,12 +436,36 @@ export interface JobStats {
   message?: string | null;
 }
 
+/** Celery extended metadata (``result_extended``): worker, kwargs snapshot, traceback, … */
+export interface TaskResultDetails {
+  worker?: string;
+  queue?: string;
+  retries?: number;
+  parent_id?: string;
+  root_id?: string;
+  traceback?: string;
+  args?: unknown;
+  parameters?: Record<string, unknown>;
+}
+
 export interface TaskResult {
   task_id: string;
   status: string;
   result: unknown;
   date_done: string | null;
   task_name: string | null;
+  job_type?: string | null;
+  display_name?: string | null;
+  /** Populated when the result backend stores extended task meta (see workers ``result_extended``). */
+  details?: TaskResultDetails | null;
+}
+
+export interface RetryJobResponse {
+  success: boolean;
+  message?: string;
+  task_id?: string;
+  job_type?: string | null;
+  error?: string;
 }
 
 export async function getJobTypes(): Promise<{ job_types: JobType[] }> {
@@ -368,12 +484,13 @@ export async function getRecentJobResults(
   );
 }
 
-export async function retryJob(
-  taskId: string
-): Promise<{ success: boolean; message?: string; error?: string }> {
-  return apiFetch(`/platform/jobs/${encodeURIComponent(taskId)}/retry`, {
-    method: "POST",
-  });
+export async function retryJob(taskId: string): Promise<RetryJobResponse> {
+  return apiFetch<RetryJobResponse>(
+    `/platform/jobs/${encodeURIComponent(taskId)}/retry`,
+    {
+      method: "POST",
+    }
+  );
 }
 
 export async function cancelJob(
@@ -443,4 +560,45 @@ export async function impersonateTenant(
     method: "POST",
     body: { grant_id: grantId },
   });
+}
+
+export interface PlatformMemberBillingDefaultFeeResponse {
+  member_billing_default_application_fee_bps: number;
+}
+
+export async function getPlatformMemberBillingDefaultFee(): Promise<PlatformMemberBillingDefaultFeeResponse> {
+  return apiFetch<PlatformMemberBillingDefaultFeeResponse>(
+    "/platform/member-billing/platform-application-fee"
+  );
+}
+
+export async function updatePlatformMemberBillingDefaultFee(
+  member_billing_default_application_fee_bps: number
+): Promise<{ ok: boolean; member_billing_default_application_fee_bps: number }> {
+  return apiFetch("/platform/member-billing/platform-application-fee", {
+    method: "PATCH",
+    body: { member_billing_default_application_fee_bps },
+  });
+}
+
+/** Per-tenant Stripe Connect application fee (100 bps = 1%). */
+export async function updateTenantMemberBillingFee(
+  tenantId: string,
+  body: {
+    member_billing_application_fee_bps?: number;
+    member_billing_application_fee_use_platform_default?: boolean;
+  }
+): Promise<{
+  ok: boolean;
+  tenant_id: string;
+  member_billing_application_fee_bps: number;
+  member_billing_application_fee_use_platform_default: boolean;
+}> {
+  return apiFetch(
+    `/platform/tenants/${encodeURIComponent(tenantId)}/member-billing-fee`,
+    {
+      method: "PATCH",
+      body,
+    }
+  );
 }

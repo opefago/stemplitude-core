@@ -221,6 +221,23 @@ class TestCapabilityCheck:
         assert result.allowed is False
         assert "disabled by your organization" in result.reason
 
+    async def test_lab_disabled_by_org_game_maker(self, engine, identity, tenant_ctx, mock_repo, fake_redis):
+        """Org toggle applies to access_game_maker (not only keys ending in _lab)."""
+        cap = _make_capability("access_game_maker")
+        rule = _make_rule(required_feature="access_game_maker")
+        mock_repo.get_capability_with_rules.return_value = (cap, [rule])
+
+        license_ = MagicMock()
+        license_.id = uuid4()
+        mock_repo.get_active_license.return_value = license_
+        mock_repo.has_license_feature.return_value = True
+        mock_repo.is_lab_disabled.return_value = True
+
+        result = await engine.can(identity, tenant_ctx, "access_game_maker")
+
+        assert result.allowed is False
+        assert "disabled by your organization" in result.reason
+
 
 class TestLicenseResolution:
     async def test_direct_license(self, engine, mock_repo):

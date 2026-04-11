@@ -1,5 +1,6 @@
 export { MembersPage } from "./MembersPage";
 export { CurriculumPage } from "./CurriculumPage";
+export { CurriculumAuthoringPage } from "./CurriculumAuthoringPage";
 export { ProgramsPage } from "./ProgramsPage";
 export { IntegrationsPage } from "./IntegrationsPage";
 export { SuperAdminDashboard } from "./SuperAdminDashboard";

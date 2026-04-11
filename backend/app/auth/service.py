@@ -2,6 +2,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -14,7 +15,8 @@ from app.core.security import (
     hash_password,
     verify_password,
 )
-from app.tenants.models import SupportAccessGrant
+from app.tenants.franchise_governance import brand_settings_for_child_ui
+from app.tenants.models import SupportAccessGrant, Tenant, TenantHierarchy
 from app.users.models import User
 
 from app.students.ui_mode import resolve_ui_mode
@@ -37,6 +39,29 @@ from .schemas import (
 logger = logging.getLogger(__name__)
 
 BLACKLIST_PREFIX = "auth:blacklist:jti:"
+
+
+async def merge_franchise_brand_tenant_settings(db: AsyncSession, tenant) -> dict | None:
+    """Apply parent/hybrid UI brand from franchise policy to ``tenant.settings`` for resolution."""
+    raw = tenant.settings if isinstance(tenant.settings, dict) else {}
+    result = await db.execute(
+        select(TenantHierarchy).where(
+            TenantHierarchy.child_tenant_id == tenant.id,
+            TenantHierarchy.is_active == True,
+        )
+    )
+    link = result.scalar_one_or_none()
+    if not link:
+        return raw or None
+    gov_mode = getattr(link, "governance_mode", None) or "child_managed"
+    parent_result = await db.execute(select(Tenant).where(Tenant.id == link.parent_tenant_id))
+    parent = parent_result.scalar_one_or_none()
+    parent_settings = parent.settings if parent and isinstance(parent.settings, dict) else None
+    return brand_settings_for_child_ui(
+        governance_mode=gov_mode,
+        child_settings=raw,
+        parent_settings=parent_settings,
+    )
 SESSIONS_PREFIX = "auth:sessions:"
 
 
@@ -235,6 +260,10 @@ class AuthService:
             tenant_id=tenant.id,
             role=membership.role,
             global_account=student.global_account,
+            extra_claims={
+                "tenant_slug": tenant.slug,
+                "tenant_name": tenant.name,
+            },
         )
         logger.info("Student tenant login student_id=%s tenant=%s", student.id, tenant.slug)
         return tokens
@@ -265,18 +294,71 @@ class AuthService:
     # Onboarding (register + create organization)
     # ------------------------------------------------------------------
 
-    async def onboard(self, data: OnboardRequest) -> OnboardResponse:
+    async def onboard(
+        self, data: OnboardRequest, *, client_ip: str | None = None
+    ) -> OnboardResponse:
         """Create user + organization atomically. The user becomes the owner."""
         import secrets
-        import string
 
         from sqlalchemy import select
-        from app.roles.models import Permission, Role, RolePermission
-        from app.tenants.models import Membership, Tenant
 
-        existing = await self.repo.get_user_by_email(data.email)
+        from app.plans.repository import PlanRepository
+        from app.roles.models import Permission, Role, RolePermission
+        from app.subscriptions.license_sync import sync_license_from_subscription
+        from app.subscriptions.models import Subscription
+        from app.tenants.models import Membership, Tenant
+        from app.trials.guardrails import (
+            assert_onboard_rate_limits,
+            disposable_email_blocked,
+            normalize_email,
+            record_trial_grant,
+            trial_email_already_used,
+            validate_onboard_request_shape,
+        )
+
+        validate_onboard_request_shape(
+            str(data.email), data.first_name, data.last_name
+        )
+        email_norm = normalize_email(str(data.email))
+        trial_plan = None
+        trial_plan_slug: str | None = None
+
+        if settings.TRIAL_ENABLED:
+            if disposable_email_blocked(email_norm):
+                raise AuthError(
+                    "Disposable email addresses are not allowed for sign-up.",
+                    status_code=400,
+                )
+            if await trial_email_already_used(self.db, email_norm):
+                logger.warning(
+                    "Onboard rejected, trial email reused email=%s",
+                    mask_email(email_norm),
+                )
+                raise AuthError(
+                    "A free trial has already been used with this email address.",
+                    status_code=409,
+                )
+            plan_repo = PlanRepository(self.db)
+            org_t = (data.organization.type or "center").strip().lower()
+            if org_t in ("parent", "homeschool"):
+                trial_plan_slug = settings.TRIAL_PLAN_SLUG_PARENT
+            else:
+                trial_plan_slug = settings.TRIAL_PLAN_SLUG_CENTER
+            trial_plan = await plan_repo.get_by_slug(trial_plan_slug)
+            if not trial_plan or not trial_plan.is_active:
+                logger.error(
+                    "Trial plan missing or inactive slug=%s",
+                    trial_plan_slug,
+                )
+                raise AuthError(
+                    "Sign-up is temporarily unavailable. Please try again later.",
+                    status_code=503,
+                )
+            await assert_onboard_rate_limits(client_ip, email_norm)
+
+        existing = await self.repo.get_user_by_email(email_norm)
         if existing:
-            logger.warning("Onboard rejected, email exists email=%s", mask_email(data.email))
+            logger.warning("Onboard rejected, email exists email=%s", mask_email(email_norm))
             raise AuthError("Email already registered", status_code=400)
 
         existing_slug = await self.db.execute(
@@ -288,7 +370,7 @@ class AuthService:
         code = self._generate_org_code(data.organization.slug)
 
         user = User(
-            email=data.email,
+            email=email_norm,
             password_hash=hash_password(data.password),
             first_name=data.first_name,
             last_name=data.last_name,
@@ -335,6 +417,45 @@ class AuthService:
             role_id=owner_role.id,
         ))
         await self.db.flush()
+
+        if settings.TRIAL_ENABLED:
+            if not trial_plan or not trial_plan.is_active:
+                logger.error(
+                    "Trial plan disappeared mid-onboard slug=%s",
+                    trial_plan_slug,
+                )
+                raise AuthError(
+                    "Sign-up is temporarily unavailable. Please try again later.",
+                    status_code=503,
+                )
+            days = (
+                settings.TRIAL_DURATION_DAYS
+                if settings.TRIAL_DURATION_DAYS > 0
+                else (trial_plan.trial_days or 14)
+            )
+            now = datetime.now(timezone.utc)
+            trial_end = now + timedelta(days=days)
+            trial_sub = Subscription(
+                tenant_id=tenant.id,
+                user_id=user.id,
+                plan_id=trial_plan.id,
+                status="trialing",
+                provider="trial",
+                provider_subscription_id=f"trial:{tenant.id}",
+                current_period_start=now,
+                current_period_end=trial_end,
+                trial_end=trial_end,
+            )
+            self.db.add(trial_sub)
+            await self.db.flush()
+            await sync_license_from_subscription(self.db, trial_sub)
+            await record_trial_grant(
+                self.db,
+                email_normalized=email_norm,
+                user_id=user.id,
+                tenant_id=tenant.id,
+                signup_ip=client_ip,
+            )
 
         logger.info(
             "Onboard complete user_id=%s tenant_id=%s slug=%s",
@@ -434,7 +555,14 @@ class AuthService:
                 if not is_super_admin:
                     extra["is_super_admin"] = True
         else:
-            extra = None
+            extra = {}
+            membership_row = await self.repo.get_first_student_membership(sub_uuid)
+            if membership_row:
+                membership, tenant = membership_row
+                extra["tenant_id"] = str(tenant.id)
+                extra["tenant_slug"] = tenant.slug
+                extra["tenant_name"] = tenant.name
+                extra["role"] = membership.role
         tokens = await self._issue_tokens(sub=sub_uuid, sub_type=sub_type, extra_claims=extra)
         logger.info("Token refreshed sub=%s sub_type=%s", sub, sub_type)
         return tokens
@@ -493,6 +621,12 @@ class AuthService:
 
             if tenant_id:
                 membership = await self.repo.get_active_membership(user.id, tenant_id)
+                if membership and membership.role_id is None:
+                    from app.tenants.service import TenantService
+
+                    ts = TenantService(self.db)
+                    await ts.ensure_parent_membership_role_if_linked(user.id, tenant_id)
+                    membership = await self.repo.get_active_membership(user.id, tenant_id)
                 if membership and membership.role_id:
                     from sqlalchemy import select
                     from app.roles.models import Role
@@ -542,15 +676,37 @@ class AuthService:
 
             resolved_mode = None
             mode_source = None
+            resolved_tenant_id = None
+            resolved_tenant_slug = None
+            resolved_tenant_name = None
             if tenant_id:
                 membership = await self.repo.get_student_membership(identity_id, tenant_id)
                 tenant = await self.repo.get_tenant_by_id(tenant_id)
-                tenant_settings = tenant.settings if tenant else None
+                tenant_settings = (
+                    await merge_franchise_brand_tenant_settings(self.db, tenant) if tenant else None
+                )
+                if tenant:
+                    resolved_tenant_id = tenant.id
+                    resolved_tenant_slug = tenant.slug
+                    resolved_tenant_name = tenant.name
                 resolved_mode, mode_source = resolve_ui_mode(
                     student_dob=student.date_of_birth,
                     membership_override=membership.ui_mode_override if membership else None,
                     tenant_settings=tenant_settings,
                 )
+            else:
+                membership_row = await self.repo.get_first_student_membership(identity_id)
+                if membership_row:
+                    membership, tenant = membership_row
+                    resolved_tenant_id = tenant.id
+                    resolved_tenant_slug = tenant.slug
+                    resolved_tenant_name = tenant.name
+                    tenant_settings = await merge_franchise_brand_tenant_settings(self.db, tenant)
+                    resolved_mode, mode_source = resolve_ui_mode(
+                        student_dob=student.date_of_birth,
+                        membership_override=membership.ui_mode_override if membership else None,
+                        tenant_settings=tenant_settings,
+                    )
 
             return StudentProfile(
                 id=student.id,
@@ -560,6 +716,9 @@ class AuthService:
                 display_name=student.display_name,
                 global_account=student.global_account,
                 is_active=student.is_active,
+                tenant_id=resolved_tenant_id,
+                tenant_slug=resolved_tenant_slug,
+                tenant_name=resolved_tenant_name,
                 resolved_ui_mode=resolved_mode,
                 ui_mode_source=mode_source,
             )

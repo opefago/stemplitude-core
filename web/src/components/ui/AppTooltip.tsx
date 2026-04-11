@@ -1,4 +1,4 @@
-import { type ReactElement, type ReactNode } from "react";
+import { type ReactElement, type ReactNode, version as reactVersion } from "react";
 import Tippy, { type TippyProps } from "@tippyjs/react";
 import "tippy.js/dist/tippy.css";
 import "./ui.css";
@@ -14,6 +14,7 @@ export interface AppTooltipProps {
   theme?: AppTooltipTheme;
   placement?: TippyProps["placement"];
   disabled?: boolean;
+  forceCustomInReact19?: boolean;
   tippyProps?: Partial<TippyProps>;
 }
 
@@ -26,9 +27,11 @@ export function AppTooltip({
   theme = "cartoon",
   placement = "bottom",
   disabled = false,
+  forceCustomInReact19 = false,
   tippyProps,
 }: AppTooltipProps) {
   const hasStructuredContent = Boolean(title || description || media);
+  const isReact19Plus = Number.parseInt(reactVersion.split(".")[0] ?? "0", 10) >= 19;
   const resolvedContent =
     content ??
     (hasStructuredContent ? (
@@ -42,7 +45,18 @@ export function AppTooltip({
     ) : null);
 
   if (disabled || !resolvedContent) return children;
+  if (isReact19Plus && !forceCustomInReact19) {
+    const nativeTitle = [title, description].filter(Boolean).join(" - ");
+    return (
+      <span className="ui-tooltip__ref-anchor" title={nativeTitle || undefined}>
+        {children}
+      </span>
+    );
+  }
 
+  /* Tippy must attach ref to a host DOM node. In React 19, refs on composite
+   * children (e.g. react-router Link) are regular props — @tippyjs/react still
+   * reads element.ref internally, which triggers a deprecation warning. */
   return (
     <Tippy
       content={resolvedContent}
@@ -57,7 +71,7 @@ export function AppTooltip({
       theme={theme === "cartoon" ? "ui-kid-tooltip" : "ui-light-tooltip"}
       {...tippyProps}
     >
-      {children}
+      <span className="ui-tooltip__ref-anchor">{children}</span>
     </Tippy>
   );
 }

@@ -1,4 +1,5 @@
-import { apiFetch } from "./client";
+import { apiFetch, browserCalendarTimeZone } from "./client";
+import type { Paginated } from "./pagination";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -31,6 +32,14 @@ export interface XPTransaction {
 export interface Streak {
   current_streak: number;
   best_streak: number;
+  last_activity_date?: string | null;
+  /** Local week Sun–Sat; active = part of current consecutive streak, not all activity. */
+  seven_day_summary?: Array<{
+    date: string;
+    weekday: string;
+    active: boolean;
+    is_today: boolean;
+  }>;
 }
 
 export interface GamificationStats {
@@ -88,20 +97,45 @@ export interface ShoutoutListResponse {
 
 // ── API functions ─────────────────────────────────────────────────────────────
 
+function calendarTzQueryParam(): string {
+  const tz = browserCalendarTimeZone();
+  return tz ? encodeURIComponent(tz) : "UTC";
+}
+
 export function getMyGamificationProfile(): Promise<GamificationProfile> {
-  return apiFetch<GamificationProfile>("/gamification/me");
+  const tz = calendarTzQueryParam();
+  return apiFetch<GamificationProfile>(`/gamification/me?calendar_tz=${tz}`);
 }
 
 export function getStudentGamificationProfile(studentId: string): Promise<GamificationProfile> {
-  return apiFetch<GamificationProfile>(`/gamification/students/${studentId}`);
+  const tz = calendarTzQueryParam();
+  return apiFetch<GamificationProfile>(
+    `/gamification/students/${studentId}?calendar_tz=${tz}`,
+  );
 }
 
 export function getLeaderboard(limit = 10): Promise<LeaderboardResponse> {
   return apiFetch<LeaderboardResponse>(`/gamification/leaderboard?limit=${limit}`);
 }
 
-export function listBadges(): Promise<BadgeDefinition[]> {
-  return apiFetch<BadgeDefinition[]>("/gamification/badges");
+/** All badge definitions (follows pagination until `total` is reached). */
+export async function listBadges(): Promise<BadgeDefinition[]> {
+  const limit = 100;
+  let skip = 0;
+  const all: BadgeDefinition[] = [];
+  for (;;) {
+    const q = new URLSearchParams({
+      skip: String(skip),
+      limit: String(limit),
+    });
+    const page = await apiFetch<Paginated<BadgeDefinition>>(
+      `/gamification/badges?${q}`,
+    );
+    all.push(...page.items);
+    if (page.items.length < limit || all.length >= page.total) break;
+    skip += limit;
+  }
+  return all;
 }
 
 export function listShoutouts(params?: {
@@ -125,7 +159,7 @@ export function createShoutout(data: {
 }): Promise<ShoutoutItem> {
   return apiFetch<ShoutoutItem>("/gamification/shoutouts", {
     method: "POST",
-    body: JSON.stringify(data),
+    body: data,
   });
 }
 
@@ -135,7 +169,7 @@ export function awardXP(data: {
   reason: string;
   source?: string;
 }): Promise<{ detail: string }> {
-  return apiFetch("/gamification/xp", { method: "POST", body: JSON.stringify(data) });
+  return apiFetch("/gamification/xp", { method: "POST", body: data });
 }
 
 export function awardBadge(data: {
@@ -144,7 +178,18 @@ export function awardBadge(data: {
 }): Promise<StudentBadge> {
   return apiFetch<StudentBadge>("/gamification/badges/award", {
     method: "POST",
-    body: JSON.stringify(data),
+    body: data,
+  });
+}
+
+/** Removes the badge award row; does not subtract XP already granted for that badge. */
+export function revokeBadge(data: {
+  student_id: string;
+  badge_slug: string;
+}): Promise<{ detail: string }> {
+  return apiFetch<{ detail: string }>("/gamification/badges/revoke", {
+    method: "POST",
+    body: data,
   });
 }
 
@@ -185,8 +230,181 @@ export function getHallOfFame(limitWeeks = 8): Promise<HallOfFameResponse> {
 export function crownWeeklyWinners(topN = 3): Promise<WeeklyWinner[]> {
   return apiFetch<WeeklyWinner[]>("/gamification/weekly-winners/crown", {
     method: "POST",
-    body: JSON.stringify({ top_n: topN }),
+    body: { top_n: topN },
   });
+}
+
+// ── Tenant config + goal builder primitives ──────────────────────────────────
+
+export interface TenantGamificationConfig {
+  mode: "academic" | "light" | "balanced" | "full";
+  enabled: boolean;
+  enabled_labs: string[];
+  max_points_per_event: number;
+  allow_badges: boolean;
+  allow_live_recognition: boolean;
+  allow_leaderboard: boolean;
+  allow_streaks: boolean;
+}
+
+export interface GoalEventMap {
+  events: string[];
+  context_match: Record<string, string | number | boolean>;
+}
+
+export interface GoalReward {
+  type: "points" | "reward";
+  value?: number;
+  reward_kind?: "badge" | "hi-five" | "sticker" | "custom";
+  badge_slug?: string;
+  icon?: string;
+}
+
+export interface GamificationGoal {
+  id: string;
+  tenant_id: string;
+  lab_type: string;
+  name: string;
+  description: string;
+  is_active: boolean;
+  event_map: GoalEventMap;
+  conditions: Array<string | Record<string, unknown>>;
+  reward: GoalReward;
+  created_by_id: string | null;
+  updated_by_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export function getTenantGamificationConfig(): Promise<TenantGamificationConfig> {
+  return apiFetch<TenantGamificationConfig>("/gamification/config");
+}
+
+export function updateTenantGamificationConfig(
+  patch: Partial<TenantGamificationConfig>,
+): Promise<TenantGamificationConfig> {
+  return apiFetch<TenantGamificationConfig>("/gamification/config", {
+    method: "PATCH",
+    body: patch,
+  });
+}
+
+export function listGamificationGoals(params?: {
+  lab_type?: string;
+  is_active?: boolean;
+}): Promise<GamificationGoal[]> {
+  const q = new URLSearchParams();
+  if (params?.lab_type) q.set("lab_type", params.lab_type);
+  if (typeof params?.is_active === "boolean") q.set("is_active", String(params.is_active));
+  const suffix = q.toString() ? `?${q.toString()}` : "";
+  return apiFetch<GamificationGoal[]>(`/gamification/goals${suffix}`);
+}
+
+export function createGamificationGoal(payload: {
+  lab_type: string;
+  name: string;
+  description?: string;
+  is_active?: boolean;
+  event_map: GoalEventMap;
+  conditions?: Array<string | Record<string, unknown>>;
+  reward: GoalReward;
+}): Promise<GamificationGoal> {
+  return apiFetch<GamificationGoal>("/gamification/goals", {
+    method: "POST",
+    body: payload,
+  });
+}
+
+export function updateGamificationGoal(
+  goalId: string,
+  patch: Partial<{
+    name: string;
+    description: string;
+    is_active: boolean;
+    event_map: GoalEventMap;
+    conditions: string[];
+    reward: GoalReward;
+  }>,
+): Promise<GamificationGoal> {
+  return apiFetch<GamificationGoal>(`/gamification/goals/${goalId}`, {
+    method: "PATCH",
+    body: patch,
+  });
+}
+
+export function deleteGamificationGoal(goalId: string): Promise<void> {
+  return apiFetch<void>(`/gamification/goals/${goalId}`, { method: "DELETE" });
+}
+
+export interface LabEventSimulationResult {
+  processed: boolean;
+  points_awarded_total: number;
+  matched_goals: Array<{
+    goal_id: string;
+    goal_name: string;
+    reward_type: string;
+    points_awarded: number;
+    reward_kind?: string | null;
+  }>;
+}
+
+export function simulateLabEvent(payload: {
+  event_type: string;
+  lab_id: string;
+  lab_type: string;
+  context?: Record<string, unknown>;
+  timestamp?: string;
+}): Promise<LabEventSimulationResult> {
+  return apiFetch<LabEventSimulationResult>("/gamification/events/ingest", {
+    method: "POST",
+    body: {
+      ...payload,
+      context: payload.context ?? {},
+      timestamp: payload.timestamp ?? new Date().toISOString(),
+      dry_run: true,
+    },
+  });
+}
+
+const labEventCooldowns = new Map<string, number>();
+
+export async function emitLabEvent(payload: {
+  event_type: string;
+  lab_id: string;
+  lab_type: string;
+  context?: Record<string, unknown>;
+  timestamp?: string;
+}): Promise<void> {
+  try {
+    await apiFetch("/gamification/events/ingest", {
+      method: "POST",
+      body: {
+        ...payload,
+        context: payload.context ?? {},
+        timestamp: payload.timestamp ?? new Date().toISOString(),
+      },
+    });
+  } catch {
+    // Do not break lab UX when telemetry/reward event submission fails.
+  }
+}
+
+export function emitLabEventThrottled(
+  payload: {
+    event_type: string;
+    lab_id: string;
+    lab_type: string;
+    context?: Record<string, unknown>;
+    timestamp?: string;
+  },
+  cooldownMs = 2500,
+): void {
+  const key = `${payload.lab_type}:${payload.lab_id}:${payload.event_type}`;
+  const now = Date.now();
+  const last = labEventCooldowns.get(key) ?? 0;
+  if (now - last < cooldownMs) return;
+  labEventCooldowns.set(key, now);
+  void emitLabEvent(payload);
 }
 
 /** localStorage key for "has this student seen this week's winner announcement" */

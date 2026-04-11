@@ -13,7 +13,7 @@ type BottomNavTab = {
 const TABS = [
   { path: "/app", label: "Home", icon: House },
   { path: "/app/labs", label: "Labs", iconSrc: "/assets/cartoon-icons/telescope.png" },
-  { path: "/app/achievements", label: "Badges", icon: Trophy },
+  { path: "/app/achievements", label: "Stickers", icon: Trophy },
   { path: "/app/profile", label: "Me", icon: User },
 ] as const satisfies readonly BottomNavTab[];
 

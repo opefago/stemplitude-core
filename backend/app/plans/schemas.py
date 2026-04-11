@@ -246,6 +246,14 @@ class PlanResponse(PlanBase):
 
     id: UUID = Field(..., description="Unique identifier of the plan.")
     created_at: datetime = Field(..., description="When the plan was created.")
+    stripe_checkout_monthly_ready: bool = Field(
+        False,
+        description="True if Stripe checkout can start for monthly billing (plan price or dev fallback).",
+    )
+    stripe_checkout_yearly_ready: bool = Field(
+        False,
+        description="True if Stripe checkout can start for yearly billing (plan price or dev fallback).",
+    )
     features: list[PlanFeatureResponse] = Field(
         default_factory=list,
         description="List of features included in this plan.",

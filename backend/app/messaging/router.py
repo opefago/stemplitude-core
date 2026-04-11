@@ -2,7 +2,7 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.permissions import require_permission
@@ -46,8 +46,8 @@ async def create_message(
 async def list_messages(
     request: Request,
     db: AsyncSession = Depends(get_db),
-    skip: int = 0,
-    limit: int = 50,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
     _: None = require_permission("messages", "view"),
 ):
     """List messages for the current user (inbox)."""

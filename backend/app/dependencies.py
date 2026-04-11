@@ -48,6 +48,7 @@ class TenantContext:
         license: dict | None = None,
         parent_tenant_id: UUID | None = None,
         billing_mode: str | None = None,
+        governance_mode: str | None = None,
     ):
         self.tenant_id = tenant_id
         self.tenant_slug = tenant_slug
@@ -56,6 +57,7 @@ class TenantContext:
         self.license = license
         self.parent_tenant_id = parent_tenant_id
         self.billing_mode = billing_mode
+        self.governance_mode = governance_mode
 
 
 async def get_current_identity(

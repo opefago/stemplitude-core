@@ -1,25 +1,48 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   AlertTriangle,
+  Building2,
   CircleHelp,
   type LucideIcon,
 } from "lucide-react";
 import { useTenant } from "../../providers/TenantProvider";
 import {
   createSupportAccessGrant,
+  decideFranchiseJoinRequest,
   getSupportAccessOptions,
+  getTenantById,
+  getTenantLabSettings,
+  listFranchiseJoinRequests,
   listSupportAccessGrants,
+  patchTenant,
   revokeSupportAccessGrant,
+  submitFranchiseJoinRequest,
+  updateTenantLabSetting,
   updateTenantSettings,
+  type FranchiseGovernanceMode,
+  type FranchiseJoinRequest,
   type SupportAccessGrant,
   type SupportAccessRoleOption,
   type SupportAccessUserOption,
 } from "../../lib/api/tenants";
+import {
+  getTenantGamificationConfig,
+  listGamificationGoals,
+  createGamificationGoal,
+  deleteGamificationGoal,
+  simulateLabEvent,
+  type GamificationGoal,
+  type GoalReward,
+  updateTenantGamificationConfig,
+  type TenantGamificationConfig,
+} from "../../lib/api/gamification";
 import { AppTooltip, KidDropdown, KidSwitch } from "../../components/ui";
 import {
   AttendanceSettings,
   type AttendanceConfig,
 } from "../classrooms/AttendanceSettings";
+import { GamificationPuzzleBuilder } from "./GamificationPuzzleBuilder";
 import "../../components/ui/ui.css";
 import "./settings.css";
 
@@ -55,6 +78,35 @@ const LABS = [
   { id: "design-maker", name: "Design Maker" },
 ];
 
+/** lab.id → tenant_lab_settings.lab_type aliases (keep in sync with backend LAB_FEATURE_TO_TENANT_LAB_TYPES). */
+const LAB_SETTING_ALIASES: Record<string, string[]> = {
+  "circuit-maker": ["access_electronics_lab", "electronics_lab", "circuit-maker"],
+  "micro-maker": ["access_robotics_lab", "robotics_lab", "micro-maker"],
+  "game-maker": ["access_game_maker", "game_maker", "game-maker"],
+  "design-maker": ["access_design_maker", "design_maker", "design-maker", "3d_designer"],
+  "python-game": ["access_python_lab", "python_lab", "python-game"],
+};
+
+/** Opt-out: enabled unless at least one row is expressly false and none are expressly true. */
+function deriveLabEnabledFromRows(
+  rows: Array<{ lab_type: string; enabled: boolean }>,
+): Record<string, boolean> {
+  const byType = new Map(rows.map((r) => [r.lab_type, r.enabled]));
+  return LABS.reduce<Record<string, boolean>>((acc, lab) => {
+    const aliases = LAB_SETTING_ALIASES[lab.id] ?? [lab.id];
+    let sawTrue = false;
+    let sawFalse = false;
+    for (const t of aliases) {
+      if (!byType.has(t)) continue;
+      const v = byType.get(t);
+      if (v === true) sawTrue = true;
+      else if (v === false) sawFalse = true;
+    }
+    acc[lab.id] = sawTrue || !sawFalse;
+    return acc;
+  }, {});
+}
+
 const UI_MODES = [
   { value: "auto", label: "Auto" },
   { value: "kids", label: "Kids" },
@@ -73,12 +125,83 @@ const REWARD_INTENSITIES = [
   { value: "high", label: "High" },
 ];
 
+const GAMIFICATION_MODES = [
+  { value: "academic", label: "Academic (minimal gamification)" },
+  { value: "light", label: "Light gamification" },
+  { value: "balanced", label: "Balanced" },
+  { value: "full", label: "Full gamification" },
+];
+
+const LAB_EVENTS: Record<string, { value: string; label: string }[]> = {
+  "circuit-maker": [
+    { value: "OBJECT_CONNECTED", label: "Object connected" },
+    { value: "CIRCUIT_COMPLETE", label: "Circuit completed" },
+    { value: "OBJECT_ERROR", label: "Object error" },
+  ],
+  "design-maker": [
+    { value: "OBJECT_CREATED", label: "Object created" },
+    { value: "OBJECT_TRANSFORMED", label: "Object transformed" },
+    { value: "MODEL_COMPLETE", label: "Model complete" },
+  ],
+  "micro-maker": [
+    { value: "SENSOR_CONNECTED", label: "Sensor connected" },
+    { value: "CODE_DEPLOYED", label: "Code deployed" },
+    { value: "PROGRAM_COMPLETE", label: "Program complete" },
+  ],
+  "python-game": [
+    { value: "SCRIPT_RUN", label: "Script run" },
+    { value: "LEVEL_COMPLETE", label: "Level complete" },
+    { value: "BUG_FIXED", label: "Bug fixed" },
+  ],
+  "game-maker": [
+    { value: "SCENE_BUILT", label: "Scene built" },
+    { value: "LOGIC_CONNECTED", label: "Logic connected" },
+    { value: "GAME_COMPLETE", label: "Game complete" },
+  ],
+};
+
+const GOAL_TEMPLATES = [
+  {
+    key: "electronics-led",
+    label: "Electronics: Light an LED",
+    lab_type: "circuit-maker",
+    name: "Light an LED",
+    description: "Student successfully completes a safe LED circuit.",
+    eventType: "CIRCUIT_COMPLETE",
+  },
+  {
+    key: "electronics-series",
+    label: "Electronics: Build a series circuit",
+    lab_type: "circuit-maker",
+    name: "Build a series circuit",
+    description: "Student creates a valid series circuit connection path.",
+    eventType: "OBJECT_CONNECTED",
+  },
+  {
+    key: "design-mug",
+    label: "3D: Build a hollow mug",
+    lab_type: "design-maker",
+    name: "Build a hollow mug",
+    description: "Student builds mug shell and subtracts interior volume.",
+    eventType: "OBJECT_TRANSFORMED",
+  },
+  {
+    key: "design-handle",
+    label: "3D: Add handle",
+    lab_type: "design-maker",
+    name: "Add handle",
+    description: "Student unions a handle into the base model.",
+    eventType: "OBJECT_TRANSFORMED",
+  },
+];
+
 const REWARD_MIN_MS = 1000;
 const REWARD_MAX_DURATION_MS = 5000;
 const REWARD_MAX_BIG_WIN_POINTS = 200;
 const REWARD_LOW_MAX_MS = 3000;
 const REWARD_MEDIUM_MAX_MS = 4000;
 const REWARD_HIGH_MAX_MS = 5000;
+
 
 type RewardAnimationSettings = {
   enabled: boolean;
@@ -108,6 +231,17 @@ const DEFAULT_REWARD_SETTINGS: RewardAnimationSettings = {
   },
 };
 
+const DEFAULT_GAMIFICATION_CONFIG: TenantGamificationConfig = {
+  mode: "balanced",
+  enabled: true,
+  enabled_labs: [],
+  max_points_per_event: 50,
+  allow_badges: true,
+  allow_live_recognition: true,
+  allow_leaderboard: true,
+  allow_streaks: true,
+};
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.floor(value)));
 }
@@ -128,6 +262,7 @@ function clampRewardSettings(input: RewardAnimationSettings): RewardAnimationSet
     },
   };
 }
+
 
 function FieldHint({ title, description }: { title: string; description: string }) {
   return (
@@ -158,10 +293,32 @@ function SectionHeading({
   );
 }
 
-type TabId = "general" | "labs" | "ui" | "parent" | "attendance" | "rewards" | "support" | "danger";
+type TabId =
+  | "general"
+  | "franchise"
+  | "labs"
+  | "ui"
+  | "parent"
+  | "attendance"
+  | "rewards"
+  | "support"
+  | "danger";
+
+const VALID_SETTINGS_TAB_PARAMS = new Set<string>([
+  "general",
+  "franchise",
+  "labs",
+  "ui",
+  "parent",
+  "attendance",
+  "rewards",
+  "support",
+  "danger",
+]);
 
 const TABS: { id: TabId; label: string; iconSrc?: string; icon?: LucideIcon }[] = [
   { id: "general", label: "General", iconSrc: "/assets/cartoon-icons/settings.png" },
+  { id: "franchise", label: "Franchise & domain", icon: Building2 },
   { id: "labs", label: "Lab Settings", iconSrc: "/assets/cartoon-icons/telescope.png" },
   { id: "ui", label: "UI Policy", iconSrc: "/assets/cartoon-icons/cursor2.png" },
   { id: "parent", label: "Parent Policies", iconSrc: "/assets/cartoon-icons/Players.png" },
@@ -172,11 +329,22 @@ const TABS: { id: TabId; label: string; iconSrc?: string; icon?: LucideIcon }[] 
 ];
 
 export function TenantSettings() {
+  const [searchParams] = useSearchParams();
+  const tabParam = searchParams.get("tab");
   const { tenant, setTenant } = useTenant();
   const [activeTab, setActiveTab] = useState<TabId>("general");
+
+  useEffect(() => {
+    if (tabParam && VALID_SETTINGS_TAB_PARAMS.has(tabParam)) {
+      setActiveTab(tabParam as TabId);
+    }
+  }, [tabParam]);
   const [labEnabled, setLabEnabled] = useState<Record<string, boolean>>(() =>
-    LABS.reduce((acc, lab) => ({ ...acc, [lab.id]: true }), {})
+    LABS.reduce((acc, lab) => ({ ...acc, [lab.id]: true }), {}),
   );
+  const [labSettingsLoading, setLabSettingsLoading] = useState(true);
+  const [labSettingsError, setLabSettingsError] = useState("");
+  const [labToggleBusy, setLabToggleBusy] = useState<Record<string, boolean>>({});
   const [uiMode, setUiMode] = useState("auto");
   const [allowCancel, setAllowCancel] = useState(true);
   const [allowReschedule, setAllowReschedule] = useState(true);
@@ -199,6 +367,21 @@ export function TenantSettings() {
       .slice(0, 16);
   });
 
+  const [hostSub, setHostSub] = useState("");
+  const [customDom, setCustomDom] = useState("");
+  const [hostSaving, setHostSaving] = useState(false);
+  const [hostErr, setHostErr] = useState("");
+  const [hostOk, setHostOk] = useState(false);
+  const [parentSlugReq, setParentSlugReq] = useState("");
+  const [prefBill, setPrefBill] = useState<"central" | "independent" | "">("");
+  const [franchiseMsg, setFranchiseMsg] = useState("");
+  const [franchiseBusy, setFranchiseBusy] = useState(false);
+  const [franchiseNote, setFranchiseNote] = useState("");
+  const [incomingFr, setIncomingFr] = useState<FranchiseJoinRequest[]>([]);
+  const [incLoading, setIncLoading] = useState(false);
+  const [approveFranchiseGovernance, setApproveFranchiseGovernance] =
+    useState<FranchiseGovernanceMode>("hybrid");
+
   // Attendance settings
   const [attendanceCfg, setAttendanceCfg] = useState<AttendanceConfig>({
     enabled: true,
@@ -214,6 +397,31 @@ export function TenantSettings() {
   const [rewardSaving, setRewardSaving] = useState(false);
   const [rewardSaved, setRewardSaved] = useState(false);
   const [rewardError, setRewardError] = useState("");
+  const [gamificationCfg, setGamificationCfg] = useState<TenantGamificationConfig>(
+    DEFAULT_GAMIFICATION_CONFIG,
+  );
+  const [gamificationSaving, setGamificationSaving] = useState(false);
+  const [gamificationSaved, setGamificationSaved] = useState(false);
+  const [gamificationError, setGamificationError] = useState("");
+  const [goals, setGoals] = useState<GamificationGoal[]>([]);
+  const [goalLoading, setGoalLoading] = useState(false);
+  const [goalError, setGoalError] = useState("");
+  const [goalSaving, setGoalSaving] = useState(false);
+  const [goalName, setGoalName] = useState("");
+  const [selectedTemplateKey, setSelectedTemplateKey] = useState("");
+  const [goalDescription, setGoalDescription] = useState("");
+  const [goalLabType, setGoalLabType] = useState(LABS[0]?.id ?? "circuit-maker");
+  const [goalEventType, setGoalEventType] = useState("OBJECT_CONNECTED");
+  const [goalRewardType, setGoalRewardType] = useState<"points" | "reward">("points");
+  const [goalPoints, setGoalPoints] = useState(10);
+  const [goalRewardKind, setGoalRewardKind] = useState<"badge" | "hi-five" | "sticker" | "custom">("badge");
+  const [goalBadgeSlug, setGoalBadgeSlug] = useState("circuit_rookie");
+  const [simulateContextJson, setSimulateContextJson] = useState("{}");
+  const [simulateLoading, setSimulateLoading] = useState(false);
+  const [simulateResult, setSimulateResult] = useState<{
+    points_awarded_total: number;
+    matched_goals: Array<{ goal_name: string; points_awarded: number; reward_type: string }>;
+  } | null>(null);
 
   // Load attendance config from tenant settings on mount
   useEffect(() => {
@@ -228,6 +436,64 @@ export function TenantSettings() {
       }));
     }
   }, [tenant?.settings]);
+
+  useEffect(() => {
+    if (!tenant?.id) return;
+    let cancelled = false;
+    async function loadGamificationConfig() {
+      try {
+        const cfg = await getTenantGamificationConfig();
+        if (!cancelled) {
+          setGamificationCfg(cfg);
+        }
+      } catch {
+        if (!cancelled) {
+          setGamificationCfg(DEFAULT_GAMIFICATION_CONFIG);
+        }
+      }
+    }
+    void loadGamificationConfig();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenant?.id]);
+
+  useEffect(() => {
+    const tenantId = tenant?.id;
+    if (!tenantId) {
+      setLabSettingsLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLabSettingsLoading(true);
+    setLabSettingsError("");
+    async function loadLabSettings() {
+      try {
+        const rows = await getTenantLabSettings(tenantId);
+        if (!cancelled) {
+          setLabEnabled(deriveLabEnabledFromRows(rows));
+        }
+      } catch {
+        if (!cancelled) {
+          setLabSettingsError("Could not load lab settings.");
+          setLabEnabled(LABS.reduce((acc, lab) => ({ ...acc, [lab.id]: true }), {}));
+        }
+      } finally {
+        if (!cancelled) {
+          setLabSettingsLoading(false);
+        }
+      }
+    }
+    void loadLabSettings();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenant?.id]);
+
+  useEffect(() => {
+    const defaultEvent = LAB_EVENTS[goalLabType]?.[0]?.value ?? "OBJECT_CONNECTED";
+    setGoalEventType(defaultEvent);
+  }, [goalLabType]);
 
   useEffect(() => {
     const raw =
@@ -287,6 +553,126 @@ export function TenantSettings() {
     }));
   }, [tenant?.settings]);
 
+  useEffect(() => {
+    if (activeTab !== "franchise" || !tenant?.id) return;
+    setHostErr("");
+    setHostOk(false);
+    setFranchiseNote("");
+    setIncLoading(true);
+    getTenantById(tenant.id)
+      .then((t) => {
+        setHostSub(t.publicHostSubdomain ?? "");
+        setCustomDom(t.customDomain ?? "");
+      })
+      .catch(() => {});
+    listFranchiseJoinRequests(tenant.id, "pending")
+      .then((r) => setIncomingFr(r.items))
+      .catch(() => setIncomingFr([]))
+      .finally(() => setIncLoading(false));
+  }, [activeTab, tenant?.id]);
+
+  const handleSaveHosts = async () => {
+    if (!tenant?.id) return;
+    setHostSaving(true);
+    setHostErr("");
+    setHostOk(false);
+    try {
+      const updated = await patchTenant(tenant.id, {
+        public_host_subdomain: hostSub.trim() || null,
+        custom_domain: customDom.trim() || null,
+      });
+      setTenant({
+        id: updated.id,
+        name: updated.name,
+        slug: updated.slug,
+        code: updated.code,
+        type: updated.type,
+        logoUrl: updated.logoUrl,
+        settings: updated.settings,
+        publicHostSubdomain: updated.publicHostSubdomain,
+        customDomain: updated.customDomain,
+      });
+      setHostOk(true);
+      setTimeout(() => setHostOk(false), 2500);
+    } catch (e) {
+      setHostErr(e instanceof Error ? e.message : "Could not save host settings.");
+    } finally {
+      setHostSaving(false);
+    }
+  };
+
+  const handleLabToggle = async (labId: string, next: boolean) => {
+    if (!tenant?.id || labSettingsLoading) return;
+    const aliases = LAB_SETTING_ALIASES[labId] ?? [labId];
+    setLabToggleBusy((b) => ({ ...b, [labId]: true }));
+    setLabSettingsError("");
+    setLabEnabled((prev) => ({ ...prev, [labId]: next }));
+    try {
+      await Promise.all(
+        aliases.map((lab_type) =>
+          updateTenantLabSetting(tenant.id, { lab_type, enabled: next }),
+        ),
+      );
+    } catch {
+      setLabSettingsError("Could not save lab settings. Try again.");
+      try {
+        const rows = await getTenantLabSettings(tenant.id);
+        setLabEnabled(deriveLabEnabledFromRows(rows));
+      } catch {
+        /* keep optimistic state if reload fails */
+      }
+    } finally {
+      setLabToggleBusy((b) => ({ ...b, [labId]: false }));
+    }
+  };
+
+  const handleSubmitFranchiseRequest = async () => {
+    if (!tenant?.id || !parentSlugReq.trim()) return;
+    setFranchiseBusy(true);
+    setFranchiseNote("");
+    try {
+      await submitFranchiseJoinRequest({
+        parent_slug: parentSlugReq.trim().toLowerCase(),
+        message: franchiseMsg.trim() || undefined,
+        preferred_billing_mode: prefBill || undefined,
+      });
+      setFranchiseNote(
+        "Request sent. The parent organization can approve it from their Franchise & domain tab.",
+      );
+      setParentSlugReq("");
+      setFranchiseMsg("");
+    } catch (e) {
+      setFranchiseNote(e instanceof Error ? e.message : "Could not submit request.");
+    } finally {
+      setFranchiseBusy(false);
+    }
+  };
+
+  const handleFranchiseDecision = async (
+    requestId: string,
+    approve: boolean,
+    billing?: "central" | "independent",
+  ) => {
+    if (!tenant?.id) return;
+    setIncLoading(true);
+    setFranchiseNote("");
+    try {
+      await decideFranchiseJoinRequest(tenant.id, requestId, {
+        approve,
+        billing_mode: billing,
+        rejection_reason: approve ? undefined : "Declined by administrator",
+        governance_mode: approve ? approveFranchiseGovernance : undefined,
+      });
+      const r = await listFranchiseJoinRequests(tenant.id, "pending");
+      setIncomingFr(r.items);
+      setFranchiseNote(approve ? "Link created." : "Request declined.");
+    } catch (e) {
+      setFranchiseNote(e instanceof Error ? e.message : "Could not update request.");
+    } finally {
+      setIncLoading(false);
+    }
+  };
+
   const handleSaveAttendance = async () => {
     if (!tenant?.id) return;
     setAttendanceSaving(true);
@@ -331,6 +717,125 @@ export function TenantSettings() {
       );
     } finally {
       setRewardSaving(false);
+    }
+  };
+
+  const handleSaveGamification = async () => {
+    setGamificationSaving(true);
+    setGamificationSaved(false);
+    setGamificationError("");
+    try {
+      await updateTenantGamificationConfig(gamificationCfg);
+      setGamificationSaved(true);
+      setTimeout(() => setGamificationSaved(false), 2500);
+    } catch (error) {
+      setGamificationError(
+        error instanceof Error ? error.message : "Failed to save gamification settings.",
+      );
+    } finally {
+      setGamificationSaving(false);
+    }
+  };
+
+
+  const refreshGoals = async (labType?: string) => {
+    setGoalLoading(true);
+    setGoalError("");
+    try {
+      const list = await listGamificationGoals(
+        labType ? { lab_type: labType } : undefined,
+      );
+      setGoals(list);
+    } catch (error) {
+      setGoalError(error instanceof Error ? error.message : "Failed to load goals.");
+    } finally {
+      setGoalLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab !== "rewards") return;
+    void refreshGoals();
+  }, [activeTab]);
+
+  const handleApplyTemplate = () => {
+    const template = GOAL_TEMPLATES.find((item) => item.key === selectedTemplateKey);
+    if (!template) return;
+    setGoalLabType(template.lab_type);
+    setGoalName(template.name);
+    setGoalDescription(template.description);
+    setGoalEventType(template.eventType);
+    setGoalRewardType("points");
+    setGoalPoints(10);
+  };
+
+  const handleCreateGoal = async () => {
+    if (!goalName.trim()) {
+      setGoalError("Goal name is required.");
+      return;
+    }
+    setGoalSaving(true);
+    setGoalError("");
+    try {
+      const reward: GoalReward =
+        goalRewardType === "points"
+          ? { type: "points", value: Math.max(1, goalPoints) }
+          : { type: "reward", reward_kind: goalRewardKind, badge_slug: goalBadgeSlug || undefined };
+      await createGamificationGoal({
+        lab_type: goalLabType,
+        name: goalName.trim(),
+        description: goalDescription.trim(),
+        event_map: { events: [goalEventType], context_match: {} },
+        conditions: [],
+        reward,
+        is_active: true,
+      });
+      setGoalName("");
+      setGoalDescription("");
+      setGoalPoints(10);
+      setGoalRewardType("points");
+      await refreshGoals(goalLabType);
+    } catch (error) {
+      setGoalError(error instanceof Error ? error.message : "Failed to create goal.");
+    } finally {
+      setGoalSaving(false);
+    }
+  };
+
+  const handleDeleteGoal = async (goalId: string) => {
+    setGoalError("");
+    try {
+      await deleteGamificationGoal(goalId);
+      await refreshGoals(goalLabType);
+    } catch (error) {
+      setGoalError(error instanceof Error ? error.message : "Failed to delete goal.");
+    }
+  };
+
+  const handleSimulate = async () => {
+    setSimulateLoading(true);
+    setGoalError("");
+    setSimulateResult(null);
+    try {
+      const context = JSON.parse(simulateContextJson || "{}") as Record<string, unknown>;
+      const result = await simulateLabEvent({
+        lab_id: "preview-lab",
+        lab_type: goalLabType,
+        event_type: goalEventType,
+        context,
+      });
+      setSimulateResult({
+        points_awarded_total: result.points_awarded_total,
+        matched_goals: result.matched_goals.map((item) => ({
+          goal_name: item.goal_name,
+          points_awarded: item.points_awarded,
+          reward_type: item.reward_type,
+        })),
+      });
+    } catch (error) {
+      setGoalError(error instanceof Error ? error.message : "Simulation failed.");
+    } finally {
+      setSimulateLoading(false);
     }
   };
 
@@ -544,6 +1049,194 @@ export function TenantSettings() {
             </div>
           </section>
 
+          <section
+            id="panel-franchise"
+            role="tabpanel"
+            aria-labelledby="tab-franchise"
+            hidden={activeTab !== "franchise"}
+            className="tenant-settings__panel"
+          >
+            <SectionHeading
+              title="Franchise & domain"
+              description="Map a public subdomain or custom hostname, request to join a parent organization, or approve child sites. Production routing also requires backend PUBLIC_HOST_BASE_DOMAIN and DNS."
+            />
+            <div className="tenant-settings__form">
+              <h3 className="tenant-settings__panel-desc" style={{ marginTop: 0 }}>
+                Public hostname
+              </h3>
+              <p className="tenant-settings__panel-desc">
+                Subdomain label for <code>{`{label}.your-platform-domain`}</code> (set the apex domain on the
+                server). Custom domain: point DNS to your app, then enter the hostname here.
+              </p>
+              <div className="tenant-settings__field">
+                <label htmlFor="host-sub">Public subdomain label</label>
+                <input
+                  id="host-sub"
+                  className="tenant-settings__input"
+                  value={hostSub}
+                  onChange={(e) => setHostSub(e.target.value.toLowerCase())}
+                  placeholder="e.g. oakridge"
+                  autoComplete="off"
+                />
+              </div>
+              <div className="tenant-settings__field">
+                <label htmlFor="custom-dom">Custom domain (optional)</label>
+                <input
+                  id="custom-dom"
+                  className="tenant-settings__input"
+                  value={customDom}
+                  onChange={(e) => setCustomDom(e.target.value.toLowerCase())}
+                  placeholder="learn.oakridge.edu"
+                  autoComplete="off"
+                />
+              </div>
+              {hostErr ? <p className="auth-error">{hostErr}</p> : null}
+              {hostOk ? <p className="auth-success">Saved host mapping.</p> : null}
+              <button
+                type="button"
+                className="tenant-settings__save-btn"
+                onClick={() => void handleSaveHosts()}
+                disabled={hostSaving || !tenant?.id}
+              >
+                {hostSaving ? "Saving…" : "Save hostname settings"}
+              </button>
+
+              <h3 className="tenant-settings__panel-desc" style={{ marginTop: "1.75rem" }}>
+                Request link under a parent org
+              </h3>
+              <p className="tenant-settings__panel-desc">
+                Sends a pending request to the parent workspace. An owner/admin there chooses{" "}
+                <strong>central</strong> (shared billing pool) or <strong>independent</strong> billing, and
+                can set shared curriculum / brand / rollup policies on approval.
+              </p>
+              <div className="tenant-settings__field">
+                <label htmlFor="parent-slug-req">Parent organization slug</label>
+                <input
+                  id="parent-slug-req"
+                  className="tenant-settings__input"
+                  value={parentSlugReq}
+                  onChange={(e) => setParentSlugReq(e.target.value)}
+                  placeholder="district-slug"
+                  autoComplete="off"
+                />
+              </div>
+              <div className="tenant-settings__field">
+                <label htmlFor="pref-bill">Preferred structure (optional hint)</label>
+                <KidDropdown
+                  value={prefBill || "any"}
+                  onChange={(v) =>
+                    setPrefBill(v === "any" ? "" : (v as "central" | "independent"))
+                  }
+                  fullWidth
+                  ariaLabel="Billing preference"
+                  options={[
+                    { value: "any", label: "No preference" },
+                    { value: "central", label: "Central (parent license)" },
+                    { value: "independent", label: "Independent (child billing)" },
+                  ]}
+                />
+              </div>
+              <div className="tenant-settings__field">
+                <label htmlFor="fr-msg">Message to parent (optional)</label>
+                <textarea
+                  id="fr-msg"
+                  className="tenant-settings__input"
+                  rows={3}
+                  value={franchiseMsg}
+                  onChange={(e) => setFranchiseMsg(e.target.value)}
+                />
+              </div>
+              <button
+                type="button"
+                className="tenant-settings__save-btn"
+                onClick={() => void handleSubmitFranchiseRequest()}
+                disabled={franchiseBusy || !parentSlugReq.trim()}
+              >
+                {franchiseBusy ? "Sending…" : "Submit join request"}
+              </button>
+
+              <h3 className="tenant-settings__panel-desc" style={{ marginTop: "1.75rem" }}>
+                Incoming franchise requests
+              </h3>
+              <p className="tenant-settings__panel-desc">
+                Child organizations asking to link under this workspace. Choose how curriculum, shared asset
+                libraries, brand, and parent rollups apply, then approve with central or independent billing.
+              </p>
+              <div className="tenant-settings__field">
+                <label>Policy when approving</label>
+                <KidDropdown
+                  value={approveFranchiseGovernance}
+                  onChange={(v) => setApproveFranchiseGovernance(v as FranchiseGovernanceMode)}
+                  fullWidth
+                  ariaLabel="Franchise governance when approving"
+                  options={[
+                    {
+                      value: "child_managed",
+                      label: "Child-managed — child curriculum & brand only",
+                    },
+                    {
+                      value: "parent_managed",
+                      label: "Parent-managed — parent curriculum, library & brand (read-only for child)",
+                    },
+                    {
+                      value: "hybrid",
+                      label: "Hybrid — child may author; parent catalog & library visible",
+                    },
+                    {
+                      value: "isolated",
+                      label: "Isolated — billing/ops link only; no parent content, brand, or rollups",
+                    },
+                  ]}
+                />
+              </div>
+              {franchiseNote ? <p className="tenant-settings__panel-desc">{franchiseNote}</p> : null}
+              {incLoading ? (
+                <p className="tenant-settings__panel-desc">Loading…</p>
+              ) : incomingFr.length === 0 ? (
+                <p className="tenant-settings__panel-desc">No pending requests.</p>
+              ) : (
+                <ul className="tenant-settings__panel-desc" style={{ listStyle: "none", padding: 0 }}>
+                  {incomingFr.map((r) => (
+                    <li key={r.id} className="tenant-settings__franchise-card">
+                      <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                        Child tenant ID: {r.child_tenant_id}
+                      </div>
+                      {r.message ? <p style={{ margin: "0 0 8px" }}>{r.message}</p> : null}
+                      {r.preferred_billing_mode ? (
+                        <p style={{ margin: "0 0 8px", fontSize: "0.875rem" }}>
+                          Preferred: {r.preferred_billing_mode}
+                        </p>
+                      ) : null}
+                      <div className="tenant-settings__franchise-actions">
+                        <button
+                          type="button"
+                          className="tenant-settings__save-btn"
+                          onClick={() => void handleFranchiseDecision(r.id, true, "central")}
+                        >
+                          Approve (central)
+                        </button>
+                        <button
+                          type="button"
+                          className="tenant-settings__save-btn"
+                          onClick={() => void handleFranchiseDecision(r.id, true, "independent")}
+                        >
+                          Approve (independent)
+                        </button>
+                        <button
+                          type="button"
+                          className="tenant-settings__save-btn tenant-settings__save-btn--secondary"
+                          onClick={() => void handleFranchiseDecision(r.id, false)}
+                        >
+                          Decline
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </section>
+
           {/* Lab Settings */}
           <section
             id="panel-labs"
@@ -554,11 +1247,16 @@ export function TenantSettings() {
           >
             <SectionHeading
               title="Lab Settings"
-              description="Enable or disable lab surfaces available to this tenant. Disabled labs are hidden from learners."
+              description="Enable or disable lab surfaces for this tenant. When disabled, a lab is unavailable to learners."
             />
             <p className="tenant-settings__panel-desc">
               Enable or disable labs for your organization
             </p>
+            {labSettingsError ? (
+              <p className="tenant-settings__panel-desc" role="alert">
+                {labSettingsError}
+              </p>
+            ) : null}
             <div className="tenant-settings__toggles">
               {LABS.map((lab) => (
                 <div
@@ -575,13 +1273,9 @@ export function TenantSettings() {
                   </label>
                   <KidSwitch
                     id={`lab-${lab.id}`}
-                    checked={labEnabled[lab.id]}
-                    onChange={(next) =>
-                      setLabEnabled((prev) => ({
-                        ...prev,
-                        [lab.id]: next,
-                      }))
-                    }
+                    checked={labEnabled[lab.id] ?? true}
+                    disabled={labSettingsLoading || labToggleBusy[lab.id]}
+                    onChange={(next) => void handleLabToggle(lab.id, next)}
                     ariaLabel={`${lab.name} lab toggle`}
                   />
                 </div>
@@ -731,6 +1425,404 @@ export function TenantSettings() {
             <p className="tenant-settings__panel-desc">
               Configure global reward animation behavior for students across live class and app pages.
             </p>
+            {false ? (
+            <>
+            <div className="tenant-settings__support-card" style={{ marginBottom: 18 }}>
+              <h3 className="tenant-settings__support-title">Gamification Policy</h3>
+              <div className="tenant-settings__form tenant-settings__form--rewards">
+                <div className="tenant-settings__field">
+                  <label htmlFor="gamification-mode">
+                    <span className="tenant-settings__label-with-hint">
+                      Mode
+                      <FieldHint
+                        title="Gamification mode"
+                        description="Academic minimizes game mechanics. Full applies strongest point rewards."
+                      />
+                    </span>
+                  </label>
+                  <KidDropdown
+                    value={gamificationCfg.mode}
+                    onChange={(value) =>
+                      setGamificationCfg((prev) => ({
+                        ...prev,
+                        mode:
+                          value === "academic" ||
+                          value === "light" ||
+                          value === "balanced" ||
+                          value === "full"
+                            ? value
+                            : prev.mode,
+                      }))
+                    }
+                    fullWidth
+                    ariaLabel="Gamification mode"
+                    options={GAMIFICATION_MODES}
+                  />
+                </div>
+                <div className="tenant-settings__field">
+                  <label htmlFor="gamification-max-points">
+                    <span className="tenant-settings__label-with-hint">
+                      Max points per lab event
+                      <FieldHint
+                        title="Max points per lab event"
+                        description="Safety cap to prevent accidental oversized rewards from custom rules."
+                      />
+                    </span>
+                  </label>
+                  <input
+                    id="gamification-max-points"
+                    type="number"
+                    min={1}
+                    max={500}
+                    value={gamificationCfg.max_points_per_event}
+                    onChange={(event) =>
+                      setGamificationCfg((prev) => ({
+                        ...prev,
+                        max_points_per_event: clamp(
+                          Number(event.target.value) || 1,
+                          1,
+                          500,
+                        ),
+                      }))
+                    }
+                    className="tenant-settings__input"
+                  />
+                </div>
+              </div>
+              <div className="tenant-settings__toggles">
+                <div className="tenant-settings__toggle-row">
+                  <span className="tenant-settings__toggle-label">Enable gamification</span>
+                  <KidSwitch
+                    checked={gamificationCfg.enabled}
+                    onChange={(next) =>
+                      setGamificationCfg((prev) => ({ ...prev, enabled: next }))
+                    }
+                    ariaLabel="Enable gamification"
+                  />
+                </div>
+                <div className="tenant-settings__toggle-row">
+                  <span className="tenant-settings__toggle-label">Allow stickers</span>
+                  <KidSwitch
+                    checked={gamificationCfg.allow_badges}
+                    onChange={(next) =>
+                      setGamificationCfg((prev) => ({ ...prev, allow_badges: next }))
+                    }
+                    ariaLabel="Allow stickers"
+                  />
+                </div>
+                <div className="tenant-settings__toggle-row">
+                  <span className="tenant-settings__toggle-label">Allow leaderboard</span>
+                  <KidSwitch
+                    checked={gamificationCfg.allow_leaderboard}
+                    onChange={(next) =>
+                      setGamificationCfg((prev) => ({ ...prev, allow_leaderboard: next }))
+                    }
+                    ariaLabel="Allow leaderboard"
+                  />
+                </div>
+                <div className="tenant-settings__toggle-row">
+                  <span className="tenant-settings__toggle-label">Allow streaks</span>
+                  <KidSwitch
+                    checked={gamificationCfg.allow_streaks}
+                    onChange={(next) =>
+                      setGamificationCfg((prev) => ({ ...prev, allow_streaks: next }))
+                    }
+                    ariaLabel="Allow streaks"
+                  />
+                </div>
+                <div className="tenant-settings__toggle-row">
+                  <span className="tenant-settings__toggle-label">Allow live recognition popups</span>
+                  <KidSwitch
+                    checked={gamificationCfg.allow_live_recognition}
+                    onChange={(next) =>
+                      setGamificationCfg((prev) => ({
+                        ...prev,
+                        allow_live_recognition: next,
+                      }))
+                    }
+                    ariaLabel="Allow live recognition popups"
+                  />
+                </div>
+              </div>
+              <div className="tenant-settings__toggles" style={{ marginTop: 12 }}>
+                {LABS.map((lab) => {
+                  const enabled = gamificationCfg.enabled_labs.includes(lab.id);
+                  return (
+                    <div key={`gamification-lab-${lab.id}`} className="tenant-settings__toggle-row">
+                      <span className="tenant-settings__toggle-label">{lab.name} events</span>
+                      <KidSwitch
+                        checked={enabled}
+                        onChange={(next) =>
+                          setGamificationCfg((prev) => {
+                            const current = new Set(prev.enabled_labs);
+                            if (next) current.add(lab.id);
+                            else current.delete(lab.id);
+                            return { ...prev, enabled_labs: Array.from(current) };
+                          })
+                        }
+                        ariaLabel={`Enable ${lab.name} gamification events`}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+              {gamificationError ? (
+                <p className="tenant-settings__reward-error">{gamificationError}</p>
+              ) : null}
+              <div className="ui-form-actions" style={{ marginTop: 16 }}>
+                <button
+                  type="button"
+                  className="ui-btn ui-btn--primary"
+                  onClick={() => void handleSaveGamification()}
+                  disabled={gamificationSaving}
+                >
+                  {gamificationSaving
+                    ? "Saving…"
+                    : gamificationSaved
+                      ? "Saved!"
+                      : "Save Gamification Policy"}
+                </button>
+              </div>
+            </div>
+            <GamificationPuzzleBuilder />
+            <div className="tenant-settings__support-card" style={{ marginBottom: 18 }}>
+              <h3 className="tenant-settings__support-title">Goal Builder (Instructor-Friendly)</h3>
+              <p className="tenant-settings__panel-desc">
+                Create lab goals using templates or custom events. Choose points or rewards per goal.
+              </p>
+              <div className="tenant-settings__form tenant-settings__form--rewards">
+                <div className="tenant-settings__field">
+                  <label htmlFor="goal-template">Template</label>
+                  <KidDropdown
+                    value={selectedTemplateKey}
+                    onChange={setSelectedTemplateKey}
+                    fullWidth
+                    ariaLabel="Goal template"
+                    options={[
+                      { value: "", label: "Select a template" },
+                      ...GOAL_TEMPLATES.map((item) => ({ value: item.key, label: item.label })),
+                    ]}
+                  />
+                  <div className="ui-form-actions" style={{ marginTop: 8 }}>
+                    <button
+                      type="button"
+                      className="ui-btn ui-btn--ghost"
+                      onClick={handleApplyTemplate}
+                      disabled={!selectedTemplateKey}
+                    >
+                      Apply Template
+                    </button>
+                  </div>
+                </div>
+                <div className="tenant-settings__field">
+                  <label htmlFor="goal-lab-type">Lab type</label>
+                  <KidDropdown
+                    value={goalLabType}
+                    onChange={setGoalLabType}
+                    fullWidth
+                    ariaLabel="Goal lab type"
+                    options={LABS.map((lab) => ({ value: lab.id, label: lab.name }))}
+                  />
+                </div>
+                <div className="tenant-settings__field">
+                  <label htmlFor="goal-name">Goal name</label>
+                  <input
+                    id="goal-name"
+                    className="tenant-settings__input tenant-settings__input--wide"
+                    value={goalName}
+                    onChange={(event) => setGoalName(event.target.value)}
+                    placeholder="e.g. Light an LED"
+                  />
+                </div>
+                <div className="tenant-settings__field">
+                  <label htmlFor="goal-event-type">Event trigger</label>
+                  <KidDropdown
+                    value={goalEventType}
+                    onChange={setGoalEventType}
+                    fullWidth
+                    ariaLabel="Goal event type"
+                    options={(LAB_EVENTS[goalLabType] ?? LAB_EVENTS["circuit-maker"]).map((evt) => ({
+                      value: evt.value,
+                      label: evt.label,
+                    }))}
+                  />
+                </div>
+                <div className="tenant-settings__field">
+                  <label htmlFor="goal-description">Description</label>
+                  <input
+                    id="goal-description"
+                    className="tenant-settings__input tenant-settings__input--wide"
+                    value={goalDescription}
+                    onChange={(event) => setGoalDescription(event.target.value)}
+                    placeholder="Describe success criteria in simple terms"
+                  />
+                </div>
+                <div className="tenant-settings__field">
+                  <label htmlFor="goal-reward-type">Reward type</label>
+                  <KidDropdown
+                    value={goalRewardType}
+                    onChange={(value) => setGoalRewardType(value === "reward" ? "reward" : "points")}
+                    fullWidth
+                    ariaLabel="Goal reward type"
+                    options={[
+                      { value: "points", label: "Points" },
+                      { value: "reward", label: "Reward" },
+                    ]}
+                  />
+                </div>
+                {goalRewardType === "points" ? (
+                  <div className="tenant-settings__field">
+                    <label htmlFor="goal-points">Points</label>
+                    <input
+                      id="goal-points"
+                      type="number"
+                      min={1}
+                      max={500}
+                      className="tenant-settings__input"
+                      value={goalPoints}
+                      onChange={(event) =>
+                        setGoalPoints(clamp(Number(event.target.value) || 1, 1, 500))
+                      }
+                    />
+                  </div>
+                ) : (
+                  <>
+                    <div className="tenant-settings__field">
+                      <label htmlFor="goal-reward-kind">Reward kind</label>
+                      <KidDropdown
+                        value={goalRewardKind}
+                        onChange={(value) =>
+                          setGoalRewardKind(
+                            value === "hi-five" || value === "sticker" || value === "custom"
+                              ? value
+                              : "badge",
+                          )
+                        }
+                        fullWidth
+                        ariaLabel="Goal reward kind"
+                        options={[
+                          { value: "badge", label: "Sticker" },
+                          { value: "hi-five", label: "Hi-five" },
+                          { value: "sticker", label: "Sticker" },
+                          { value: "custom", label: "Custom image" },
+                        ]}
+                      />
+                    </div>
+                    <div className="tenant-settings__field">
+                      <label htmlFor="goal-badge-slug">Sticker slug (optional)</label>
+                      <input
+                        id="goal-badge-slug"
+                        className="tenant-settings__input tenant-settings__input--wide"
+                        value={goalBadgeSlug}
+                        onChange={(event) => setGoalBadgeSlug(event.target.value)}
+                        placeholder="e.g. circuit_master"
+                      />
+                    </div>
+                  </>
+                )}
+              </div>
+              <div className="ui-form-actions" style={{ marginTop: 16 }}>
+                <button
+                  type="button"
+                  className="ui-btn ui-btn--primary"
+                  onClick={() => void handleCreateGoal()}
+                  disabled={goalSaving}
+                >
+                  {goalSaving ? "Creating…" : "Create Goal"}
+                </button>
+              </div>
+              <div className="tenant-settings__field" style={{ marginTop: 16 }}>
+                <label htmlFor="goal-simulate-context">Simulation context (JSON)</label>
+                <input
+                  id="goal-simulate-context"
+                  className="tenant-settings__input tenant-settings__input--wide"
+                  value={simulateContextJson}
+                  onChange={(event) => setSimulateContextJson(event.target.value)}
+                />
+              </div>
+              <div className="ui-form-actions" style={{ marginTop: 10 }}>
+                <button
+                  type="button"
+                  className="ui-btn ui-btn--ghost"
+                  onClick={() => void handleSimulate()}
+                  disabled={simulateLoading}
+                >
+                  {simulateLoading ? "Simulating…" : "Preview / Simulate Rule Match"}
+                </button>
+              </div>
+              {simulateResult ? (
+                <div className="tenant-settings__support-message tenant-settings__support-message--success" style={{ marginTop: 12 }}>
+                  Matched {simulateResult.matched_goals.length} goal(s), total points preview: {simulateResult.points_awarded_total}
+                </div>
+              ) : null}
+              {goalError ? (
+                <p className="tenant-settings__reward-error">{goalError}</p>
+              ) : null}
+
+              <div style={{ marginTop: 16 }}>
+                <h4 className="tenant-settings__support-title" style={{ marginBottom: 8 }}>
+                  Existing goals
+                </h4>
+                {goalLoading ? (
+                  <p className="tenant-settings__panel-desc">Loading goals...</p>
+                ) : goals.length === 0 ? (
+                  <p className="tenant-settings__panel-desc">No goals yet for this tenant.</p>
+                ) : (
+                  <div className="tenant-settings__support-list">
+                    {goals.map((goal) => (
+                      <div key={goal.id} className="tenant-settings__support-item">
+                        <div className="tenant-settings__support-item-main">
+                          <div className="tenant-settings__support-item-name">
+                            {goal.name}
+                          </div>
+                          <div className="tenant-settings__support-item-meta">
+                            <span>{goal.lab_type}</span>
+                            <span>{goal.event_map?.events?.join(", ") || "No event"}</span>
+                            <span>
+                              {goal.reward.type === "points"
+                                ? `${goal.reward.value ?? 0} points`
+                                : `${goal.reward.reward_kind ?? "reward"}`}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="tenant-settings__support-item-actions">
+                          <span
+                            className={`tenant-settings__status-badge ${
+                              goal.is_active
+                                ? "tenant-settings__status-badge--active"
+                                : "tenant-settings__status-badge--inactive"
+                            }`}
+                          >
+                            {goal.is_active ? "Active" : "Inactive"}
+                          </span>
+                          <button
+                            type="button"
+                            className="tenant-settings__secondary-btn"
+                            onClick={() => void handleDeleteGoal(goal.id)}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+            </>
+            ) : (
+              <div className="tenant-settings__support-card" style={{ marginBottom: 18 }}>
+                <h3 className="tenant-settings__support-title">Gamification Moved</h3>
+                <p className="tenant-settings__panel-desc">
+                  Gamification policy and nested puzzle goal builder are now in the dedicated sidebar tab.
+                </p>
+                <div className="ui-form-actions">
+                  <a href="/app/gamification" className="ui-btn ui-btn--primary">
+                    Open Gamification Studio
+                  </a>
+                </div>
+              </div>
+            )}
             <div className="tenant-settings__toggles">
               <div
                 className="tenant-settings__toggle-row"

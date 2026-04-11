@@ -51,6 +51,11 @@
   color: var(--color-text-secondary, #777);
 }
 
+.dp-trigger__icon--mascot {
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
 .dp-trigger__text {
   flex: 1;
   text-align: left;

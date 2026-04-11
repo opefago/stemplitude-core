@@ -2,25 +2,46 @@ import { type ReactElement, useCallback, useEffect, useMemo, useRef } from "reac
 import { createElement } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { heartbeatMySession } from "../../lib/api/classrooms";
+import { useAuth } from "../../providers/AuthProvider";
+import { LiveVideoWidget } from "../classrooms/LiveVideoWidget";
 import { LabAssistantPanel } from "./LabAssistantPanel";
 
-/** Classroom context carried through URL params when a lab is launched from a live session. */
+/** Classroom context carried through URL params when a lab is launched from a session or assignment. */
 export interface LabClassroomContext {
   classroomId: string;
   sessionId: string;
   referrer: string;
   labType: string | null;
+  /** Set when opened from the assignment workflow (for submitting back with snapshot). */
+  assignmentId: string | null;
+  curriculumLabId: string | null;
+  savedProjectId: string | null;
 }
 
 const IN_LAB_HEARTBEAT_MS = 30_000;
+
+const CLASSROOM_LAB_REFERRERS = new Set(["classroom_live_session", "assignment_view"]);
 
 function parseClassroomContext(search: string): LabClassroomContext | null {
   const params = new URLSearchParams(search);
   const classroomId = params.get("classroom_id");
   const sessionId = params.get("session_id");
   const referrer = params.get("referrer");
-  if (classroomId && sessionId && referrer === "classroom_live_session") {
-    return { classroomId, sessionId, referrer, labType: params.get("lab") };
+  if (
+    classroomId &&
+    sessionId &&
+    referrer &&
+    CLASSROOM_LAB_REFERRERS.has(referrer)
+  ) {
+    return {
+      classroomId,
+      sessionId,
+      referrer,
+      labType: params.get("lab"),
+      assignmentId: params.get("assignment_id"),
+      curriculumLabId: params.get("curriculum_lab_id"),
+      savedProjectId: params.get("saved_project_id"),
+    };
   }
   return null;
 }
@@ -54,6 +75,7 @@ function getFallbackExitPath(search: string): string {
 export function useLabSession() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { user } = useAuth();
 
   const classroomContext = useMemo(
     () => parseClassroomContext(location.search),
@@ -102,8 +124,26 @@ export function useLabSession() {
     navigate(fallbackExitPath, { replace: true });
   }, [fallbackExitPath, navigate]);
 
+  const meetingProvider = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    return params.get("meeting_provider");
+  }, [location.search]);
+
+  const useBuiltInVideo = meetingProvider === "built_in";
+
   const panel: ReactElement | null = classroomContext
-    ? createElement(LabAssistantPanel, { classroomContext })
+    ? createElement(
+        "div",
+        null,
+        useBuiltInVideo
+          ? createElement(LiveVideoWidget, {
+              classroomId: classroomContext.classroomId,
+              sessionId: classroomContext.sessionId,
+              isInstructorView: user?.subType === "user",
+            })
+          : null,
+        createElement(LabAssistantPanel, { classroomContext }),
+      )
     : null;
 
   return { exitLab, fallbackExitPath, classroomContext, panel };

@@ -41,6 +41,8 @@ function uid() {
 
 const OFFLINE_BANNER_ID = "__offline__";
 const AUTH_BANNER_ID = "__auth__";
+/** One generic 5xx banner — parallel failing requests used to each append a duplicate. */
+const SERVER_ERROR_BANNER_ID = "__server_error__";
 
 export function GlobalBannerProvider({ children }: { children: ReactNode }) {
   const [banners, setBanners] = useState<BannerItem[]>([]);
@@ -111,6 +113,7 @@ export function GlobalBannerProvider({ children }: { children: ReactNode }) {
         });
       } else if (evt.kind === "server") {
         showBanner({
+          id: SERVER_ERROR_BANNER_ID,
           variant: "error",
           message: "Looks like something went wrong. Please refresh the page.",
           action: { label: "Refresh", onClick: () => window.location.reload() },

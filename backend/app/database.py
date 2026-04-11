@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.orm import DeclarativeBase
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.pool import NullPool, StaticPool
 
 from app.config import settings
 
@@ -39,6 +39,29 @@ async_session_factory = async_sessionmaker(
     class_=AsyncSession,
     expire_on_commit=False,
 )
+
+
+def create_loop_local_async_engine_and_sessionmaker() -> tuple[object, object]:
+    """Fresh engine + sessionmaker for one ``asyncio.run()`` (e.g. Celery prefork).
+
+    Pooled connections from the process-global ``engine`` stay bound to the event
+    loop that opened them; ``NullPool`` avoids reuse across per-task loops.
+    """
+    if "sqlite" in settings.DATABASE_URL:
+        eng = create_async_engine(
+            settings.DATABASE_URL,
+            echo=settings.DEBUG,
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+    else:
+        eng = create_async_engine(
+            settings.DATABASE_URL,
+            echo=settings.DEBUG,
+            poolclass=NullPool,
+        )
+    factory = async_sessionmaker(eng, class_=AsyncSession, expire_on_commit=False)
+    return eng, factory
 
 
 class Base(DeclarativeBase):
@@ -85,3 +108,9 @@ async def get_db(request: Request) -> AsyncGenerator[AsyncSession, None]:
             raise
         finally:
             await session.close()
+
+
+# Tables created in migrations but queried via raw SQL in ``app.growth`` must still be
+# registered so mappers that reference them (e.g. ``Subscription.affiliate_partner_id``)
+# can flush without NoReferencedTableError.
+from app.growth.models import AffiliatePartner  # noqa: E402, F401

@@ -2,7 +2,7 @@
 
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -23,10 +23,13 @@ class SubscriptionRepository:
         return result.scalar_one_or_none()
 
     async def get_by_stripe_id(self, stripe_subscription_id: str) -> Subscription | None:
-        """Get subscription by Stripe subscription ID."""
+        """Get subscription by Stripe subscription ID (legacy or provider column)."""
         result = await self.session.execute(
             select(Subscription).where(
-                Subscription.stripe_subscription_id == stripe_subscription_id
+                or_(
+                    Subscription.stripe_subscription_id == stripe_subscription_id,
+                    Subscription.provider_subscription_id == stripe_subscription_id,
+                )
             )
         )
         return result.scalar_one_or_none()
@@ -75,6 +78,33 @@ class SubscriptionRepository:
             select(Invoice)
             .where(Invoice.subscription_id == subscription_id)
             .order_by(Invoice.created_at.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        invoices = list(result.scalars().all())
+        return invoices, total
+
+    async def list_invoices_for_tenant(
+        self,
+        tenant_id: UUID,
+        *,
+        skip: int = 0,
+        limit: int = 50,
+    ) -> tuple[list[Invoice], int]:
+        """All invoices for subscriptions belonging to this tenant."""
+        tenant_filter = Subscription.tenant_id == tenant_id
+        count_result = await self.session.execute(
+            select(func.count())
+            .select_from(Invoice)
+            .join(Subscription, Invoice.subscription_id == Subscription.id)
+            .where(tenant_filter)
+        )
+        total = int(count_result.scalar() or 0)
+        result = await self.session.execute(
+            select(Invoice)
+            .join(Subscription, Invoice.subscription_id == Subscription.id)
+            .where(tenant_filter)
+            .order_by(func.coalesce(Invoice.paid_at, Invoice.created_at).desc())
             .offset(skip)
             .limit(limit)
         )

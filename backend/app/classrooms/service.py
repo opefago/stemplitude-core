@@ -9,27 +9,45 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.classrooms.attendance_config import resolve_attendance_config
-from app.classrooms.models import Classroom, ClassroomSession, ClassroomStudent
+from app.classrooms.models import Classroom, ClassroomSession, ClassroomStudent, SessionRecording
 from app.programs.models import Program
 from app.tenants.models import Tenant
-from app.curriculum.models import Course
-from app.dependencies import CurrentIdentity
+from app.curriculum.models import AssignmentTemplate, Course, RubricTemplate
+from app.roles.models import Role
+from app.dependencies import CurrentIdentity, TenantContext
+from app.tenants.franchise_governance import curriculum_read_tenant_ids
 from app.notifications.models import Notification
 from app.progress.models import Attendance
 from app.students.models import ParentStudent, Student
+from app.students.parent_access import (
+    ensure_can_view_student_as_guardian,
+    guardian_may_use_child_context_in_tenant,
+)
 from app.users.models import User
 from app.tenants.repository import MembershipRepository
 from app.realtime.gateway import publish_channel_message
+from app.config import settings
+from app.audit.models import AuditEvent
+from app.core import blob_storage
 from app.realtime.user_events import (
     publish_notifications_changed,
     publish_reward_granted,
     publish_sessions_changed,
 )
+from app.database import async_session_factory
+from app.email.outbox import enqueue_transactional_email
+from app.email.presets import (
+    build_classroom_grading_email,
+    build_classroom_session_content_email,
+    build_classroom_submission_email,
+)
+from app.gamification.streak_side_effects import bump_student_streak, bump_students_streak
 
+from .assignment_lab_enrich import enrich_assignments_lab_launcher
 from .repository import ClassroomRepository
 from .schemas import (
     AttendanceResponse,
@@ -57,7 +75,36 @@ from .schemas import (
     RealtimeEventEnvelope,
     RealtimeSessionSnapshotResponse,
     SessionResponse,
+    SessionVideoTokenResponse,
+    SessionRecordingResponse,
+    SessionRecordingStartRequest,
+    SessionRecordingStopRequest,
+    SessionRecordingAccessResponse,
 )
+from .video_provider import build_livekit_access_token, resolve_video_provider_config
+
+
+async def _assignable_course_or_404(
+    session: AsyncSession,
+    curriculum_id: UUID,
+    *,
+    workspace_tenant_id: UUID,
+    parent_tenant_id: UUID | None = None,
+    governance_mode: str | None = None,
+) -> Course:
+    read_ids = curriculum_read_tenant_ids(
+        child_tenant_id=workspace_tenant_id,
+        parent_tenant_id=parent_tenant_id,
+        governance_mode=governance_mode,
+    )
+    course = await session.get(Course, curriculum_id)
+    if not course or course.tenant_id not in read_ids:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Curriculum not found",
+        )
+    return course
+
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +119,81 @@ class ClassroomService:
     def __init__(self, session: AsyncSession):
         self.session = session
         self.repo = ClassroomRepository(session)
+        self._audit_table_available: bool | None = None
+
+    @staticmethod
+    def _normalize_rubric_snapshot_storage(raw) -> list | None:
+        """Persistable rubric definition (criterion ids + max points; no scores)."""
+        if raw is None:
+            return None
+        if not isinstance(raw, list):
+            return None
+        out: list[dict] = []
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            cid = str(item.get("criterion_id") or "").strip()
+            if not cid:
+                continue
+            try:
+                mx = int(item.get("max_points"))
+            except (TypeError, ValueError):
+                continue
+            if mx < 1 or mx > 1000:
+                continue
+            row: dict = {"criterion_id": cid[:80], "max_points": mx}
+            label = item.get("label")
+            if isinstance(label, str) and label.strip():
+                row["label"] = label.strip()[:200]
+            out.append(row)
+        return out or None
+
+    def _merge_session_assignment_row(self, prev: dict, assignment: dict) -> dict:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        aid = str(assignment.get("id") or prev.get("id") or uuid.uuid4())
+        out = dict(prev)
+        out["id"] = aid
+        if "title" in assignment:
+            out["title"] = str(assignment.get("title") or "").strip()
+        if "instructions" in assignment:
+            out["instructions"] = str(assignment.get("instructions") or "").strip()
+        if "due_at" in assignment:
+            out["due_at"] = assignment.get("due_at")
+        out["updated_at"] = now_iso
+
+        if "lab_id" in assignment:
+            lid = assignment.get("lab_id")
+            if lid is None or lid == "":
+                out.pop("lab_id", None)
+            else:
+                out["lab_id"] = str(lid)
+
+        for key in ("requires_lab", "requires_assets", "allow_edit_after_submit", "use_rubric"):
+            if key in assignment:
+                out[key] = bool(assignment.get(key))
+
+        if "rubric_template_id" in assignment:
+            rid = assignment.get("rubric_template_id")
+            if rid is None or rid == "":
+                out.pop("rubric_template_id", None)
+            else:
+                out["rubric_template_id"] = str(rid)
+
+        if "assignment_template_id" in assignment:
+            tid = assignment.get("assignment_template_id")
+            if tid is None or tid == "":
+                out.pop("assignment_template_id", None)
+            else:
+                out["assignment_template_id"] = str(tid)
+
+        if "rubric_snapshot" in assignment:
+            snap = self._normalize_rubric_snapshot_storage(assignment.get("rubric_snapshot"))
+            if snap is None:
+                out.pop("rubric_snapshot", None)
+            else:
+                out["rubric_snapshot"] = snap
+
+        return out
 
     async def _session_recipient_principal_ids(
         self,
@@ -307,8 +429,27 @@ class ClassroomService:
             # Flatten dict payloads into envelope.payload so clients can consume
             # fields directly (e.g. payload.view, payload.resource_id).
             if isinstance(event.metadata_, dict):
-                payload.update(event.metadata_)
-            payload["metadata"] = event.metadata_
+                meta_flat = dict(event.metadata_)
+                if event.event_type in (
+                    "student.submission.saved",
+                    "student.submission.submitted",
+                ) and meta_flat.get("preview_image"):
+                    # Avoid multi-hundred-KB websocket frames; full image is on REST list endpoints.
+                    meta_flat["has_preview"] = True
+                    meta_flat["preview_image"] = None
+                payload.update(meta_flat)
+                assign_list = payload.get("assignments")
+                if (
+                    event.event_type.startswith("assignment.")
+                    and isinstance(assign_list, list)
+                    and assign_list
+                ):
+                    enriched = [
+                        dict(a) if isinstance(a, dict) else a for a in assign_list
+                    ]
+                    await enrich_assignments_lab_launcher(self.session, enriched)
+                    payload["assignments"] = enriched
+                payload["metadata"] = meta_flat
         return RealtimeEventEnvelope(
             event_id=event.id,
             session_id=event.session_id,
@@ -499,8 +640,23 @@ class ClassroomService:
             metadata_=metadata,
         )
 
-    async def create(self, data: ClassroomCreate, tenant_id: UUID) -> ClassroomResponse:
+    async def create(
+        self,
+        data: ClassroomCreate,
+        tenant_id: UUID,
+        *,
+        parent_tenant_id: UUID | None = None,
+        governance_mode: str | None = None,
+    ) -> ClassroomResponse:
         """Create a classroom with generated join_code."""
+        if data.curriculum_id is not None:
+            await _assignable_course_or_404(
+                self.session,
+                data.curriculum_id,
+                workspace_tenant_id=tenant_id,
+                parent_tenant_id=parent_tenant_id,
+                governance_mode=governance_mode,
+            )
         join_code = await self.repo.generate_unique_join_code()
         classroom = Classroom(
             tenant_id=tenant_id,
@@ -597,6 +753,9 @@ class ClassroomService:
         classroom_id: UUID,
         data: ClassroomUpdate,
         tenant_id: UUID,
+        *,
+        parent_tenant_id: UUID | None = None,
+        governance_mode: str | None = None,
     ) -> ClassroomResponse:
         """Update a classroom."""
         classroom = await self.repo.get_by_id(classroom_id, tenant_id)
@@ -607,6 +766,15 @@ class ClassroomService:
                 detail="Classroom not found",
             )
         update_data = data.model_dump(exclude_unset=True)
+
+        if "curriculum_id" in update_data and update_data["curriculum_id"] is not None:
+            await _assignable_course_or_404(
+                self.session,
+                update_data["curriculum_id"],
+                workspace_tenant_id=tenant_id,
+                parent_tenant_id=parent_tenant_id,
+                governance_mode=governance_mode,
+            )
 
         if "instructor_id" in update_data and update_data["instructor_id"] is not None:
             membership_repo = MembershipRepository(self.session)
@@ -680,13 +848,19 @@ class ClassroomService:
         tenant_id: UUID,
         classroom_ids: list[UUID],
         curriculum_id: UUID | None,
+        parent_tenant_id: UUID | None = None,
+        governance_mode: str | None = None,
     ) -> int:
         """Bulk assign/unassign curriculum to classes with optional program derivation."""
         derived_program_id: UUID | None = None
         if curriculum_id is not None:
-            course = await self.session.get(Course, curriculum_id)
-            if not course or course.tenant_id != tenant_id:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Curriculum not found")
+            course = await _assignable_course_or_404(
+                self.session,
+                curriculum_id,
+                workspace_tenant_id=tenant_id,
+                parent_tenant_id=parent_tenant_id,
+                governance_mode=governance_mode,
+            )
             derived_program_id = course.program_id
         updated = await self.repo.bulk_assign_curriculum(
             tenant_id=tenant_id,
@@ -861,6 +1035,8 @@ class ClassroomService:
             existing.notes = data.notes
             await self.session.flush()
             await self.session.refresh(existing)
+            if data.status in ("present", "late"):
+                await bump_student_streak(data.student_id, tenant_id)
             return AttendanceResponse.model_validate(existing)
         attendance = Attendance(
             session_id=data.session_id,
@@ -873,6 +1049,8 @@ class ClassroomService:
         self.session.add(attendance)
         await self.session.flush()
         await self.session.refresh(attendance)
+        if data.status in ("present", "late"):
+            await bump_student_streak(data.student_id, tenant_id)
         return AttendanceResponse.model_validate(attendance)
 
     async def list_attendance(
@@ -959,6 +1137,7 @@ class ClassroomService:
         student_ids = [row[0] for row in enrolled_result.all()]
 
         results: list[AttendanceResponse] = []
+        streak_student_ids: list[UUID] = []
         now = datetime.now(timezone.utc)
 
         for student_id in student_ids:
@@ -985,6 +1164,8 @@ class ClassroomService:
                 await self.session.flush()
                 await self.session.refresh(existing)
                 results.append(AttendanceResponse.model_validate(existing))
+                if attendance_status in ("present", "late"):
+                    streak_student_ids.append(student_id)
             else:
                 record = Attendance(
                     session_id=session_id,
@@ -998,6 +1179,8 @@ class ClassroomService:
                 await self.session.flush()
                 await self.session.refresh(record)
                 results.append(AttendanceResponse.model_validate(record))
+                if attendance_status in ("present", "late"):
+                    streak_student_ids.append(student_id)
 
         logger.info(
             "Attendance calculated session=%s classroom=%s students=%d mode=%s",
@@ -1006,6 +1189,8 @@ class ClassroomService:
             len(results),
             config.mode,
         )
+        if streak_student_ids:
+            await bump_students_streak(streak_student_ids, tenant_id)
         return results
 
     async def list_sessions(
@@ -1196,6 +1381,7 @@ class ClassroomService:
         tenant_id: UUID,
         identity: CurrentIdentity,
         data: SessionPresenceHeartbeatRequest,
+        student_actor_id: UUID | None = None,
     ) -> SessionPresenceSummaryResponse:
         """Track participant presence while in a live session."""
         session_obj = await self._ensure_session_exists(
@@ -1216,35 +1402,42 @@ class ClassroomService:
                 detail="Session has already ended",
             )
 
-        actor_type = self._presence_actor_type(identity)
+        actor_id = student_actor_id if student_actor_id is not None else identity.id
+        actor_type = (
+            "student"
+            if student_actor_id is not None
+            else self._presence_actor_type(identity)
+        )
         became_active = False
         if data.status == "left":
             await self.repo.mark_presence_left(
                 session_id=session_obj.id,
-                actor_id=identity.id,
+                actor_id=actor_id,
                 actor_type=actor_type,
                 left_at=now,
             )
         elif data.status == "in_lab":
             await self.repo.mark_presence_in_lab(
                 session_id=session_obj.id,
-                actor_id=identity.id,
+                actor_id=actor_id,
                 actor_type=actor_type,
                 seen_at=now,
                 lab_type=data.lab_type,
             )
         else:
-            await self.repo.upsert_presence(
+            _, presence_created = await self.repo.upsert_presence(
                 session_id=session_obj.id,
                 classroom_id=classroom_id,
                 tenant_id=tenant_id,
-                actor_id=identity.id,
+                actor_id=actor_id,
                 actor_type=actor_type,
                 seen_at=now,
             )
             if session_obj.status == "scheduled" and session_obj.session_start <= now <= session_obj.session_end:
                 session_obj.status = "active"
                 became_active = True
+            if presence_created and actor_type == "student":
+                await bump_student_streak(actor_id, tenant_id)
 
         await self.session.flush()
         if became_active:
@@ -1517,7 +1710,6 @@ class ClassroomService:
         from sqlalchemy import select
         from app.students.models import ParentStudent
         from workers.tasks.notification_tasks import create_notification_task
-        from workers.tasks.email_tasks import send_email_task
 
         enrolled = await self.repo.list_enrolled_students(classroom_id)
         session_date = session_obj.session_start.strftime("%b %-d") if session_obj.session_start else "recent"
@@ -1528,6 +1720,14 @@ class ClassroomService:
             f"Your instructor has added new resources to the {session_date} session "
             f"in {classroom_name}. Log in to view them."
         )
+
+        prepared_session_email = None
+        if any(s.email for _, s in enrolled):
+            prepared_session_email = build_classroom_session_content_email(
+                classroom_id=classroom_id,
+                title=title,
+                body=body,
+            )
 
         for _enrollment, student in enrolled:
             # In-app notification: find parent users linked to this student
@@ -1545,12 +1745,11 @@ class ClassroomService:
                 )
 
             # Email notification: send to student email if available
-            if student.email:
-                send_email_task.delay(
-                    student.email,
-                    title,
-                    body,
-                    f"<p>{body}</p>",
+            if student.email and prepared_session_email:
+                enqueue_transactional_email(
+                    to_email=student.email,
+                    prepared=prepared_session_email,
+                    tenant_id=tenant_id,
                 )
 
     async def update_session_details(
@@ -1595,6 +1794,10 @@ class ClassroomService:
                 text_assignments=list(existing_content.get("text_assignments") or []),
                 resource_entries=list(existing_content.get("resource_entries") or []),
             )
+
+        if data.display_title is not None:
+            dt = data.display_title.strip()
+            session_obj.display_title = dt[:200] if dt else None
 
         await self.session.flush()
         await self.session.refresh(session_obj)
@@ -1643,20 +1846,26 @@ class ClassroomService:
         identity: CurrentIdentity,
         data: SessionChatCreateRequest,
         correlation_id: str | None = None,
+        student_actor_id: UUID | None = None,
     ) -> SessionEventResponse:
         session_obj = await self._ensure_session_exists(
             classroom_id=classroom_id,
             session_id=session_id,
             tenant_id=tenant_id,
         )
-        actor_type = self._presence_actor_type(identity)
+        actor_id = student_actor_id if student_actor_id is not None else identity.id
+        actor_type = (
+            "student"
+            if student_actor_id is not None
+            else self._presence_actor_type(identity)
+        )
         event = await self.repo.create_session_event(
             session_id=session_obj.id,
             classroom_id=classroom_id,
             tenant_id=tenant_id,
             event_type="chat",
             correlation_id=correlation_id,
-            actor_id=identity.id,
+            actor_id=actor_id,
             actor_type=actor_type,
             message=data.message.strip(),
         )
@@ -1712,6 +1921,61 @@ class ClassroomService:
             classroom = await self.repo.get_by_id(classroom_id, tenant_id)
             class_name = (classroom.name or "Class").strip() if classroom else "Class"
             msg = (data.message or "").strip() or None
+            # Keep classroom recognitions in sync with gamification data used by dashboard cards.
+            try:
+                from app.gamification.service import GamificationService
+
+                # Use an isolated session so gamification write failures do not poison
+                # the classroom event transaction/session.
+                async with async_session_factory() as gamification_session:
+                    tenant_row = await gamification_session.get(Tenant, tenant_id)
+                    tenant_ctx = TenantContext(
+                        tenant_id=tenant_id,
+                        tenant_slug=(tenant_row.slug if tenant_row and tenant_row.slug else "tenant"),
+                    )
+                    gamification = GamificationService(gamification_session)
+                    if activity_type == "points_awarded" and points_delta:
+                        await gamification.award_xp(
+                            data.student_id,
+                            tenant_ctx,
+                            int(points_delta),
+                            reason=f"Classroom recognition in {class_name}",
+                            source="classroom_recognition",
+                            source_id=event.id,
+                        )
+                    elif activity_type in {"high_five", "callout"}:
+                        actor_user = await gamification_session.get(User, identity.id)
+                        student_obj = await gamification_session.get(Student, data.student_id)
+                        from_name = (
+                            f"{(actor_user.first_name or '').strip()} {(actor_user.last_name or '').strip()}".strip()
+                            if actor_user
+                            else "Instructor"
+                        ) or "Instructor"
+                        to_name = (
+                            f"{(student_obj.first_name or '').strip()} {(student_obj.last_name or '').strip()}".strip()
+                            if student_obj
+                            else "Student"
+                        ) or "Student"
+                        await gamification.create_shoutout(
+                            from_user_id=identity.id,
+                            from_user_name=from_name,
+                            to_student_id=data.student_id,
+                            to_student_name=to_name,
+                            tenant=tenant_ctx,
+                            message=msg
+                            or (
+                                "Great participation in class!"
+                                if activity_type == "high_five"
+                                else "Outstanding effort today!"
+                            ),
+                            emoji="👏" if activity_type == "high_five" else "🌟",
+                            classroom_id=classroom_id,
+                        )
+                    # Ensure student streaks are persisted/tracked for classroom recognitions
+                    # even when an event does not directly award XP.
+                    await gamification.track_student_activity(data.student_id, tenant_ctx)
+            except Exception:
+                logger.exception("Failed to mirror classroom recognition into gamification tables")
             if activity_type == "points_awarded":
                 pd = points_delta or 0
                 title = f"You earned {pd} points in {class_name}"
@@ -1738,8 +2002,16 @@ class ClassroomService:
             try:
                 tenant = await self.session.get(Tenant, tenant_id)
                 tenant_settings = tenant.settings if tenant and isinstance(tenant.settings, dict) else {}
+                gamification_cfg_raw = tenant_settings.get("gamification_config", {})
+                gamification_cfg = (
+                    gamification_cfg_raw if isinstance(gamification_cfg_raw, dict) else {}
+                )
+                mode = str(gamification_cfg.get("mode") or "balanced")
+                allow_live_recognition = bool(gamification_cfg.get("allow_live_recognition", True))
                 reward_cfg_raw = tenant_settings.get("reward_animations", {})
                 reward_cfg = reward_cfg_raw if isinstance(reward_cfg_raw, dict) else {}
+                if not allow_live_recognition or mode == "academic":
+                    return await self._event_to_response(event)
                 big_win_threshold_raw = reward_cfg.get("big_win_points")
                 try:
                     big_win_threshold = int(big_win_threshold_raw)
@@ -1858,11 +2130,23 @@ class ClassroomService:
             after_sequence=after_sequence,
             limit=replay_limit,
         )
+        assigns = list(state_row.assignments or [])
+        if assigns:
+            await enrich_assignments_lab_launcher(self.session, assigns)
+        state_for_snap = SessionStateResponse(
+            session_id=session_obj.id,
+            classroom_id=session_obj.classroom_id,
+            tenant_id=session_obj.tenant_id,
+            active_lab=state_row.active_lab,
+            assignments=assigns,
+            metadata=dict(state_row.metadata_ or {}),
+            updated_at=state_row.updated_at,
+        )
         return RealtimeSessionSnapshotResponse(
             session=self._session_to_response(session_obj),
             presence=presence,
             participants=participants,
-            state=self._session_state_to_response(state_row, session_obj=session_obj),
+            state=state_for_snap,
             latest_sequence=latest_sequence,
             events=events,
         )
@@ -1877,13 +2161,19 @@ class ClassroomService:
         event_type: str,
         payload: dict | None = None,
         correlation_id: str | None = None,
+        student_actor_id: UUID | None = None,
     ) -> RealtimeEventEnvelope:
         session_obj = await self._ensure_session_exists(
             classroom_id=classroom_id,
             session_id=session_id,
             tenant_id=tenant_id,
         )
-        actor_type = self._presence_actor_type(identity)
+        actor_id = student_actor_id if student_actor_id is not None else identity.id
+        actor_type = (
+            "student"
+            if student_actor_id is not None
+            else self._presence_actor_type(identity)
+        )
         normalized_type = (event_type or "").strip() or "session.generic"
         await self._persist_live_sync_patch(
             classroom_id=classroom_id,
@@ -1898,11 +2188,16 @@ class ClassroomService:
             tenant_id=tenant_id,
             event_type=normalized_type,
             correlation_id=correlation_id,
-            actor_id=identity.id,
+            actor_id=actor_id,
             actor_type=actor_type,
             metadata_=payload or {},
         )
         await self.session.flush()
+        if normalized_type in (
+            "student.submission.saved",
+            "student.submission.submitted",
+        ) and actor_type == "student":
+            await bump_student_streak(actor_id, tenant_id)
         return await self._event_to_envelope(event)
 
     async def set_session_active_lab(
@@ -1914,6 +2209,7 @@ class ClassroomService:
         identity: CurrentIdentity,
         active_lab: str | None,
         correlation_id: str | None = None,
+        student_actor_id: UUID | None = None,
     ) -> RealtimeEventEnvelope:
         state_row = await self.repo.update_session_state(
             session_id=session_id,
@@ -1929,6 +2225,7 @@ class ClassroomService:
             event_type="session.lab.selected",
             payload={"active_lab": state_row.active_lab},
             correlation_id=correlation_id,
+            student_actor_id=student_actor_id,
         )
         return envelope
 
@@ -1941,6 +2238,7 @@ class ClassroomService:
         identity: CurrentIdentity,
         assignment: dict,
         correlation_id: str | None = None,
+        student_actor_id: UUID | None = None,
     ) -> RealtimeEventEnvelope:
         state_row = await self.repo.get_or_create_session_state(
             session_id=session_id,
@@ -1948,23 +2246,24 @@ class ClassroomService:
             tenant_id=tenant_id,
         )
         assignments = list(state_row.assignments or [])
-        now_iso = datetime.now(timezone.utc).isoformat()
         assignment_id = str(assignment.get("id") or uuid.uuid4())
-        normalized = {
-            "id": assignment_id,
-            "title": str(assignment.get("title") or "").strip(),
-            "instructions": str(assignment.get("instructions") or "").strip(),
-            "due_at": assignment.get("due_at"),
-            "updated_at": now_iso,
-        }
+        assignment_with_id = dict(assignment)
+        assignment_with_id["id"] = assignment_id
         replaced = False
         for idx, row in enumerate(assignments):
             if str(row.get("id")) == assignment_id:
-                assignments[idx] = {**row, **normalized}
+                assignments[idx] = self._merge_session_assignment_row(row, assignment_with_id)
                 replaced = True
                 break
         if not replaced:
-            assignments.insert(0, normalized)
+            assignments.insert(
+                0, self._merge_session_assignment_row({}, assignment_with_id)
+            )
+        normalized: dict = {}
+        for row in assignments:
+            if str(row.get("id")) == assignment_id:
+                normalized = row
+                break
         await self.repo.update_session_state(
             session_id=session_id,
             classroom_id=classroom_id,
@@ -1980,6 +2279,7 @@ class ClassroomService:
             event_type=event_type,
             payload={"assignment": normalized, "assignments": assignments},
             correlation_id=correlation_id,
+            student_actor_id=student_actor_id,
         )
 
     async def delete_session_assignment(
@@ -1991,6 +2291,7 @@ class ClassroomService:
         identity: CurrentIdentity,
         assignment_id: str,
         correlation_id: str | None = None,
+        student_actor_id: UUID | None = None,
     ) -> RealtimeEventEnvelope:
         state_row = await self.repo.get_or_create_session_state(
             session_id=session_id,
@@ -2013,6 +2314,76 @@ class ClassroomService:
             event_type="assignment.deleted",
             payload={"assignment_id": assignment_id, "assignments": next_assignments},
             correlation_id=correlation_id,
+            student_actor_id=student_actor_id,
+        )
+
+    async def create_session_assignment_from_template(
+        self,
+        *,
+        classroom_id: UUID,
+        session_id: UUID,
+        tenant_id: UUID,
+        identity: CurrentIdentity,
+        template_id: UUID,
+        due_at: str | None = None,
+        title_override: str | None = None,
+        assignment_id: str | None = None,
+        rubric_snapshot_override: list | None = None,
+        parent_tenant_id: UUID | None = None,
+        governance_mode: str | None = None,
+        correlation_id: str | None = None,
+        student_actor_id: UUID | None = None,
+    ) -> RealtimeEventEnvelope:
+        session_obj = await self.repo.get_session_by_id(session_id, classroom_id, tenant_id)
+        if session_obj is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        read_ids = curriculum_read_tenant_ids(
+            child_tenant_id=tenant_id,
+            parent_tenant_id=parent_tenant_id,
+            governance_mode=governance_mode,
+        )
+        tmpl = await self.session.get(AssignmentTemplate, template_id)
+        if tmpl is None or tmpl.tenant_id not in read_ids:
+            raise HTTPException(status_code=404, detail="Assignment template not found")
+
+        rubric_snapshot = None
+        rubric_template_id_str = None
+        if tmpl.use_rubric:
+            if rubric_snapshot_override is not None:
+                rubric_snapshot = self._normalize_rubric_snapshot_storage(rubric_snapshot_override)
+            elif tmpl.rubric_template_id:
+                rt = await self.session.get(RubricTemplate, tmpl.rubric_template_id)
+                if rt is not None and rt.tenant_id in read_ids:
+                    rubric_template_id_str = str(rt.id)
+                    rubric_snapshot = self._normalize_rubric_snapshot_storage(rt.criteria)
+
+        new_id = assignment_id or str(uuid.uuid4())
+        payload: dict = {
+            "id": new_id,
+            "title": (title_override or tmpl.title or "").strip(),
+            "instructions": (tmpl.instructions or "") if tmpl.instructions else "",
+            "due_at": due_at,
+            "lab_id": str(tmpl.lab_id) if tmpl.lab_id else None,
+            "requires_lab": tmpl.requires_lab,
+            "requires_assets": tmpl.requires_assets,
+            "allow_edit_after_submit": tmpl.allow_edit_after_submit,
+            "use_rubric": tmpl.use_rubric,
+            "assignment_template_id": str(tmpl.id),
+        }
+        if rubric_template_id_str:
+            payload["rubric_template_id"] = rubric_template_id_str
+        if rubric_snapshot is not None:
+            payload["rubric_snapshot"] = rubric_snapshot
+
+        return await self.upsert_session_assignment(
+            classroom_id=classroom_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            identity=identity,
+            assignment=payload,
+            correlation_id=correlation_id,
+            student_actor_id=student_actor_id,
         )
 
     async def regenerate_meeting(
@@ -2069,9 +2440,14 @@ class ClassroomService:
     # ── Assignments ───────────────────────────────────────────────────────────
 
     async def list_classroom_assignments(
-        self, *, classroom_id: UUID, tenant_id: UUID, identity: CurrentIdentity
+        self,
+        *,
+        classroom_id: UUID,
+        tenant_id: UUID,
+        identity: CurrentIdentity,
+        child_context_student_id: UUID | None = None,
     ) -> list[dict]:
-        """Return all assignments across every session of a classroom (instructor view)."""
+        """Return all assignments across every session of a classroom (instructor or enrolled learner)."""
         from sqlalchemy import select
         from app.classrooms.models import ClassroomSessionEvent, ClassroomSessionState
 
@@ -2081,12 +2457,33 @@ class ClassroomService:
 
         is_staff = identity.role in {"admin", "owner", "instructor", "super_admin"}
         if not is_staff:
-            if identity.sub_type != "student":
+            if identity.sub_type == "student":
+                enrollment_student_id = identity.id
+            elif (
+                identity.sub_type == "user"
+                and child_context_student_id is not None
+            ):
+                role = (identity.role or "").strip().lower()
+                if role not in ("parent", "homeschool_parent"):
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Insufficient permissions to view assignments",
+                    )
+                await ensure_can_view_student_as_guardian(
+                    self.session,
+                    identity=identity,
+                    student_id=child_context_student_id,
+                    tenant_id=tenant_id,
+                )
+                enrollment_student_id = child_context_student_id
+            else:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Insufficient permissions to view assignments",
                 )
-            enrollment = await self.repo.get_enrollment(classroom_id, identity.id)
+            enrollment = await self.repo.get_enrollment(
+                classroom_id, enrollment_student_id
+            )
             if enrollment is None:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
@@ -2149,13 +2546,19 @@ class ClassroomService:
                         "requires_lab": bool(raw.get("requires_lab")),
                         "requires_assets": bool(raw.get("requires_assets")),
                         "allow_edit_after_submit": bool(raw.get("allow_edit_after_submit")),
+                        "use_rubric": bool(raw.get("use_rubric", True)),
+                        "rubric_template_id": raw.get("rubric_template_id") or None,
+                        "rubric_snapshot": raw.get("rubric_snapshot") or None,
+                        "assignment_template_id": raw.get("assignment_template_id") or None,
                         "session_id": str(session.id),
                         "session_start": session.session_start.isoformat(),
                         "session_end": session.session_end.isoformat(),
                         "session_status": session.status,
+                        "session_display_title": session.display_title,
                         "submission_count": count,
                     }
                 )
+        await enrich_assignments_lab_launcher(self.session, result)
         result.sort(
             key=lambda x: (x.get("due_at") is None, str(x.get("due_at") or ""))
         )
@@ -2270,12 +2673,41 @@ class ClassroomService:
             ev_id = str(ev.id)
             grade_ev = grade_map.get(ev_id)
             grade_meta = grade_ev.metadata_ if grade_ev else {}
+            rubric_raw = grade_meta.get("rubric") if grade_meta else None
+            rubric_parsed = None
+            if isinstance(rubric_raw, list):
+                rubric_parsed = []
+                for item in rubric_raw:
+                    if not isinstance(item, dict):
+                        continue
+                    cid = item.get("criterion_id")
+                    if not cid:
+                        continue
+                    try:
+                        mx = int(item.get("max_points", 0))
+                        pa = int(item.get("points_awarded", 0))
+                    except (TypeError, ValueError):
+                        continue
+                    rubric_parsed.append(
+                        {
+                            "criterion_id": str(cid),
+                            "label": item.get("label") if isinstance(item.get("label"), str) else None,
+                            "max_points": mx,
+                            "points_awarded": pa,
+                        }
+                    )
+                if not rubric_parsed:
+                    rubric_parsed = None
             student_id = str(meta.get("student_id") or ev.actor_id)
             try:
                 student_uuid = UUID(student_id)
                 student_display_name = await self._resolve_student_name(student_uuid)
             except Exception:
                 student_display_name = None
+            preview = meta.get("preview_image")
+            preview_str = preview if isinstance(preview, str) and preview.strip() else None
+            lab_id_raw = meta.get("lab_id")
+            lab_id_str = lab_id_raw if isinstance(lab_id_raw, str) and lab_id_raw.strip() else None
             result.append(
                 {
                     "event_id": ev_id,
@@ -2289,6 +2721,9 @@ class ClassroomService:
                     "grade": grade_meta.get("score") if grade_meta else None,
                     "feedback": grade_meta.get("feedback") if grade_meta else None,
                     "graded_at": grade_ev.created_at.isoformat() if grade_ev else None,
+                    "rubric": rubric_parsed,
+                    "preview_image": preview_str,
+                    "lab_id": lab_id_str,
                 }
             )
         return result
@@ -2336,19 +2771,20 @@ class ClassroomService:
             logger.exception("Failed to publish instructor submission notification")
 
         if instructor.email:
-            from workers.tasks.email_tasks import send_email_task
-
             session_phrase = f"Session {session_id}"
             plain = (
                 f"{student_name} submitted work for {assignment_label} in {classroom_name} "
                 f"({session_phrase})."
             )
-            html = f"<p>{plain}</p>"
-            send_email_task.delay(
-                instructor.email,
-                title,
-                plain,
-                html,
+            prepared = build_classroom_submission_email(
+                classroom_id=classroom_id,
+                email_subject=title,
+                summary_plain=plain,
+            )
+            enqueue_transactional_email(
+                to_email=instructor.email,
+                prepared=prepared,
+                tenant_id=tenant_id,
             )
 
     async def grade_submission(
@@ -2362,6 +2798,7 @@ class ClassroomService:
         score: int,
         feedback: str | None,
         assignment_id: str | None,
+        rubric: list[dict] | None = None,
     ) -> dict:
         """Record a grade for a student submission via a new session event."""
         from app.classrooms.models import ClassroomSessionEvent
@@ -2386,6 +2823,16 @@ class ClassroomService:
             student_uuid = None
 
         actor_type = self._presence_actor_type(identity)
+        meta: dict = {
+            "submission_event_id": str(submission_event_id),
+            "assignment_id": assignment_id,
+            "student_id": student_id,
+            "score": score,
+            "feedback": feedback,
+            "graded_by": str(identity.id),
+        }
+        if rubric:
+            meta["rubric"] = rubric
         grade_event = await self.repo.create_session_event(
             session_id=session_id,
             classroom_id=classroom_id,
@@ -2394,14 +2841,7 @@ class ClassroomService:
             actor_id=identity.id,
             actor_type=actor_type,
             student_id=student_uuid,
-            metadata_={
-                "submission_event_id": str(submission_event_id),
-                "assignment_id": assignment_id,
-                "student_id": student_id,
-                "score": score,
-                "feedback": feedback,
-                "graded_by": str(identity.id),
-            },
+            metadata_=meta,
         )
         await self.session.flush()
         await self.session.refresh(grade_event)
@@ -2441,11 +2881,17 @@ class ClassroomService:
                     or "Your child"
                 )
                 if student and student.email:
-                    from workers.tasks.email_tasks import send_email_task
-
-                    plain = f"{notif_title}. {notif_body}"
-                    html = f"<p>{plain}</p>"
-                    send_email_task.delay(student.email, notif_title, plain, html)
+                    prepared_grade = build_classroom_grading_email(
+                        classroom_id=classroom_id,
+                        email_subject=notif_title,
+                        body_plain=notif_body,
+                        cta_label="View feedback in app",
+                    )
+                    enqueue_transactional_email(
+                        to_email=student.email,
+                        prepared=prepared_grade,
+                        tenant_id=tenant_id,
+                    )
 
                 # Notify linked parents/guardians in-app and via email.
                 parent_links_result = await self.session.execute(
@@ -2476,15 +2922,16 @@ class ClassroomService:
                         )
                     )
                     if parent_user.email:
-                        from workers.tasks.email_tasks import send_email_task
-
-                        parent_plain = f"{parent_title}. {parent_body}"
-                        parent_html = f"<p>{parent_plain}</p>"
-                        send_email_task.delay(
-                            parent_user.email,
-                            parent_title,
-                            parent_plain,
-                            parent_html,
+                        parent_prepared = build_classroom_grading_email(
+                            classroom_id=classroom_id,
+                            email_subject=parent_title,
+                            body_plain=parent_body,
+                            cta_label="View classwork in app",
+                        )
+                        enqueue_transactional_email(
+                            to_email=parent_user.email,
+                            prepared=parent_prepared,
+                            tenant_id=tenant_id,
                         )
                 if parent_user_ids:
                     await self.session.flush()
@@ -2506,3 +2953,390 @@ class ClassroomService:
             "feedback": feedback,
             "graded_at": grade_event.created_at.isoformat(),
         }
+
+    async def _ensure_session_media_access(
+        self,
+        *,
+        classroom_id: UUID,
+        session_id: UUID,
+        tenant_id: UUID,
+        identity: CurrentIdentity,
+        child_context_student_id: UUID | None = None,
+    ) -> ClassroomSession:
+        session_obj = await self._ensure_session_exists(
+            classroom_id=classroom_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+        )
+        if identity.is_super_admin:
+            return session_obj
+
+        if identity.sub_type == "student":
+            enrollment = await self.repo.get_enrollment(classroom_id, identity.id)
+            if not enrollment:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enrolled in this classroom.")
+            return session_obj
+
+        role_slug = (identity.role or "").strip().lower()
+        if role_slug in {"owner", "admin", "instructor"}:
+            return session_obj
+
+        if child_context_student_id is not None and role_slug in {"parent", "homeschool_parent"}:
+            allowed = await guardian_may_use_child_context_in_tenant(
+                self.session,
+                identity=identity,
+                student_id=child_context_student_id,
+                tenant_id=tenant_id,
+            )
+            if not allowed:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Child context access denied.")
+            enrollment = await self.repo.get_enrollment(classroom_id, child_context_student_id)
+            if not enrollment:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Student is not enrolled in this classroom.")
+            return session_obj
+
+        membership_repo = MembershipRepository(self.session)
+        membership = await membership_repo.get_by_user_tenant(identity.id, tenant_id)
+        if not membership or not bool(membership.is_active):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized for this classroom session.")
+        return session_obj
+
+    async def _recording_or_404(
+        self,
+        *,
+        recording_id: UUID,
+        classroom_id: UUID,
+        session_id: UUID,
+        tenant_id: UUID,
+    ) -> SessionRecording:
+        row = await self.session.get(SessionRecording, recording_id)
+        if (
+            not row
+            or row.tenant_id != tenant_id
+            or row.classroom_id != classroom_id
+            or row.session_id != session_id
+        ):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recording not found")
+        return row
+
+    async def _can_manage_recordings(self, *, identity: CurrentIdentity, tenant_id: UUID) -> bool:
+        if identity.is_super_admin:
+            return True
+        role_slug = (identity.role or "").strip().lower()
+        if role_slug in {"owner", "admin", "instructor"}:
+            return True
+        if identity.sub_type != "user":
+            return False
+        membership = await MembershipRepository(self.session).get_by_user_tenant(identity.id, tenant_id)
+        if not membership or not bool(membership.is_active) or not membership.role_id:
+            return False
+        role = await self.session.get(Role, membership.role_id)
+        return bool(role and (role.slug or "").strip().lower() in {"owner", "admin", "instructor"})
+
+    async def _emit_recording_audit(
+        self,
+        *,
+        action: str,
+        recording: SessionRecording,
+        identity: CurrentIdentity,
+        old_data: dict | None = None,
+        new_data: dict | None = None,
+        changed_fields: list[str] | None = None,
+    ) -> None:
+        if self._audit_table_available is None:
+            try:
+                result = await self.session.execute(
+                    text("SELECT to_regclass('public.audit_events')")
+                )
+                self._audit_table_available = bool(result.scalar_one_or_none())
+            except Exception:
+                self._audit_table_available = False
+        if not self._audit_table_available:
+            return
+        evt = AuditEvent(
+            table_name="session_recordings",
+            record_id=str(recording.id),
+            action=action.upper(),
+            old_data=old_data,
+            new_data=new_data,
+            changed_fields=changed_fields,
+            db_user="app",
+            app_user_id=str(identity.id),
+            tenant_id=str(recording.tenant_id),
+            ip_address=None,
+            created_at=datetime.now(timezone.utc),
+        )
+        self.session.add(evt)
+
+    async def issue_session_video_token(
+        self,
+        *,
+        classroom_id: UUID,
+        session_id: UUID,
+        tenant_id: UUID,
+        identity: CurrentIdentity,
+        child_context_student_id: UUID | None = None,
+    ) -> SessionVideoTokenResponse:
+        session_obj = await self._ensure_session_media_access(
+            classroom_id=classroom_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            identity=identity,
+            child_context_student_id=child_context_student_id,
+        )
+        config = resolve_video_provider_config()
+        if not config.enabled:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Live video is not configured for this environment.",
+            )
+        participant_id = child_context_student_id or identity.id
+        participant_name = await self._resolve_actor_display_name(identity)
+        result = build_livekit_access_token(
+            config=config,
+            tenant_id=tenant_id,
+            classroom_id=classroom_id,
+            session_id=session_obj.id,
+            participant_identity=str(participant_id),
+            participant_name=participant_name,
+            can_publish=True,
+            can_subscribe=True,
+        )
+        return SessionVideoTokenResponse(
+            provider=result.provider,
+            room_name=result.room_name,
+            participant_identity=result.participant_identity,
+            participant_name=result.participant_name,
+            ws_url=result.ws_url,
+            token=result.token,
+            expires_at=result.expires_at,
+        )
+
+    async def list_session_recordings(
+        self,
+        *,
+        classroom_id: UUID,
+        session_id: UUID,
+        tenant_id: UUID,
+        identity: CurrentIdentity,
+        child_context_student_id: UUID | None = None,
+    ) -> list[SessionRecordingResponse]:
+        await self._ensure_session_media_access(
+            classroom_id=classroom_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            identity=identity,
+            child_context_student_id=child_context_student_id,
+        )
+        result = await self.session.execute(
+            select(SessionRecording)
+            .where(
+                SessionRecording.tenant_id == tenant_id,
+                SessionRecording.classroom_id == classroom_id,
+                SessionRecording.session_id == session_id,
+                SessionRecording.deleted_at.is_(None),
+            )
+            .order_by(SessionRecording.created_at.desc())
+        )
+        return [SessionRecordingResponse.model_validate(row) for row in result.scalars().all()]
+
+    async def start_session_recording(
+        self,
+        *,
+        classroom_id: UUID,
+        session_id: UUID,
+        tenant_id: UUID,
+        identity: CurrentIdentity,
+        data: SessionRecordingStartRequest,
+        child_context_student_id: UUID | None = None,
+    ) -> SessionRecordingResponse:
+        await self._ensure_session_media_access(
+            classroom_id=classroom_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            identity=identity,
+            child_context_student_id=child_context_student_id,
+        )
+        if not await self._can_manage_recordings(identity=identity, tenant_id=tenant_id):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only staff can start recordings.")
+
+        provider = resolve_video_provider_config()
+        retention_days = max(1, int(settings.SESSION_RECORDING_RETENTION_DAYS or 30))
+        row = SessionRecording(
+            tenant_id=tenant_id,
+            classroom_id=classroom_id,
+            session_id=session_id,
+            created_by_id=identity.id,
+            provider=provider.provider,
+            provider_room_name=provider.ws_url or None,
+            provider_recording_id=(data.provider_recording_id or "").strip() or None,
+            status="recording",
+            retention_expires_at=datetime.now(timezone.utc) + timedelta(days=retention_days),
+        )
+        self.session.add(row)
+        await self.session.flush()
+        await self._emit_recording_audit(
+            action="INSERT",
+            recording=row,
+            identity=identity,
+            new_data={
+                "status": row.status,
+                "provider": row.provider,
+                "provider_recording_id": row.provider_recording_id,
+            },
+            changed_fields=["status", "provider", "provider_recording_id"],
+        )
+        await self.session.flush()
+        await self.session.refresh(row)
+        return SessionRecordingResponse.model_validate(row)
+
+    async def stop_session_recording(
+        self,
+        *,
+        classroom_id: UUID,
+        session_id: UUID,
+        recording_id: UUID,
+        tenant_id: UUID,
+        identity: CurrentIdentity,
+        data: SessionRecordingStopRequest,
+        child_context_student_id: UUID | None = None,
+    ) -> SessionRecordingResponse:
+        await self._ensure_session_media_access(
+            classroom_id=classroom_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            identity=identity,
+            child_context_student_id=child_context_student_id,
+        )
+        if not await self._can_manage_recordings(identity=identity, tenant_id=tenant_id):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only staff can stop recordings.")
+
+        row = await self._recording_or_404(
+            recording_id=recording_id,
+            classroom_id=classroom_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+        )
+        old_status = row.status
+        row.status = (data.status or "ready").strip().lower()
+        if data.blob_key is not None:
+            row.blob_key = (data.blob_key or "").strip() or None
+        if data.duration_seconds is not None:
+            row.duration_seconds = int(data.duration_seconds)
+        if data.size_bytes is not None:
+            row.size_bytes = int(data.size_bytes)
+        if data.provider_recording_id is not None:
+            row.provider_recording_id = (data.provider_recording_id or "").strip() or None
+        await self._emit_recording_audit(
+            action="UPDATE",
+            recording=row,
+            identity=identity,
+            old_data={"status": old_status},
+            new_data={
+                "status": row.status,
+                "blob_key": row.blob_key,
+                "duration_seconds": row.duration_seconds,
+                "size_bytes": row.size_bytes,
+                "provider_recording_id": row.provider_recording_id,
+            },
+            changed_fields=[
+                "status",
+                "blob_key",
+                "duration_seconds",
+                "size_bytes",
+                "provider_recording_id",
+            ],
+        )
+        await self.session.flush()
+        await self.session.refresh(row)
+        return SessionRecordingResponse.model_validate(row)
+
+    async def create_session_recording_access_link(
+        self,
+        *,
+        classroom_id: UUID,
+        session_id: UUID,
+        recording_id: UUID,
+        tenant_id: UUID,
+        identity: CurrentIdentity,
+        child_context_student_id: UUID | None = None,
+    ) -> SessionRecordingAccessResponse:
+        await self._ensure_session_media_access(
+            classroom_id=classroom_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            identity=identity,
+            child_context_student_id=child_context_student_id,
+        )
+        row = await self._recording_or_404(
+            recording_id=recording_id,
+            classroom_id=classroom_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+        )
+        if row.deleted_at is not None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recording has been deleted.")
+        if not row.blob_key:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Recording file is not available yet.")
+        expires = max(60, int(settings.SESSION_RECORDING_PRESIGNED_EXPIRES_SECONDS or 900))
+        url = blob_storage.generate_presigned_download_url(row.blob_key, expires_in=expires)
+        await self._emit_recording_audit(
+            action="UPDATE",
+            recording=row,
+            identity=identity,
+            new_data={"access_link_generated": True, "expires_in_seconds": expires},
+            changed_fields=["access_link_generated"],
+        )
+        await self.session.flush()
+        return SessionRecordingAccessResponse(
+            recording_id=row.id,
+            download_url=url,
+            expires_in_seconds=expires,
+        )
+
+    async def delete_session_recording(
+        self,
+        *,
+        classroom_id: UUID,
+        session_id: UUID,
+        recording_id: UUID,
+        tenant_id: UUID,
+        identity: CurrentIdentity,
+        child_context_student_id: UUID | None = None,
+    ) -> SessionRecordingResponse:
+        await self._ensure_session_media_access(
+            classroom_id=classroom_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            identity=identity,
+            child_context_student_id=child_context_student_id,
+        )
+        if not await self._can_manage_recordings(identity=identity, tenant_id=tenant_id):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only staff can delete recordings.")
+
+        row = await self._recording_or_404(
+            recording_id=recording_id,
+            classroom_id=classroom_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+        )
+        if row.deleted_at is None:
+            row.deleted_at = datetime.now(timezone.utc)
+            row.status = "deleted"
+            old_blob = row.blob_key
+            await self._emit_recording_audit(
+                action="DELETE",
+                recording=row,
+                identity=identity,
+                old_data={"blob_key": old_blob},
+                new_data={"status": row.status, "deleted_at": row.deleted_at.isoformat()},
+                changed_fields=["status", "deleted_at"],
+            )
+            if old_blob:
+                try:
+                    blob_storage.delete_file(old_blob)
+                except Exception:
+                    logger.exception("Failed to delete recording blob key=%s", old_blob)
+        await self.session.flush()
+        await self.session.refresh(row)
+        return SessionRecordingResponse.model_validate(row)

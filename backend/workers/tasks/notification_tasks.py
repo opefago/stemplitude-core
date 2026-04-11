@@ -1,6 +1,7 @@
 import logging
 from uuid import UUID
 
+from workers.async_db import run_async_db
 from workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -16,12 +17,12 @@ def create_notification_task(
 ):
     """Create a notification record asynchronously."""
     logger.info("create_notification_task started user_id=%s type=%s", user_id, notification_type)
-    import asyncio
-    from app.database import async_session_factory
     from app.notifications.models import Notification
 
     async def _create():
-        async with async_session_factory() as db:
+        import app.database as db_mod
+
+        async with db_mod.async_session_factory() as db:
             tid = UUID(tenant_id) if tenant_id else None
             notification = Notification(
                 user_id=UUID(user_id),
@@ -46,7 +47,7 @@ def create_notification_task(
                     )
 
     try:
-        asyncio.run(_create())
+        run_async_db(_create)
         logger.info("create_notification_task completed user_id=%s type=%s", user_id, notification_type)
     except Exception as exc:
         logger.error("create_notification_task failed user_id=%s type=%s: %s", user_id, notification_type, exc)
@@ -67,13 +68,12 @@ def create_student_notification_task(
         student_id,
         notification_type,
     )
-    import asyncio
-
-    from app.database import async_session_factory
     from app.notifications.models import Notification
 
     async def _create():
-        async with async_session_factory() as db:
+        import app.database as db_mod
+
+        async with db_mod.async_session_factory() as db:
             tid = UUID(tenant_id)
             notification = Notification(
                 user_id=None,
@@ -101,7 +101,7 @@ def create_student_notification_task(
                 )
 
     try:
-        asyncio.run(_create())
+        run_async_db(_create)
         logger.info(
             "create_student_notification_task completed student_id=%s type=%s",
             student_id,

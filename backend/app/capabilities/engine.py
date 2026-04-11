@@ -8,6 +8,34 @@ from app.dependencies import CurrentIdentity, TenantContext
 
 logger = logging.getLogger(__name__)
 
+# Org-level lab toggles in ``tenant_lab_settings`` apply to these license feature keys
+# (not only keys ending in ``_lab``, e.g. game/design makers).
+_ORG_LAB_TOGGLE_FEATURES = frozenset(
+    {
+        "access_game_maker",
+        "access_design_maker",
+        "game_maker",
+        "3d_designer",
+        "design_maker",
+    }
+)
+
+
+def _org_lab_toggle_applies(required_feature: str | None) -> bool:
+    if not required_feature:
+        return False
+    if required_feature in _ORG_LAB_TOGGLE_FEATURES:
+        return True
+    return required_feature.endswith("_lab")
+
+
+async def invalidate_capability_cache_for_tenant(tenant_id: UUID) -> None:
+    """Drop cached capability results for a tenant (e.g. after lab enable/disable)."""
+    redis = await get_redis()
+    prefix = f"cap:{tenant_id}:"
+    async for key in redis.scan_iter(match=f"{prefix}*"):
+        await redis.delete(key)
+
 
 @dataclass
 class CapabilityResult:
@@ -85,7 +113,7 @@ class CapabilityEngine:
                 if license_:
                     pass
 
-            if rule.required_feature and rule.required_feature.endswith("_lab"):
+            if rule.required_feature and _org_lab_toggle_applies(rule.required_feature):
                 if await self.repo.is_lab_disabled(tenant.tenant_id, rule.required_feature):
                     result = Deny("This lab has been disabled by your organization")
                     logger.debug("Capability denied key=%s reason=%s", capability_key, result.reason)
@@ -131,9 +159,12 @@ class CapabilityEngine:
 
         if not link or link.billing_mode == "independent":
             seat = await self.repo.get_seat_usage(tenant_id, seat_type)
-            if seat and seat.current_count >= seat.max_count:
-                logger.debug("Seat check tenant=%s type=%s result=%s", tenant_id, seat_type, "Seat limit reached for your plan")
-                return Deny("Seat limit reached for your plan")
+            if seat:
+                live_count = await self._count_seat_type(tenant_id, seat_type)
+                if live_count >= seat.max_count:
+                    reason = f"Seat limit reached ({live_count}/{seat.max_count})"
+                    logger.debug("Seat check tenant=%s type=%s result=%s", tenant_id, seat_type, reason)
+                    return Deny(reason)
             logger.debug("Seat check tenant=%s type=%s result=%s", tenant_id, seat_type, "ok")
             return None
 

@@ -2,7 +2,7 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.permissions import require_permission
@@ -39,13 +39,15 @@ def _get_tenant(request: Request) -> TenantContext:
 async def list_conversations(
     request: Request,
     db: AsyncSession = Depends(get_db),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
     _: None = require_permission("messages", "view"),
 ):
-    """List all conversations for the current user."""
+    """List conversations for the current user (paginated)."""
     tenant = _get_tenant(request)
     identity = require_identity(request)
     service = ConversationService(db)
-    return await service.list_conversations(identity, tenant)
+    return await service.list_conversations(identity, tenant, skip=skip, limit=limit)
 
 
 @router.post("/group", response_model=ConversationSummary, status_code=status.HTTP_201_CREATED)
@@ -104,8 +106,8 @@ async def list_conversation_messages(
     id: UUID,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    skip: int = 0,
-    limit: int = 50,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
     _: None = require_permission("messages", "view"),
 ):
     """List messages in a conversation."""

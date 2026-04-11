@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Calendar, ChevronLeft, ChevronRight, Edit, Plus, Search, Users } from "lucide-react";
 import {
   archiveProgram,
@@ -30,6 +30,7 @@ function formatTermLabel(start: string | null, end: string | null): string | nul
 }
 
 export function ProgramsPage() {
+  const location = useLocation();
   const navigate = useNavigate();
   const [programs, setPrograms] = useState<ApiProgram[]>([]);
   const [loading, setLoading] = useState(true);
@@ -119,6 +120,19 @@ export function ProgramsPage() {
 
   useEffect(() => { setPage(1); }, [search, statusFilter]);
   useEffect(() => { if (page > totalPages) setPage(totalPages); }, [page, totalPages]);
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get("create") !== "1") return;
+    setShowCreate(true);
+    params.delete("create");
+    navigate(
+      {
+        pathname: location.pathname,
+        search: params.toString() ? `?${params.toString()}` : "",
+      },
+      { replace: true },
+    );
+  }, [location.pathname, location.search, navigate]);
 
   async function handleCreateProgram(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -335,8 +349,18 @@ export function ProgramsPage() {
         ariaLabel="Create Program"
         contentClassName="programs-page__dialog"
         closeVariant="neutral"
+        footer={
+          <div className="ui-form-actions">
+            <button type="button" className="ui-btn ui-btn--ghost" onClick={() => setShowCreate(false)} disabled={creating}>
+              Cancel
+            </button>
+            <button type="submit" form="programs-create-form" className="ui-btn ui-btn--primary" disabled={creating}>
+              {creating ? "Creating..." : "Create Program"}
+            </button>
+          </div>
+        }
       >
-        <form className="programs-page__form" onSubmit={handleCreateProgram}>
+        <form id="programs-create-form" className="programs-page__form" onSubmit={handleCreateProgram}>
           <div className="programs-page__form-grid">
             <div className="programs-page__field programs-page__field--full">
               <label htmlFor="program-name">Name</label>
@@ -399,14 +423,6 @@ export function ProgramsPage() {
               saving={creating}
             />
           </div>
-          <div className="ui-form-actions">
-            <button type="button" className="ui-btn ui-btn--ghost" onClick={() => setShowCreate(false)} disabled={creating}>
-              Cancel
-            </button>
-            <button type="submit" className="ui-btn ui-btn--primary" disabled={creating}>
-              {creating ? "Creating..." : "Create Program"}
-            </button>
-          </div>
         </form>
       </ModalDialog>
 
@@ -417,8 +433,18 @@ export function ProgramsPage() {
         ariaLabel="Edit Program"
         contentClassName="programs-page__dialog"
         closeVariant="neutral"
+        footer={
+          <div className="ui-form-actions">
+            <button type="button" className="ui-btn ui-btn--ghost" onClick={() => setEditingProgram(null)} disabled={savingEdit}>
+              Cancel
+            </button>
+            <button type="submit" form="programs-edit-form" className="ui-btn ui-btn--primary" disabled={savingEdit}>
+              {savingEdit ? "Saving..." : "Save"}
+            </button>
+          </div>
+        }
       >
-        <form className="programs-page__form" onSubmit={handleSaveEdit}>
+        <form id="programs-edit-form" className="programs-page__form" onSubmit={handleSaveEdit}>
           <div className="programs-page__form-grid">
             <div className="programs-page__field programs-page__field--full">
               <label htmlFor="edit-program-name">Name</label>
@@ -485,14 +511,6 @@ export function ProgramsPage() {
               inheritLabel="Inherit from tenant"
               saving={savingEdit}
             />
-          </div>
-          <div className="ui-form-actions">
-            <button type="button" className="ui-btn ui-btn--ghost" onClick={() => setEditingProgram(null)} disabled={savingEdit}>
-              Cancel
-            </button>
-            <button type="submit" className="ui-btn ui-btn--primary" disabled={savingEdit}>
-              {savingEdit ? "Saving..." : "Save"}
-            </button>
           </div>
         </form>
       </ModalDialog>

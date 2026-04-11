@@ -4,10 +4,14 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.plans.models import Plan, PlanFeature, PlanLimit
+
+from app.schemas.pagination import Paginated
 
 from .repository import PlanRepository
 from .schemas import PlanCreate, PlanResponse, PlanUpdate
+from .stripe_checkout import stripe_checkout_ready
 
 
 class PlanService:
@@ -17,10 +21,23 @@ class PlanService:
         self.session = session
         self.repo = PlanRepository(session)
 
-    async def list_public(self) -> list[PlanResponse]:
-        """List all active plans (public)."""
-        plans = await self.repo.list_active()
-        return [self._to_response(p) for p in plans]
+    async def list_public(
+        self,
+        *,
+        skip: int = 0,
+        limit: int = 50,
+    ) -> Paginated[PlanResponse]:
+        """List active plans (public, paginated)."""
+        excl = (
+            [settings.TRIAL_CATALOG_EXCLUDE_SLUG]
+            if settings.TRIAL_ENABLED and settings.TRIAL_CATALOG_EXCLUDE_SLUG.strip()
+            else []
+        )
+        plans, total = await self.repo.list_active(
+            skip=skip, limit=limit, exclude_slugs=excl or None
+        )
+        items = [self._to_response(p) for p in plans]
+        return Paginated(items=items, total=total, skip=skip, limit=limit)
 
     async def list_all(self, *, skip: int = 0, limit: int = 100) -> tuple[list[PlanResponse], int]:
         """List all plans (super admin)."""
@@ -111,6 +128,7 @@ class PlanService:
         """Convert Plan model to PlanResponse."""
         from .schemas import PlanFeatureResponse, PlanLimitResponse
 
+        monthly_ready, yearly_ready = stripe_checkout_ready(plan)
         return PlanResponse(
             id=plan.id,
             name=plan.name,
@@ -123,6 +141,8 @@ class PlanService:
             trial_days=plan.trial_days,
             is_active=plan.is_active,
             created_at=plan.created_at,
+            stripe_checkout_monthly_ready=monthly_ready,
+            stripe_checkout_yearly_ready=yearly_ready,
             features=[PlanFeatureResponse.model_validate(f) for f in plan.features],
             limits=[PlanLimitResponse.model_validate(l) for l in plan.limits],
         )

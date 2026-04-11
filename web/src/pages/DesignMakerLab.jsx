@@ -6,8 +6,9 @@ import RichTip from '../labs/design-maker/RichTip';
 import TC from '../labs/design-maker/tooltipContent';
 import {
   Settings, Upload, Download, Share2, X, Pencil,
-  FolderOpen, ChevronDown, Search,
+  FolderOpen, ChevronDown, Search, Send, Save,
 } from 'lucide-react';
+import { createMySessionSubmission } from '../lib/api/classrooms';
 import { v4 as uuidv4 } from 'uuid';
 import * as THREE from 'three';
 import Scene, { setMarqueeActive } from '../labs/design-maker/Scene';
@@ -28,6 +29,7 @@ import {
   getEffectiveSelectionIdsFromState,
 } from '../labs/design-maker/store';
 import { unionCSG, mergeCSG, subtractCSG, intersectCSG } from '../labs/design-maker/csgUtils';
+import { emitLabEvent, emitLabEventThrottled } from '../lib/api/gamification';
 import './DesignMakerLab.css';
 
 function downloadBlob(blob, filename) {
@@ -37,6 +39,34 @@ function downloadBlob(blob, filename) {
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+function shrinkDataUrlToJpeg(dataUrl, maxW = 720, quality = 0.82) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const nw = img.naturalWidth || img.width || 1;
+        const nh = img.naturalHeight || img.height || 1;
+        const w = Math.min(maxW, nw);
+        const h = Math.round((nh * w) / nw);
+        const c = document.createElement('canvas');
+        c.width = w;
+        c.height = h;
+        const ctx = c.getContext('2d');
+        if (!ctx) {
+          resolve(dataUrl);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(c.toDataURL('image/jpeg', quality));
+      } catch (err) {
+        reject(err);
+      }
+    };
+    img.onerror = () => reject(new Error('Snapshot decode failed'));
+    img.src = dataUrl;
+  });
 }
 
 function buildExportScene(objects) {
@@ -92,6 +122,7 @@ export default function DesignMakerLab() {
   const isDirty = useDesignStore(s => s.isDirty);
   const objects = useDesignStore(s => s.objects);
   const selectedIds = useDesignStore(s => s.selectedIds);
+  const lastObjectCountRef = useRef(0);
 
   const setProjectName = useDesignStore(s => s.setProjectName);
   const setSettingsOpen = useDesignStore(s => s.setSettingsOpen);
@@ -216,6 +247,8 @@ export default function DesignMakerLab() {
   }, [provider, classroomContext, ydoc]);
   const projectsRef = useRef(null);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [classroomSubmitBusy, setClassroomSubmitBusy] = useState(false);
+  const [classroomSubmitError, setClassroomSubmitError] = useState(null);
   const [projectDialogOpen, setProjectDialogOpen] = useState(false);
   const [dialogSearch, setDialogSearch] = useState('');
   const [dialogPage, setDialogPage] = useState(0);
@@ -230,6 +263,22 @@ export default function DesignMakerLab() {
     (dialogPage + 1) * DIALOG_PAGE_SIZE
   );
   const [sidebarTab, setSidebarTab] = useState('properties');
+
+  useEffect(() => {
+    if (objects.length > lastObjectCountRef.current) {
+      emitLabEventThrottled({
+        lab_id: 'design-maker',
+        lab_type: 'design-maker',
+        event_type: 'OBJECT_CREATED',
+        context: {
+          object_count: objects.length,
+          source: 'scene_growth',
+          session_id: classroomContext?.sessionId ?? null,
+        },
+      }, 1200);
+    }
+    lastObjectCountRef.current = objects.length;
+  }, [objects.length, classroomContext?.sessionId]);
 
   useEffect(() => {
     if (!projectsOpen) return;
@@ -312,6 +361,49 @@ export default function DesignMakerLab() {
       });
     }
   }, []);
+
+  const handleSubmitSnapshotToClassroom = useCallback(async (status) => {
+    const ctx = classroomContext;
+    if (!ctx?.assignmentId || !ctx.classroomId || !ctx.sessionId) return;
+    const canvas = viewportRef.current?.querySelector('canvas');
+    if (!canvas) {
+      setClassroomSubmitError('3D view is not ready to capture yet.');
+      return;
+    }
+    let dataUrl;
+    try {
+      dataUrl = canvas.toDataURL('image/png');
+    } catch {
+      setClassroomSubmitError('Could not capture the 3D view.');
+      return;
+    }
+    setClassroomSubmitBusy(true);
+    setClassroomSubmitError(null);
+    try {
+      const preview = await shrinkDataUrlToJpeg(dataUrl);
+      const content = JSON.stringify({
+        type: 'design_maker',
+        lab_id: 'design-maker',
+        note: projectName || 'Design Maker',
+        object_count: objects.length,
+        submitted_at: new Date().toISOString(),
+      });
+      await createMySessionSubmission(ctx.classroomId, ctx.sessionId, {
+        assignment_id: ctx.assignmentId,
+        content,
+        status,
+        preview_image: preview,
+        lab_id: 'design-maker',
+      });
+      if (status === 'submitted') {
+        navigate(`/app/classrooms/${ctx.classroomId}?tab=assignments`);
+      }
+    } catch (e) {
+      setClassroomSubmitError(e instanceof Error ? e.message : 'Submit failed');
+    } finally {
+      setClassroomSubmitBusy(false);
+    }
+  }, [classroomContext, navigate, objects.length, projectName]);
 
   const handleMarqueeUp = useCallback(() => {
     if (marquee && viewportRef.current && sceneCamera.current) {
@@ -461,6 +553,12 @@ export default function DesignMakerLab() {
           geometry.center();
           geometry.computeVertexNormals();
           addImportedObject(geometry, file.name.replace(`.${ext}`, ''));
+          void emitLabEvent({
+            lab_id: 'design-maker',
+            lab_type: 'design-maker',
+            event_type: 'OBJECT_CREATED',
+            context: { type: 'imported_stl', file_name: file.name },
+          });
         } else if (ext === 'obj') {
           const { OBJLoader } = await import('three/examples/jsm/loaders/OBJLoader.js');
           const loader = new OBJLoader();
@@ -469,6 +567,12 @@ export default function DesignMakerLab() {
             if (child.isMesh) {
               child.geometry.center();
               addImportedObject(child.geometry, file.name.replace(`.${ext}`, ''));
+              void emitLabEvent({
+                lab_id: 'design-maker',
+                lab_type: 'design-maker',
+                event_type: 'OBJECT_CREATED',
+                context: { type: 'imported_obj', file_name: file.name },
+              });
             }
           });
         }
@@ -489,6 +593,12 @@ export default function DesignMakerLab() {
     const scene = buildExportScene(objects);
     const result = exporter.parse(scene, { binary: true });
     downloadBlob(new Blob([result], { type: 'application/octet-stream' }), `${projectName}.stl`);
+    void emitLabEvent({
+      lab_id: 'design-maker',
+      lab_type: 'design-maker',
+      event_type: 'MODEL_COMPLETE',
+      context: { export_format: 'stl', object_count: objects.length },
+    });
     setExportOpen(false);
   }, [objects, projectName]);
 
@@ -501,6 +611,12 @@ export default function DesignMakerLab() {
       scene,
       (gltf) => {
         downloadBlob(new Blob([gltf], { type: 'application/octet-stream' }), `${projectName}.glb`);
+        void emitLabEvent({
+          lab_id: 'design-maker',
+          lab_type: 'design-maker',
+          event_type: 'MODEL_COMPLETE',
+          context: { export_format: 'glb', object_count: objects.length },
+        });
       },
       (error) => console.error('GLB export failed:', error),
       { binary: true }
@@ -595,6 +711,12 @@ export default function DesignMakerLab() {
           visible: true,
           geometry: { bufferGeometry: normalized.geometry },
         });
+        void emitLabEvent({
+          lab_id: 'design-maker',
+          lab_type: 'design-maker',
+          event_type: 'OBJECT_TRANSFORMED',
+          context: { operation: 'merge', selected_count: selectedIds.length },
+        });
       }
     } catch (err) {
       console.error('Merge failed:', err);
@@ -623,6 +745,12 @@ export default function DesignMakerLab() {
           visible: true,
           geometry: { bufferGeometry: normalized.geometry },
         });
+        void emitLabEvent({
+          lab_id: 'design-maker',
+          lab_type: 'design-maker',
+          event_type: 'OBJECT_TRANSFORMED',
+          context: { operation: 'subtract', selected_count: selectedIds.length },
+        });
       }
     } catch (err) {
       console.error('Subtract failed:', err);
@@ -648,6 +776,12 @@ export default function DesignMakerLab() {
           isHole: false,
           visible: true,
           geometry: { bufferGeometry: normalized.geometry },
+        });
+        void emitLabEvent({
+          lab_id: 'design-maker',
+          lab_type: 'design-maker',
+          event_type: 'OBJECT_TRANSFORMED',
+          context: { operation: 'intersect', selected_count: selectedIds.length },
         });
       }
     } catch (err) {
@@ -747,6 +881,33 @@ export default function DesignMakerLab() {
         </div>
 
         <div className="dml-header-right">
+          {classroomContext?.assignmentId && (
+            <>
+              <RichTip label="Save draft with snapshot" description="Sends a zoomable preview to your instructor.">
+                <button
+                  type="button"
+                  className="dml-header-btn"
+                  disabled={classroomSubmitBusy}
+                  onClick={() => void handleSubmitSnapshotToClassroom('draft')}
+                >
+                  <Save size={16} />
+                  <span>{classroomSubmitBusy ? 'Saving…' : 'Save to class'}</span>
+                </button>
+              </RichTip>
+              <RichTip label="Submit final" description="Submits your design with a snapshot for grading.">
+                <button
+                  type="button"
+                  className="dml-header-btn dml-header-btn--primary"
+                  disabled={classroomSubmitBusy}
+                  onClick={() => void handleSubmitSnapshotToClassroom('submitted')}
+                >
+                  <Send size={16} />
+                  <span>Submit</span>
+                </button>
+              </RichTip>
+              <div className="dml-divider" />
+            </>
+          )}
           <input
             ref={fileInputRef}
             type="file"
@@ -800,6 +961,12 @@ export default function DesignMakerLab() {
           </RichTip>
         </div>
       </header>
+
+      {classroomSubmitError ? (
+        <p className="dml-classroom-submit-error" role="alert">
+          {classroomSubmitError}
+        </p>
+      ) : null}
 
       <div className="dml-main">
         <div

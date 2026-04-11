@@ -1,6 +1,7 @@
 import uuid
+from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -62,3 +63,65 @@ class Lab(Base):
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     config: Mapped[dict | None] = mapped_column(JSONB, default=dict)
     starter_code: Mapped[dict | None] = mapped_column(JSONB, default=dict)
+
+
+class RubricTemplate(Base):
+    """Reusable rubric definitions (criteria + max points) for assignment templates and live assignments."""
+
+    __tablename__ = "rubric_templates"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(1000))
+    criteria: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+
+class AssignmentTemplate(Base):
+    """Reusable assignment shells scoped to tenant and optionally a course or lesson."""
+
+    __tablename__ = "assignment_templates"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    course_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("courses.id", ondelete="CASCADE"), index=True
+    )
+    lesson_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("lessons.id", ondelete="CASCADE"), index=True
+    )
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    instructions: Mapped[str | None] = mapped_column(Text)
+    lab_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("labs.id", ondelete="SET NULL")
+    )
+    rubric_template_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("rubric_templates.id", ondelete="SET NULL")
+    )
+    use_rubric: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    requires_lab: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    requires_assets: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    allow_edit_after_submit: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )

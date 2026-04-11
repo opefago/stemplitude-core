@@ -1,17 +1,25 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { CreditCard, TrendingUp } from "lucide-react";
-import { KidDropdown, ProgressBar } from "../../components/ui";
+import { KidDropdown, ModalDialog, ProgressBar } from "../../components/ui";
 import { ensureFreshAccessToken } from "../../lib/api/client";
 import { listSeatUsage, type SeatUsageRecord } from "../../lib/api/licenses";
-import { listPlans, type PlanRecord } from "../../lib/api/plans";
+import { fetchPlanById, listPlans, type PlanRecord } from "../../lib/api/plans";
 import {
   createCheckoutSession,
+  cancelSubscription,
   type BillingCycle,
-  listSubscriptionInvoices,
+  listBillingProviders,
+  pauseSubscription,
+  reactivateSubscription,
+  resumeSubscription,
   listSubscriptions,
+  listTenantInvoices,
+  type BillingProviderOption,
   type InvoiceRecord,
   type SubscriptionRecord,
 } from "../../lib/api/subscriptions";
+import { useAuth } from "../../providers/AuthProvider";
 import "../../components/ui/ui.css";
 import "./settings.css";
 
@@ -71,6 +79,12 @@ function getProviderLabel(provider?: string | null): string {
 function normalizeBillingError(message: string): string {
   const text = message.trim().toLowerCase();
   if (
+    text.includes("tenant context required") ||
+    text.includes("x-tenant-id")
+  ) {
+    return "Choose an organization or school in the app (tenant), then open Billing again.";
+  }
+  if (
     text.includes("not authenticated") ||
     text.includes("session expired") ||
     text.includes("401")
@@ -81,9 +95,12 @@ function normalizeBillingError(message: string): string {
 }
 
 export function BillingPage() {
+  const { user, isLoading: authLoading } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const checkoutReturnStatus = searchParams.get("checkout");
   const hasLoadedBillingRef = useRef(false);
-  const lastLoadedInvoiceSubscriptionRef = useRef<string | null>(null);
   const [plans, setPlans] = useState<PlanRecord[]>([]);
+  const [subscribedPlanExtra, setSubscribedPlanExtra] = useState<PlanRecord | null>(null);
   const [subscriptions, setSubscriptions] = useState<SubscriptionRecord[]>([]);
   const [invoices, setInvoices] = useState<InvoiceRecord[]>([]);
   const [seatUsage, setSeatUsage] = useState<SeatUsageRecord[]>([]);
@@ -98,6 +115,27 @@ export function BillingPage() {
   const [affiliateCode, setAffiliateCode] = useState("");
   const [checkoutError, setCheckoutError] = useState("");
   const [checkoutInfo, setCheckoutInfo] = useState("");
+  const [billingProviders, setBillingProviders] = useState<BillingProviderOption[]>([]);
+  const [paymentProvider, setPaymentProvider] = useState("stripe");
+  const [subscriptionAction, setSubscriptionAction] = useState<
+    "cancel" | "pause" | null
+  >(null);
+  const [subscriptionActionBusy, setSubscriptionActionBusy] = useState(false);
+  const [subscriptionActionError, setSubscriptionActionError] = useState("");
+
+  useEffect(() => {
+    void listBillingProviders()
+      .then((rows) => {
+        setBillingProviders(rows);
+        const preferred = rows.find((r) => r.available_for_checkout);
+        if (preferred) {
+          setPaymentProvider((prev) =>
+            rows.some((r) => r.key === prev && r.available_for_checkout) ? prev : preferred.key,
+          );
+        }
+      })
+      .catch(() => setBillingProviders([]));
+  }, []);
 
   useEffect(() => {
     const query = new URLSearchParams(window.location.search);
@@ -110,32 +148,49 @@ export function BillingPage() {
   }, []);
 
   useEffect(() => {
+    if (authLoading) return;
+    if (!user) {
+      hasLoadedBillingRef.current = false;
+      setPlans([]);
+      setSubscriptions([]);
+      setInvoices([]);
+      setSeatUsage([]);
+      setLoadError("");
+      setInvoiceError("");
+      setLoadingPlans(false);
+      setLoadingInvoices(false);
+      return;
+    }
     if (hasLoadedBillingRef.current) {
       return;
     }
     hasLoadedBillingRef.current = true;
     async function loadBillingData() {
       setLoadingPlans(true);
+      setLoadingInvoices(true);
       setLoadError("");
+      setInvoiceError("");
       try {
         const canLoad = await ensureFreshAccessToken();
         if (!canLoad) {
           setLoadError("Your session has expired. Please log in again.");
           setPlans([]);
           setSubscriptions([]);
+          setInvoices([]);
           setSeatUsage([]);
           return;
         }
-        const [plansResult, subscriptionsResult, seatsResult] =
+        const [plansResult, subscriptionsResult, seatsResult, invoicesResult] =
           await Promise.allSettled([
-            listPlans(),
+            listPlans({ limit: 100 }),
             listSubscriptions({ limit: 50 }),
             listSeatUsage(),
+            listTenantInvoices({ limit: 100 }),
           ]);
         const errors: string[] = [];
 
         if (plansResult.status === "fulfilled") {
-          setPlans(plansResult.value);
+          setPlans(plansResult.value.items);
         } else {
           errors.push(
             plansResult.reason instanceof Error
@@ -164,17 +219,29 @@ export function BillingPage() {
           );
         }
 
+        if (invoicesResult.status === "fulfilled") {
+          setInvoices(invoicesResult.value.items);
+        } else {
+          setInvoices([]);
+          const msg =
+            invoicesResult.reason instanceof Error
+              ? normalizeBillingError(invoicesResult.reason.message)
+              : "Unable to load billing history";
+          setInvoiceError(msg);
+        }
+
         if (errors.length > 0) {
           setLoadError(errors.join(". "));
         }
-        if (plansResult.status === "fulfilled" && plansResult.value.length > 0) {
+        if (plansResult.status === "fulfilled" && plansResult.value.items.length > 0) {
           const current = subscriptionsResult.status === "fulfilled"
             ? selectCurrentSubscription(subscriptionsResult.value.items)
             : null;
+          const planItems = plansResult.value.items;
           const preferredPlanId =
-            current && plansResult.value.some((plan) => plan.id === current.plan_id)
+            current && planItems.some((plan) => plan.id === current.plan_id)
               ? current.plan_id
-              : plansResult.value[0].id;
+              : planItems[0].id;
           setSelectedPlanId((prev) => prev || preferredPlanId);
         }
       } catch (err) {
@@ -183,54 +250,98 @@ export function BillingPage() {
         setLoadError(message);
       } finally {
         setLoadingPlans(false);
+        setLoadingInvoices(false);
       }
     }
     void loadBillingData();
-  }, []);
+  }, [authLoading, user?.id]);
+
+  useEffect(() => {
+    if (checkoutReturnStatus !== "success" || authLoading || !user?.id) {
+      return;
+    }
+    let cancelled = false;
+    async function refetchSubscriptions() {
+      const canLoad = await ensureFreshAccessToken();
+      if (!canLoad || cancelled) return;
+      try {
+        const [subRes, invRes] = await Promise.all([
+          listSubscriptions({ limit: 50 }),
+          listTenantInvoices({ limit: 100 }),
+        ]);
+        if (!cancelled) {
+          setSubscriptions(subRes.items);
+          setInvoices(invRes.items);
+        }
+      } catch {
+        /* ignore — main load effect will surface errors on next visit */
+      }
+    }
+    void refetchSubscriptions();
+    const t1 = window.setTimeout(() => void refetchSubscriptions(), 2000);
+    const t2 = window.setTimeout(() => void refetchSubscriptions(), 6000);
+    const tClear = window.setTimeout(() => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.delete("checkout");
+          return next;
+        },
+        { replace: true },
+      );
+    }, 8000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+      window.clearTimeout(tClear);
+    };
+  }, [checkoutReturnStatus, authLoading, user?.id, setSearchParams]);
 
   const currentSubscription = useMemo(
     () => selectCurrentSubscription(subscriptions),
     [subscriptions],
   );
+  const currentSubscriptionStatus = (currentSubscription?.status ?? "").toLowerCase();
+  const isPaused = currentSubscriptionStatus === "paused";
+  const isCancelScheduled = Boolean(currentSubscription?.canceled_at);
 
   useEffect(() => {
-    async function loadInvoices(subscriptionId: string) {
-      setLoadingInvoices(true);
-      setInvoiceError("");
+    const pid = currentSubscription?.plan_id;
+    if (!pid) {
+      setSubscribedPlanExtra(null);
+      return;
+    }
+    if (plans.some((p) => p.id === pid)) {
+      setSubscribedPlanExtra(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
       try {
-        const canLoad = await ensureFreshAccessToken();
-        if (!canLoad) {
-          setInvoiceError("Your session has expired. Please log in again.");
-          setInvoices([]);
-          return;
+        const plan = await fetchPlanById(pid);
+        if (!cancelled) {
+          setSubscribedPlanExtra(plan);
         }
-        const rows = await listSubscriptionInvoices(subscriptionId, { limit: 50 });
-        setInvoices(rows);
-      } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "Unable to load billing history";
-        setInvoiceError(message);
-        setInvoices([]);
-      } finally {
-        setLoadingInvoices(false);
+      } catch {
+        if (!cancelled) {
+          setSubscribedPlanExtra(null);
+        }
       }
-    }
-    if (!currentSubscription?.id) {
-      setInvoices([]);
-      lastLoadedInvoiceSubscriptionRef.current = null;
-      return;
-    }
-    if (lastLoadedInvoiceSubscriptionRef.current === currentSubscription.id) {
-      return;
-    }
-    lastLoadedInvoiceSubscriptionRef.current = currentSubscription.id;
-    void loadInvoices(currentSubscription.id);
-  }, [currentSubscription?.id]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentSubscription?.plan_id, plans]);
 
   const currentPlan = useMemo(() => {
     if (!currentSubscription) return null;
-    return plans.find((plan) => plan.id === currentSubscription.plan_id) ?? null;
-  }, [plans, currentSubscription]);
+    return (
+      plans.find((plan) => plan.id === currentSubscription.plan_id) ??
+      subscribedPlanExtra ??
+      null
+    );
+  }, [plans, currentSubscription, subscribedPlanExtra]);
 
   const paymentProviderLabel = useMemo(
     () => getProviderLabel(currentSubscription?.provider),
@@ -272,6 +383,41 @@ export function BillingPage() {
     return limit?.limit_value ?? null;
   }, [selectedPlan]);
 
+  const effectivePaymentProvider =
+    billingProviders.length === 0 ? "stripe" : paymentProvider;
+
+  const checkoutReadyForProvider = useMemo(() => {
+    if (!selectedPlan) return false;
+    if (effectivePaymentProvider === "stripe") {
+      if (billingCycle === "yearly") {
+        if (typeof selectedPlan.stripe_checkout_yearly_ready === "boolean") {
+          return selectedPlan.stripe_checkout_yearly_ready;
+        }
+        return Boolean((selectedPlan.stripe_price_id_yearly ?? "").trim());
+      }
+      if (typeof selectedPlan.stripe_checkout_monthly_ready === "boolean") {
+        return selectedPlan.stripe_checkout_monthly_ready;
+      }
+      return Boolean((selectedPlan.stripe_price_id_monthly ?? "").trim());
+    }
+    return false;
+  }, [selectedPlan, billingCycle, effectivePaymentProvider]);
+
+  const providerDropdownOptions = useMemo(
+    () =>
+      billingProviders.map((p) => ({
+        value: p.key,
+        label: p.available_for_checkout ? p.label : `${p.label} — not available`,
+        disabled: !p.available_for_checkout,
+      })),
+    [billingProviders],
+  );
+
+  const selectedProviderMeta = useMemo(
+    () => billingProviders.find((p) => p.key === effectivePaymentProvider),
+    [billingProviders, effectivePaymentProvider],
+  );
+
   const studentSeatUsage = useMemo(() => {
     return (
       seatUsage.find((row) => row.seat_type.toLowerCase() === "student") ??
@@ -301,10 +447,11 @@ export function BillingPage() {
       const response = await createCheckoutSession({
         plan_id: selectedPlanId,
         billing_cycle: billingCycle,
-        success_url: `${baseUrl}/app/settings/billing?checkout=success`,
-        cancel_url: `${baseUrl}/app/settings/billing?checkout=cancelled`,
+        success_url: `${baseUrl}/app/billing?checkout=success`,
+        cancel_url: `${baseUrl}/app/billing?checkout=cancelled`,
         promo_code: promoCode.trim() || null,
         affiliate_code: affiliateCode.trim() || null,
+        payment_provider: effectivePaymentProvider,
       });
       if (response.url) {
         window.location.assign(response.url);
@@ -316,6 +463,68 @@ export function BillingPage() {
       setCheckoutError(message);
     } finally {
       setStartingCheckout(false);
+    }
+  }
+
+  async function refreshBillingSnapshot() {
+    const [subRes, invRes] = await Promise.all([
+      listSubscriptions({ limit: 50 }),
+      listTenantInvoices({ limit: 100 }),
+    ]);
+    setSubscriptions(subRes.items);
+    setInvoices(invRes.items);
+  }
+
+  async function handleConfirmPauseOrCancel() {
+    if (!currentSubscription?.id || !subscriptionAction) return;
+    setSubscriptionActionBusy(true);
+    setSubscriptionActionError("");
+    try {
+      if (subscriptionAction === "pause") {
+        await pauseSubscription(currentSubscription.id);
+      } else {
+        await cancelSubscription(currentSubscription.id);
+      }
+      await refreshBillingSnapshot();
+      setSubscriptionAction(null);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Could not update subscription.";
+      setSubscriptionActionError(message);
+    } finally {
+      setSubscriptionActionBusy(false);
+    }
+  }
+
+  async function handleResumeBilling() {
+    if (!currentSubscription?.id) return;
+    setSubscriptionActionError("");
+    setSubscriptionActionBusy(true);
+    try {
+      await resumeSubscription(currentSubscription.id);
+      await refreshBillingSnapshot();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Could not resume subscription.";
+      setSubscriptionActionError(message);
+    } finally {
+      setSubscriptionActionBusy(false);
+    }
+  }
+
+  async function handleUndoCancel() {
+    if (!currentSubscription?.id) return;
+    setSubscriptionActionError("");
+    setSubscriptionActionBusy(true);
+    try {
+      await reactivateSubscription(currentSubscription.id);
+      await refreshBillingSnapshot();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Could not reactivate subscription.";
+      setSubscriptionActionError(message);
+    } finally {
+      setSubscriptionActionBusy(false);
     }
   }
 
@@ -350,6 +559,61 @@ export function BillingPage() {
                 ? `Status: ${currentSubscription.status}`
                 : "No subscription found"}
             </div>
+            {!currentSubscription && !loadingPlans && (
+              <p className="billing-page__usage-text" style={{ marginTop: "0.75rem" }}>
+                Paid subscriptions are stored per workspace. Use the same organization in the header
+                as when you started checkout. After returning from Stripe, wait a few seconds for
+                webhooks—this page rechecks automatically when the URL includes{" "}
+                <code className="billing-page__code">checkout=success</code>.
+              </p>
+            )}
+            {currentSubscription && (
+              <div className="billing-page__subscription-actions">
+                {isPaused ? (
+                  <button
+                    type="button"
+                    className="billing-page__btn-secondary"
+                    onClick={() => void handleResumeBilling()}
+                    disabled={subscriptionActionBusy}
+                  >
+                    Resume billing
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="billing-page__btn-secondary"
+                    onClick={() => setSubscriptionAction("pause")}
+                    disabled={subscriptionActionBusy}
+                  >
+                    Pause subscription
+                  </button>
+                )}
+                {isCancelScheduled ? (
+                  <button
+                    type="button"
+                    className="billing-page__btn-secondary"
+                    onClick={() => void handleUndoCancel()}
+                    disabled={subscriptionActionBusy}
+                  >
+                    Undo cancel
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="billing-page__btn-secondary billing-page__btn-secondary--danger"
+                    onClick={() => setSubscriptionAction("cancel")}
+                    disabled={subscriptionActionBusy}
+                  >
+                    Cancel at period end
+                  </button>
+                )}
+              </div>
+            )}
+            {subscriptionActionError && (
+              <p className="billing-page__flash billing-page__flash--error">
+                {subscriptionActionError}
+              </p>
+            )}
           </div>
         </section>
 
@@ -397,6 +661,9 @@ export function BillingPage() {
           <h2 id="history-heading" className="billing-page__card-title">
             Billing History
           </h2>
+          <p className="billing-page__usage-text" style={{ marginBottom: "0.75rem" }}>
+            Invoices for this workspace across all organization subscriptions (platform billing).
+          </p>
           <div className="billing-page__table-wrapper">
             <table className="billing-page__table">
               <thead>
@@ -444,6 +711,18 @@ export function BillingPage() {
         <div className="billing-page__actions billing-page__actions--stack">
           <section className="billing-page__checkout-panel" aria-label="Checkout options">
             <div className="billing-page__checkout-grid">
+              <label className="billing-page__field">
+                <span>Payment method</span>
+                <KidDropdown
+                  value={paymentProvider}
+                  options={providerDropdownOptions}
+                  onChange={setPaymentProvider}
+                  ariaLabel="Payment provider"
+                  placeholder="Select provider"
+                  disabled={startingCheckout || providerDropdownOptions.length === 0}
+                  fullWidth
+                />
+              </label>
               <label className="billing-page__field">
                 <span>Plan</span>
                 <KidDropdown
@@ -501,6 +780,22 @@ export function BillingPage() {
                 {selectedSeats != null ? ` • Up to ${selectedSeats} students` : ""}
               </p>
             )}
+            {selectedPlan && effectivePaymentProvider === "stripe" && !checkoutReadyForProvider && (
+              <p className="billing-page__flash billing-page__flash--error">
+                Stripe checkout isn’t set up for this plan’s {billingCycle} billing yet. Add
+                stripe_price_id_{billingCycle === "yearly" ? "yearly" : "monthly"} in{" "}
+                backend/config/plan_registry.json (then run{" "}
+                <code className="billing-page__code">python -m app.manage db seed</code>) or update the
+                plan in the database. In local development you can set{" "}
+                STRIPE_DEV_FALLBACK_PRICE_MONTHLY / STRIPE_DEV_FALLBACK_PRICE_YEARLY in backend{" "}
+                <code className="billing-page__code">.env</code>.
+              </p>
+            )}
+            {selectedProviderMeta?.description && (
+              <p className="billing-page__usage-text" style={{ marginTop: "0.5rem" }}>
+                {selectedProviderMeta.description}
+              </p>
+            )}
             {checkoutError && (
               <p className="billing-page__flash billing-page__flash--error">{checkoutError}</p>
             )}
@@ -515,13 +810,69 @@ export function BillingPage() {
             type="button"
             className="billing-page__btn-primary"
             onClick={() => void handleStartCheckout()}
-            disabled={loadingPlans || startingCheckout || !selectedPlanId}
+            disabled={
+              loadingPlans ||
+              startingCheckout ||
+              !selectedPlanId ||
+              !checkoutReadyForProvider
+            }
           >
             <TrendingUp size={18} aria-hidden />
             {startingCheckout ? "Starting checkout..." : "Upgrade Plan"}
           </button>
         </div>
       </div>
+      <ModalDialog
+        isOpen={subscriptionAction != null}
+        onClose={() => {
+          if (subscriptionActionBusy) return;
+          setSubscriptionAction(null);
+          setSubscriptionActionError("");
+        }}
+        title={
+          subscriptionAction === "pause"
+            ? "Pause subscription"
+            : "Cancel subscription"
+        }
+        ariaLabel={
+          subscriptionAction === "pause"
+            ? "Pause subscription"
+            : "Cancel subscription"
+        }
+        footer={
+          <div className="ui-form-actions">
+            <button
+              type="button"
+              className="ui-btn ui-btn--ghost"
+              onClick={() => {
+                setSubscriptionAction(null);
+                setSubscriptionActionError("");
+              }}
+              disabled={subscriptionActionBusy}
+            >
+              Keep as is
+            </button>
+            <button
+              type="button"
+              className="ui-btn ui-btn--primary"
+              onClick={() => void handleConfirmPauseOrCancel()}
+              disabled={subscriptionActionBusy}
+            >
+              {subscriptionActionBusy
+                ? "Saving..."
+                : subscriptionAction === "pause"
+                  ? "Pause now"
+                  : "Confirm cancel"}
+            </button>
+          </div>
+        }
+      >
+        <p className="billing-page__usage-text" style={{ marginTop: 0 }}>
+          {subscriptionAction === "pause"
+            ? "Pausing stops upcoming billing collection until you resume."
+            : "Your subscription will remain active until the end of the current billing period."}
+        </p>
+      </ModalDialog>
     </div>
   );
 }

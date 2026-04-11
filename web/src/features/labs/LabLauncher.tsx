@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   FlaskConical,
@@ -13,6 +13,7 @@ import {
 import { useAuth } from "../../providers/AuthProvider";
 import { useUIMode } from "../../providers/UIModeProvider";
 import { useTenant } from "../../providers/TenantProvider";
+import { getLabLauncherAvailability } from "../../lib/api/capabilities";
 import { resolveLabRoute } from "./labRouting";
 import "./labs.css";
 
@@ -74,7 +75,11 @@ export function LabLauncher() {
   const [searchParams] = useSearchParams();
   const { user } = useAuth();
   const { mode } = useUIMode();
-  useTenant();
+  const { tenant } = useTenant();
+  const [allowedById, setAllowedById] = useState<Record<string, boolean>>({});
+  const [denyReasonById, setDenyReasonById] = useState<Record<string, string>>({});
+  const [availabilityReady, setAvailabilityReady] = useState(false);
+  const [availabilityError, setAvailabilityError] = useState<string | null>(null);
 
   useEffect(() => {
     const requestedLab = searchParams.get("lab");
@@ -85,6 +90,46 @@ export function LabLauncher() {
     params.set("lab", match.id);
     navigate(`${match.route}?${params.toString()}`, { replace: true });
   }, [navigate, searchParams]);
+
+  useEffect(() => {
+    if (!tenant?.id) {
+      setAllowedById({});
+      setDenyReasonById({});
+      setAvailabilityReady(false);
+      setAvailabilityError(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await getLabLauncherAvailability();
+        if (cancelled) return;
+        const allow: Record<string, boolean> = {};
+        const reasons: Record<string, string> = {};
+        for (const row of res.labs) {
+          allow[row.id] = row.allowed;
+          if (!row.allowed && row.reason) {
+            reasons[row.id] = row.reason;
+          }
+        }
+        setAllowedById(allow);
+        setDenyReasonById(reasons);
+        setAvailabilityReady(true);
+        setAvailabilityError(null);
+      } catch (e) {
+        if (cancelled) return;
+        setAllowedById({});
+        setDenyReasonById({});
+        setAvailabilityReady(false);
+        setAvailabilityError(
+          e instanceof Error ? e.message : "Could not load lab availability",
+        );
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenant?.id]);
 
   return (
     <div
@@ -109,17 +154,29 @@ export function LabLauncher() {
         <h2 id="labs-heading" className="visually-hidden">
           Available labs
         </h2>
+        {availabilityError ? (
+          <p className="lab-launcher__availability-error" role="alert">
+            {availabilityError}
+          </p>
+        ) : null}
         {LABS.map((lab) => {
           const Icon = lab.icon;
+          const allowed = availabilityError
+            ? false
+            : availabilityReady
+              ? Boolean(allowedById[lab.id])
+              : true;
+          const deniedReason = denyReasonById[lab.id];
           return (
             <article
               key={lab.id}
-              className="lab-launcher__card"
+              className={`lab-launcher__card${allowed ? "" : " lab-launcher__card--disabled"}`}
               style={
                 {
                   "--lab-card-accent": `var(${lab.colorVar})`,
                 } as React.CSSProperties
               }
+              aria-disabled={!allowed}
             >
               <div className="lab-launcher__card-icon-wrap">
                 {lab.iconSrc ? (
@@ -139,6 +196,11 @@ export function LabLauncher() {
               </div>
               <h3 className="lab-launcher__card-title">{lab.name}</h3>
               <p className="lab-launcher__card-desc">{lab.description}</p>
+              {!allowed && deniedReason ? (
+                <p className="lab-launcher__card-denied" role="status">
+                  {deniedReason}
+                </p>
+              ) : null}
               <p className="lab-launcher__card-meta" aria-label="Last opened">
                 <Clock size={14} aria-hidden />
                 Last opened: 2 days ago
@@ -147,13 +209,19 @@ export function LabLauncher() {
                 <FolderOpen size={14} aria-hidden />
                 3 projects
               </p>
-              <Link
-                to={lab.path}
-                className="lab-launcher__card-action"
-                aria-label={`Launch ${lab.name}`}
-              >
-                Launch <ArrowRight size={16} aria-hidden />
-              </Link>
+              {allowed ? (
+                <Link
+                  to={lab.path}
+                  className="lab-launcher__card-action"
+                  aria-label={`Launch ${lab.name}`}
+                >
+                  Launch <ArrowRight size={16} aria-hidden />
+                </Link>
+              ) : (
+                <span className="lab-launcher__card-action lab-launcher__card-action--disabled">
+                  Not available
+                </span>
+              )}
             </article>
           );
         })}

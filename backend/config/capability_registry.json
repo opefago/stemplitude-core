@@ -57,6 +57,15 @@
       ]
     },
     {
+      "key": "access_python_lab",
+      "name": "Access Python Game Lab",
+      "category": "lab",
+      "description": "Ability to access the Python game / coding lab",
+      "rules": [
+        { "required_feature": "python_lab" }
+      ]
+    },
+    {
       "key": "manage_users",
       "name": "Manage Users",
       "category": "management",

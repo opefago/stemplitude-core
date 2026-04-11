@@ -16,7 +16,7 @@
       }
     },
     "email.send": {
-      "task_path": "workers.tasks.email_tasks.send_email_task",
+      "task_path": "email.send",
       "queue": "default",
       "runtime": "python",
       "max_retries": 3,
@@ -27,7 +27,11 @@
         "recipient": { "type": "string", "required": true, "description": "Recipient email address" },
         "subject": { "type": "string", "required": true, "description": "Email subject line" },
         "body": { "type": "string", "required": true, "description": "Plain text body" },
-        "html_body": { "type": "string", "required": false, "description": "Optional HTML body" }
+        "html_body": { "type": "string", "required": false, "description": "Optional HTML body" },
+        "tenant_id": { "type": "string", "required": false, "description": "Tenant UUID for provider resolution and optional-mail suppression scope" },
+        "route_key": { "type": "string", "required": false, "description": "Template/route slug for compliance footer and unsubscribe (see app.email.presets)" },
+        "attachments": { "type": "array", "required": false, "description": "Optional list of attachment payloads (see app.email.attachments.attachments_from_task_payload)" },
+        "list_unsubscribe_url": { "type": "string", "required": false, "description": "RFC 8058 one-click HTTPS URL for List-Unsubscribe header" }
       }
     },
     "notification.create": {
@@ -69,7 +73,7 @@
       "max_retries": 0,
       "retry_delay_seconds": 0,
       "dedup_ttl_seconds": 60,
-      "description": "Process a Stripe webhook event",
+      "description": "Process a platform Stripe webhook payload (checkout.session.completed, checkout.session.async_payment_succeeded, invoice.*, customer.subscription.*). Tenant plan fulfillment matches POST /subscriptions/webhook.",
       "params_schema": {
         "event_type": { "type": "string", "required": true, "description": "Stripe event type" },
         "event_data": { "type": "object", "required": true, "description": "Stripe event data payload" }
@@ -82,10 +86,36 @@
       "max_retries": 0,
       "retry_delay_seconds": 0,
       "dedup_ttl_seconds": 300,
-      "description": "Aggregate progress stats for a tenant",
+      "description": "Rebuild daily analytics rollups for a tenant (yesterday UTC if date omitted)",
       "params_schema": {
         "tenant_id": { "type": "string", "required": true, "description": "UUID of the tenant" }
       }
+    },
+    "analytics.rebuild_tenant_day": {
+      "task_path": "workers.tasks.analytics_tasks.rebuild_tenant_analytics_day",
+      "queue": "default",
+      "runtime": "python",
+      "max_retries": 1,
+      "retry_delay_seconds": 60,
+      "dedup_ttl_seconds": 120,
+      "description": "Rebuild tenant_analytics_daily for one tenant and UTC day",
+      "params_schema": {
+        "tenant_id": { "type": "string", "required": true, "description": "UUID of the tenant" },
+        "bucket_date_iso": { "type": "string", "required": false, "description": "YYYY-MM-DD or null for yesterday UTC" }
+      }
+    },
+    "analytics.rebuild_all_tenants": {
+      "task_path": "workers.tasks.analytics_tasks.rebuild_all_tenants_analytics_day",
+      "queue": "default",
+      "runtime": "python",
+      "max_retries": 0,
+      "retry_delay_seconds": 0,
+      "dedup_ttl_seconds": 3600,
+      "description": "Enqueue rebuild_tenant_analytics_day for every active tenant (yesterday UTC when bucket_date_iso omitted). Scheduled nightly via Celery Beat.",
+      "params_schema": {
+        "bucket_date_iso": { "type": "string", "required": false, "description": "Optional YYYY-MM-DD UTC" }
+      },
+      "schedule": { "type": "crontab", "hour": "4", "minute": "15" }
     },
     "analytics.usage_report": {
       "task_path": "workers.tasks.analytics_tasks.generate_usage_report",
@@ -166,7 +196,7 @@
       "max_retries": 0,
       "retry_delay_seconds": 0,
       "dedup_ttl_seconds": 300,
-      "description": "Remove orphaned files from S3 that have no database reference",
+      "description": "Repair DB rows referencing missing S3/R2 objects; delete storage keys not referenced by DB",
       "schedule": { "type": "crontab", "hour": "4", "minute": "0", "day_of_week": "sunday" }
     },
     "cron.cleanup_audit_events": {
@@ -188,6 +218,46 @@
       "dedup_ttl_seconds": 300,
       "description": "Delete in-app notifications past retention days and trim per-recipient overflow",
       "schedule": { "type": "crontab", "hour": "3", "minute": "15" }
+    },
+    "cron.cleanup_email_logs": {
+      "task_path": "workers.tasks.cleanup_tasks.cleanup_email_logs",
+      "queue": "default",
+      "runtime": "python",
+      "max_retries": 0,
+      "retry_delay_seconds": 0,
+      "dedup_ttl_seconds": 300,
+      "description": "Delete email_logs rows older than EMAIL_LOG_RETENTION_DAYS (batched)",
+      "schedule": { "type": "crontab", "hour": "3", "minute": "45" }
+    },
+    "cron.member_billing_renewal_reminders": {
+      "task_path": "workers.tasks.member_billing_tasks.member_billing_renewal_reminders",
+      "queue": "default",
+      "runtime": "python",
+      "max_retries": 0,
+      "retry_delay_seconds": 0,
+      "dedup_ttl_seconds": 3600,
+      "description": "Send membership renewal reminder emails for Stripe Connect member subscriptions",
+      "schedule": { "type": "crontab", "hour": "10", "minute": "0" }
+    },
+    "cron.member_billing_reconcile_checkouts": {
+      "task_path": "workers.tasks.member_billing_tasks.member_billing_reconcile_checkout_sessions",
+      "queue": "default",
+      "runtime": "python",
+      "max_retries": 0,
+      "retry_delay_seconds": 0,
+      "dedup_ttl_seconds": 300,
+      "description": "Poll Stripe for completed Checkout Sessions still incomplete locally (webhook safety net)",
+      "schedule": { "type": "crontab", "minute": "*/10" }
+    },
+    "cron.class_session_reminders": {
+      "task_path": "workers.tasks.class_session_reminder_tasks.class_session_reminders_tick",
+      "queue": "default",
+      "runtime": "python",
+      "max_retries": 0,
+      "retry_delay_seconds": 0,
+      "dedup_ttl_seconds": 120,
+      "description": "In-app class session reminders for linked parents; tenants enable via settings.class_session_reminders (persisted sessions only)",
+      "schedule": { "type": "interval", "every": 10, "period": "minutes" }
     }
   }
 }

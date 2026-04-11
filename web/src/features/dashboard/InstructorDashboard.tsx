@@ -80,7 +80,6 @@ export function InstructorDashboard() {
     enabled: Boolean(user && tenantId),
     onSessionsInvalidate: loadUpcoming,
     onNotificationsInvalidate: loadUpcoming,
-    onMessagesInvalidate: loadUpcoming,
   });
 
   const nextClassroom = useMemo(() => upcoming[0], [upcoming]);

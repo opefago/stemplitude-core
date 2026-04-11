@@ -82,7 +82,13 @@ export function SuperAdminDashboard() {
           <Shield size={28} className="super-admin__shield" aria-hidden />
           <div>
             <h1 className="dashboard-bento__greeting">Platform Admin</h1>
-            <p className="dashboard-bento__subtitle">Manage tenants, monitor health, and run platform operations</p>
+            <p className="dashboard-bento__subtitle">
+              Manage tenants, monitor health, and run platform operations.{" "}
+              <Link to="/app/platform/tasks" className="super-admin__subtitle-link">
+                Admin Tasks
+              </Link>{" "}
+              includes Stripe subscription reconcile for the workspace selected in the header.
+            </p>
           </div>
         </div>
         <button type="button" className="super-admin__btn super-admin__btn--primary">
@@ -174,6 +180,25 @@ export function SuperAdminDashboard() {
           <p className="dashboard-bento__card-desc">Manage platform roles and user assignments</p>
           <span className="dashboard-bento__card-action">
             Open Users <ArrowRight size={14} aria-hidden />
+          </span>
+        </Link>
+
+        <Link
+          to="/app/platform/member-billing-fees"
+          className="dashboard-bento__card dashboard-bento__card-link dashboard-bento__card--orange"
+          aria-label="Open Stripe member billing fees"
+        >
+          <div className="dashboard-bento__card-header">
+            <h2 className="dashboard-bento__card-title">Member billing fees</h2>
+            <div className="dashboard-bento__card-icon">
+              <DollarSign size={24} aria-hidden />
+            </div>
+          </div>
+          <p className="dashboard-bento__card-desc">
+            Platform default and per-organization Stripe Connect application fees
+          </p>
+          <span className="dashboard-bento__card-action">
+            Configure fees <ArrowRight size={14} aria-hidden />
           </span>
         </Link>
 

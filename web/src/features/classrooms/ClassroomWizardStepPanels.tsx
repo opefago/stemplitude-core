@@ -128,33 +128,35 @@ export function ClassroomWizardBasicsStep({
         </ClassroomFormLabelRow>
         <KidDropdown
           value={w.deliveryMode}
-          onChange={(v) => w.setDeliveryMode(v as "online" | "in-person")}
+          onChange={(v) => w.setDeliveryMode(v as "online" | "in-person" | "hybrid")}
           fullWidth
           ariaLabel="Class location mode"
           options={[
             { value: "online", label: "Remote / Virtual" },
+            { value: "hybrid", label: "Hybrid (remote + in-person)" },
             { value: "in-person", label: "In person" },
           ]}
         />
       </div>
-      {w.deliveryMode === "online" ? (
+      {w.deliveryMode !== "in-person" && (
         <>
           <div className="classroom-list__create-field">
             <ClassroomFormLabelRow tip={CLASSROOM_FORM_TIP.meetingLink} ariaTopic="meeting link">
-              Meeting link
+              Video / Meeting
             </ClassroomFormLabelRow>
             <KidDropdown
               value={w.meetingMode}
-              onChange={(v) => w.setMeetingMode(v as "generate" | "paste")}
+              onChange={(v) => w.setMeetingMode(v as "built_in" | "generate" | "paste")}
               fullWidth
               ariaLabel="Meeting link mode"
               options={[
-                { value: "generate", label: "Auto-generate link" },
+                { value: "built_in", label: "Use built-in video" },
+                { value: "generate", label: "Auto-generate link (external)" },
                 { value: "paste", label: "Paste existing link" },
               ]}
             />
           </div>
-          {w.meetingMode === "generate" ? (
+          {w.meetingMode === "generate" && (
             <div className="classroom-list__create-field">
               <ClassroomFormLabelRow tip={CLASSROOM_FORM_TIP.meetingProvider} ariaTopic="meeting provider">
                 Provider
@@ -171,7 +173,8 @@ export function ClassroomWizardBasicsStep({
                 ]}
               />
             </div>
-          ) : (
+          )}
+          {w.meetingMode === "paste" && (
             <div className="classroom-list__create-field">
               <ClassroomFormLabelRow
                 htmlFor={`${p}-meeting-url`}
@@ -191,10 +194,11 @@ export function ClassroomWizardBasicsStep({
             </div>
           )}
         </>
-      ) : (
+      )}
+      {(w.deliveryMode === "in-person" || w.deliveryMode === "hybrid") && (
         <div className="classroom-list__create-field classroom-list__create-field--full">
           <ClassroomFormLabelRow htmlFor={`${p}-address`} tip={CLASSROOM_FORM_TIP.address} ariaTopic="in-person address">
-            Address (optional)
+            Address{w.deliveryMode === "hybrid" ? " (optional)" : " (optional)"}
           </ClassroomFormLabelRow>
           <input
             id={`${p}-address`}

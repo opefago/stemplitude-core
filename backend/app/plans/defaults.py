@@ -51,6 +51,8 @@ async def seed_plans(session) -> int:
             type=defn["type"],
             price_monthly=defn.get("price_monthly"),
             price_yearly=defn.get("price_yearly"),
+            stripe_price_id_monthly=defn.get("stripe_price_id_monthly"),
+            stripe_price_id_yearly=defn.get("stripe_price_id_yearly"),
             trial_days=defn.get("trial_days", 0),
         )
         session.add(plan)

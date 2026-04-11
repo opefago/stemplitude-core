@@ -1,0 +1,242 @@
+/* Parent / learner settings — playful “kids” chrome aligned with My children + Kid* UI */
+
+.parent-controls {
+  --pc-accent: #ff9600;
+  max-width: 640px;
+  margin: 0 auto;
+  padding: var(--spacing-lg, 24px);
+  font-family: "Nunito", "DIN Round Pro", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    sans-serif;
+}
+
+.parent-controls__header {
+  margin-bottom: var(--spacing-lg, 24px);
+}
+
+.parent-controls__title {
+  margin: 0 0 6px;
+  font-size: 1.65rem;
+  font-weight: 800;
+  color: var(--color-text, #1e293b);
+  letter-spacing: -0.02em;
+}
+
+.parent-controls__subtitle {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--color-text-secondary, #64748b);
+}
+
+.parent-controls__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  font-weight: 800;
+  font-size: 0.875rem;
+  color: var(--pc-accent);
+  text-decoration: none;
+}
+
+.parent-controls__back:hover {
+  text-decoration: underline;
+}
+
+.parent-controls__card {
+  margin-bottom: var(--spacing-md, 16px);
+  padding: var(--spacing-lg, 20px);
+  background: var(--color-surface, #fff);
+  border: 2px solid var(--color-border, #e8e8e8);
+  border-radius: 20px;
+  box-shadow: 0 3px 0 var(--color-border, #e8e8e8);
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.parent-controls__card:hover {
+  border-color: color-mix(in srgb, var(--pc-accent) 40%, var(--color-border));
+  box-shadow: 0 4px 0 color-mix(in srgb, var(--pc-accent) 22%, var(--color-border));
+}
+
+.parent-controls__card-title {
+  margin: 0 0 4px;
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: var(--color-text, #1e293b);
+}
+
+.parent-controls__card-desc {
+  margin: 0 0 var(--spacing-md, 16px);
+  font-size: 0.9rem;
+  color: var(--color-text-secondary, #64748b);
+  line-height: 1.5;
+}
+
+.parent-controls__field {
+  margin-bottom: var(--spacing-md, 14px);
+}
+
+.parent-controls__field:last-child {
+  margin-bottom: 0;
+}
+
+.parent-controls__label {
+  display: block;
+  font-size: 0.8125rem;
+  font-weight: 800;
+  color: var(--color-text-secondary, #64748b);
+  margin-bottom: 8px;
+}
+
+.parent-controls__scope-detail {
+  margin: 10px 0 0;
+  font-size: 0.875rem;
+  line-height: 1.45;
+  color: var(--color-text-secondary, #64748b);
+}
+
+.parent-controls__kid-input {
+  display: block;
+  width: 100%;
+  max-width: 360px;
+  min-height: 44px;
+  padding: 10px 14px;
+  border: 2px solid color-mix(in srgb, var(--color-border) 75%, var(--color-secondary) 25%);
+  border-radius: 14px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 0.9375rem;
+  font-weight: 800;
+  font-family: inherit;
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--color-border) 88%, white);
+}
+
+.parent-controls__kid-input::placeholder {
+  color: var(--color-text-secondary);
+  font-weight: 700;
+  opacity: 0.85;
+}
+
+.parent-controls__kid-input:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.parent-controls__kid-checkbox.kid-checkbox {
+  align-items: flex-start;
+  gap: 12px;
+  font-size: 0.9375rem;
+  line-height: 1.4;
+  font-weight: 700;
+  color: var(--color-text, #1e293b);
+}
+
+.parent-controls__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: var(--spacing-md, 16px);
+}
+
+.parent-controls__btn {
+  padding: 10px 20px;
+  border-radius: 999px;
+  border: 2px solid var(--color-border, #e2e8f0);
+  background: var(--color-surface, #fff);
+  font-weight: 800;
+  font-size: 0.875rem;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease,
+    filter 0.12s ease;
+  box-shadow: 0 2px 0 color-mix(in srgb, var(--color-border) 90%, white);
+}
+
+.parent-controls__btn:hover:not(:disabled) {
+  border-color: var(--pc-accent);
+  color: #c2410c;
+}
+
+.parent-controls__btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.parent-controls__btn--primary {
+  background: linear-gradient(145deg, #ff9f1a 0%, #ff9600 100%);
+  border-color: #e08600;
+  color: #fff;
+  box-shadow: 0 3px 0 #c2410c;
+}
+
+.parent-controls__btn--primary:hover:not(:disabled) {
+  color: #fff;
+  filter: brightness(1.04);
+}
+
+.parent-controls__btn--danger {
+  border-color: color-mix(in srgb, #ef4444 45%, var(--color-border));
+  color: #b91c1c;
+  background: color-mix(in srgb, #ef4444 8%, var(--color-surface));
+}
+
+.parent-controls__btn--danger:hover:not(:disabled) {
+  background: color-mix(in srgb, #ef4444 14%, var(--color-surface));
+}
+
+.parent-controls__alert {
+  padding: 12px 14px;
+  border-radius: 14px;
+  font-size: 0.875rem;
+  line-height: 1.45;
+  background: color-mix(in srgb, #f59e0b 12%, transparent);
+  border: 2px solid color-mix(in srgb, #f59e0b 35%, var(--color-border));
+  color: var(--color-text, #1e293b);
+  margin-bottom: var(--spacing-md, 16px);
+}
+
+.parent-controls__error {
+  padding: 12px 14px;
+  border-radius: 14px;
+  font-size: 0.875rem;
+  font-weight: 700;
+  background: color-mix(in srgb, #ef4444 10%, transparent);
+  color: #b91c1c;
+  margin-bottom: var(--spacing-md, 16px);
+  border: 2px solid color-mix(in srgb, #ef4444 22%, transparent);
+}
+
+.parent-controls__ok {
+  padding: 10px 14px;
+  border-radius: 14px;
+  font-size: 0.875rem;
+  font-weight: 800;
+  background: color-mix(in srgb, #22c55e 12%, transparent);
+  color: #166534;
+  margin-bottom: var(--spacing-md, 16px);
+  border: 2px solid color-mix(in srgb, #22c55e 28%, transparent);
+}
+
+.parent-controls__remove-modal {
+  width: min(420px, 96vw) !important;
+  max-height: min(70vh, 520px) !important;
+}
+
+.parent-controls__remove-modal-body {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--color-text-secondary, #64748b);
+}
+
+.parent-controls__modal-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+  width: 100%;
+}

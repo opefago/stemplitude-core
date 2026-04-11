@@ -99,22 +99,33 @@ export function SearchableDropdown({
       }
       left = Math.max(viewportPad, left);
 
+      const gap = 6;
       const spaceBelow = window.innerHeight - rect.bottom - viewportPad;
       const spaceAbove = rect.top - viewportPad;
       const openUp = spaceBelow < 280 && spaceAbove > spaceBelow;
-      const available = openUp ? spaceAbove : spaceBelow;
-      const maxHeight = Math.max(160, Math.min(360, available - viewportPad));
-      const top = openUp
-        ? Math.max(viewportPad, rect.top - maxHeight - 6)
-        : Math.min(window.innerHeight - maxHeight - viewportPad, rect.bottom + 6);
 
-      setMenuStyle({
-        position: "fixed",
-        top,
-        left,
-        width: desiredWidth,
-        maxHeight,
-      });
+      if (openUp) {
+        const spaceForMenu = Math.max(0, rect.top - viewportPad - gap);
+        const maxHeight = Math.max(160, Math.min(360, spaceForMenu));
+        setMenuStyle({
+          position: "fixed",
+          left,
+          width: desiredWidth,
+          maxHeight,
+          bottom: window.innerHeight - rect.top + gap,
+          top: "auto",
+        });
+      } else {
+        const maxHeight = Math.max(160, Math.min(360, spaceBelow - gap));
+        setMenuStyle({
+          position: "fixed",
+          left,
+          width: desiredWidth,
+          maxHeight,
+          top: rect.bottom + gap,
+          bottom: "auto",
+        });
+      }
     }
 
     updateMenuPosition();

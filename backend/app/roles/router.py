@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.permissions import require_permission
@@ -15,6 +15,7 @@ from app.roles.schemas import (
     RoleWithPermissionsResponse,
 )
 from app.roles.service import RoleService
+from app.schemas.pagination import Paginated
 
 router = APIRouter()
 
@@ -34,48 +35,34 @@ _admin_deps = [_require_tenant(), require_permission("roles", "view")]
 
 @router.get(
     "/",
-    response_model=list[RoleResponse],
+    response_model=Paginated[RoleResponse],
     dependencies=_admin_deps,
 )
 async def list_roles(
     db: AsyncSession = Depends(get_db),
     tenant: TenantContext = Depends(get_tenant_context),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
 ):
     service = RoleService(db)
-    roles = await service.list_roles(tenant.tenant_id)
-    return [
-        RoleResponse(
-            id=r.id,
-            tenant_id=r.tenant_id,
-            name=r.name,
-            slug=r.slug,
-            is_system=r.is_system,
-            is_active=r.is_active,
-        )
-        for r in roles
-    ]
+    return await service.list_roles_paginated(
+        tenant.tenant_id, skip=skip, limit=limit
+    )
 
 
 @router.get(
     "/permissions",
-    response_model=list[PermissionResponse],
+    response_model=Paginated[PermissionResponse],
     dependencies=_admin_deps,
 )
 async def list_permissions(
     db: AsyncSession = Depends(get_db),
     tenant: TenantContext = Depends(get_tenant_context),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(200, ge=1, le=1000),
 ):
     service = RoleService(db)
-    permissions = await service.list_permissions()
-    return [
-        PermissionResponse(
-            id=p.id,
-            resource=p.resource,
-            action=p.action,
-            description=p.description,
-        )
-        for p in permissions
-    ]
+    return await service.list_permissions_paginated(skip=skip, limit=limit)
 
 
 @router.post(

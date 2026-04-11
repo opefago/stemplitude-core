@@ -119,22 +119,34 @@ class ConversationRepository:
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def list_for_user(self, user_id: UUID, tenant_id: UUID) -> list[Conversation]:
-        """List all conversations the user is an active member of."""
+    async def list_for_user(
+        self,
+        user_id: UUID,
+        tenant_id: UUID,
+        *,
+        skip: int = 0,
+        limit: int = 50,
+    ) -> tuple[list[Conversation], int]:
+        """List conversations the user is an active member of (paginated)."""
         member_conv_ids = select(ConversationMember.conversation_id).where(
             ConversationMember.user_id == user_id,
             ConversationMember.left_at.is_(None),
         )
+        filters = (
+            Conversation.tenant_id == tenant_id,
+            Conversation.id.in_(member_conv_ids),
+        )
+        count_stmt = select(func.count()).select_from(Conversation).where(*filters)
+        total = int((await self.session.execute(count_stmt)).scalar() or 0)
         stmt = (
             select(Conversation)
-            .where(
-                Conversation.tenant_id == tenant_id,
-                Conversation.id.in_(member_conv_ids),
-            )
+            .where(*filters)
             .order_by(Conversation.updated_at.desc())
+            .offset(skip)
+            .limit(limit)
         )
         result = await self.session.execute(stmt)
-        return list(result.scalars().all())
+        return list(result.scalars().all()), total
 
     async def create_conversation(
         self,

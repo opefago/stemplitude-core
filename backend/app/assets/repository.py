@@ -1,5 +1,6 @@
 """Asset repository."""
 
+from typing import Sequence
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -35,6 +36,21 @@ class AssetRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_by_id_in_tenants(
+        self, asset_id: UUID, tenant_ids: Sequence[UUID]
+    ) -> Asset | None:
+        """Get asset by ID scoped to any of the given tenants (franchise shared library read)."""
+        if not tenant_ids:
+            return None
+        result = await self.session.execute(
+            select(Asset).where(
+                Asset.id == asset_id,
+                Asset.tenant_id.in_(list(tenant_ids)),
+                Asset.is_active == True,
+            )
+        )
+        return result.scalar_one_or_none()
+
     async def is_parent_of_student(
         self, user_id: UUID, student_id: UUID
     ) -> bool:
@@ -65,7 +81,7 @@ class AssetRepository:
 
     async def list_assets(
         self,
-        tenant_id: UUID,
+        tenant_id: UUID | Sequence[UUID],
         *,
         owner_id: UUID | None = None,
         owner_type: str | None = None,
@@ -74,8 +90,18 @@ class AssetRepository:
         skip: int = 0,
         limit: int = 100,
     ) -> tuple[list[Asset], int]:
-        """List assets with filters, returning items and total count."""
-        base_where = [Asset.tenant_id == tenant_id, Asset.is_active == True]
+        """List assets with filters, returning items and total count.
+
+        ``tenant_id`` may be a single UUID or a sequence (e.g. child + parent for franchise read).
+        """
+        if isinstance(tenant_id, UUID):
+            tenant_clause = Asset.tenant_id == tenant_id
+        else:
+            ids = list(tenant_id)
+            if not ids:
+                return [], 0
+            tenant_clause = Asset.tenant_id.in_(ids)
+        base_where = [tenant_clause, Asset.is_active == True]
         filters = [
             (owner_id, lambda v: Asset.owner_id == v),
             (owner_type, lambda v: Asset.owner_type == v),

@@ -13,8 +13,8 @@ export function useClassroomWizardState() {
   const [instructorId, setInstructorId] = useState("");
   const [includeAdminOwners, setIncludeAdminOwners] = useState(true);
   const [capacity, setCapacity] = useState("20");
-  const [deliveryMode, setDeliveryMode] = useState<"online" | "in-person">("online");
-  const [meetingMode, setMeetingMode] = useState<"generate" | "paste">("generate");
+  const [deliveryMode, setDeliveryMode] = useState<"online" | "in-person" | "hybrid">("online");
+  const [meetingMode, setMeetingMode] = useState<"built_in" | "generate" | "paste">("generate");
   const [meetingProvider, setMeetingProvider] = useState<"zoom" | "meet" | "teams">("zoom");
   const [manualMeetingLink, setManualMeetingLink] = useState("");
   const [locationAddress, setLocationAddress] = useState("");
@@ -69,13 +69,21 @@ export function useClassroomWizardState() {
     setNameTouched(false);
     setInstructorId(c.instructor_id ?? "");
     setCapacity(c.max_students != null && c.max_students > 0 ? String(c.max_students) : "0");
-    setDeliveryMode(c.mode === "in-person" ? "in-person" : "online");
-    const autoGen = Boolean(c.meeting_auto_generated);
-    setMeetingMode(autoGen ? "generate" : "paste");
-    const prov = (c.meeting_provider ?? "zoom").toLowerCase();
-    setMeetingProvider(
-      prov === "meet" || prov === "teams" || prov === "zoom" ? (prov as "zoom" | "meet" | "teams") : "zoom",
+    setDeliveryMode(
+      c.mode === "in-person" ? "in-person" : c.mode === "hybrid" ? "hybrid" : "online",
     );
+    const provRaw = (c.meeting_provider ?? "").toLowerCase();
+    if (provRaw === "built_in") {
+      setMeetingMode("built_in");
+      setMeetingProvider("zoom");
+    } else {
+      const autoGen = Boolean(c.meeting_auto_generated);
+      setMeetingMode(autoGen ? "generate" : "paste");
+      const prov = provRaw || "zoom";
+      setMeetingProvider(
+        prov === "meet" || prov === "teams" || prov === "zoom" ? (prov as "zoom" | "meet" | "teams") : "zoom",
+      );
+    }
     setManualMeetingLink(c.meeting_link ?? "");
     setLocationAddress(c.location_address ?? "");
     setDescription(String(sch.notes ?? ""));

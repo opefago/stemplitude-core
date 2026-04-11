@@ -1,4 +1,4 @@
-import { apiFetch } from "./client";
+import { apiFetch, browserCalendarTimeZone } from "./client";
 import { getAccessToken } from "../tokens";
 import { ensureFreshAccessToken } from "./client";
 
@@ -13,7 +13,7 @@ export interface ClassroomRecord {
   program_end_date?: string | null;
   curriculum_title?: string | null;
   instructor_id?: string | null;
-  mode: "online" | "in-person";
+  mode: "online" | "in-person" | "hybrid";
   recurrence_type?: string | null;
   meeting_provider?: string | null;
   meeting_link?: string | null;
@@ -39,6 +39,9 @@ export interface SessionTextAssignment {
   instructions?: string | null;
   due_at?: string | null;
   lab_id?: string | null;
+  /** Playground launcher id when ``lab_id`` is a curriculum UUID (from API). */
+  lab_launcher_id?: string | null;
+  curriculum_lab_title?: string | null;
   requires_lab?: boolean;
   requires_assets?: boolean;
   allow_edit_after_submit?: boolean;
@@ -95,6 +98,35 @@ export interface SessionPresenceParticipant {
   last_seen_at: string;
   in_lab?: boolean;
   lab_type?: string | null;
+}
+
+export interface SessionVideoToken {
+  provider: string;
+  room_name: string;
+  participant_identity: string;
+  participant_name: string;
+  ws_url: string;
+  token: string;
+  expires_at: string;
+}
+
+export interface SessionRecordingRecord {
+  id: string;
+  tenant_id: string;
+  classroom_id: string;
+  session_id: string;
+  created_by_id?: string | null;
+  provider: string;
+  provider_room_name?: string | null;
+  provider_recording_id?: string | null;
+  status: string;
+  blob_key?: string | null;
+  duration_seconds?: number | null;
+  size_bytes?: number | null;
+  retention_expires_at?: string | null;
+  deleted_at?: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ClassroomSessionEventRecord {
@@ -173,7 +205,7 @@ export interface CreateClassroomPayload {
   program_id?: string | null;
   curriculum_id?: string | null;
   instructor_id?: string | null;
-  mode: "online" | "in-person";
+  mode: "online" | "in-person" | "hybrid";
   recurrence_type?: string | null;
   meeting_provider?: string | null;
   meeting_link?: string | null;
@@ -213,6 +245,11 @@ export async function listClassrooms(params?: {
 
 export async function listMyClassrooms(): Promise<ClassroomRecord[]> {
   return apiFetch<ClassroomRecord[]>("/students/me/classrooms");
+}
+
+/** Parent / homeschool: classrooms their linked learners are enrolled in (not `/students/me/*`). */
+export async function listGuardianLinkedClassrooms(): Promise<ClassroomRecord[]> {
+  return apiFetch<ClassroomRecord[]>("/students/parent/linked-classrooms");
 }
 
 export async function checkDuplicateClassroomName(
@@ -337,6 +374,85 @@ export async function heartbeatClassroomSession(
   });
 }
 
+export async function issueSessionVideoToken(
+  classroomId: string,
+  sessionId: string,
+): Promise<SessionVideoToken> {
+  return apiFetch<SessionVideoToken>(`/classrooms/${classroomId}/sessions/${sessionId}/video-token`, {
+    method: "POST",
+  });
+}
+
+export async function listSessionRecordings(
+  classroomId: string,
+  sessionId: string,
+): Promise<SessionRecordingRecord[]> {
+  return apiFetch<SessionRecordingRecord[]>(
+    `/classrooms/${classroomId}/sessions/${sessionId}/recordings`,
+  );
+}
+
+export async function startSessionRecording(
+  classroomId: string,
+  sessionId: string,
+  payload?: { provider_recording_id?: string | null },
+): Promise<SessionRecordingRecord> {
+  return apiFetch<SessionRecordingRecord>(
+    `/classrooms/${classroomId}/sessions/${sessionId}/recordings/start`,
+    {
+      method: "POST",
+      body: payload ?? {},
+    },
+  );
+}
+
+export async function stopSessionRecording(
+  classroomId: string,
+  sessionId: string,
+  recordingId: string,
+  payload?: {
+    status?: string;
+    blob_key?: string | null;
+    duration_seconds?: number | null;
+    size_bytes?: number | null;
+    provider_recording_id?: string | null;
+  },
+): Promise<SessionRecordingRecord> {
+  return apiFetch<SessionRecordingRecord>(
+    `/classrooms/${classroomId}/sessions/${sessionId}/recordings/${recordingId}/stop`,
+    {
+      method: "POST",
+      body: payload ?? {},
+    },
+  );
+}
+
+export async function createRecordingAccessLink(
+  classroomId: string,
+  sessionId: string,
+  recordingId: string,
+): Promise<{ recording_id: string; download_url: string; expires_in_seconds: number }> {
+  return apiFetch<{ recording_id: string; download_url: string; expires_in_seconds: number }>(
+    `/classrooms/${classroomId}/sessions/${sessionId}/recordings/${recordingId}/access-link`,
+    {
+      method: "POST",
+    },
+  );
+}
+
+export async function deleteSessionRecording(
+  classroomId: string,
+  sessionId: string,
+  recordingId: string,
+): Promise<SessionRecordingRecord> {
+  return apiFetch<SessionRecordingRecord>(
+    `/classrooms/${classroomId}/sessions/${sessionId}/recordings/${recordingId}`,
+    {
+      method: "DELETE",
+    },
+  );
+}
+
 export async function heartbeatMySession(
   classroomId: string,
   sessionId: string,
@@ -441,7 +557,7 @@ export type UpdateClassroomPayload = Partial<{
   program_id: string | null;
   curriculum_id: string | null;
   instructor_id: string | null;
-  mode: "online" | "in-person";
+  mode: "online" | "in-person" | "hybrid";
   recurrence_type: string | null;
   meeting_provider: string | null;
   meeting_link: string | null;
@@ -569,6 +685,8 @@ export async function createMySessionSubmission(
     assignment_id?: string | null;
     content: string;
     status: "draft" | "submitted";
+    preview_image?: string | null;
+    lab_id?: string | null;
   },
 ): Promise<RealtimeEventEnvelope> {
   return apiFetch<RealtimeEventEnvelope>(
@@ -597,12 +715,33 @@ export async function submitAssignment(
   assignmentId: string,
   content: string,
   status: "draft" | "submitted",
+  opts?: { preview_image?: string | null; lab_id?: string | null },
 ): Promise<RealtimeEventEnvelope> {
   return createMySessionSubmission(classroomId, sessionId, {
     assignment_id: assignmentId,
     content,
     status,
+    preview_image: opts?.preview_image ?? undefined,
+    lab_id: opts?.lab_id ?? undefined,
   });
+}
+
+export async function createSessionAssignmentFromTemplate(
+  classroomId: string,
+  sessionId: string,
+  payload: {
+    template_id: string;
+    due_at?: string | null;
+    title?: string | null;
+  },
+): Promise<RealtimeEventEnvelope> {
+  return apiFetch<RealtimeEventEnvelope>(
+    `/classrooms/${classroomId}/sessions/${sessionId}/assignments/from-template`,
+    {
+      method: "POST",
+      body: payload,
+    },
+  );
 }
 
 // ── Assignments & Grading ─────────────────────────────────────────────────
@@ -613,15 +752,30 @@ export interface ClassroomAssignment {
   instructions?: string | null;
   due_at?: string | null;
   lab_id?: string | null;
+  lab_launcher_id?: string | null;
+  curriculum_lab_title?: string | null;
   requires_lab?: boolean;
   requires_assets?: boolean;
   allow_edit_after_submit?: boolean;
+  use_rubric?: boolean;
+  rubric_template_id?: string | null;
+  rubric_snapshot?: unknown[] | null;
+  assignment_template_id?: string | null;
   session_id: string;
   session_start: string;
   session_end: string;
   session_status: string;
+  session_display_title?: string | null;
   submission_count: number;
 }
+
+/** Rubric row sent when grading; drives analytics mean_rubric_compliance. */
+export type RubricCriterionPayload = {
+  criterion_id: string;
+  label?: string | null;
+  max_points: number;
+  points_awarded: number;
+};
 
 export interface SubmissionRecord {
   event_id: string;
@@ -635,6 +789,10 @@ export interface SubmissionRecord {
   grade?: number | null;
   feedback?: string | null;
   graded_at?: string | null;
+  rubric?: RubricCriterionPayload[] | null;
+  /** Data URL image snapshot (labs); omitted on realtime payloads. */
+  preview_image?: string | null;
+  lab_id?: string | null;
 }
 
 export async function listClassroomAssignments(
@@ -658,7 +816,12 @@ export async function gradeSubmission(
   classroomId: string,
   sessionId: string,
   eventId: string,
-  payload: { score: number; feedback?: string | null; assignment_id?: string | null },
+  payload: {
+    score: number;
+    feedback?: string | null;
+    assignment_id?: string | null;
+    rubric?: RubricCriterionPayload[] | null;
+  },
 ): Promise<{ event_id: string; score: number; graded_at: string }> {
   return apiFetch(
     `/classrooms/${classroomId}/sessions/${sessionId}/submissions/${eventId}/grade`,
@@ -728,6 +891,11 @@ export interface ClassroomRealtimeClientOptions {
    * virtual lab (LabAssistantPanel) so the student stays visible as in_lab.
    */
   preserveInLab?: boolean;
+  /**
+   * Parent child mode: same learner as `X-Child-Context` on HTTP. Presence and
+   * student-originated realtime commands use this student id.
+   */
+  childContextStudentId?: string | null;
   onSnapshot?: (snapshot: RealtimeSnapshot) => void;
   onEvent?: (event: RealtimeEventEnvelope) => void;
   onReplay?: (events: RealtimeEventEnvelope[]) => void;
@@ -832,6 +1000,14 @@ export class ClassroomRealtimeClient {
     });
     if (this.opts.preserveInLab) {
       params.set("preserve_in_lab", "1");
+    }
+    const childId = this.opts.childContextStudentId?.trim();
+    if (childId) {
+      params.set("student_actor_id", childId);
+    }
+    const calTz = browserCalendarTimeZone();
+    if (calTz) {
+      params.set("calendar_tz", calTz);
     }
     const url = buildWsUrl(
       `/api/v1/classrooms/${this.opts.classroomId}/sessions/${this.opts.sessionId}/ws?${params.toString()}`,

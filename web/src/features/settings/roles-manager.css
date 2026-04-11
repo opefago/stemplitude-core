@@ -584,6 +584,47 @@
   font-weight: 500;
 }
 
+.rm__field-control {
+  width: 100%;
+  min-height: 42px;
+  padding: 10px 12px;
+  border: 2px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.rm__field-control::placeholder {
+  color: var(--color-text-secondary);
+}
+
+.rm__field-control:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 14%, transparent);
+}
+
+.rm__assign-table {
+  border-collapse: collapse;
+}
+
+.rm__assign-table th,
+.rm__assign-table td {
+  padding: 10px;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text);
+}
+
+.rm__assign-table th {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary);
+}
+
 .rm__all-toggle {
   display: flex;
   align-items: center;

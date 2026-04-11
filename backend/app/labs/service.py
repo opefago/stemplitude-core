@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import blob_storage
 from app.dependencies import CurrentIdentity, TenantContext
+from app.gamification.streak_side_effects import bump_student_streak
 from app.labs.models import LabAssignment, Project, SubmissionFeedback
 
 from .repository import FeedbackRepository, LabAssignmentRepository, ProjectRepository
@@ -54,6 +55,13 @@ class LabsService:
     ) -> ProjectResponse:
         """Submit a project with file upload to R2."""
         student_id = self._student_id(identity, tenant_ctx)
+        from app.member_billing.guard import assert_member_billing_access_allowed
+
+        await assert_member_billing_access_allowed(
+            self.session,
+            tenant_id=tenant_ctx.tenant_id,
+            student_id=student_id,
+        )
         project_id = uuid.uuid4()
         filename = file.filename or "project"
         content_type = file.content_type or "application/octet-stream"
@@ -75,6 +83,7 @@ class LabsService:
             metadata_=metadata_ or {},
         )
         project = await self.repo.create(project)
+        await bump_student_streak(student_id, tenant_ctx.tenant_id)
         return ProjectResponse(
             id=project.id,
             student_id=project.student_id,

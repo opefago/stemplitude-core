@@ -5,26 +5,46 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.classrooms.models import Classroom
 from app.dependencies import CurrentIdentity, TenantContext
 from app.licenses.models import License, SeatUsage
 from app.roles.models import Permission, Role, RolePermission, UserRole
 from app.roles.defaults import DEFAULT_ROLES as ROLE_PERMISSION_MAP
-from app.students.models import StudentMembership
-from app.tenants.models import Membership, SupportAccessGrant, Tenant, TenantHierarchy, TenantLabSetting
+from app.students.models import ParentStudent, StudentMembership
+from app.tenants.models import (
+    Membership,
+    SupportAccessGrant,
+    Tenant,
+    TenantHierarchy,
+    TenantHierarchyRequest,
+    TenantLabSetting,
+)
 from app.users.models import User
+
+from app.capabilities.engine import invalidate_capability_cache_for_tenant
+from app.tenants.franchise_governance import (
+    build_stored_governance,
+    normalize_governance_mode,
+    parent_analytics_rollups_allowed,
+)
 
 from .repository import (
     MembershipRepository,
     SupportAccessGrantRepository,
     TenantHierarchyRepository,
+    TenantHierarchyRequestRepository,
     TenantLabSettingRepository,
     TenantRepository,
 )
 from .schemas import (
+    ChildOrganizationRollupResponse,
     ChildSeatUsage,
     ChildTenantCreate,
+    FranchiseJoinDecision,
+    FranchiseJoinRequestCreate,
     HierarchyUpdate,
     LabSettingUpdate,
     MemberAdd,
@@ -55,6 +75,7 @@ class TenantService:
         self.lab_repo = TenantLabSettingRepository(session)
         self.grant_repo = SupportAccessGrantRepository(session)
         self.hierarchy_repo = TenantHierarchyRepository(session)
+        self.hierarchy_req_repo = TenantHierarchyRequestRepository(session)
 
     async def _seed_default_roles(self, tenant_id: UUID) -> None:
         """Create default roles and assign their permissions for a new tenant."""
@@ -81,6 +102,129 @@ class TenantService:
                 if perm:
                     self.session.add(RolePermission(role_id=role.id, permission_id=perm.id))
 
+    async def ensure_system_role(self, tenant_id: UUID, slug: str) -> Role | None:
+        """Create a missing tenant role from :mod:`app.roles.defaults` (idempotent)."""
+        if slug not in ROLE_PERMISSION_MAP:
+            logger.error("ensure_system_role: unknown slug=%s", slug)
+            return None
+        result = await self.session.execute(
+            select(Role).where(
+                Role.tenant_id == tenant_id,
+                Role.slug == slug,
+                Role.is_active == True,  # noqa: E712
+            )
+        )
+        existing = result.scalar_one_or_none()
+        if existing:
+            return existing
+
+        perm_result = await self.session.execute(select(Permission))
+        perms_by_key: dict[str, Permission] = {
+            f"{p.resource}:{p.action}": p for p in perm_result.scalars().all()
+        }
+        meta = ROLE_PERMISSION_MAP[slug]
+        name = meta["name"]
+        role = Role(
+            tenant_id=tenant_id,
+            name=name,
+            slug=slug,
+            is_system=True,
+        )
+        self.session.add(role)
+        await self.session.flush()
+        for key in meta.get("permissions", []):
+            perm = perms_by_key.get(key)
+            if perm:
+                self.session.add(RolePermission(role_id=role.id, permission_id=perm.id))
+        await self.session.flush()
+        logger.info("Ensured system role slug=%s tenant_id=%s", slug, tenant_id)
+        return role
+
+    async def ensure_parent_membership_role_if_linked(
+        self, user_id: UUID, tenant_id: UUID
+    ) -> bool:
+        """If membership has no role but user is a linked parent of a student in tenant, set Parent role."""
+        membership = await self.membership_repo.get_by_user_tenant(user_id, tenant_id)
+        if not membership or not membership.is_active or membership.role_id is not None:
+            return False
+
+        link = await self.session.execute(
+            select(ParentStudent.id)
+            .join(
+                StudentMembership,
+                StudentMembership.student_id == ParentStudent.student_id,
+            )
+            .where(
+                ParentStudent.user_id == user_id,
+                StudentMembership.tenant_id == tenant_id,
+                StudentMembership.is_active == True,  # noqa: E712
+            )
+            .limit(1)
+        )
+        if link.scalar_one_or_none() is None:
+            return False
+
+        role = await self.ensure_system_role(tenant_id, "parent")
+        if not role:
+            return False
+        membership.role_id = role.id
+        await self.session.flush()
+        logger.info(
+            "Repaired parent membership (was missing role_id) user=%s tenant=%s",
+            user_id,
+            tenant_id,
+        )
+        return True
+
+    async def user_is_linked_parent_in_tenant(self, user_id: UUID, tenant_id: UUID) -> bool:
+        """True if user has ParentStudent to a student with active StudentMembership in tenant."""
+        link = await self.session.execute(
+            select(ParentStudent.id)
+            .join(
+                StudentMembership,
+                StudentMembership.student_id == ParentStudent.student_id,
+            )
+            .where(
+                ParentStudent.user_id == user_id,
+                StudentMembership.tenant_id == tenant_id,
+                StudentMembership.is_active == True,  # noqa: E712
+            )
+            .limit(1)
+        )
+        return link.scalar_one_or_none() is not None
+
+    async def ensure_linked_parent_membership(self, user_id: UUID, tenant_id: UUID) -> bool:
+        """Create or repair Membership for linked guardians without a row (or missing role).
+
+        Returns True if this session should be committed (caller owns transaction).
+        """
+        membership = await self.membership_repo.get_by_user_tenant(user_id, tenant_id)
+        if membership:
+            if not membership.is_active:
+                return False
+            if membership.role_id is not None:
+                return False
+            return await self.ensure_parent_membership_role_if_linked(user_id, tenant_id)
+
+        if not await self.user_is_linked_parent_in_tenant(user_id, tenant_id):
+            return False
+
+        role = await self.ensure_system_role(tenant_id, "parent")
+        if not role:
+            return False
+        try:
+            await self.membership_repo.add_member(user_id, tenant_id, role.id)
+            await self.session.flush()
+            logger.info(
+                "Created parent membership from ParentStudent link user=%s tenant=%s",
+                user_id,
+                tenant_id,
+            )
+            return True
+        except IntegrityError:
+            await self.session.rollback()
+            return await self.ensure_parent_membership_role_if_linked(user_id, tenant_id)
+
     async def create_tenant(
         self,
         data: TenantCreate,
@@ -96,6 +240,8 @@ class TenantService:
             settings=data.settings or {},
             billing_mode=data.billing_mode,
             billing_email_enabled=data.billing_email_enabled,
+            public_host_subdomain=data.public_host_subdomain,
+            custom_domain=data.custom_domain,
             is_active=True,
         )
         await self._seed_default_roles(tenant.id)
@@ -115,8 +261,8 @@ class TenantService:
         return tenant
 
     async def list_user_tenants(self, user_id: UUID) -> list[Tenant]:
-        """List tenants the user belongs to."""
-        return await self.repo.list_user_tenants(user_id)
+        """List tenants the user can open (membership or guardian of an enrolled student)."""
+        return await self.repo.list_user_accessible_tenants(user_id)
 
     async def get_tenant(self, tenant_id: UUID) -> Tenant | None:
         """Get tenant by ID."""
@@ -131,10 +277,17 @@ class TenantService:
         update_data = data.model_dump(exclude_unset=True)
         if "code" in update_data:
             update_data["code"] = update_data["code"].upper()
-        for k, v in update_data.items():
-            setattr(tenant, k, v)
-        await self.session.flush()
-        await self.session.refresh(tenant)
+        try:
+            for k, v in update_data.items():
+                setattr(tenant, k, v)
+            await self.session.flush()
+            await self.session.refresh(tenant)
+        except IntegrityError as exc:
+            await self.session.rollback()
+            logger.warning("Tenant update conflict id=%s", tenant_id)
+            raise ValueError(
+                "Host subdomain or custom domain is already in use by another organization."
+            ) from exc
         logger.info("Tenant updated id=%s", tenant_id)
         if "is_active" in update_data:
             if update_data["is_active"]:
@@ -222,9 +375,18 @@ class TenantService:
         tenant = await self.repo.get_by_id(tenant_id)
         if not tenant:
             return None
-        return await self.lab_repo.upsert(
+        row = await self.lab_repo.upsert(
             tenant_id, data.lab_type, data.enabled, data.config
         )
+        try:
+            await invalidate_capability_cache_for_tenant(tenant_id)
+        except Exception:
+            logger.warning(
+                "Could not invalidate capability cache for tenant %s after lab toggle",
+                tenant_id,
+                exc_info=True,
+            )
+        return row
 
     async def grant_support_access(
         self,
@@ -378,13 +540,23 @@ class TenantService:
             logger.warning("Hierarchy violation: tenant cannot be its own child parent=%s", parent_id)
             raise ValueError("A tenant cannot be its own child")
 
+        mode = normalize_governance_mode(data.governance_mode)
+        stored = build_stored_governance(mode, data.governance)
         link = await self.hierarchy_repo.create(
             parent_tenant_id=parent_id,
             child_tenant_id=data.child_tenant_id,
             billing_mode=data.billing_mode,
             seat_allocations=data.seat_allocations,
+            governance_mode=mode,
+            governance=stored,
         )
-        logger.info("Child tenant added parent=%s child=%s billing=%s", parent_id, data.child_tenant_id, data.billing_mode)
+        logger.info(
+            "Child tenant added parent=%s child=%s billing=%s governance_mode=%s",
+            parent_id,
+            data.child_tenant_id,
+            data.billing_mode,
+            mode,
+        )
         return link
 
     async def list_children(self, parent_id: UUID) -> list[TenantHierarchy]:
@@ -404,6 +576,14 @@ class TenantService:
             logger.warning("Hierarchy update failed: link not found parent=%s child=%s", parent_id, child_id)
             return None
         update_data = data.model_dump(exclude_unset=True)
+        gm = update_data.pop("governance_mode", None)
+        gov_in = update_data.pop("governance", None)
+        if gm is not None:
+            nm = normalize_governance_mode(gm)
+            link.governance_mode = nm
+            link.governance = build_stored_governance(nm, gov_in)
+        elif gov_in is not None:
+            link.governance = build_stored_governance(link.governance_mode, gov_in)
         result = await self.hierarchy_repo.update(link, **update_data)
         logger.info("Hierarchy updated parent=%s child=%s", parent_id, child_id)
         return result
@@ -517,3 +697,231 @@ class TenantService:
         instructor_count = instructor_result.scalar() or 0
 
         return {"student": student_count, "instructor": instructor_count}
+
+    async def get_public_tenant_by_host_label(self, label: str) -> Tenant | None:
+        return await self.repo.get_by_public_host_subdomain(label)
+
+    async def list_franchise_join_requests(
+        self, parent_tenant_id: UUID, status: str | None = "pending"
+    ) -> list[TenantHierarchyRequest]:
+        return await self.hierarchy_req_repo.list_for_parent(parent_tenant_id, status)
+
+    async def submit_franchise_join_request(
+        self,
+        child_tenant_id: UUID,
+        requested_by_user_id: UUID,
+        data: FranchiseJoinRequestCreate,
+    ) -> TenantHierarchyRequest:
+        if data.parent_tenant_id:
+            parent = await self.repo.get_by_id(data.parent_tenant_id)
+        else:
+            slug = (data.parent_slug or "").strip().lower()
+            parent = await self.repo.get_by_slug(slug) if slug else None
+        if not parent or not parent.is_active:
+            raise ValueError("Parent organization not found")
+        parent_id = parent.id
+        if parent_id == child_tenant_id:
+            raise ValueError("A tenant cannot request to join itself")
+        if await self.hierarchy_repo.is_already_child(parent_id):
+            raise ValueError(
+                "That organization is already a sub-site and cannot be a franchise parent "
+                "(only two levels are supported)."
+            )
+        child = await self.repo.get_by_id(child_tenant_id)
+        if not child:
+            raise ValueError("Child tenant not found")
+        if await self.hierarchy_repo.is_already_child(child_tenant_id):
+            raise ValueError("Your organization is already linked under a parent")
+        if await self.hierarchy_repo.is_parent(child_tenant_id):
+            raise ValueError(
+                "Organizations that already have child sites cannot become a sub-organization"
+            )
+        existing = await self.hierarchy_req_repo.get_pending_for_child(child_tenant_id)
+        if existing:
+            raise ValueError("A pending franchise request already exists for this organization")
+        pb = data.preferred_billing_mode
+        if pb is not None and pb not in ("central", "independent"):
+            raise ValueError("preferred_billing_mode must be central or independent")
+        row = TenantHierarchyRequest(
+            child_tenant_id=child_tenant_id,
+            parent_tenant_id=parent_id,
+            status="pending",
+            message=data.message,
+            preferred_billing_mode=pb,
+            requested_by_user_id=requested_by_user_id,
+        )
+        row = await self.hierarchy_req_repo.create(row)
+        try:
+            from app.tenants.franchise_notifications import (
+                persist_parent_franchise_request_notifications,
+            )
+
+            admins = await self._owner_admin_user_ids(parent_id)
+            await persist_parent_franchise_request_notifications(
+                self.session,
+                parent_tenant_id=parent_id,
+                child_display_name=(child.name or "").strip() or "An organization",
+                child_slug=(child.slug or "").strip(),
+                recipient_user_ids=admins,
+            )
+        except Exception:
+            logger.exception(
+                "In-app notification failed for franchise join request parent=%s child=%s",
+                parent_id,
+                child_tenant_id,
+            )
+        return row
+
+    async def decide_franchise_join_request(
+        self,
+        parent_tenant_id: UUID,
+        request_id: UUID,
+        decided_by_user_id: UUID,
+        decision: FranchiseJoinDecision,
+    ) -> TenantHierarchyRequest:
+        req = await self.hierarchy_req_repo.get_by_id(request_id)
+        if not req or req.parent_tenant_id != parent_tenant_id:
+            raise ValueError("Request not found")
+        if req.status != "pending":
+            raise ValueError("Request is no longer pending")
+        now = datetime.now(timezone.utc)
+        if not decision.approve:
+            req.status = "rejected"
+            req.decided_at = now
+            req.decided_by_user_id = decided_by_user_id
+            req.rejection_reason = decision.rejection_reason
+            await self.session.flush()
+            await self.session.refresh(req)
+            try:
+                await self._notify_child_franchise_decision(
+                    req,
+                    parent_tenant_id=parent_tenant_id,
+                    approved=False,
+                    billing_mode=None,
+                )
+            except Exception:
+                logger.exception(
+                    "In-app notification failed for franchise decline child=%s",
+                    req.child_tenant_id,
+                )
+            return req
+        billing = decision.billing_mode
+        if billing not in ("central", "independent"):
+            raise ValueError("billing_mode must be central or independent when approving")
+        create_payload = ChildTenantCreate(
+            child_tenant_id=req.child_tenant_id,
+            billing_mode=billing,
+            seat_allocations=decision.seat_allocations,
+            governance_mode=decision.governance_mode or "child_managed",
+            governance=decision.governance,
+        )
+        await self.add_child_tenant(parent_tenant_id, create_payload)
+        req.status = "approved"
+        req.decided_at = now
+        req.decided_by_user_id = decided_by_user_id
+        await self.session.flush()
+        await self.session.refresh(req)
+        try:
+            await self._notify_child_franchise_decision(
+                req,
+                parent_tenant_id=parent_tenant_id,
+                approved=True,
+                billing_mode=billing,
+            )
+        except Exception:
+            logger.exception(
+                "In-app notification failed for franchise approval child=%s",
+                req.child_tenant_id,
+            )
+        return req
+
+    async def _owner_admin_user_ids(self, tenant_id: UUID) -> list[UUID]:
+        rows = await self.membership_repo.list_tenant_members(tenant_id)
+        seen: set[UUID] = set()
+        out: list[UUID] = []
+        for _m, user, role in rows:
+            if not role or role.slug not in ("owner", "admin"):
+                continue
+            if user.id in seen:
+                continue
+            seen.add(user.id)
+            out.append(user.id)
+        return out
+
+    async def _notify_child_franchise_decision(
+        self,
+        req: TenantHierarchyRequest,
+        *,
+        parent_tenant_id: UUID,
+        approved: bool,
+        billing_mode: str | None,
+    ) -> None:
+        parent = await self.repo.get_by_id(parent_tenant_id)
+        parent_name = (parent.name or "").strip() or "Parent organization"
+        parent_slug = (parent.slug or "").strip() if parent else ""
+        from app.tenants.franchise_notifications import (
+            persist_child_franchise_decision_notifications,
+        )
+
+        admins = await self._owner_admin_user_ids(req.child_tenant_id)
+        recipients = list(dict.fromkeys([*admins, req.requested_by_user_id]))
+        await persist_child_franchise_decision_notifications(
+            self.session,
+            child_tenant_id=req.child_tenant_id,
+            parent_display_name=parent_name,
+            parent_slug=parent_slug,
+            approved=approved,
+            billing_mode=billing_mode,
+            rejection_reason=req.rejection_reason if not approved else None,
+            recipient_user_ids=recipients,
+        )
+
+    async def get_child_organization_rollup(
+        self, parent_tenant_id: UUID, child_tenant_id: UUID
+    ) -> ChildOrganizationRollupResponse | None:
+        link = await self.get_hierarchy_link(parent_tenant_id, child_tenant_id)
+        if not link or not link.is_active:
+            return None
+        child = await self.repo.get_by_id(child_tenant_id)
+        if not child:
+            return None
+        if not parent_analytics_rollups_allowed(link.governance_mode, link.governance):
+            return None
+
+        sm = await self.session.execute(
+            select(func.count(StudentMembership.id)).where(
+                StudentMembership.tenant_id == child_tenant_id,
+                StudentMembership.is_active == True,  # noqa: E712
+            )
+        )
+        student_n = int(sm.scalar() or 0)
+
+        ins = await self.session.execute(
+            select(func.count(Membership.id))
+            .join(Role, Role.id == Membership.role_id, isouter=True)
+            .where(
+                Membership.tenant_id == child_tenant_id,
+                Membership.is_active == True,  # noqa: E712
+                Role.slug == "instructor",
+            )
+        )
+        instructor_n = int(ins.scalar() or 0)
+
+        cls_count = await self.session.execute(
+            select(func.count(Classroom.id)).where(
+                Classroom.tenant_id == child_tenant_id,
+                Classroom.deleted_at.is_(None),
+                Classroom.is_active == True,  # noqa: E712
+            )
+        )
+        classroom_n = int(cls_count.scalar() or 0)
+
+        return ChildOrganizationRollupResponse(
+            child_tenant_id=child_tenant_id,
+            child_name=child.name,
+            active_student_enrollments=student_n,
+            active_instructor_memberships=instructor_n,
+            active_classrooms=classroom_n,
+            billing_mode=link.billing_mode,
+            governance_mode=link.governance_mode,
+        )

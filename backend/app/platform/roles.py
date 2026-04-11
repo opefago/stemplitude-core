@@ -67,6 +67,7 @@ async def list_roles_with_details(session: AsyncSession) -> list[dict[str, Any]]
         # Convert defaultdict to plain dict of resource -> sorted actions
         perms_serialized = {res: sorted(acts) for res, acts in perms.items()}
         out.append({
+            "id": str(r.id),
             "slug": r.slug,
             "name": r.name,
             "is_system": r.is_system,
@@ -171,13 +172,25 @@ async def assign_role_to_user(
     for ur in existing_result.scalars().all():
         ur.is_active = False
 
-    # Create new UserRole
-    session.add(UserRole(
-        user_id=user.id,
-        role_id=role.id,
-        is_active=True,
-        granted_by=granted_by,
-    ))
+    pair_result = await session.execute(
+        select(UserRole).where(
+            UserRole.user_id == user.id,
+            UserRole.role_id == role.id,
+        )
+    )
+    row = pair_result.scalar_one_or_none()
+    if row:
+        row.is_active = True
+        row.granted_by = granted_by
+    else:
+        session.add(
+            UserRole(
+                user_id=user.id,
+                role_id=role.id,
+                is_active=True,
+                granted_by=granted_by,
+            )
+        )
     await session.flush()
 
     return {

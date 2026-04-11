@@ -1,5 +1,6 @@
 import json
-from typing import Literal
+from datetime import datetime, timezone
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -9,7 +10,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.permissions import require_permission
 from app.database import get_db
 from app.dependencies import CurrentIdentity, TenantContext, get_current_identity, get_tenant_context
+from app.students.me_student import require_me_student_id
+from app.students.parent_access import ensure_can_view_student_as_guardian
+from app.students.parent_activity import (
+    load_parent_child_activity,
+    load_parent_child_assignment_grades,
+)
 from app.students.schemas import (
+    AttendanceExcusalCreate,
+    AttendanceExcusalReview,
+    AttendanceExcusalRow,
+    AttendanceExcusalStaffRow,
+    GuardianAttendanceOverviewResponse,
+    GuardianChildControlsPatch,
+    GuardianChildControlsResponse,
+    ParentActivityKind,
+    ParentChildActivityResponse,
+    ParentChildAssignmentGradesResponse,
     ParentLinkRequest,
     ParentResponse,
     ResetPasswordRequest,
@@ -22,6 +39,7 @@ from app.students.schemas import (
     StudentUpdate,
     UsernameCheckResponse,
 )
+from app.students.attendance_excusal_service import AttendanceExcusalService
 from app.students.service import StudentService
 from app.database import async_session_factory
 from app.classrooms.schemas import (
@@ -47,12 +65,30 @@ from app.classrooms.realtime import emit_presence_updated_for_session
 router = APIRouter()
 
 
+def _utc_activity_datetime(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 class StudentSessionSubmissionRequest(BaseModel):
     assignment_id: str | None = Field(
         default=None, description="Optional assignment id tied to this submission."
     )
     content: str = Field(..., min_length=1, max_length=20000)
     status: Literal["draft", "submitted"] = "draft"
+    preview_image: str | None = Field(
+        default=None,
+        max_length=480_000,
+        description="Optional data URL (image/png or image/jpeg) snapshot of lab work.",
+    )
+    lab_id: str | None = Field(
+        default=None,
+        max_length=120,
+        description="Optional lab identifier (e.g. design-maker) for filtering in the UI.",
+    )
 
 
 class StudentAssignmentResponse(BaseModel):
@@ -76,14 +112,14 @@ async def _ensure_student_session_access(
     db: AsyncSession,
     classroom_id: UUID,
     session_id: UUID,
-    identity: CurrentIdentity,
+    student_id: UUID,
     tenant_id: UUID,
 ) -> ClassroomSession:
     service = StudentService(db)
     return await service.ensure_student_session_access(
         classroom_id=classroom_id,
         session_id=session_id,
-        student_id=identity.id,
+        student_id=student_id,
         tenant_id=tenant_id,
     )
 
@@ -384,19 +420,26 @@ async def list_parents(
     db: AsyncSession = Depends(get_db),
     tenant: TenantContext = Depends(get_tenant_context),
 ):
+    from app.users.models import User
+
     service = StudentService(db)
     await service.get_student(id, tenant.tenant_id)
     parents = await service.repo.list_parents(id)
-    return [
-        ParentResponse(
-            id=p.id,
-            user_id=p.user_id,
-            student_id=p.student_id,
-            relationship=p.relationship,
-            is_primary_contact=p.is_primary_contact,
+    out: list[ParentResponse] = []
+    for p in parents:
+        u = await db.get(User, p.user_id)
+        em = (u.email or "").strip() if u else ""
+        out.append(
+            ParentResponse(
+                id=p.id,
+                user_id=p.user_id,
+                student_id=p.student_id,
+                relationship=p.relationship,
+                is_primary_contact=p.is_primary_contact,
+                user_email=em or None,
+            )
         )
-        for p in parents
-    ]
+    return out
 
 
 @router.post(
@@ -421,7 +464,7 @@ async def reset_password(
 )
 async def my_upcoming_sessions(
     db: AsyncSession = Depends(get_db),
-    identity: CurrentIdentity = Depends(get_current_identity),
+    me_student_id: UUID = Depends(require_me_student_id),
     tenant: TenantContext = Depends(get_tenant_context),
     limit: int = Query(20, ge=1, le=100),
 ):
@@ -430,7 +473,7 @@ async def my_upcoming_sessions(
 
     service = StudentService(db)
     sessions = await service.list_my_upcoming_sessions(
-        student_id=identity.id,
+        student_id=me_student_id,
         tenant_id=tenant.tenant_id,
         limit=limit,
     )
@@ -444,7 +487,7 @@ async def my_upcoming_sessions(
 )
 async def my_active_sessions(
     db: AsyncSession = Depends(get_db),
-    identity: CurrentIdentity = Depends(get_current_identity),
+    me_student_id: UUID = Depends(require_me_student_id),
     tenant: TenantContext = Depends(get_tenant_context),
     limit: int = Query(20, ge=1, le=100),
 ):
@@ -453,7 +496,7 @@ async def my_active_sessions(
 
     service = StudentService(db)
     sessions = await service.list_my_active_sessions(
-        student_id=identity.id,
+        student_id=me_student_id,
         tenant_id=tenant.tenant_id,
         limit=limit,
     )
@@ -467,13 +510,13 @@ async def my_active_sessions(
 )
 async def my_assignments(
     db: AsyncSession = Depends(get_db),
-    identity: CurrentIdentity = Depends(get_current_identity),
+    me_student_id: UUID = Depends(require_me_student_id),
     tenant: TenantContext = Depends(get_tenant_context),
     limit: int = Query(200, ge=1, le=500),
 ):
     service = StudentService(db)
     items = await service.list_my_assignments(
-        student_id=identity.id,
+        student_id=me_student_id,
         tenant_id=tenant.tenant_id,
         limit=limit,
     )
@@ -487,7 +530,7 @@ async def my_assignments(
 )
 async def my_classrooms(
     db: AsyncSession = Depends(get_db),
-    identity: CurrentIdentity = Depends(get_current_identity),
+    me_student_id: UUID = Depends(require_me_student_id),
     tenant: TenantContext = Depends(get_tenant_context),
 ):
     """Classrooms the current student is enrolled in."""
@@ -495,7 +538,7 @@ async def my_classrooms(
 
     service = StudentService(db)
     classrooms = await service.list_my_classrooms(
-        student_id=identity.id,
+        student_id=me_student_id,
         tenant_id=tenant.tenant_id,
     )
     return [ClassroomResponse.model_validate(c) for c in classrooms]
@@ -509,14 +552,14 @@ async def my_classrooms(
 async def my_classroom_by_id(
     classroom_id: UUID,
     db: AsyncSession = Depends(get_db),
-    identity: CurrentIdentity = Depends(get_current_identity),
+    me_student_id: UUID = Depends(require_me_student_id),
     tenant: TenantContext = Depends(get_tenant_context),
 ):
     """Single classroom for current student, only if enrolled."""
     service = StudentService(db)
     classroom = await service.get_my_classroom(
         classroom_id=classroom_id,
-        student_id=identity.id,
+        student_id=me_student_id,
         tenant_id=tenant.tenant_id,
     )
     return ClassroomResponse.model_validate(classroom)
@@ -530,7 +573,7 @@ async def my_classroom_by_id(
 async def my_classroom_sessions(
     classroom_id: UUID,
     db: AsyncSession = Depends(get_db),
-    identity: CurrentIdentity = Depends(get_current_identity),
+    me_student_id: UUID = Depends(require_me_student_id),
     tenant: TenantContext = Depends(get_tenant_context),
     limit: int = Query(100, ge=1, le=500),
 ):
@@ -538,7 +581,7 @@ async def my_classroom_sessions(
     service = StudentService(db)
     sessions = await service.list_my_classroom_sessions(
         classroom_id=classroom_id,
-        student_id=identity.id,
+        student_id=me_student_id,
         tenant_id=tenant.tenant_id,
         limit=limit,
     )
@@ -556,6 +599,7 @@ async def create_my_session_submission(
     data: StudentSessionSubmissionRequest,
     db: AsyncSession = Depends(get_db),
     identity: CurrentIdentity = Depends(get_current_identity),
+    me_student_id: UUID = Depends(require_me_student_id),
     tenant: TenantContext = Depends(get_tenant_context),
 ):
     """Save/submit student work tied to a specific classroom session."""
@@ -563,7 +607,7 @@ async def create_my_session_submission(
         db=db,
         classroom_id=classroom_id,
         session_id=session_id,
-        identity=identity,
+        student_id=me_student_id,
         tenant_id=tenant.tenant_id,
     )
 
@@ -571,13 +615,23 @@ async def create_my_session_submission(
     if not content:
         raise HTTPException(status_code=400, detail="Submission content is required")
 
+    preview_image: str | None = None
+    if data.preview_image:
+        raw = data.preview_image.strip()
+        if not raw.startswith("data:image/") or ";base64," not in raw:
+            raise HTTPException(
+                status_code=400,
+                detail="preview_image must be a base64 data URL (image/png or image/jpeg).",
+            )
+        preview_image = raw
+
     service = ClassroomService(db)
     if data.assignment_id:
         can_edit = await service.can_student_edit_submission(
             classroom_id=classroom_id,
             session_id=session_id,
             tenant_id=tenant.tenant_id,
-            student_id=identity.id,
+            student_id=me_student_id,
             assignment_id=data.assignment_id,
         )
         if not can_edit:
@@ -593,18 +647,24 @@ async def create_my_session_submission(
         if data.status == "submitted"
         else "student.submission.saved"
     )
+    submission_payload: dict = {
+        "assignment_id": data.assignment_id,
+        "content": content,
+        "status": data.status,
+        "student_id": str(identity.id),
+    }
+    if preview_image:
+        submission_payload["preview_image"] = preview_image
+    if data.lab_id and data.lab_id.strip():
+        submission_payload["lab_id"] = data.lab_id.strip()
+
     envelope = await service.publish_generic_session_event(
         classroom_id=classroom_id,
         session_id=session_id,
         tenant_id=tenant.tenant_id,
         identity=identity,
         event_type=event_type,
-        payload={
-            "assignment_id": data.assignment_id,
-            "content": content,
-            "status": data.status,
-            "student_id": str(identity.id),
-        },
+        payload=submission_payload,
     )
     if data.status == "submitted":
         await service.notify_instructor_submission(
@@ -626,7 +686,7 @@ async def list_my_session_submissions(
     classroom_id: UUID,
     session_id: UUID,
     db: AsyncSession = Depends(get_db),
-    identity: CurrentIdentity = Depends(get_current_identity),
+    me_student_id: UUID = Depends(require_me_student_id),
     tenant: TenantContext = Depends(get_tenant_context),
     assignment_id: str | None = Query(None, description="Optional assignment id filter."),
 ):
@@ -635,7 +695,7 @@ async def list_my_session_submissions(
         db=db,
         classroom_id=classroom_id,
         session_id=session_id,
-        identity=identity,
+        student_id=me_student_id,
         tenant_id=tenant.tenant_id,
     )
     service = ClassroomService(db)
@@ -644,7 +704,7 @@ async def list_my_session_submissions(
         session_id=session_id,
         tenant_id=tenant.tenant_id,
         assignment_id=assignment_id,
-        student_id=identity.id,
+        student_id=me_student_id,
     )
     return [SubmissionRecord.model_validate(i) for i in items]
 
@@ -658,7 +718,7 @@ async def my_session_realtime_snapshot(
     classroom_id: UUID,
     session_id: UUID,
     db: AsyncSession = Depends(get_db),
-    identity: CurrentIdentity = Depends(get_current_identity),
+    me_student_id: UUID = Depends(require_me_student_id),
     tenant: TenantContext = Depends(get_tenant_context),
     after_sequence: int = Query(0, ge=0),
     replay_limit: int = Query(300, ge=1, le=1000),
@@ -668,7 +728,7 @@ async def my_session_realtime_snapshot(
         db=db,
         classroom_id=classroom_id,
         session_id=session_id,
-        identity=identity,
+        student_id=me_student_id,
         tenant_id=tenant.tenant_id,
     )
     service = ClassroomService(db)
@@ -690,7 +750,7 @@ async def my_session_realtime_events(
     classroom_id: UUID,
     session_id: UUID,
     db: AsyncSession = Depends(get_db),
-    identity: CurrentIdentity = Depends(get_current_identity),
+    me_student_id: UUID = Depends(require_me_student_id),
     tenant: TenantContext = Depends(get_tenant_context),
     after_sequence: int = Query(0, ge=0),
     limit: int = Query(300, ge=1, le=1000),
@@ -700,7 +760,7 @@ async def my_session_realtime_events(
         db=db,
         classroom_id=classroom_id,
         session_id=session_id,
-        identity=identity,
+        student_id=me_student_id,
         tenant_id=tenant.tenant_id,
     )
     service = ClassroomService(db)
@@ -724,6 +784,7 @@ async def my_session_presence_heartbeat(
     data: SessionPresenceHeartbeatRequest,
     db: AsyncSession = Depends(get_db),
     identity: CurrentIdentity = Depends(get_current_identity),
+    me_student_id: UUID = Depends(require_me_student_id),
     tenant: TenantContext = Depends(get_tenant_context),
 ):
     """Student-safe presence heartbeat fallback endpoint."""
@@ -731,7 +792,7 @@ async def my_session_presence_heartbeat(
         db=db,
         classroom_id=classroom_id,
         session_id=session_id,
-        identity=identity,
+        student_id=me_student_id,
         tenant_id=tenant.tenant_id,
     )
     service = ClassroomService(db)
@@ -741,6 +802,7 @@ async def my_session_presence_heartbeat(
         tenant_id=tenant.tenant_id,
         identity=identity,
         data=data,
+        student_actor_id=me_student_id,
     )
     if data.status in {"in_lab", "left"}:
         await emit_presence_updated_for_session(
@@ -760,7 +822,7 @@ async def my_session_presence_summary(
     classroom_id: UUID,
     session_id: UUID,
     db: AsyncSession = Depends(get_db),
-    identity: CurrentIdentity = Depends(get_current_identity),
+    me_student_id: UUID = Depends(require_me_student_id),
     tenant: TenantContext = Depends(get_tenant_context),
 ):
     """Student-safe presence summary fallback endpoint."""
@@ -768,7 +830,7 @@ async def my_session_presence_summary(
         db=db,
         classroom_id=classroom_id,
         session_id=session_id,
-        identity=identity,
+        student_id=me_student_id,
         tenant_id=tenant.tenant_id,
     )
     service = ClassroomService(db)
@@ -818,6 +880,7 @@ async def my_session_chat_send(
     data: SessionChatCreateRequest,
     db: AsyncSession = Depends(get_db),
     identity: CurrentIdentity = Depends(get_current_identity),
+    me_student_id: UUID = Depends(require_me_student_id),
     tenant: TenantContext = Depends(get_tenant_context),
 ):
     """Student-safe chat fallback endpoint."""
@@ -825,7 +888,7 @@ async def my_session_chat_send(
         db=db,
         classroom_id=classroom_id,
         session_id=session_id,
-        identity=identity,
+        student_id=me_student_id,
         tenant_id=tenant.tenant_id,
     )
     service = ClassroomService(db)
@@ -835,6 +898,7 @@ async def my_session_chat_send(
         tenant_id=tenant.tenant_id,
         identity=identity,
         data=data,
+        student_actor_id=me_student_id,
     )
 
 
@@ -848,7 +912,7 @@ async def my_session_asset_by_id(
     session_id: UUID,
     asset_id: UUID,
     db: AsyncSession = Depends(get_db),
-    identity: CurrentIdentity = Depends(get_current_identity),
+    me_student_id: UUID = Depends(require_me_student_id),
     tenant: TenantContext = Depends(get_tenant_context),
     expires_in: int = Query(3600, ge=60, le=86400),
 ):
@@ -857,7 +921,7 @@ async def my_session_asset_by_id(
         db=db,
         classroom_id=classroom_id,
         session_id=session_id,
-        identity=identity,
+        student_id=me_student_id,
         tenant_id=tenant.tenant_id,
     )
 
@@ -888,23 +952,511 @@ async def my_session_asset_by_id(
 
 
 @router.get(
+    "/parent/children",
+    response_model=list[StudentProfile],
+    dependencies=[_require_tenant(), require_permission("students", "view")],
+)
+async def parent_children(
+    db: AsyncSession = Depends(get_db),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    tenant: TenantContext = Depends(get_tenant_context),
+):
+    """Learners the current user may manage: linked children for parents, all active students for staff.
+
+    Staff (owner/admin/instructor) see active students in the tenant — same scope as paying membership
+    or acting on behalf of a learner (see ``ensure_can_view_student_as_guardian``).
+    """
+    if identity.sub_type != "user":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace users can list children",
+        )
+    role = (identity.role or "").strip().lower()
+    service = StudentService(db)
+    if role in ("parent", "homeschool_parent"):
+        students = await service.list_guardian_children(
+            guardian_user_id=identity.id,
+            tenant_id=tenant.tenant_id,
+            role_slug=role,
+        )
+    elif role in ("owner", "admin", "instructor"):
+        students = await service.repo.list_by_tenant(
+            tenant.tenant_id, skip=0, limit=200, is_active=True
+        )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Parent, homeschool parent, or staff (owner / admin / instructor) role required",
+        )
+    grade_map = await service.repo.grade_levels_for_students_in_tenant(
+        [s.id for s in students], tenant.tenant_id
+    )
+    return [
+        StudentProfile(
+            id=s.id,
+            first_name=s.first_name,
+            last_name=s.last_name,
+            email=s.email,
+            display_name=s.display_name,
+            date_of_birth=s.date_of_birth,
+            avatar_url=s.avatar_url,
+            global_account=s.global_account,
+            is_active=s.is_active,
+            grade_level=grade_map.get(s.id),
+        )
+        for s in students
+    ]
+
+
+@router.get(
+    "/parent/children/{student_id}/controls",
+    response_model=GuardianChildControlsResponse,
+    dependencies=[_require_tenant(), require_permission("students", "view")],
+)
+async def get_guardian_child_controls(
+    student_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    tenant: TenantContext = Depends(get_tenant_context),
+):
+    if identity.sub_type != "user":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace users can view guardian controls",
+        )
+    role = (identity.role or "").strip().lower()
+    if role not in ("parent", "homeschool_parent"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Parent or homeschool parent role required",
+        )
+    service = StudentService(db)
+    return await service.get_guardian_child_controls(
+        student_id, tenant.tenant_id, identity
+    )
+
+
+@router.patch(
+    "/parent/children/{student_id}/controls",
+    response_model=GuardianChildControlsResponse,
+    dependencies=[_require_tenant(), require_permission("students", "view")],
+)
+async def patch_guardian_child_controls(
+    student_id: UUID,
+    data: GuardianChildControlsPatch,
+    db: AsyncSession = Depends(get_db),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    tenant: TenantContext = Depends(get_tenant_context),
+):
+    if identity.sub_type != "user":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace users can update guardian controls",
+        )
+    role = (identity.role or "").strip().lower()
+    if role not in ("parent", "homeschool_parent"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Parent or homeschool parent role required",
+        )
+    service = StudentService(db)
+    return await service.patch_guardian_child_controls(
+        student_id, tenant.tenant_id, identity, data
+    )
+
+
+@router.delete(
+    "/parent/children/{student_id}/link",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[_require_tenant(), require_permission("students", "view")],
+)
+async def unlink_guardian_from_child(
+    student_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    tenant: TenantContext = Depends(get_tenant_context),
+):
+    if identity.sub_type != "user":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace users can remove a guardian link",
+        )
+    role = (identity.role or "").strip().lower()
+    if role not in ("parent", "homeschool_parent"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Parent or homeschool parent role required",
+        )
+    service = StudentService(db)
+    await service.unlink_guardian_from_student(student_id, tenant.tenant_id, identity)
+
+
+@router.get(
+    "/parent/children/{student_id}/activity",
+    response_model=ParentChildActivityResponse,
+    dependencies=[_require_tenant(), require_permission("progress", "view")],
+)
+async def parent_child_activity(
+    student_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    tenant: TenantContext = Depends(get_tenant_context),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(40, ge=1, le=100),
+    occurred_after: datetime | None = Query(
+        None, description="Inclusive lower bound (ISO 8601). Defaults to 90 days before occurred_before."
+    ),
+    occurred_before: datetime | None = Query(
+        None, description="Inclusive upper bound (ISO 8601). Defaults to now (UTC)."
+    ),
+    activity_kind: ParentActivityKind | None = Query(
+        None, description="When set, only this activity type is included."
+    ),
+    without_classroom: bool = Query(
+        False,
+        description="When true, only activity not tied to a class (lessons, labs, badges, XP).",
+    ),
+    classroom_id: UUID | None = Query(
+        None,
+        description="When set, only assignment and attendance rows for this classroom.",
+    ),
+):
+    """Paginated learning events in a bounded date range and a rolling weekly digest for one child."""
+    if identity.sub_type != "user":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace users can view child activity",
+        )
+    role = (identity.role or "").strip().lower()
+    if role not in ("parent", "homeschool_parent"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Parent or homeschool parent role required",
+        )
+    await ensure_can_view_student_as_guardian(
+        db,
+        identity=identity,
+        student_id=student_id,
+        tenant_id=tenant.tenant_id,
+    )
+    if without_classroom and classroom_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Use either without_classroom or classroom_id, not both",
+        )
+    try:
+        return await load_parent_child_activity(
+            db,
+            student_id=student_id,
+            tenant_id=tenant.tenant_id,
+            skip=skip,
+            limit=limit,
+            occurred_after=_utc_activity_datetime(occurred_after),
+            occurred_before=_utc_activity_datetime(occurred_before),
+            activity_kind=activity_kind,
+            without_classroom=without_classroom,
+            classroom_id=classroom_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+
+@router.get(
+    "/parent/children/{student_id}/assignment-grades",
+    response_model=ParentChildAssignmentGradesResponse,
+    dependencies=[_require_tenant(), require_permission("progress", "view")],
+)
+async def parent_child_assignment_grades(
+    student_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    tenant: TenantContext = Depends(get_tenant_context),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=100),
+    graded_after: datetime | None = Query(
+        None,
+        description="Inclusive lower bound on grade time (ISO 8601). Defaults to one year before graded_before.",
+    ),
+    graded_before: datetime | None = Query(
+        None,
+        description="Inclusive upper bound on grade time (ISO 8601). Defaults to now (UTC).",
+    ),
+    classroom_id: UUID | None = Query(
+        None,
+        description="When set, only grades from this classroom.",
+    ),
+):
+    """Assignment scores and rubric breakdown for a linked learner (guardian dashboard)."""
+    if identity.sub_type != "user":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace users can view child grades",
+        )
+    role = (identity.role or "").strip().lower()
+    if role not in ("parent", "homeschool_parent"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Parent or homeschool parent role required",
+        )
+    await ensure_can_view_student_as_guardian(
+        db,
+        identity=identity,
+        student_id=student_id,
+        tenant_id=tenant.tenant_id,
+    )
+    try:
+        return await load_parent_child_assignment_grades(
+            db,
+            student_id=student_id,
+            tenant_id=tenant.tenant_id,
+            skip=skip,
+            limit=limit,
+            graded_after=_utc_activity_datetime(graded_after),
+            graded_before=_utc_activity_datetime(graded_before),
+            classroom_id=classroom_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+
+@router.get(
     "/parent/children-sessions",
     response_model=list,
-    dependencies=[_require_tenant(), require_permission("classrooms", "view")],
+    dependencies=[_require_tenant(), require_permission("students", "view")],
 )
 async def parent_children_sessions(
     db: AsyncSession = Depends(get_db),
     identity: CurrentIdentity = Depends(get_current_identity),
     tenant: TenantContext = Depends(get_tenant_context),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(50, ge=1, le=800),
+    student_id: UUID | None = Query(
+        None, description="When set, only sessions for this learner (must be your child)."
+    ),
+    time_scope: Annotated[
+        Literal["upcoming", "past"],
+        Query(description="upcoming = future sessions; past = ended sessions"),
+    ] = "upcoming",
+    session_start_before: datetime | None = Query(
+        None,
+        description=(
+            "Upcoming only: exclude sessions with start >= this instant (UTC). "
+            "Use local start-of-next-month as ISO8601 to scope to the current calendar month."
+        ),
+    ),
+    expand_month_sessions: bool = Query(
+        False,
+        description=(
+            "Upcoming only, with session_start_before: return a large merged month view "
+            "for the parent Events hub. The response may include up to ~1400 occurrences "
+            "for the month (not capped to `limit`), so “later this month” is populated even "
+            "when many sessions fall in the next 7 days."
+        ),
+    ),
 ):
-    """Upcoming sessions across all children linked to the current parent."""
+    """Upcoming or past sessions for linked children (or all tenant students for homeschool)."""
     from app.classrooms.schemas import SessionResponse
 
+    if identity.sub_type != "user":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace users can list children sessions",
+        )
+    role = (identity.role or "").strip().lower()
+    if role not in ("parent", "homeschool_parent"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Parent or homeschool parent role required",
+        )
+
+    if student_id is not None:
+        await ensure_can_view_student_as_guardian(
+            db,
+            identity=identity,
+            student_id=student_id,
+            tenant_id=tenant.tenant_id,
+        )
+
     service = StudentService(db)
-    sessions = await service.list_parent_children_upcoming_sessions(
-        parent_user_id=identity.id,
+    if time_scope == "past":
+        sessions = await service.list_parent_children_past_sessions(
+            parent_user_id=identity.id,
+            tenant_id=tenant.tenant_id,
+            limit=limit,
+            guardian_role_slug=role,
+            student_id=student_id,
+        )
+    else:
+        sessions = await service.list_parent_children_upcoming_sessions(
+            parent_user_id=identity.id,
+            tenant_id=tenant.tenant_id,
+            limit=limit,
+            guardian_role_slug=role,
+            student_id=student_id,
+            session_start_before=_utc_activity_datetime(session_start_before),
+            expand_month_sessions=expand_month_sessions,
+        )
+    return [SessionResponse.model_validate(s) for s in sessions]
+
+
+@router.get(
+    "/parent/linked-classrooms",
+    response_model=list,
+    dependencies=[_require_tenant(), require_permission("students", "view")],
+)
+async def parent_linked_classrooms(
+    db: AsyncSession = Depends(get_db),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    tenant: TenantContext = Depends(get_tenant_context),
+):
+    """Classrooms any of the guardian's linked learners are enrolled in (tenant students for homeschool)."""
+    from app.classrooms.schemas import ClassroomResponse
+
+    if identity.sub_type != "user":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace users can list linked classrooms",
+        )
+    role = (identity.role or "").strip().lower()
+    if role not in ("parent", "homeschool_parent"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Parent or homeschool parent role required",
+        )
+    service = StudentService(db)
+    classrooms = await service.list_guardian_linked_classrooms(
+        guardian_user_id=identity.id,
         tenant_id=tenant.tenant_id,
+        role_slug=role,
+    )
+    return [ClassroomResponse.model_validate(c) for c in classrooms]
+
+
+@router.get(
+    "/parent/children/{student_id}/attendance-overview",
+    response_model=GuardianAttendanceOverviewResponse,
+    dependencies=[_require_tenant(), require_permission("students", "view")],
+)
+async def parent_child_attendance_overview(
+    student_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    tenant: TenantContext = Depends(get_tenant_context),
+):
+    if identity.sub_type != "user":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace users can view attendance",
+        )
+    role = (identity.role or "").strip().lower()
+    if role not in ("parent", "homeschool_parent"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Parent or homeschool parent role required",
+        )
+    await ensure_can_view_student_as_guardian(
+        db,
+        identity=identity,
+        student_id=student_id,
+        tenant_id=tenant.tenant_id,
+    )
+    svc = AttendanceExcusalService(db)
+    return await svc.guardian_overview(student_id=student_id, tenant_id=tenant.tenant_id)
+
+
+@router.post(
+    "/parent/children/{student_id}/excusal-requests",
+    response_model=AttendanceExcusalRow,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[_require_tenant(), require_permission("students", "view")],
+)
+async def parent_create_excusal_request(
+    student_id: UUID,
+    data: AttendanceExcusalCreate,
+    db: AsyncSession = Depends(get_db),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    tenant: TenantContext = Depends(get_tenant_context),
+):
+    if identity.sub_type != "user":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace users can submit excusal requests",
+        )
+    role = (identity.role or "").strip().lower()
+    if role not in ("parent", "homeschool_parent"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Parent or homeschool parent role required",
+        )
+    await ensure_can_view_student_as_guardian(
+        db,
+        identity=identity,
+        student_id=student_id,
+        tenant_id=tenant.tenant_id,
+    )
+    svc = AttendanceExcusalService(db)
+    return await svc.create_excusal(
+        student_id=student_id,
+        tenant_id=tenant.tenant_id,
+        guardian_user_id=identity.id,
+        data=data,
+    )
+
+
+@router.get(
+    "/attendance-excusal-requests",
+    response_model=list[AttendanceExcusalStaffRow],
+    dependencies=[_require_tenant(), require_permission("attendance", "view")],
+)
+async def list_attendance_excusal_requests_staff(
+    db: AsyncSession = Depends(get_db),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    tenant: TenantContext = Depends(get_tenant_context),
+    status_filter: str | None = Query(None, description="pending, approved, or denied"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+):
+    if identity.sub_type != "user":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace users can list excusal requests",
+        )
+    svc = AttendanceExcusalService(db)
+    return await svc.list_for_staff(
+        tenant_id=tenant.tenant_id,
+        identity=identity,
+        status_filter=status_filter,
+        skip=skip,
         limit=limit,
     )
-    return [SessionResponse.model_validate(s) for s in sessions]
+
+
+@router.patch(
+    "/attendance-excusal-requests/{excusal_id}",
+    response_model=AttendanceExcusalStaffRow,
+    dependencies=[_require_tenant(), require_permission("attendance", "edit")],
+)
+async def review_attendance_excusal_request(
+    excusal_id: UUID,
+    data: AttendanceExcusalReview,
+    db: AsyncSession = Depends(get_db),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    tenant: TenantContext = Depends(get_tenant_context),
+):
+    if identity.sub_type != "user":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only workspace users can review excusal requests",
+        )
+    svc = AttendanceExcusalService(db)
+    return await svc.review_excusal(
+        excusal_id=excusal_id,
+        tenant_id=tenant.tenant_id,
+        identity=identity,
+        data=data,
+    )

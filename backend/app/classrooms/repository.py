@@ -352,8 +352,8 @@ class ClassroomRepository:
         actor_id: UUID,
         actor_type: str,
         seen_at: datetime,
-    ) -> ClassroomSessionPresence:
-        """Create or refresh a participant presence row."""
+    ) -> tuple[ClassroomSessionPresence, bool]:
+        """Create or refresh a participant presence row. Second value is True if inserted."""
         row = await self.get_presence_row(session_id, actor_id, actor_type)
         if row:
             if row.first_seen_at is None:
@@ -361,7 +361,7 @@ class ClassroomRepository:
             row.last_seen_at = seen_at
             row.left_at = None
             row.in_lab = False
-            return row
+            return row, False
 
         row = ClassroomSessionPresence(
             session_id=session_id,
@@ -374,7 +374,7 @@ class ClassroomRepository:
             in_lab=False,
         )
         self.session.add(row)
-        return row
+        return row, True
 
     async def mark_presence_in_lab(
         self,
