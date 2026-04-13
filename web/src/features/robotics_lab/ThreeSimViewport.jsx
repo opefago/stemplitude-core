@@ -3,6 +3,7 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import { useCameraController } from "../../labs/robotics/view/useCameraController";
+import { buildPerspectivePose } from "../../labs/robotics/view/cameraPresets";
 import { overlayOpacityForMode } from "../../labs/robotics/view/overlayManager";
 import { DistanceRayOverlay } from "../../labs/robotics/view/overlays/DistanceRayOverlay";
 import { HeadingOverlay } from "../../labs/robotics/view/overlays/HeadingOverlay";
@@ -266,6 +267,10 @@ export function ThreeSimViewport({
   const controller = useCameraController(resolvedCameraState, { width: worldWidth, depth: worldDepth }, robotPose);
   const [isDraggingObject, setIsDraggingObject] = useState(false);
   const [debugPose, setDebugPose] = useState(null);
+  const initialPerspectivePose = useMemo(
+    () => buildPerspectivePose({ width: worldWidth, depth: worldDepth }, robotPose),
+    [robotPose, worldDepth, worldWidth],
+  );
   const handleDragStateChange = useCallback((isDragging) => {
     setIsDraggingObject(isDragging);
     if (orbitRef.current) orbitRef.current.enabled = !isDragging;
@@ -275,7 +280,16 @@ export function ThreeSimViewport({
   return (
     <div className="robotics-three-viewport">
       <Canvas
-        camera={{ position: [robotPose.x - 620, 440, robotPose.z - 100], fov: 46, near: 0.1, far: 7000 }}
+        camera={{
+          position: [
+            initialPerspectivePose.position.x,
+            initialPerspectivePose.position.y,
+            initialPerspectivePose.position.z,
+          ],
+          fov: 46,
+          near: 0.1,
+          far: 7000,
+        }}
         dpr={[1, 1.5]}
         gl={{ antialias: true, powerPreference: "high-performance" }}
       >
@@ -475,6 +489,23 @@ function SceneCameraRig({
   const lastModeRef = useRef(cameraState.mode);
   const lastResetRef = useRef(cameraResetToken);
   const lastFocusRef = useRef(cameraFocusToken);
+  const debugRafRef = useRef(null);
+  const initializedRef = useRef(false);
+
+  useEffect(() => {
+    if (!controller || initializedRef.current) return;
+    const controls = orbitRef.current;
+    if (!controls) return;
+
+    const snapshot = controller.update(0, cameraState, worldSize, robotPose);
+    const targetY = cameraState.mode === "perspective" || cameraState.mode === "top" ? 0 : snapshot.pose.target.y;
+
+    camera.position.set(snapshot.pose.position.x, snapshot.pose.position.y, snapshot.pose.position.z);
+    controls.target.set(snapshot.pose.target.x, targetY, snapshot.pose.target.z);
+    camera.lookAt(snapshot.pose.target.x, targetY, snapshot.pose.target.z);
+    controls.update();
+    initializedRef.current = true;
+  }, [camera, cameraState, controller, orbitRef, robotPose, worldSize]);
 
   useEffect(() => {
     if (!controller) return;
@@ -512,6 +543,92 @@ function SceneCameraRig({
     }
   }, [cameraFocusToken, controller, orbitRef, robotPose]);
 
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const controls = orbitRef.current;
+    if (!controls) return;
+
+    const buildCameraDebugPayload = () => {
+      const target = controls.target;
+      const deltaX = camera.position.x - target.x;
+      const deltaY = camera.position.y - target.y;
+      const deltaZ = camera.position.z - target.z;
+      const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ);
+      return {
+        mode: cameraState.mode,
+        position: {
+          x: Number(camera.position.x.toFixed(2)),
+          y: Number(camera.position.y.toFixed(2)),
+          z: Number(camera.position.z.toFixed(2)),
+        },
+        target: {
+          x: Number(target.x.toFixed(2)),
+          y: Number(target.y.toFixed(2)),
+          z: Number(target.z.toFixed(2)),
+        },
+        rotationDeg: {
+          x: Number(THREE.MathUtils.radToDeg(camera.rotation.x).toFixed(2)),
+          y: Number(THREE.MathUtils.radToDeg(camera.rotation.y).toFixed(2)),
+          z: Number(THREE.MathUtils.radToDeg(camera.rotation.z).toFixed(2)),
+        },
+        quaternion: {
+          x: Number(camera.quaternion.x.toFixed(4)),
+          y: Number(camera.quaternion.y.toFixed(4)),
+          z: Number(camera.quaternion.z.toFixed(4)),
+          w: Number(camera.quaternion.w.toFixed(4)),
+        },
+        orbit: {
+          distance: Number(distance.toFixed(2)),
+          azimuthDeg: Number(THREE.MathUtils.radToDeg(controls.getAzimuthalAngle()).toFixed(2)),
+          polarDeg: Number(THREE.MathUtils.radToDeg(controls.getPolarAngle()).toFixed(2)),
+        },
+        lens: {
+          fov: Number((camera.fov ?? 0).toFixed(2)),
+          zoom: Number((camera.zoom ?? 1).toFixed(2)),
+        },
+      };
+    };
+
+    const emitCameraDebug = (shouldLog = false) => {
+      const payload = buildCameraDebugPayload();
+
+      window.__roboticsCameraDebug = payload;
+      window.getRoboticsCameraDebug = () => JSON.stringify(payload, null, 2);
+      window.copyRoboticsCameraDebug = async () => {
+        const text = JSON.stringify(payload, null, 2);
+        await navigator.clipboard.writeText(text);
+        return text;
+      };
+
+      if (shouldLog) {
+        console.info("[robotics-camera-debug]", payload);
+        console.info("[robotics-camera-debug-json]", JSON.stringify(payload));
+      }
+    };
+
+    const onControlsChange = () => {
+      if (debugRafRef.current != null) return;
+      debugRafRef.current = requestAnimationFrame(() => {
+        debugRafRef.current = null;
+        emitCameraDebug(false);
+      });
+    };
+    const onControlsEnd = () => emitCameraDebug(true);
+
+    controls.addEventListener("change", onControlsChange);
+    controls.addEventListener("end", onControlsEnd);
+    emitCameraDebug(true);
+
+    return () => {
+      controls.removeEventListener("change", onControlsChange);
+      controls.removeEventListener("end", onControlsEnd);
+      if (debugRafRef.current != null) {
+        cancelAnimationFrame(debugRafRef.current);
+        debugRafRef.current = null;
+      }
+    };
+  }, [camera, cameraState.mode, orbitRef]);
+
   useFrame((_, delta) => {
     if (!controller) return;
     const controls = orbitRef.current;
@@ -530,12 +647,16 @@ function SceneCameraRig({
     if (shouldDriveCamera) {
       camera.position.set(snapshot.pose.position.x, snapshot.pose.position.y, snapshot.pose.position.z);
       if (controls) {
-        controls.target.set(snapshot.pose.target.x, snapshot.pose.target.y, snapshot.pose.target.z);
+        const targetY = cameraState.mode === "perspective" || cameraState.mode === "top" ? 0 : snapshot.pose.target.y;
+        controls.target.set(snapshot.pose.target.x, targetY, snapshot.pose.target.z);
         controls.update();
       } else {
         camera.lookAt(snapshot.pose.target.x, snapshot.pose.target.y, snapshot.pose.target.z);
       }
     } else if (controls) {
+      if (cameraState.mode === "perspective" || cameraState.mode === "top") {
+        controls.target.y = 0;
+      }
       controls.update();
     }
     onDebugPose?.(snapshot.pose);
