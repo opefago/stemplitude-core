@@ -54,6 +54,18 @@ const LAB_CONFIGS: LabConfig[] = [
     }),
   },
   {
+    id: "robotics-lab",
+    label: "Robotics Lab",
+    path: "/playground/robotics",
+    storageKey: "stemplitude_robotics_projects",
+    projectMapper: (raw) => ({
+      id: String(raw?.id ?? crypto.randomUUID()),
+      name: String(raw?.name ?? "Untitled Robotics Project"),
+      updatedAt: raw?.updatedAt ?? undefined,
+      createdAt: raw?.createdAt ?? undefined,
+    }),
+  },
+  {
     id: "python-game",
     label: "Python Game Maker",
     path: "/playground/python-game",

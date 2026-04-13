@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   FlaskConical,
   Cpu,
+  Bot,
   Palette,
   Blocks,
   Clock,
@@ -50,6 +51,14 @@ const LABS: LabItem[] = [
     colorVar: "--lab-card-micro",
   },
   {
+    id: "robotics-lab",
+    name: "Robotics Lab",
+    description: "Program robots, run missions, and test sensors in simulation",
+    path: "/playground/robotics",
+    icon: Bot,
+    colorVar: "--lab-card-circuit",
+  },
+  {
     id: "python-game",
     name: "Python Game Maker",
     description: "Build games with Python",
@@ -78,6 +87,7 @@ const LABS: LabItem[] = [
 const LAB_STORAGE_BY_ID: Record<string, string> = {
   "circuit-maker": "stemplitude_circuitmaker_projects",
   "micro-maker": "stemplitude_micromaker_projects",
+  "robotics-lab": "stemplitude_robotics_projects",
   "python-game": "stemplitude_pygame_projects",
   "game-maker": "stemplitude_gamemaker_projects",
   "design-maker": "dml-projects-meta",

@@ -3,6 +3,7 @@ import {
   BrowserRouter as Router,
   Routes,
   Route,
+  Navigate,
   useLocation,
 } from "react-router-dom";
 import { AnimatePresence } from "framer-motion";
@@ -42,6 +43,7 @@ import "./App.css";
 const LAB_ROUTE_PREFIX_TO_ID = [
   ["/playground/circuit-maker", "circuit-maker"],
   ["/playground/micro-maker", "micro-maker"],
+  ["/playground/robotics", "robotics-lab"],
   ["/playground/gamedev", "gamedev"],
   ["/playground/python-game", "python-game"],
   ["/playground/game-maker", "game-maker"],
@@ -118,12 +120,21 @@ const StudentProjectsPage = lazyNamed(
 );
 const ElectronicsLab = lazy(() => import("./pages/ElectronicsLab"));
 const MCULab = lazy(() => import("./pages/MCULab"));
+const RoboticsLab = lazy(() => import("./pages/RoboticsLab"));
+const RoboticsLabLayout = lazy(() => import("./pages/RoboticsLabLayout"));
+const RoboticsCodeEditorPage = lazy(() => import("./pages/RoboticsCodeEditorPage"));
+const RoboticsSimEditorPage = lazy(() => import("./pages/RoboticsSimEditorPage"));
+const RoboticsSimRunPage = lazy(() => import("./pages/RoboticsSimRunPage"));
 const GameDevLab = lazy(() => import("./pages/GameDevLab"));
 const PythonGameLab = lazy(() => import("./pages/PythonGameLab"));
 const GameMakerLab = lazy(() => import("./pages/GameMakerLab"));
 const DesignMakerLab = lazy(() => import("./pages/DesignMakerLab"));
 const InvitationsPage = lazyNamed(() => import("./features/admin"), "InvitationsPage");
 const ExploreGamesPage = lazy(() => import("./pages/ExploreGamesPage"));
+const AdminContentDashboardPage = lazyNamed(() => import("./features/track_lessons"), "AdminContentDashboardPage");
+const TenantDashboardPage = lazyNamed(() => import("./features/track_lessons"), "TenantDashboardPage");
+const ClassroomDeliveryPage = lazyNamed(() => import("./features/track_lessons"), "ClassroomDeliveryPage");
+const TRACK_LESSON_SURFACES_ENABLED = import.meta.env.VITE_TRACK_LESSON_SURFACES_ENABLED !== "false";
 
 function DashboardPlaceholder({ title, body }) {
   return (
@@ -288,6 +299,7 @@ function PublicContent() {
   const isLabPage =
     location.pathname.startsWith("/playground/circuit-maker") ||
     location.pathname.startsWith("/playground/micro-maker") ||
+    location.pathname.startsWith("/playground/robotics") ||
     location.pathname.startsWith("/playground/gamedev") ||
     location.pathname.startsWith("/playground/python-game") ||
     location.pathname.startsWith("/playground/game-maker") ||
@@ -309,8 +321,11 @@ function PublicContent() {
   const isAuthPage =
     location.pathname.startsWith("/auth") ||
     location.pathname.startsWith("/invite/");
-  const isAppPage = location.pathname.startsWith("/app");
-  const showChrome = !isLabPage && !isLMSMarketingPage && !isAuthPage && !isAppPage;
+  const isWorkspaceSurface =
+    location.pathname.startsWith("/app") ||
+    (TRACK_LESSON_SURFACES_ENABLED && location.pathname.startsWith("/tenant")) ||
+    (TRACK_LESSON_SURFACES_ENABLED && location.pathname.startsWith("/classrooms"));
+  const showChrome = !isLabPage && !isLMSMarketingPage && !isAuthPage && !isWorkspaceSurface;
 
   return (
     <div className="app">
@@ -334,6 +349,13 @@ function PublicContent() {
             element={<ElectronicsLab />}
           />
           <Route path="/playground/micro-maker" element={<MCULab />} />
+          <Route path="/playground/robotics" element={<RoboticsLab />} />
+          <Route path="/playground/robotics/*" element={<RoboticsLabLayout />}>
+            <Route path="code" element={<RoboticsCodeEditorPage />} />
+            <Route path="sim" element={<RoboticsSimEditorPage />} />
+            <Route path="run" element={<RoboticsSimRunPage />} />
+            <Route path="*" element={<Navigate to="code" replace />} />
+          </Route>
           <Route path="/playground/gamedev" element={<GameDevLab />} />
           <Route path="/playground/python-game" element={<PythonGameLab />} />
           <Route path="/playground/game-maker" element={<GameMakerLab />} />
@@ -398,6 +420,18 @@ function PublicContent() {
               </RouteGuard>
             }
           />
+          {TRACK_LESSON_SURFACES_ENABLED ? (
+            <Route
+              path="/app/platform/lessons"
+              element={
+                <RouteGuard>
+                  <AppShell>
+                    <AdminContentDashboardPage />
+                  </AppShell>
+                </RouteGuard>
+              }
+            />
+          ) : null}
 
           {/* Platform routes — header only, no sidebar */}
           <Route
@@ -412,6 +446,32 @@ function PublicContent() {
           />
 
           {/* Authenticated app routes */}
+            {TRACK_LESSON_SURFACES_ENABLED ? (
+              <>
+                <Route path="/admin/*" element={<Navigate to="/app/platform/lessons" replace />} />
+                <Route path="/app/tenant-content/*" element={<Navigate to="/tenant" replace />} />
+                <Route
+                  path="/tenant/*"
+                  element={
+                    <RouteGuard>
+                      <AppShell>
+                        <TenantDashboardPage />
+                      </AppShell>
+                    </RouteGuard>
+                  }
+                />
+                <Route
+                  path="/classrooms/*"
+                  element={
+                    <RouteGuard>
+                      <AppShell>
+                        <ClassroomDeliveryPage />
+                      </AppShell>
+                    </RouteGuard>
+                  }
+                />
+              </>
+            ) : null}
             <Route
               path="/app/*"
               element={

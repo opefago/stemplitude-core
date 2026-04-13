@@ -1,7 +1,7 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Zap, Cpu, Play, Lock, ArrowRight, Wrench, Gamepad2, Puzzle, Cuboid } from 'lucide-react';
+import { Zap, Cpu, Play, Lock, ArrowRight, Wrench, Gamepad2, Puzzle, Cuboid, Bot } from 'lucide-react';
 import { readLabLastOpenedAt } from '../lib/learnerLabStorage';
 import { resolveLabRoute } from '../features/labs/labRouting';
 import './Playground.css';
@@ -38,6 +38,21 @@ const Playground = () => {
       color: '#FF6B35',
       status: 'available',
       path: '/playground/micro-maker'
+    },
+    {
+      id: 'robotics-lab',
+      title: 'Robotics Lab',
+      icon: <Bot size={48} />,
+      description: 'VEX VR-inspired robotics simulator with sensors, missions, and progression from blocks to text.',
+      features: [
+        '2D grid simulator',
+        'Obstacle and object maps',
+        'Distance, line, color, gyro sensors',
+        'Blocks to Python progression'
+      ],
+      color: '#22c55e',
+      status: 'available',
+      path: '/playground/robotics'
     },
     {
       id: 'game-maker',

@@ -73,6 +73,7 @@ const TIMEZONES = [
 const LABS = [
   { id: "circuit-maker", name: "Circuit Maker" },
   { id: "micro-maker", name: "Micro Maker" },
+  { id: "robotics-lab", name: "Robotics Lab" },
   { id: "python-game", name: "Python Game Maker" },
   { id: "game-maker", name: "Game Maker" },
   { id: "design-maker", name: "Design Maker" },
@@ -82,6 +83,7 @@ const LABS = [
 const LAB_SETTING_ALIASES: Record<string, string[]> = {
   "circuit-maker": ["access_electronics_lab", "electronics_lab", "circuit-maker"],
   "micro-maker": ["access_robotics_lab", "robotics_lab", "micro-maker"],
+  "robotics-lab": ["access_robotics_lab", "robotics_lab", "robotics-lab", "robotics_vr", "robotics_lab_vr"],
   "game-maker": ["access_game_maker", "game_maker", "game-maker"],
   "design-maker": ["access_design_maker", "design_maker", "design-maker", "3d_designer"],
   "python-game": ["access_python_lab", "python_lab", "python-game"],
@@ -148,6 +150,11 @@ const LAB_EVENTS: Record<string, { value: string; label: string }[]> = {
     { value: "CODE_DEPLOYED", label: "Code deployed" },
     { value: "PROGRAM_COMPLETE", label: "Program complete" },
   ],
+  "robotics-lab": [
+    { value: "RUN_STARTED", label: "Run started" },
+    { value: "RUN_COMPLETED", label: "Run completed" },
+    { value: "MISSION_COMPLETED", label: "Mission completed" },
+  ],
   "python-game": [
     { value: "SCRIPT_RUN", label: "Script run" },
     { value: "LEVEL_COMPLETE", label: "Level complete" },
@@ -192,6 +199,14 @@ const GOAL_TEMPLATES = [
     name: "Add handle",
     description: "Student unions a handle into the base model.",
     eventType: "OBJECT_TRANSFORMED",
+  },
+  {
+    key: "robotics-first-run",
+    label: "Robotics: Complete first run",
+    lab_type: "robotics-lab",
+    name: "Complete first robotics run",
+    description: "Student runs a robotics mission successfully in simulator.",
+    eventType: "RUN_COMPLETED",
   },
 ];
 

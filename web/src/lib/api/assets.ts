@@ -16,6 +16,7 @@ export interface Asset {
   lab_type: string | null;
   owner_type: string;
   file_size: number | null;
+  blob_key?: string;
   blob_url?: string | null;
   mime_type?: string | null;
   thumbnail_url?: string | null;

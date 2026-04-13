@@ -45,6 +45,7 @@ const LABS = [
   { value: "circuit-maker", label: "Circuit Maker" },
   { value: "design-maker", label: "Design Maker (3D)" },
   { value: "micro-maker", label: "Micro Maker (MCU)" },
+  { value: "robotics-lab", label: "Robotics Lab" },
   { value: "python-game", label: "Python Game Maker" },
   { value: "game-maker", label: "Game Maker" },
 ];
@@ -64,6 +65,11 @@ const LAB_EVENTS: Record<string, { value: string; label: string }[]> = {
     { value: "SENSOR_CONNECTED", label: "Sensor connected" },
     { value: "CODE_DEPLOYED", label: "Code deployed" },
     { value: "PROGRAM_COMPLETE", label: "Program complete" },
+  ],
+  "robotics-lab": [
+    { value: "RUN_STARTED", label: "Run started" },
+    { value: "RUN_COMPLETED", label: "Run completed" },
+    { value: "MISSION_COMPLETED", label: "Mission completed" },
   ],
   "python-game": [
     { value: "SCRIPT_RUN", label: "Script run" },

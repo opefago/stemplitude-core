@@ -35,6 +35,7 @@ import {
 import {
   DateTimePicker,
   KidDropdown,
+  KidDialog,
   ModalDialog,
   SearchableDropdown,
 } from "../../components/ui";
@@ -72,8 +73,10 @@ import {
   type SessionPresenceSummary,
 } from "../../lib/api/classrooms";
 import {
+  getCourse,
   listAssignmentTemplates,
   type AssignmentTemplate,
+  type Course,
 } from "../../lib/api/curriculum";
 import {
   getAssetById,
@@ -344,12 +347,14 @@ export function ClassroomLiveSession() {
     "none" | "lab" | "assets" | "both"
   >("none");
   const [assignmentLabId, setAssignmentLabId] = useState("");
+  const [assignmentSource, setAssignmentSource] = useState<"curriculum" | "templates" | "create">("curriculum");
   const [assignmentTemplateId, setAssignmentTemplateId] = useState("");
   const [assignmentTemplates, setAssignmentTemplates] = useState<
     AssignmentTemplate[]
   >([]);
   const [assignmentTemplatesLoading, setAssignmentTemplatesLoading] =
     useState(false);
+  const [curriculumCourse, setCurriculumCourse] = useState<Course | null>(null);
   const [sessionAssignments, setSessionAssignments] = useState<SessionAssignment[]>([
     {
       id: "a-1",
@@ -488,11 +493,42 @@ export function ClassroomLiveSession() {
     return schedule.permitted_labs ?? [];
   }, [classroom?.schedule]);
 
+  const curriculumTemplateIds = useMemo(
+    () => new Set(curriculumCourse?.assignment_template_ids ?? []),
+    [curriculumCourse?.assignment_template_ids],
+  );
+
+  const sourceScopedTemplates = useMemo(() => {
+    if (assignmentSource === "create") return [];
+    if (assignmentSource === "curriculum") {
+      return assignmentTemplates.filter((template) => curriculumTemplateIds.has(template.id));
+    }
+    return assignmentTemplates;
+  }, [assignmentTemplates, assignmentSource, curriculumTemplateIds]);
+
   useEffect(() => {
     if (permittedLabs.length && !selectedSessionLab) {
       setSelectedSessionLab(permittedLabs[0]);
     }
   }, [permittedLabs, selectedSessionLab]);
+
+  useEffect(() => {
+    if (!classroom?.curriculum_id) {
+      setCurriculumCourse(null);
+      return;
+    }
+    let cancelled = false;
+    void getCourse(classroom.curriculum_id)
+      .then((row) => {
+        if (!cancelled) setCurriculumCourse(row);
+      })
+      .catch(() => {
+        if (!cancelled) setCurriculumCourse(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [classroom?.curriculum_id]);
 
   useEffect(() => {
     if (sharedResources.length === 0) {
@@ -2007,10 +2043,7 @@ export function ClassroomLiveSession() {
   const loadAssignmentTemplateOptions = async () => {
     setAssignmentTemplatesLoading(true);
     try {
-      const rows = await listAssignmentTemplates({
-        limit: 300,
-        ...(classroom?.curriculum_id ? { course_id: classroom.curriculum_id } : {}),
-      });
+      const rows = await listAssignmentTemplates({ limit: 400 });
       setAssignmentTemplates(rows);
     } catch {
       setAssignmentTemplates([]);
@@ -2021,6 +2054,7 @@ export function ClassroomLiveSession() {
 
   const openCreateAssignmentDialog = () => {
     setEditingAssignmentId(null);
+    setAssignmentSource(curriculumCourse?.classroom_assignment_source ?? "curriculum");
     setAssignmentTemplateId("");
     setAssignmentTitle("");
     setAssignmentInstructions("");
@@ -2033,6 +2067,7 @@ export function ClassroomLiveSession() {
 
   const openEditAssignmentDialog = (assignment: SessionAssignment) => {
     setEditingAssignmentId(assignment.id);
+    setAssignmentSource("create");
     setAssignmentTemplateId("");
     setAssignmentTitle(assignment.title);
     setAssignmentInstructions(assignment.instructions);
@@ -2059,7 +2094,15 @@ export function ClassroomLiveSession() {
       setError("Choose a designated lab when this assignment requires lab work.");
       return;
     }
-    if (!editingAssignmentId && assignmentTemplateId) {
+    if (!editingAssignmentId && assignmentSource !== "create") {
+      if (!assignmentTemplateId) {
+        setError(
+          assignmentSource === "curriculum"
+            ? "Select a curriculum-listed template."
+            : "Select a template from the library.",
+        );
+        return;
+      }
       setError(null);
       try {
         await createSessionAssignmentFromTemplate(id, activeSession.id, {
@@ -2068,6 +2111,7 @@ export function ClassroomLiveSession() {
           title: assignmentTitle.trim() || null,
         });
         setShowAssignmentDialog(false);
+        setAssignmentSource(curriculumCourse?.classroom_assignment_source ?? "curriculum");
         setAssignmentTemplateId("");
         setAssignmentTitle("");
         setAssignmentInstructions("");
@@ -2127,6 +2171,7 @@ export function ClassroomLiveSession() {
       }
     }
     setShowAssignmentDialog(false);
+    setAssignmentSource(curriculumCourse?.classroom_assignment_source ?? "curriculum");
     setAssignmentRequirement("none");
     setAssignmentLabId(selectedSessionLab || permittedLabs[0] || "");
   };
@@ -3623,20 +3668,150 @@ export function ClassroomLiveSession() {
             </div>
           )}
 
-          <ModalDialog
+          <KidDialog
             isOpen={showAssignmentDialog}
             onClose={() => setShowAssignmentDialog(false)}
             title={editingAssignmentId ? "Update assignment" : "Create assignment"}
-            ariaLabel={editingAssignmentId ? "Update assignment" : "Create assignment"}
-            contentClassName="classroom-list__create-form classroom-list__create-form--dialog classroom-live__assignment-dialog"
-            closeVariant="neutral"
-            footer={
+            showActions={false}
+          >
+            <div className="classroom-list__create-form classroom-list__create-form--dialog classroom-live__assignment-dialog">
+              {!editingAssignmentId && (
+                <>
+                  <div className="classroom-list__create-field">
+                    <label>Assignment source</label>
+                    <KidDropdown
+                      value={assignmentSource}
+                      onChange={(value) => {
+                        const next = value as "curriculum" | "templates" | "create";
+                        setAssignmentSource(next);
+                        setAssignmentTemplateId("");
+                      }}
+                      ariaLabel="Select assignment source"
+                      minWidth={260}
+                      options={[
+                        { value: "curriculum", label: "Curriculum list" },
+                        { value: "templates", label: "Template library" },
+                        { value: "create", label: "Create one-off assignment" },
+                      ]}
+                    />
+                  </div>
+                  {assignmentSource !== "create" ? (
+                    <div className="classroom-list__create-field">
+                      <label>
+                        {assignmentSource === "curriculum"
+                          ? "Curriculum assignment template"
+                          : "Assignment template library"}
+                      </label>
+                      <SearchableDropdown
+                        value={assignmentTemplateId}
+                        onChange={setAssignmentTemplateId}
+                        ariaLabel="Select assignment template"
+                        placeholder={
+                          assignmentTemplatesLoading
+                            ? "Loading templates..."
+                            : assignmentSource === "curriculum"
+                              ? "Select from curriculum list"
+                              : "Select from template library"
+                        }
+                        searchPlaceholder="Search templates..."
+                        emptyLabel={
+                          assignmentSource === "curriculum"
+                            ? "No templates listed on this curriculum"
+                            : "No templates found"
+                        }
+                        fullWidth
+                        options={sourceScopedTemplates.map((template) => ({
+                          value: template.id,
+                          label: template.title,
+                          searchText: `${template.instructions ?? ""} ${template.course_id ?? ""} ${template.lesson_id ?? ""}`,
+                        }))}
+                      />
+                    </div>
+                  ) : null}
+                </>
+              )}
+              <div className="classroom-list__create-field">
+                <label htmlFor="session-assignment-title">Title</label>
+                <input
+                  id="session-assignment-title"
+                  className="classroom-list__create-input"
+                  value={assignmentTitle}
+                  onChange={(e) => setAssignmentTitle(e.target.value)}
+                  placeholder={
+                    assignmentTemplateId
+                      ? "Optional title override"
+                      : "Assignment title"
+                  }
+                />
+              </div>
+              <div className="classroom-list__create-field">
+                <label htmlFor="session-assignment-instructions">Instructions</label>
+                <textarea
+                  id="session-assignment-instructions"
+                  className="classroom-list__create-input classroom-live__assignment-textarea"
+                  value={assignmentInstructions}
+                  onChange={(e) => setAssignmentInstructions(e.target.value)}
+                  placeholder={
+                    assignmentTemplateId
+                      ? "Optional override instructions"
+                      : "What should students do?"
+                  }
+                />
+              </div>
+              <div className="classroom-list__create-field">
+                <label htmlFor="session-assignment-due">Due date & time</label>
+                <DateTimePicker
+                  id="session-assignment-due"
+                  value={assignmentDueAt}
+                  onChange={setAssignmentDueAt}
+                  datePlaceholder="Pick due date"
+                  timePlaceholder="Pick due time"
+                />
+              </div>
+              <div className="classroom-list__create-field">
+                <label>Submission requirement</label>
+                <KidDropdown
+                  value={assignmentRequirement}
+                  onChange={(value) => {
+                    const next = value as "none" | "lab" | "assets" | "both";
+                    setAssignmentRequirement(next);
+                    if ((next === "lab" || next === "both") && !assignmentLabId) {
+                      setAssignmentLabId(selectedSessionLab || permittedLabs[0] || "");
+                    }
+                  }}
+                  ariaLabel="Assignment requirement type"
+                  minWidth={240}
+                  options={[
+                    { value: "none", label: "Flexible (no requirement)" },
+                    { value: "lab", label: "Requires lab" },
+                    { value: "assets", label: "Requires assets/files" },
+                    { value: "both", label: "Requires lab + assets" },
+                  ]}
+                />
+              </div>
+              {permittedLabs.length > 0 &&
+                (assignmentRequirement === "lab" || assignmentRequirement === "both") && (
+                  <div className="classroom-list__create-field">
+                    <label>Designated lab</label>
+                    <KidDropdown
+                      value={assignmentLabId}
+                      onChange={setAssignmentLabId}
+                      ariaLabel="Select designated lab"
+                      minWidth={240}
+                      options={[
+                        { value: "", label: "No designated lab" },
+                        ...permittedLabs.map((lab) => ({ value: lab, label: lab })),
+                      ]}
+                    />
+                  </div>
+                )}
               <div className="classroom-list__create-actions">
                 <button
                   type="button"
                   className="classroom-list__create-btn classroom-list__create-btn--ghost"
                   onClick={() => {
                     setShowAssignmentDialog(false);
+                    setAssignmentSource(curriculumCourse?.classroom_assignment_source ?? "curriculum");
                     setAssignmentTemplateId("");
                     setAssignmentRequirement("none");
                     setAssignmentLabId(selectedSessionLab || permittedLabs[0] || "");
@@ -3650,114 +3825,18 @@ export function ClassroomLiveSession() {
                   onClick={() => void handleSaveAssignment()}
                   disabled={
                     !editingAssignmentId &&
-                    !assignmentTemplateId &&
-                    (!assignmentTitle.trim() || !assignmentInstructions.trim())
+                    (
+                      assignmentSource === "create"
+                        ? (!assignmentTitle.trim() || !assignmentInstructions.trim())
+                        : !assignmentTemplateId
+                    )
                   }
                 >
                   {editingAssignmentId ? "Update assignment" : "Create assignment"}
                 </button>
               </div>
-            }
-          >
-            {!editingAssignmentId && (
-              <div className="classroom-list__create-field">
-                <label>Existing assignment template (optional)</label>
-                <SearchableDropdown
-                  value={assignmentTemplateId}
-                  onChange={setAssignmentTemplateId}
-                  ariaLabel="Select assignment template"
-                  placeholder={
-                    assignmentTemplatesLoading
-                      ? "Loading templates..."
-                      : "Select an existing template"
-                  }
-                  searchPlaceholder="Search templates..."
-                  emptyLabel="No templates found"
-                  fullWidth
-                  options={assignmentTemplates.map((template) => ({
-                    value: template.id,
-                    label: template.title,
-                    searchText: `${template.instructions ?? ""} ${template.course_id ?? ""} ${template.lesson_id ?? ""}`,
-                  }))}
-                />
-              </div>
-            )}
-            <div className="classroom-list__create-field">
-              <label htmlFor="session-assignment-title">Title</label>
-              <input
-                id="session-assignment-title"
-                className="classroom-list__create-input"
-                value={assignmentTitle}
-                onChange={(e) => setAssignmentTitle(e.target.value)}
-                placeholder={
-                  assignmentTemplateId
-                    ? "Optional title override"
-                    : "Assignment title"
-                }
-              />
             </div>
-            <div className="classroom-list__create-field">
-              <label htmlFor="session-assignment-instructions">Instructions</label>
-              <textarea
-                id="session-assignment-instructions"
-                className="classroom-list__create-input classroom-live__assignment-textarea"
-                value={assignmentInstructions}
-                onChange={(e) => setAssignmentInstructions(e.target.value)}
-                placeholder={
-                  assignmentTemplateId
-                    ? "Optional override instructions"
-                    : "What should students do?"
-                }
-              />
-            </div>
-            <div className="classroom-list__create-field">
-              <label htmlFor="session-assignment-due">Due date & time</label>
-              <DateTimePicker
-                id="session-assignment-due"
-                value={assignmentDueAt}
-                onChange={setAssignmentDueAt}
-                datePlaceholder="Pick due date"
-                timePlaceholder="Pick due time"
-              />
-            </div>
-            <div className="classroom-list__create-field">
-              <label>Submission requirement</label>
-              <KidDropdown
-                value={assignmentRequirement}
-                onChange={(value) => {
-                  const next = value as "none" | "lab" | "assets" | "both";
-                  setAssignmentRequirement(next);
-                  if ((next === "lab" || next === "both") && !assignmentLabId) {
-                    setAssignmentLabId(selectedSessionLab || permittedLabs[0] || "");
-                  }
-                }}
-                ariaLabel="Assignment requirement type"
-                minWidth={240}
-                options={[
-                  { value: "none", label: "Flexible (no requirement)" },
-                  { value: "lab", label: "Requires lab" },
-                  { value: "assets", label: "Requires assets/files" },
-                  { value: "both", label: "Requires lab + assets" },
-                ]}
-              />
-            </div>
-            {permittedLabs.length > 0 &&
-              (assignmentRequirement === "lab" || assignmentRequirement === "both") && (
-                <div className="classroom-list__create-field">
-                  <label>Designated lab</label>
-                  <KidDropdown
-                    value={assignmentLabId}
-                    onChange={setAssignmentLabId}
-                    ariaLabel="Select designated lab"
-                    minWidth={240}
-                    options={[
-                      { value: "", label: "No designated lab" },
-                      ...permittedLabs.map((lab) => ({ value: lab, label: lab })),
-                    ]}
-                  />
-                </div>
-              )}
-          </ModalDialog>
+          </KidDialog>
 
           <ModalDialog
             isOpen={showEndDialog}

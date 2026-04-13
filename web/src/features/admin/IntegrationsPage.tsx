@@ -33,6 +33,7 @@ interface IntegrationDefinition {
 }
 
 const INTEGRATIONS: IntegrationDefinition[] = [
+  { id: "youtube", name: "YouTube", description: "Connect YouTube to browse listed/unlisted videos in lesson builder", letter: "Y", color: "#ff0000" },
   { id: "google", name: "Google", description: "Connect Google Calendar and related services", letter: "G", color: "#4285f4" },
   { id: "microsoft", name: "Microsoft", description: "Connect Microsoft calendar and productivity tools", letter: "M", color: "#6264a7" },
   { id: "zoom", name: "Zoom", description: "Launch virtual classes directly from your dashboard", letter: "Z", color: "#2d8cff" },
@@ -123,11 +124,32 @@ export function IntegrationsPage() {
   const connectProvider = async (provider: string) => {
     try {
       const res = await getConnectUrl(provider);
-      window.open(res.url, "_blank", "noopener,noreferrer");
+      const popup = window.open(
+        res.url,
+        "oauth-connect",
+        "width=720,height=760,menubar=no,toolbar=no,location=yes,resizable=yes,scrollbars=yes",
+      );
+      if (!popup) {
+        window.open(res.url, "_blank", "noopener,noreferrer");
+      }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to start OAuth flow");
     }
   };
+
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      const data = event.data as { type?: string; ok?: boolean } | null;
+      if (!data || data.type !== "oauth:connected") return;
+      if (data.ok) {
+        void loadConnections();
+      } else {
+        setError("OAuth connection failed");
+      }
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [loadConnections]);
 
   const closeConfig = () => setConfiguringId(null);
 

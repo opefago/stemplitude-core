@@ -13,6 +13,7 @@ import "./studio.css";
 const LABS = [
   { id: "circuit-maker", name: "Circuit Maker" },
   { id: "micro-maker", name: "Micro Maker" },
+  { id: "robotics-lab", name: "Robotics Lab" },
   { id: "python-game", name: "Python Game Maker" },
   { id: "game-maker", name: "Game Maker" },
   { id: "design-maker", name: "Design Maker" },

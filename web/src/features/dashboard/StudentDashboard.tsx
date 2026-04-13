@@ -44,6 +44,7 @@ import "./student-dashboard.css";
 const LABS = [
   { id: "circuit-maker", name: "Circuit Maker", path: "/playground/circuit-maker" },
   { id: "micro-maker", name: "Micro Maker", path: "/playground/micro-maker" },
+  { id: "robotics-lab", name: "Robotics Lab", path: "/playground/robotics" },
   { id: "python-game", name: "Python Game Maker", path: "/playground/python-game" },
   { id: "game-maker", name: "Game Maker", path: "/playground/game-maker" },
   { id: "design-maker", name: "Design Maker", path: "/playground/design-maker" },
@@ -52,6 +53,7 @@ const LABS = [
 const LAB_LABEL_BY_ID: Record<string, string> = {
   "circuit-maker": "Circuit Maker",
   "micro-maker": "Micro Maker",
+  "robotics-lab": "Robotics Lab",
   "python-game": "Python Game Maker",
   "game-maker": "Game Maker",
   "design-maker": "Design Maker",

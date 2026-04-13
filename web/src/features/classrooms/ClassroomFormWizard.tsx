@@ -12,6 +12,10 @@ import {
   updateClassroom,
   type ClassroomRecord,
 } from "../../lib/api/classrooms";
+import {
+  assignLessonToClassroom,
+  listTenantLessons,
+} from "../../lib/api/trackLessons";
 import { listPrograms, type Program as ProgramRecord } from "../../lib/api/programs";
 import { listCourses, type Course as CurriculumRecord } from "../../lib/api/curriculum";
 import { filterToPermittedLabOptions } from "../../lib/permittedLabs";
@@ -32,6 +36,8 @@ import {
   editScreenSnapshotsEqual,
   type EditScreenSnapshot,
 } from "./classroomEditPayload";
+import { MultiAssignDialog } from "../track_lessons/components";
+import "../track_lessons/track-lessons.css";
 
 /** If wizard drifts after capture only on these keys, re-baseline once (late prefill / member list). */
 const EDIT_DIRTY_BASELINE_ASYNC_FIELDS = new Set([
@@ -77,6 +83,9 @@ export function ClassroomFormWizard({
   const { tenant } = useTenant();
   const [programs, setPrograms] = useState<ProgramRecord[]>([]);
   const [curricula, setCurricula] = useState<CurriculumRecord[]>([]);
+  const [lessonOptions, setLessonOptions] = useState<Array<{ id: string; label: string }>>([]);
+  const [selectedLessonIds, setSelectedLessonIds] = useState<string[]>([]);
+  const [lessonPickerOpen, setLessonPickerOpen] = useState(false);
   /** After programs/curricula fetch settles (even on error) — avoids clearing hydrated ids while options are still empty. */
   const [catalogReady, setCatalogReady] = useState(false);
   const [availableInstructors, setAvailableInstructors] = useState<
@@ -154,6 +163,9 @@ export function ClassroomFormWizard({
     missingScheduleRequired,
     invalidTimeRange,
     programLockedByCurriculum,
+    lessonOptions,
+    selectedLessonIds,
+    onOpenLessonPicker: () => setLessonPickerOpen(true),
     onInviteInstructors: () => {
       onClose();
       if (mode === "create") wRef.current.resetForCreate();
@@ -205,16 +217,18 @@ export function ClassroomFormWizard({
     }
     let mounted = true;
     setCatalogReady(false);
-    void Promise.all([listPrograms({ limit: 300 }), listCourses({ limit: 300 })])
-      .then(([programRows, courseRows]) => {
+    void Promise.all([listPrograms({ limit: 300 }), listCourses({ limit: 300 }), listTenantLessons(true)])
+      .then(([programRows, courseRows, lessonRows]) => {
         if (!mounted) return;
         setPrograms(programRows);
         setCurricula(courseRows);
+        setLessonOptions(lessonRows.map((row) => ({ id: row.id, label: row.title })));
       })
       .catch(() => {
         if (!mounted) return;
         setPrograms([]);
         setCurricula([]);
+        setLessonOptions([]);
       })
       .finally(() => {
         if (mounted) setCatalogReady(true);
@@ -266,8 +280,16 @@ export function ClassroomFormWizard({
     setFormError(null);
     setEditLoadError(null);
     setEditBaseline(null);
+    setSelectedLessonIds([]);
+    setLessonPickerOpen(false);
     if (initialCurriculumIdFromQuery) wRef.current.setCurriculumId(initialCurriculumIdFromQuery);
   }, [isOpen, mode, initialCurriculumIdFromQuery]);
+
+  useEffect(() => {
+    if (!isOpen || mode !== "edit") return;
+    setSelectedLessonIds([]);
+    setLessonPickerOpen(false);
+  }, [isOpen, mode, editClassroomId]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -472,6 +494,8 @@ export function ClassroomFormWizard({
     setFormError(null);
     setEditLoadError(null);
     setEditBaseline(null);
+    setSelectedLessonIds([]);
+    setLessonPickerOpen(false);
     editDirtyBaselineCapturedKeyRef.current = "";
     if (editDirtyStabilizeTimerRef.current != null) {
       window.clearTimeout(editDirtyStabilizeTimerRef.current);
@@ -568,6 +592,11 @@ export function ClassroomFormWizard({
               /* classroom still created */
             }
           }
+          if (selectedLessonIds.length > 0) {
+            await Promise.all(
+              selectedLessonIds.map((lessonId) => assignLessonToClassroom(created.id, lessonId)),
+            );
+          }
           await onSuccess(created);
           handleClose();
           return;
@@ -590,6 +619,11 @@ export function ClassroomFormWizard({
           } catch {
             /* ignore */
           }
+        }
+        if (selectedLessonIds.length > 0) {
+          await Promise.all(
+            selectedLessonIds.map((lessonId) => assignLessonToClassroom(updated.id, lessonId)),
+          );
         }
         await onSuccess(updated);
         handleClose();
@@ -633,6 +667,7 @@ export function ClassroomFormWizard({
           editNothingChanged;
 
   return (
+    <>
     <ModalDialog
       isOpen={isOpen}
       onClose={handleClose}
@@ -736,5 +771,23 @@ export function ClassroomFormWizard({
         </div>
       </form>
     </ModalDialog>
+    <MultiAssignDialog
+      isOpen={lessonPickerOpen}
+      title={
+        mode === "create"
+          ? "Select lessons to assign after creation"
+          : "Select lessons to assign to this classroom"
+      }
+      items={lessonOptions}
+      selectedIds={selectedLessonIds}
+      onSelectedIdsChange={setSelectedLessonIds}
+      searchPlaceholder="Search lessons"
+      emptyLabel="No lessons available."
+      confirmLabel="Use selected lessons"
+      isSubmitting={submitting}
+      onClose={() => setLessonPickerOpen(false)}
+      onConfirm={() => setLessonPickerOpen(false)}
+    />
+    </>
   );
 }

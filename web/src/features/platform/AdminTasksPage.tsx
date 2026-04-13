@@ -407,6 +407,25 @@ const COMMAND_HINTS: CommandHint[] = [
       },
     ],
   },
+  {
+    domain: "robotics",
+    actions: [
+      {
+        action: "toolchain-status",
+        help: "Show local robotics compile toolchain status (PROS + ARM GCC)",
+        params: [],
+      },
+      {
+        action: "toolchain-install",
+        help: "Install local robotics compile toolchain dependencies",
+        params: [
+          { long: "--python", help: "Python executable", default: "python3" },
+          { long: "--brew", help: "Homebrew executable", default: "brew" },
+          { long: "--xpm", help: "xpm runner command", default: "npx xpm" },
+        ],
+      },
+    ],
+  },
 ];
 
 interface Suggestion {
@@ -457,6 +476,7 @@ const QUICK_ACTIONS = [
   { label: "Expiring Soon (30d)", command: "subscriptions:expiring --days 30" },
   { label: "Active Licenses", command: "licenses:list --status active" },
   { label: "Audit Log", command: "audit:list" },
+  { label: "Robotics Toolchain Status", command: "robotics:toolchain-status" },
 ];
 
 function formatTimestamp(ts: number): string {

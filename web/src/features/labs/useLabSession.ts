@@ -16,6 +16,7 @@ export interface LabClassroomContext {
   /** Set when opened from the assignment workflow (for submitting back with snapshot). */
   assignmentId: string | null;
   curriculumLabId: string | null;
+  lessonId: string | null;
   savedProjectId: string | null;
 }
 
@@ -41,6 +42,7 @@ function parseClassroomContext(search: string): LabClassroomContext | null {
       labType: params.get("lab"),
       assignmentId: params.get("assignment_id"),
       curriculumLabId: params.get("curriculum_lab_id"),
+      lessonId: params.get("lesson_id"),
       savedProjectId: params.get("saved_project_id"),
     };
   }

@@ -1,0 +1,633 @@
+.track-lessons-page {
+  padding: 16px;
+  display: grid;
+  gap: 16px;
+}
+
+.track-lessons-hero {
+  border: 2px solid color-mix(in srgb, var(--color-secondary) 28%, var(--color-border) 72%);
+  background: color-mix(in srgb, var(--color-surface) 96%, var(--color-secondary) 4%);
+  border-radius: 18px;
+  padding: 16px;
+  box-shadow: 0 2px 0 color-mix(in srgb, var(--color-border) 90%, white);
+}
+
+.track-lessons-hero-title {
+  margin: 0;
+  font-size: 1.65rem;
+  letter-spacing: 0.01em;
+}
+
+.track-lessons-hero-subtitle {
+  margin: 8px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+.track-lessons-hero--tenant {
+  border-color: color-mix(in srgb, var(--color-border) 74%, var(--color-primary) 26%);
+  background: color-mix(in srgb, var(--color-surface) 97%, var(--color-primary) 3%);
+}
+
+.track-lessons-tenant-title {
+  font-size: 1.35rem;
+}
+
+.track-lessons-tenant-subtitle {
+  font-size: 0.9rem;
+}
+
+.track-lessons-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.track-lessons-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.track-lessons-library-shell {
+  border: 2px solid color-mix(in srgb, var(--color-border) 70%, var(--color-secondary) 30%);
+  border-radius: 16px;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+  background: color-mix(in srgb, var(--color-surface) 95%, var(--color-secondary) 5%);
+}
+
+.track-lessons-library-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.track-lessons-library-toolbar {
+  display: grid;
+  gap: 10px;
+}
+
+.track-lessons-library-search-input {
+  width: 100%;
+  border: 2px solid color-mix(in srgb, var(--color-border) 70%, var(--color-secondary) 30%);
+  border-radius: 14px;
+  padding: 11px 14px;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: #fff;
+  background: color-mix(in srgb, var(--color-surface) 95%, var(--color-secondary) 5%);
+  caret-color: #fff;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.track-lessons-library-search-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 18%, transparent);
+}
+
+.track-lessons-library-search-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.track-lessons-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.track-lessons-segmented {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.track-lessons-segmented__item {
+  border: 2px solid color-mix(in srgb, var(--color-border) 75%, var(--color-secondary) 25%);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font-weight: 800;
+  font-size: 0.85rem;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.track-lessons-segmented__item--active {
+  border-color: color-mix(in srgb, var(--color-primary) 48%, var(--color-border));
+  background: color-mix(in srgb, var(--color-primary) 10%, white);
+  color: color-mix(in srgb, var(--color-primary-dark) 80%, #0f172a);
+}
+
+.track-lessons-empty {
+  border: 2px dashed color-mix(in srgb, var(--color-border) 70%, var(--color-secondary) 30%);
+  border-radius: 14px;
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+}
+
+.track-lessons-section-title {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.track-lessons-card {
+  border: 2px solid color-mix(in srgb, var(--color-border) 70%, var(--color-secondary) 30%);
+  background: var(--color-surface);
+  border-radius: 16px;
+  padding: 14px;
+  display: grid;
+  gap: 8px;
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--color-border) 88%, white);
+}
+
+.track-lessons-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.track-lessons-card-meta {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.track-lessons-card-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.track-lessons-pill {
+  border-radius: 999px;
+  padding: 4px 10px;
+  border: 2px solid color-mix(in srgb, var(--color-border) 68%, var(--color-secondary) 32%);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+}
+
+.track-lessons-form {
+  display: grid;
+  gap: 12px;
+}
+
+.track-lessons-form h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.track-lessons-form-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.track-lessons-cancel-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--color-surface, #fff);
+  color: var(--color-text-secondary, #64748b);
+  border: 2px solid var(--color-border, #e2e8f0);
+  box-shadow: 0 3px 0 var(--color-border, #e2e8f0);
+  font-size: 0.875rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
+  border: 3px solid
+    color-mix(
+      in srgb,
+      var(--color-border, #e2e8f0) 72%,
+      var(--color-secondary, #1cb0f6) 28%
+    );
+  border-radius: 16px;
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--color-border, #e2e8f0) 85%, white);
+}
+
+.track-lessons-cancel-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 0 color-mix(in srgb, var(--color-border, #e2e8f0) 85%, white);
+  background: color-mix(in srgb, var(--color-secondary, #1cb0f6) 10%, white);
+  border-color: color-mix(
+    in srgb,
+    var(--color-border, #e2e8f0) 64%,
+    var(--color-secondary, #1cb0f6) 36%
+  );
+}
+
+.track-lessons-cancel-button:active {
+  transform: translateY(1px);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--color-border, #e2e8f0) 85%, white);
+}
+
+.track-lessons-cancel-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  box-shadow: none;
+  transform: none;
+}
+
+.track-lessons-form .ui-form-field {
+  display: grid;
+  gap: 6px;
+}
+
+.track-lessons-form .kid-dropdown__trigger,
+.track-lessons-youtube-panel .kid-dropdown__trigger,
+.track-lessons-upload-flow .kid-dropdown__trigger {
+  border-color: color-mix(in srgb, var(--color-border) 70%, var(--color-secondary) 30%);
+  background: color-mix(in srgb, var(--color-surface) 94%, var(--color-secondary) 6%);
+  box-shadow: none;
+}
+
+.track-lessons-form .kid-dropdown__trigger:focus-visible,
+.track-lessons-youtube-panel .kid-dropdown__trigger:focus-visible,
+.track-lessons-upload-flow .kid-dropdown__trigger:focus-visible {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 18%, transparent);
+}
+
+.track-lessons-help {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--color-text-secondary);
+}
+
+.track-lessons-inline-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.track-lessons-tags-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  border: 2px solid color-mix(in srgb, var(--color-border) 70%, var(--color-secondary) 30%);
+  border-radius: 14px;
+  padding: 8px;
+  background: color-mix(in srgb, var(--color-surface) 94%, var(--color-secondary) 6%);
+}
+
+.track-lessons-tags-wrap input:not([type="checkbox"]):not([type="radio"]) {
+  border: none;
+  outline: none;
+  min-width: 180px;
+  flex: 1;
+  background: transparent;
+  font-size: 0.9rem;
+  box-shadow: none;
+  padding: 4px 2px;
+}
+
+.track-lessons-tag-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 2px solid color-mix(in srgb, var(--color-primary) 35%, var(--color-border));
+  background: color-mix(in srgb, var(--color-primary) 12%, white);
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.track-lessons-tag-remove {
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+}
+
+.track-lessons-assignment-panel {
+  border: 2px dashed color-mix(in srgb, var(--color-border) 68%, var(--color-secondary) 32%);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--color-surface) 94%, var(--color-secondary) 6%);
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.track-lessons-assignment-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.track-lessons-assignment-panel .ui-form-field {
+  display: grid;
+  gap: 6px;
+}
+
+.track-lessons-assignment-panel .ui-form-field > span {
+  font-size: 0.875rem;
+  font-weight: 800;
+  color: color-mix(in srgb, var(--color-text) 90%, var(--color-primary) 10%);
+}
+
+.track-lessons-assignment-panel input:not([type="checkbox"]):not([type="radio"]) {
+  border: 2px solid color-mix(in srgb, var(--color-border) 70%, var(--color-secondary) 30%);
+  border-radius: 14px;
+  padding: 11px 14px;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--color-text);
+  background: color-mix(in srgb, var(--color-surface) 94%, var(--color-secondary) 6%);
+}
+
+.track-lessons-assignment-panel input:not([type="checkbox"]):not([type="radio"]):focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 18%, transparent);
+}
+
+.track-lessons-youtube-panel {
+  border: 2px solid color-mix(in srgb, var(--color-border) 72%, var(--color-secondary) 28%);
+  border-radius: 14px;
+  padding: 10px;
+  background: color-mix(in srgb, var(--color-surface) 96%, var(--color-secondary) 4%);
+  display: grid;
+  gap: 8px;
+}
+
+.track-lessons-youtube-item {
+  width: 100%;
+  border: 2px solid color-mix(in srgb, var(--color-border) 75%, var(--color-secondary) 25%);
+  border-radius: 12px;
+  background: var(--color-surface);
+  padding: 10px;
+  text-align: left;
+  display: grid;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.track-lessons-youtube-item small {
+  color: var(--color-text-secondary);
+}
+
+.track-lessons-youtube-item--selected {
+  border-color: color-mix(in srgb, var(--color-primary) 48%, var(--color-border));
+  background: color-mix(in srgb, var(--color-primary) 10%, white);
+}
+
+.track-lessons-youtube-panel input:not([type="checkbox"]):not([type="radio"]) {
+  border: 2px solid color-mix(in srgb, var(--color-border) 70%, var(--color-secondary) 30%);
+  border-radius: 14px;
+  padding: 10px 12px;
+  font-size: 0.9rem;
+  background: color-mix(in srgb, var(--color-surface) 96%, var(--color-secondary) 4%);
+}
+
+.track-lessons-file-picker {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 2px solid color-mix(in srgb, #9fdcff 70%, var(--color-border) 30%);
+  border-radius: 16px;
+  background: color-mix(in srgb, #ecf9ff 88%, white);
+}
+
+.track-lessons-file-picker__native {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.track-lessons-file-picker__name {
+  color: var(--color-text-secondary);
+  font-size: 0.9rem;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.track-lessons-upload-flow {
+  border: 2px solid color-mix(in srgb, var(--color-border) 70%, var(--color-secondary) 30%);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--color-surface) 95%, var(--color-secondary) 5%);
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.track-lessons-upload-flow__status {
+  display: grid;
+  gap: 6px;
+}
+
+.track-lessons-upload-flow__badge {
+  width: fit-content;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 800;
+  border: 2px solid transparent;
+}
+
+.track-lessons-upload-flow__badge--linked {
+  color: #166534;
+  background: #dcfce7;
+  border-color: #86efac;
+}
+
+.track-lessons-upload-flow__badge--pending {
+  color: #92400e;
+  background: #fef3c7;
+  border-color: #fcd34d;
+}
+
+.track-lessons-upload-flow__source {
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.track-lessons-upload-flow__steps {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.track-lessons-upload-flow__step {
+  border-radius: 999px;
+  border: 2px solid color-mix(in srgb, var(--color-border) 70%, var(--color-secondary) 30%);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 3px 10px;
+}
+
+.track-lessons-upload-flow__step--active {
+  border-color: color-mix(in srgb, var(--color-secondary) 60%, var(--color-border));
+  color: color-mix(in srgb, var(--color-secondary) 85%, #0f172a);
+}
+
+.track-lessons-upload-flow__step--done {
+  border-color: color-mix(in srgb, var(--color-primary) 48%, var(--color-border));
+  background: color-mix(in srgb, var(--color-primary) 10%, white);
+  color: color-mix(in srgb, var(--color-primary-dark) 80%, #0f172a);
+}
+
+.track-lessons-upload-flow__arrow {
+  color: var(--color-text-secondary);
+  font-weight: 900;
+}
+
+.track-lessons-lesson-picker {
+  display: grid;
+  gap: 10px;
+}
+
+.track-lessons-lesson-picker__search {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.track-lessons-lesson-picker__list {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  height: 320px;
+  overflow: auto;
+  border: 2px solid color-mix(in srgb, var(--color-border) 72%, var(--color-secondary) 28%);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--color-surface) 96%, var(--color-secondary) 4%);
+  padding: 10px;
+  padding-right: 2px;
+}
+
+.track-lessons-lesson-picker__item {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 2px solid color-mix(in srgb, var(--color-border) 72%, var(--color-secondary) 28%);
+  border-radius: 12px;
+  background: var(--color-surface);
+  text-align: left;
+  font-weight: 700;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.track-lessons-lesson-picker__item:hover {
+  border-color: color-mix(in srgb, var(--color-border) 62%, var(--color-secondary) 38%);
+}
+
+.track-lessons-lesson-picker__item input[type="checkbox"],
+.track-lessons-lesson-picker__item input[type="radio"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--color-primary);
+  margin-top: 2px;
+}
+
+.track-lessons-lesson-picker__content {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.track-lessons-lesson-picker__title {
+  flex: 1;
+  min-width: 0;
+}
+
+.track-lessons-lesson-picker__meta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.track-lessons-lesson-picker__badge {
+  border: 2px solid color-mix(in srgb, var(--color-border) 70%, var(--color-secondary) 30%);
+  background: color-mix(in srgb, var(--color-surface) 94%, var(--color-secondary) 6%);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--color-text-secondary);
+}
+
+.track-lessons-lesson-picker__path {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.track-lessons-lesson-picker__item--selected {
+  border-color: color-mix(in srgb, var(--color-primary) 44%, var(--color-border));
+  background: color-mix(in srgb, var(--color-primary) 10%, white);
+}
+
+.track-lessons-lesson-picker__empty {
+  height: 100%;
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  padding: 12px;
+}
+
+.track-lessons-quiz-builder {
+  display: grid;
+  gap: 10px;
+}
+
+.track-lessons-quiz-builder__question {
+  border: 2px solid color-mix(in srgb, var(--color-border) 72%, var(--color-secondary) 28%);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--color-surface) 96%, var(--color-secondary) 4%);
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.track-lessons-quiz-builder__choices {
+  display: grid;
+  gap: 8px;
+}
+
+.track-lessons-quiz-builder__choice-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.track-lessons-quiz-builder__choice-row input:not([type="checkbox"]):not([type="radio"]) {
+  min-width: 0;
+}

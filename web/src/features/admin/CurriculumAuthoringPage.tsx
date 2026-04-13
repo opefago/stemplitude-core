@@ -77,6 +77,11 @@ export function CurriculumAuthoringPage() {
   const [asgRequiresAssets, setAsgRequiresAssets] = useState(false);
   const [asgAllowEdit, setAsgAllowEdit] = useState(false);
   const [asgSortOrder, setAsgSortOrder] = useState(0);
+  const [asgInlineRubricOpen, setAsgInlineRubricOpen] = useState(false);
+  const [asgInlineRubricSaving, setAsgInlineRubricSaving] = useState(false);
+  const [asgInlineRubricTitle, setAsgInlineRubricTitle] = useState("");
+  const [asgInlineRubricDescription, setAsgInlineRubricDescription] = useState("");
+  const [asgInlineRubricRows, setAsgInlineRubricRows] = useState(() => [criterionRow(), criterionRow()]);
 
   const [modules, setModules] = useState<CurriculumModule[]>([]);
   const [lessons, setLessons] = useState<CurriculumLesson[]>([]);
@@ -143,9 +148,62 @@ export function CurriculumAuthoringPage() {
     setAsgRequiresAssets(false);
     setAsgAllowEdit(false);
     setAsgSortOrder(0);
+    setAsgInlineRubricOpen(false);
+    setAsgInlineRubricSaving(false);
+    setAsgInlineRubricTitle("");
+    setAsgInlineRubricDescription("");
+    setAsgInlineRubricRows([criterionRow(), criterionRow()]);
     setModules([]);
     setLessons([]);
     setLabs([]);
+  }
+
+  function activateExistingRubricMode() {
+    setAsgInlineRubricOpen(false);
+  }
+
+  function activateInlineRubricMode() {
+    setAsgRubricId("");
+    setAsgInlineRubricOpen(true);
+  }
+
+  async function createRubricFromAssignmentBuilder() {
+    if (!asgInlineRubricTitle.trim()) {
+      setError("Rubric title is required.");
+      return;
+    }
+    const criteria: RubricCriterionDefinition[] = asgInlineRubricRows
+      .filter((r) => r.criterion_id.trim())
+      .map((r) => ({
+        criterion_id: r.criterion_id.trim(),
+        label: r.label?.trim() || null,
+        max_points: Math.min(1000, Math.max(1, Number(r.max_points) || 1)),
+        description: r.description?.trim() || null,
+      }));
+    if (criteria.length === 0) {
+      setError("Add at least one rubric criterion with an ID.");
+      return;
+    }
+    setAsgInlineRubricSaving(true);
+    setError(null);
+    try {
+      const created = await createRubricTemplate({
+        title: asgInlineRubricTitle.trim(),
+        description: asgInlineRubricDescription.trim() || null,
+        criteria,
+      });
+      setRubrics((prev) => [created, ...prev]);
+      setAsgRubricId(created.id);
+      setAsgUseRubric(true);
+      setAsgInlineRubricOpen(false);
+      setAsgInlineRubricTitle("");
+      setAsgInlineRubricDescription("");
+      setAsgInlineRubricRows([criterionRow(), criterionRow()]);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Could not create rubric");
+    } finally {
+      setAsgInlineRubricSaving(false);
+    }
   }
 
   useEffect(() => {
@@ -768,24 +826,151 @@ export function CurriculumAuthoringPage() {
               </>
             ) : null}
             <div className="curriculum-page__field curriculum-page__field--full">
-              <label>Rubric template (optional)</label>
-              <SearchableDropdown
-                value={asgRubricId || "none"}
-                onChange={(v) => setAsgRubricId(v === "none" ? "" : v)}
-                placeholder="Select rubric template"
-                searchPlaceholder="Search rubric templates..."
-                emptyLabel="No rubric templates found"
-                fullWidth
-                ariaLabel="Rubric template"
-                options={[
-                  { value: "none", label: "None", searchText: "no rubric" },
-                  ...rubrics.map((r) => ({
-                    value: r.id,
-                    label: r.title,
-                    searchText: `${r.description ?? ""} ${(r.criteria?.map((c) => `${c.criterion_id} ${c.label ?? ""}`).join(" ")) ?? ""}`,
-                  })),
-                ]}
-              />
+              <label>Rubric (choose one)</label>
+              <p className="curriculum-page__field-hint">
+                Pick an existing rubric or create one inline. Selecting one option negates the other.
+              </p>
+              <div className="track-lessons-actions" style={{ marginTop: 10 }}>
+                <button
+                  type="button"
+                  className={asgInlineRubricOpen ? "kid-button kid-button--ghost" : "kid-button"}
+                  onClick={activateExistingRubricMode}
+                >
+                  Choose existing rubric
+                </button>
+                <button
+                  type="button"
+                  className={asgInlineRubricOpen ? "kid-button" : "kid-button kid-button--ghost"}
+                  onClick={activateInlineRubricMode}
+                >
+                  Create inline rubric
+                </button>
+              </div>
+              {!asgInlineRubricOpen ? (
+                <SearchableDropdown
+                  value={asgRubricId || "none"}
+                  onChange={(v) => {
+                    setAsgRubricId(v === "none" ? "" : v);
+                    setAsgInlineRubricOpen(false);
+                  }}
+                  placeholder="Select rubric template"
+                  searchPlaceholder="Search rubric templates..."
+                  emptyLabel="No rubric templates found"
+                  fullWidth
+                  ariaLabel="Rubric template"
+                  options={[
+                    { value: "none", label: "None", searchText: "no rubric" },
+                    ...rubrics.map((r) => ({
+                      value: r.id,
+                      label: r.title,
+                      searchText: `${r.description ?? ""} ${(r.criteria?.map((c) => `${c.criterion_id} ${c.label ?? ""}`).join(" ")) ?? ""}`,
+                    })),
+                  ]}
+                />
+              ) : null}
+              {asgInlineRubricOpen ? (
+                <div className="curriculum-page__form-section" style={{ marginTop: 10 }}>
+                  <div className="curriculum-page__form-grid">
+                    <div className="curriculum-page__field curriculum-page__field--full">
+                      <label htmlFor="asg-inline-rubric-title">Rubric title</label>
+                      <input
+                        id="asg-inline-rubric-title"
+                        value={asgInlineRubricTitle}
+                        onChange={(e) => setAsgInlineRubricTitle(e.target.value)}
+                        maxLength={200}
+                      />
+                    </div>
+                    <div className="curriculum-page__field curriculum-page__field--full">
+                      <label htmlFor="asg-inline-rubric-desc">Description (optional)</label>
+                      <textarea
+                        id="asg-inline-rubric-desc"
+                        rows={2}
+                        value={asgInlineRubricDescription}
+                        onChange={(e) => setAsgInlineRubricDescription(e.target.value)}
+                        maxLength={1000}
+                      />
+                    </div>
+                  </div>
+                  <ul className="curriculum-authoring__criteria">
+                    {asgInlineRubricRows.map((row, idx) => (
+                      <li key={row.key} className="curriculum-authoring__criteria-row">
+                        <div className="curriculum-page__field">
+                          <label htmlFor={`asg-inline-crit-id-${row.key}`}>Criterion id</label>
+                          <input
+                            id={`asg-inline-crit-id-${row.key}`}
+                            value={row.criterion_id}
+                            onChange={(e) =>
+                              setAsgInlineRubricRows((prev) =>
+                                prev.map((x) => (x.key === row.key ? { ...x, criterion_id: e.target.value } : x)),
+                              )
+                            }
+                            maxLength={80}
+                          />
+                        </div>
+                        <div className="curriculum-page__field">
+                          <label htmlFor={`asg-inline-crit-label-${row.key}`}>Label</label>
+                          <input
+                            id={`asg-inline-crit-label-${row.key}`}
+                            value={row.label ?? ""}
+                            onChange={(e) =>
+                              setAsgInlineRubricRows((prev) =>
+                                prev.map((x) => (x.key === row.key ? { ...x, label: e.target.value } : x)),
+                              )
+                            }
+                            maxLength={200}
+                          />
+                        </div>
+                        <div className="curriculum-page__field curriculum-authoring__criteria-max">
+                          <label htmlFor={`asg-inline-crit-max-${row.key}`}>Max pts</label>
+                          <input
+                            id={`asg-inline-crit-max-${row.key}`}
+                            type="number"
+                            min={1}
+                            max={1000}
+                            value={row.max_points}
+                            onChange={(e) =>
+                              setAsgInlineRubricRows((prev) =>
+                                prev.map((x) =>
+                                  x.key === row.key ? { ...x, max_points: Number(e.target.value) || 1 } : x,
+                                ),
+                              )
+                            }
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          className="curriculum-authoring__criteria-remove"
+                          onClick={() =>
+                            setAsgInlineRubricRows((prev) =>
+                              prev.length > 1 ? prev.filter((x) => x.key !== row.key) : prev,
+                            )
+                          }
+                          aria-label={`Remove inline criterion ${idx + 1}`}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="track-lessons-actions">
+                    <button
+                      type="button"
+                      className="kid-button kid-button--ghost"
+                      onClick={() => setAsgInlineRubricRows((prev) => [...prev, criterionRow()])}
+                    >
+                      <Plus size={16} aria-hidden /> Add criterion
+                    </button>
+                    <button
+                      type="button"
+                      className="kid-button"
+                      onClick={() => void createRubricFromAssignmentBuilder()}
+                      disabled={asgInlineRubricSaving}
+                    >
+                      {asgInlineRubricSaving ? "Creating..." : "Create rubric and attach"}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </div>
             <div className="curriculum-page__field">
               <label htmlFor="asg-sort">Sort order</label>

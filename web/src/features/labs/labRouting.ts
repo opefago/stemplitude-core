@@ -10,6 +10,11 @@ export function isCurriculumLabUuid(value: string | null | undefined): boolean {
 const LAB_ALIASES: Array<{ id: string; route: string; aliases: string[] }> = [
   { id: "circuit-maker", route: "/playground/circuit-maker", aliases: ["circuit maker", "circuit-maker"] },
   { id: "micro-maker", route: "/playground/micro-maker", aliases: ["micro maker", "micro-maker"] },
+  {
+    id: "robotics-lab",
+    route: "/playground/robotics/code",
+    aliases: ["robotics", "robotics lab", "robotics-lab", "robotics_lab", "robotics_lab_vr"],
+  },
   { id: "gamedev", route: "/playground/gamedev", aliases: ["game dev", "gamedev", "game-dev"] },
   { id: "python-game", route: "/playground/python-game", aliases: ["python game", "python-game"] },
   { id: "game-maker", route: "/playground/game-maker", aliases: ["game maker", "game-maker"] },
@@ -37,6 +42,8 @@ export function buildLabLaunchPath(
     savedProjectId?: string;
     /** Classroom meeting provider — forwarded so the lab can show built-in video. */
     meetingProvider?: string;
+    /** Optional lesson id for track-lesson launches. */
+    lessonId?: string;
   } = {},
 ): string {
   const match = resolveLabRoute(labNameOrId);
@@ -48,6 +55,7 @@ export function buildLabLaunchPath(
   if (opts.sessionId) params.set("session_id", opts.sessionId);
   if (opts.assignmentId) params.set("assignment_id", opts.assignmentId);
   if (opts.curriculumLabId) params.set("curriculum_lab_id", opts.curriculumLabId);
+  if (opts.lessonId) params.set("lesson_id", opts.lessonId);
   if (opts.savedProjectId) params.set("saved_project_id", opts.savedProjectId);
   if (opts.meetingProvider) params.set("meeting_provider", opts.meetingProvider);
   return `${match.route}?${params.toString()}`;

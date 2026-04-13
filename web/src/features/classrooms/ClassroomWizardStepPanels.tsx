@@ -21,6 +21,9 @@ export type ClassroomWizardPanelContext = {
   missingScheduleRequired: boolean;
   invalidTimeRange: boolean;
   programLockedByCurriculum: boolean;
+  lessonOptions: Array<{ id: string; label: string }>;
+  selectedLessonIds: string[];
+  onOpenLessonPicker: () => void;
   onInviteInstructors: () => void;
 };
 
@@ -312,6 +315,34 @@ export function ClassroomWizardProgramCurriculumStep({ w, ctx }: { w: ClassroomW
             </button>
           ))}
         </div>
+      </div>
+      <div className="classroom-list__create-field classroom-list__create-field--full">
+        <ClassroomFormLabelRow ariaTopic="optional lesson assignments">
+          Optional lesson assignments
+        </ClassroomFormLabelRow>
+        <p className="classroom-list__helper-copy">
+          Pick lessons to auto-assign when you save this classroom.
+        </p>
+        <div className="track-lessons-actions">
+          <button
+            type="button"
+            className="kid-button kid-button--ghost"
+            onClick={ctx.onOpenLessonPicker}
+          >
+            {ctx.selectedLessonIds.length > 0
+              ? `Manage lessons (${ctx.selectedLessonIds.length})`
+              : "Add lessons (optional)"}
+          </button>
+        </div>
+        {ctx.selectedLessonIds.length > 0 ? (
+          <p className="classroom-list__helper-copy">
+            Selected: {ctx.selectedLessonIds
+              .map((id) => ctx.lessonOptions.find((item) => item.id === id)?.label ?? id)
+              .slice(0, 3)
+              .join(", ")}
+            {ctx.selectedLessonIds.length > 3 ? ` +${ctx.selectedLessonIds.length - 3} more` : ""}
+          </p>
+        ) : null}
       </div>
     </>
   );

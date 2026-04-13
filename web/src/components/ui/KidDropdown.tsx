@@ -17,6 +17,7 @@ interface KidDropdownProps {
   disabled?: boolean;
   fullWidth?: boolean;
   minWidth?: number;
+  subtle?: boolean;
 }
 
 export function KidDropdown({
@@ -28,6 +29,7 @@ export function KidDropdown({
   disabled = false,
   fullWidth = false,
   minWidth,
+  subtle = true,
 }: KidDropdownProps) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -120,7 +122,7 @@ export function KidDropdown({
   return (
     <div
       ref={wrapRef}
-      className={`kid-dropdown ${fullWidth ? "kid-dropdown--full" : ""}`}
+      className={`kid-dropdown ${fullWidth ? "kid-dropdown--full" : ""} ${subtle ? "kid-dropdown--subtle" : ""}`.trim()}
       style={minWidth ? { minWidth } : undefined}
     >
       <button

@@ -11,6 +11,10 @@ export interface Course {
   is_published: boolean;
   /** Lab launcher labels that prefill permitted labs when creating a class with this curriculum. */
   default_permitted_labs?: string[] | null;
+  /** Classroom assignment authoring mode for curricula-linked classes. */
+  classroom_assignment_source?: "curriculum" | "templates" | "create";
+  /** Ordered assignment template IDs curated for this curriculum. */
+  assignment_template_ids?: string[] | null;
 }
 
 export interface CourseCreatePayload {
@@ -21,6 +25,8 @@ export interface CourseCreatePayload {
   is_published?: boolean;
   program_id?: string | null;
   default_permitted_labs?: string[] | null;
+  classroom_assignment_source?: "curriculum" | "templates" | "create";
+  assignment_template_ids?: string[] | null;
 }
 
 export interface CourseUpdatePayload {
@@ -32,6 +38,8 @@ export interface CourseUpdatePayload {
   program_id?: string | null;
   /** Send `[]` to clear curriculum defaults. */
   default_permitted_labs?: string[] | null;
+  classroom_assignment_source?: "curriculum" | "templates" | "create" | null;
+  assignment_template_ids?: string[] | null;
 }
 
 export async function listCourses(params: {

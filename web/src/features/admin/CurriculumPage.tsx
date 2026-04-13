@@ -2,18 +2,23 @@ import { useEffect, useMemo, useState, type Dispatch, type FormEvent, type SetSt
 import { useLocation, useNavigate } from "react-router-dom";
 import { ChevronLeft, ChevronRight, ClipboardList, Plus, Search } from "lucide-react";
 import {
+  listAssignmentTemplates,
   createCourse,
   deleteCourse,
   listCourses,
   updateCourse,
+  type AssignmentTemplate,
   type Course,
 } from "../../lib/api/curriculum";
 import { listPrograms, type Program } from "../../lib/api/programs";
 import { listClassrooms } from "../../lib/api/classrooms";
+import { assignTrackToCurriculum, listTenantTracks } from "../../lib/api/trackLessons";
 import { PERMITTED_LAB_OPTIONS } from "../../lib/permittedLabs";
 import { AccordionCard, KidDropdown, ModalDialog } from "../../components/ui";
+import { MultiAssignDialog } from "../track_lessons/components";
 import "../../components/ui/ui.css";
 import "./curriculum.css";
+import "../track_lessons/track-lessons.css";
 
 type CurriculumLevel = "beginner" | "intermediate" | "advanced";
 type CurriculumStatus = "published" | "draft";
@@ -51,6 +56,16 @@ export function CurriculumPage() {
   const [editProgramId, setEditProgramId] = useState<string>("");
   const [editDefaultPermittedLabs, setEditDefaultPermittedLabs] = useState<string[]>([]);
   const [assignedClassroomCount, setAssignedClassroomCount] = useState<Record<string, number>>({});
+  const [assignmentTemplates, setAssignmentTemplates] = useState<AssignmentTemplate[]>([]);
+  const [createAssignmentSource, setCreateAssignmentSource] = useState<"curriculum" | "templates" | "create">("curriculum");
+  const [editAssignmentSource, setEditAssignmentSource] = useState<"curriculum" | "templates" | "create">("curriculum");
+  const [createAssignmentTemplateIds, setCreateAssignmentTemplateIds] = useState<string[]>([]);
+  const [editAssignmentTemplateIds, setEditAssignmentTemplateIds] = useState<string[]>([]);
+  const [assignmentPickerMode, setAssignmentPickerMode] = useState<"create" | "edit" | null>(null);
+  const [trackOptions, setTrackOptions] = useState<Array<{ id: string; label: string }>>([]);
+  const [createTrackIds, setCreateTrackIds] = useState<string[]>([]);
+  const [editTrackIds, setEditTrackIds] = useState<string[]>([]);
+  const [trackPickerMode, setTrackPickerMode] = useState<"create" | "edit" | null>(null);
 
   const toggleDefaultLab = (lab: string, setState: Dispatch<SetStateAction<string[]>>) => {
     setState((prev) => (prev.includes(lab) ? prev.filter((v) => v !== lab) : [...prev, lab]));
@@ -62,14 +77,18 @@ export function CurriculumPage() {
       setLoading(true);
       setError(null);
       try {
-        const [courses, programRows, classroomRows] = await Promise.all([
+        const [courses, programRows, classroomRows, trackRows, assignmentTemplateRows] = await Promise.all([
           listCourses({ limit: 300 }),
           listPrograms({ limit: 300 }),
           listClassrooms({ limit: 300 }),
+          listTenantTracks(true),
+          listAssignmentTemplates({ limit: 400 }),
         ]);
         if (!mounted) return;
         setCurricula(courses);
         setPrograms(programRows);
+        setTrackOptions(trackRows.map((row) => ({ id: row.id, label: row.title })));
+        setAssignmentTemplates(assignmentTemplateRows);
         const counts: Record<string, number> = {};
         for (const classroom of classroomRows) {
           if (!classroom.curriculum_id) continue;
@@ -121,6 +140,11 @@ export function CurriculumPage() {
     });
   }, [curricula, search, levelFilter, statusFilter, programFilter]);
 
+  const assignmentTemplateOptions = useMemo(
+    () => assignmentTemplates.map((template) => ({ id: template.id, label: template.title })),
+    [assignmentTemplates],
+  );
+
   const totalPages = Math.max(1, Math.ceil(filteredCurricula.length / CURRICULA_PER_PAGE));
   const paginatedCurricula = filteredCurricula.slice(
     (page - 1) * CURRICULA_PER_PAGE,
@@ -142,6 +166,8 @@ export function CurriculumPage() {
         is_published: createPublished,
         program_id: createProgramId || null,
         default_permitted_labs: createDefaultPermittedLabs.length ? createDefaultPermittedLabs : null,
+        classroom_assignment_source: createAssignmentSource,
+        assignment_template_ids: createAssignmentTemplateIds,
       });
       setCurricula((prev) => [created, ...prev]);
       setExpandedId(created.id);
@@ -152,12 +178,20 @@ export function CurriculumPage() {
       setCreatePublished(false);
       setCreateProgramId("");
       setCreateDefaultPermittedLabs([]);
+      setCreateAssignmentSource("curriculum");
+      setCreateAssignmentTemplateIds([]);
+      if (createTrackIds.length > 0) {
+        await Promise.all(createTrackIds.map((trackId) => assignTrackToCurriculum(created.id, trackId)));
+      }
+      setCreateTrackIds([]);
       if (afterCreateDestination === "rubrics") {
         navigate(`/app/curriculum/authoring?tab=rubrics&create=rubric&courseId=${created.id}`);
       } else if (afterCreateDestination === "assignments") {
         navigate(`/app/curriculum/authoring?tab=assignments&create=assignment&courseId=${created.id}`);
       }
       setAfterCreateDestination("stay");
+      setTrackPickerMode(null);
+      setAssignmentPickerMode(null);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to create curriculum");
     } finally {
@@ -177,9 +211,18 @@ export function CurriculumPage() {
         is_published: editPublished,
         program_id: editProgramId || null,
         default_permitted_labs: editDefaultPermittedLabs,
+        classroom_assignment_source: editAssignmentSource,
+        assignment_template_ids: editAssignmentTemplateIds,
       });
       setCurricula((prev) => prev.map((entry) => (entry.id === updated.id ? updated : entry)));
+      if (editTrackIds.length > 0) {
+        await Promise.all(editTrackIds.map((trackId) => assignTrackToCurriculum(updated.id, trackId)));
+      }
+      setEditTrackIds([]);
+      setEditAssignmentTemplateIds([]);
       setEditing(null);
+      setTrackPickerMode(null);
+      setAssignmentPickerMode(null);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to update curriculum");
     } finally {
@@ -352,6 +395,8 @@ export function CurriculumPage() {
                     setEditPublished(curriculum.is_published);
                     setEditProgramId(curriculum.program_id ?? "");
                     setEditDefaultPermittedLabs(curriculum.default_permitted_labs ?? []);
+                    setEditAssignmentSource(curriculum.classroom_assignment_source ?? "curriculum");
+                    setEditAssignmentTemplateIds(curriculum.assignment_template_ids ?? []);
                   }}
                 >
                   Edit
@@ -404,7 +449,14 @@ export function CurriculumPage() {
 
       <ModalDialog
         isOpen={showCreateForm}
-        onClose={() => setShowCreateForm(false)}
+        onClose={() => {
+          setShowCreateForm(false);
+          setCreateTrackIds([]);
+          setCreateAssignmentTemplateIds([]);
+          setCreateAssignmentSource("curriculum");
+          setTrackPickerMode(null);
+          setAssignmentPickerMode(null);
+        }}
         title="Create Curriculum"
         ariaLabel="Create Curriculum"
         contentClassName="curriculum-page__form-section curriculum-page__form-section--dialog"
@@ -413,7 +465,14 @@ export function CurriculumPage() {
             <button
               type="button"
               className="ui-btn ui-btn--ghost"
-              onClick={() => setShowCreateForm(false)}
+              onClick={() => {
+                setShowCreateForm(false);
+                setCreateTrackIds([]);
+                setCreateAssignmentTemplateIds([]);
+                setCreateAssignmentSource("curriculum");
+                setTrackPickerMode(null);
+                setAssignmentPickerMode(null);
+              }}
               disabled={creating}
             >
               Cancel
@@ -514,16 +573,60 @@ export function CurriculumPage() {
                 ]}
               />
             </div>
-            <div className="curriculum-page__field curriculum-page__field--full curriculum-page__authoring-shortcuts">
-              <span className="curriculum-page__field-hint">Or open authoring without saving this form:</span>
-              <div className="curriculum-page__header-actions">
+            <div className="curriculum-page__field curriculum-page__field--full">
+              <label>Classroom assignment source</label>
+              <p className="curriculum-page__field-hint">
+                Controls how classrooms linked to this curriculum should create assignments.
+              </p>
+              <KidDropdown
+                value={createAssignmentSource}
+                onChange={(v) => setCreateAssignmentSource(v as "curriculum" | "templates" | "create")}
+                fullWidth
+                ariaLabel="Classroom assignment source"
+                options={[
+                  { value: "curriculum", label: "Curriculum list" },
+                  { value: "templates", label: "Template library" },
+                  { value: "create", label: "Create one-off" },
+                ]}
+              />
+            </div>
+            <div className="curriculum-page__field curriculum-page__field--full">
+              <label>Curriculum assignment templates (list)</label>
+              <p className="curriculum-page__field-hint">
+                Curate a reusable list of templates for classes linked to this curriculum.
+              </p>
+              <div className="track-lessons-actions">
                 <button
                   type="button"
-                  className="ui-btn ui-btn--ghost"
-                  onClick={() => navigate("/app/curriculum/authoring?tab=rubrics&create=rubric")}
+                  className="kid-button kid-button--ghost"
+                  onClick={() => setAssignmentPickerMode("create")}
                 >
-                  New rubric template
+                  {createAssignmentTemplateIds.length > 0
+                    ? `Manage templates (${createAssignmentTemplateIds.length})`
+                    : "Add templates (optional)"}
                 </button>
+              </div>
+            </div>
+            <div className="curriculum-page__field curriculum-page__field--full">
+              <label>Optional track assignments</label>
+              <p className="curriculum-page__field-hint">
+                Add tracks to this curriculum right after save.
+              </p>
+              <div className="track-lessons-actions">
+                <button
+                  type="button"
+                  className="kid-button kid-button--ghost"
+                  onClick={() => setTrackPickerMode("create")}
+                >
+                  {createTrackIds.length > 0
+                    ? `Manage tracks (${createTrackIds.length})`
+                    : "Add tracks (optional)"}
+                </button>
+              </div>
+            </div>
+            <div className="curriculum-page__field curriculum-page__field--full curriculum-page__authoring-shortcuts">
+              <span className="curriculum-page__field-hint">Or open assignment authoring without saving this form:</span>
+              <div className="curriculum-page__header-actions">
                 <button
                   type="button"
                   className="ui-btn ui-btn--ghost"
@@ -539,7 +642,14 @@ export function CurriculumPage() {
 
       <ModalDialog
         isOpen={Boolean(editing)}
-        onClose={() => setEditing(null)}
+        onClose={() => {
+          setEditing(null);
+          setEditTrackIds([]);
+          setEditAssignmentTemplateIds([]);
+          setEditAssignmentSource("curriculum");
+          setTrackPickerMode(null);
+          setAssignmentPickerMode(null);
+        }}
         title="Edit Curriculum"
         ariaLabel="Edit Curriculum"
         contentClassName="curriculum-page__form-section curriculum-page__form-section--dialog"
@@ -548,7 +658,14 @@ export function CurriculumPage() {
             <button
               type="button"
               className="ui-btn ui-btn--ghost"
-              onClick={() => setEditing(null)}
+              onClick={() => {
+                setEditing(null);
+                setEditTrackIds([]);
+                setEditAssignmentTemplateIds([]);
+                setEditAssignmentSource("curriculum");
+                setTrackPickerMode(null);
+                setAssignmentPickerMode(null);
+              }}
               disabled={savingEdit}
             >
               Cancel
@@ -632,9 +749,112 @@ export function CurriculumPage() {
                 ))}
               </div>
             </div>
+            <div className="curriculum-page__field curriculum-page__field--full">
+              <label>Optional track assignments</label>
+              <p className="curriculum-page__field-hint">
+                Add tracks to this curriculum after saving edits.
+              </p>
+              <div className="track-lessons-actions">
+                <button
+                  type="button"
+                  className="kid-button kid-button--ghost"
+                  onClick={() => setTrackPickerMode("edit")}
+                >
+                  {editTrackIds.length > 0
+                    ? `Manage tracks (${editTrackIds.length})`
+                    : "Add tracks (optional)"}
+                </button>
+              </div>
+            </div>
+            <div className="curriculum-page__field curriculum-page__field--full">
+              <label>Classroom assignment source</label>
+              <p className="curriculum-page__field-hint">
+                Controls how classrooms linked to this curriculum should create assignments.
+              </p>
+              <KidDropdown
+                value={editAssignmentSource}
+                onChange={(v) => setEditAssignmentSource(v as "curriculum" | "templates" | "create")}
+                fullWidth
+                ariaLabel="Edit classroom assignment source"
+                options={[
+                  { value: "curriculum", label: "Curriculum list" },
+                  { value: "templates", label: "Template library" },
+                  { value: "create", label: "Create one-off" },
+                ]}
+              />
+            </div>
+            <div className="curriculum-page__field curriculum-page__field--full">
+              <label>Curriculum assignment templates (list)</label>
+              <p className="curriculum-page__field-hint">
+                Curate templates that classrooms can pick from when source is set to curriculum list.
+              </p>
+              <div className="track-lessons-actions">
+                <button
+                  type="button"
+                  className="kid-button kid-button--ghost"
+                  onClick={() => setAssignmentPickerMode("edit")}
+                >
+                  {editAssignmentTemplateIds.length > 0
+                    ? `Manage templates (${editAssignmentTemplateIds.length})`
+                    : "Add templates (optional)"}
+                </button>
+              </div>
+            </div>
           </div>
         </form>
       </ModalDialog>
+      <MultiAssignDialog
+        isOpen={trackPickerMode === "create"}
+        title="Select tracks to assign after curriculum creation"
+        items={trackOptions}
+        selectedIds={createTrackIds}
+        onSelectedIdsChange={setCreateTrackIds}
+        searchPlaceholder="Search tracks"
+        emptyLabel="No tracks available."
+        confirmLabel="Use selected tracks"
+        isSubmitting={creating}
+        onClose={() => setTrackPickerMode(null)}
+        onConfirm={() => setTrackPickerMode(null)}
+      />
+      <MultiAssignDialog
+        isOpen={trackPickerMode === "edit"}
+        title="Select tracks to assign to this curriculum"
+        items={trackOptions}
+        selectedIds={editTrackIds}
+        onSelectedIdsChange={setEditTrackIds}
+        searchPlaceholder="Search tracks"
+        emptyLabel="No tracks available."
+        confirmLabel="Use selected tracks"
+        isSubmitting={savingEdit}
+        onClose={() => setTrackPickerMode(null)}
+        onConfirm={() => setTrackPickerMode(null)}
+      />
+      <MultiAssignDialog
+        isOpen={assignmentPickerMode === "create"}
+        title="Select assignment templates for this curriculum"
+        items={assignmentTemplateOptions}
+        selectedIds={createAssignmentTemplateIds}
+        onSelectedIdsChange={setCreateAssignmentTemplateIds}
+        searchPlaceholder="Search templates"
+        emptyLabel="No assignment templates available."
+        confirmLabel="Use selected templates"
+        isSubmitting={creating}
+        onClose={() => setAssignmentPickerMode(null)}
+        onConfirm={() => setAssignmentPickerMode(null)}
+      />
+      <MultiAssignDialog
+        isOpen={assignmentPickerMode === "edit"}
+        title="Select assignment templates for this curriculum"
+        items={assignmentTemplateOptions}
+        selectedIds={editAssignmentTemplateIds}
+        onSelectedIdsChange={setEditAssignmentTemplateIds}
+        searchPlaceholder="Search templates"
+        emptyLabel="No assignment templates available."
+        confirmLabel="Use selected templates"
+        isSubmitting={savingEdit}
+        onClose={() => setAssignmentPickerMode(null)}
+        onConfirm={() => setAssignmentPickerMode(null)}
+      />
     </div>
   );
 }

@@ -138,6 +138,7 @@ const HOMESCHOOL_NAV: NavItem[] = [
 const INSTRUCTOR_NAV: NavItem[] = [
   { path: "/app", label: "Home", iconSrc: "/assets/cartoon-icons/house.png" },
   { path: "/app/classrooms", label: "Classrooms", iconSrc: "/assets/cartoon-icons/bag.png" },
+  { path: "/tenant", label: "Lessons", iconSrc: "/assets/cartoon-icons/Books.png" },
   { path: "/app/students", label: "Students", iconSrc: "/assets/cartoon-icons/Players.png" },
   { path: "/app/curriculum", label: "Curriculum", iconSrc: "/assets/cartoon-icons/Books.png" },
   { path: "/app/gamification", label: "Gamification", iconSrc: "/assets/cartoon-icons/Gift1.png" },
@@ -148,6 +149,7 @@ const INSTRUCTOR_NAV: NavItem[] = [
 
 const ADMIN_NAV: NavItem[] = [
   { path: "/app", label: "Dashboard", iconSrc: "/assets/cartoon-icons/house.png" },
+  { path: "/tenant", label: "Lessons", iconSrc: "/assets/cartoon-icons/Books.png", section: "Learning" },
   { path: "/app/labs", label: "Labs", iconSrc: "/assets/cartoon-icons/telescope.png", section: "Learning" },
   { path: "/app/members", label: "Users", iconSrc: "/assets/cartoon-icons/Players.png", section: "People" },
   { path: "/app/invitations", label: "Invitations", iconSrc: "/assets/cartoon-icons/Papyrus.png" },
@@ -168,6 +170,7 @@ const ADMIN_NAV: NavItem[] = [
     Admin Tasks, Health Check, Job Worker, Entity Browser are in TenantSwitcher dropdown only. */
 const PLATFORM_NAV: NavItem[] = [
   { path: "/app", label: "Platform Admin", iconSrc: "/assets/cartoon-icons/Lock.png" },
+  { path: "/app/platform/lessons", label: "Lessons", iconSrc: "/assets/cartoon-icons/Books.png" },
   { path: "/app/platform/dashboard", label: "Analytics", iconSrc: "/assets/cartoon-icons/Trail.png" },
   { path: "/app/platform/email", label: "Email Config", iconSrc: "/assets/cartoon-icons/Information.png" },
   { path: "/app/platform/users", label: "Users", iconSrc: "/assets/cartoon-icons/Players.png" },
@@ -188,6 +191,7 @@ function getNavItems(
   childContextStudentId: string | null,
 ): NavItem[] {
   const isOnPlatformPage =
+    pathname.startsWith("/app/platform/lessons") ||
     pathname.startsWith("/app/platform/dashboard") ||
     pathname.startsWith("/app/platform/email") ||
     pathname.startsWith("/app/platform/users") ||
@@ -268,6 +272,20 @@ function getCreateActions(
         description: "Add a new course with modules, lessons, and labs.",
         section: "Curriculum",
         to: "/app/curriculum?create=1",
+      },
+      {
+        id: "lesson",
+        label: "New lesson",
+        description: "Create a lesson in the new lesson builder.",
+        section: "Curriculum",
+        to: "/tenant",
+      },
+      {
+        id: "track",
+        label: "New track",
+        description: "Create a track and order lessons.",
+        section: "Curriculum",
+        to: "/tenant",
       },
       {
         id: "rubric",
@@ -576,6 +594,7 @@ export function Sidebar() {
   }, [location.pathname, isMobile, setClosed]);
 
   const isOnPlatformPage =
+    location.pathname.startsWith("/app/platform/lessons") ||
     location.pathname.startsWith("/app/platform/dashboard") ||
     location.pathname.startsWith("/app/platform/email") ||
     location.pathname.startsWith("/app/platform/users") ||

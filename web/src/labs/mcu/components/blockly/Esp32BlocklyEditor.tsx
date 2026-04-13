@@ -66,6 +66,7 @@ import {
 } from "../../../../lib/learnerLabStorage";
 import { useAuth } from "../../../../providers/AuthProvider";
 import { KidDialog } from "../../../../components/ui/KidDialog";
+import { KidDropdown } from "../../../../components/ui";
 
 const MM_PROJECTS_BASE_KEY = "stemplitude_micromaker_projects";
 const loadMmProjectsFromStorage = () => readLabProjectsArray(MM_PROJECTS_BASE_KEY);
@@ -2124,25 +2125,16 @@ export const Esp32BlocklyEditor: React.FC<Props> = ({
 
         {/* Right: Board selector + Exit */}
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <select
+          <KidDropdown
             value={boardId}
-            onChange={(e) => setBoardId(e.target.value)}
-            style={{
-              padding: "5px 8px",
-              border: "1px solid #e0c09a",
-              borderRadius: 7,
-              fontSize: 13,
-              background: "rgba(255,255,255,0.7)",
-              color: "#3a2518",
-              fontWeight: 600,
-            }}
-          >
-            {Object.values(BOARD_CONFIGS).map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.label}
-              </option>
-            ))}
-          </select>
+            ariaLabel="Board selector"
+            minWidth={170}
+            options={Object.values(BOARD_CONFIGS).map((b) => ({
+              value: b.id,
+              label: b.label,
+            }))}
+            onChange={(nextId) => setBoardId(nextId)}
+          />
           {(onExit || exitPath) && (
             <button
               type="button"
@@ -2956,24 +2948,22 @@ export const Esp32BlocklyEditor: React.FC<Props> = ({
                 }}
               />
               <label style={{ fontSize: 13 }}>Baud rate</label>
-              <select
+              <KidDropdown
                 value={baud}
-                onChange={(e) => setBaud(e.target.value)}
-                style={{
-                  padding: 8,
-                  border: "1px solid #ccc",
-                  borderRadius: 6,
-                }}
-              >
-                <option value="9600">9600</option>
-                <option value="19200">19200</option>
-                <option value="38400">38400</option>
-                <option value="57600">57600</option>
-                <option value="115200">115200</option>
-                <option value="230400">230400</option>
-                <option value="460800">460800</option>
-                <option value="921600">921600</option>
-              </select>
+                ariaLabel="Baud rate"
+                fullWidth
+                options={[
+                  { value: "9600", label: "9600" },
+                  { value: "19200", label: "19200" },
+                  { value: "38400", label: "38400" },
+                  { value: "57600", label: "57600" },
+                  { value: "115200", label: "115200" },
+                  { value: "230400", label: "230400" },
+                  { value: "460800", label: "460800" },
+                  { value: "921600", label: "921600" },
+                ]}
+                onChange={(nextBaud) => setBaud(nextBaud)}
+              />
             </div>
             <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
               <button
