@@ -1,0 +1,28 @@
+{
+  "lesson": {
+    "title": "Electric Circuits 101",
+    "summary": "Understand voltage, current, and resistance.",
+    "objectives": [
+      "Define voltage and current",
+      "Solve simple Ohm's law equations"
+    ],
+    "subject": "Physics",
+    "grade": "7",
+    "tags": ["circuits", "electricity"],
+    "visibility": "tenant_only",
+    "video": {
+      "provider": "youtube",
+      "provider_ref": "dQw4w9WgXcQ"
+    }
+  },
+  "track": {
+    "title": "Foundations of Circuits",
+    "summary": "Core electrical engineering foundations.",
+    "lessons": [
+      {
+        "lesson_id": "00000000-0000-0000-0000-000000000001",
+        "order_index": 0
+      }
+    ]
+  }
+}

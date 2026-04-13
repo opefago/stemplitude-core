@@ -122,6 +122,12 @@ class CurriculumService:
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Curriculum authoring is disabled for this franchise policy.",
             )
+        await self._validate_course_assignment_template_ids(
+            workspace_tenant_id=tenant_id,
+            parent_tenant_id=parent_tenant_id,
+            governance_mode=governance_mode,
+            assignment_template_ids=data.get("assignment_template_ids"),
+        )
         course = Course(tenant_id=tenant_id, **data)
         self.db.add(course)
         await self.db.flush()
@@ -172,6 +178,13 @@ class CurriculumService:
         course = await self._get_course_write(
             course_id, tenant_id, parent_tenant_id, governance_mode
         )
+        if "assignment_template_ids" in data:
+            await self._validate_course_assignment_template_ids(
+                workspace_tenant_id=tenant_id,
+                parent_tenant_id=parent_tenant_id,
+                governance_mode=governance_mode,
+                assignment_template_ids=data.get("assignment_template_ids"),
+            )
         for k, v in data.items():
             if v is not None:
                 setattr(course, k, v)
@@ -679,6 +692,33 @@ class CurriculumService:
             if rt is None or rt.tenant_id not in read_ids:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND, detail="Rubric template not found"
+                )
+
+    async def _validate_course_assignment_template_ids(
+        self,
+        *,
+        workspace_tenant_id: UUID,
+        parent_tenant_id: UUID | None,
+        governance_mode: str | None,
+        assignment_template_ids: list[UUID] | None,
+    ) -> None:
+        if assignment_template_ids is None:
+            return
+        if not assignment_template_ids:
+            return
+        read_ids = self._read_tenant_ids(workspace_tenant_id, parent_tenant_id, governance_mode)
+        result = await self.db.execute(
+            select(AssignmentTemplate.id, AssignmentTemplate.tenant_id).where(
+                AssignmentTemplate.id.in_(assignment_template_ids)
+            )
+        )
+        found = {row[0]: row[1] for row in result.all()}
+        for template_id in assignment_template_ids:
+            tenant_id = found.get(template_id)
+            if tenant_id is None or tenant_id not in read_ids:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Assignment template not found: {template_id}",
                 )
 
     async def create_assignment_template(

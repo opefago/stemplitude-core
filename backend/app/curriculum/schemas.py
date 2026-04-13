@@ -44,6 +44,19 @@ class CourseBase(BaseModel):
             "used to prefill new classes when this curriculum is selected."
         ),
     )
+    classroom_assignment_source: str = Field(
+        "curriculum",
+        description=(
+            "Default classroom assignment source policy: "
+            "'curriculum' (use configured curriculum templates), "
+            "'templates' (browse template library), "
+            "or 'create' (manual one-off assignments)."
+        ),
+    )
+    assignment_template_ids: list[UUID] | None = Field(
+        None,
+        description="Optional ordered list of assignment template IDs curated for this curriculum.",
+    )
 
     @field_validator("default_permitted_labs", mode="before")
     @classmethod
@@ -63,6 +76,38 @@ class CourseBase(BaseModel):
             if len(out) >= 32:
                 break
         return out or None
+
+    @field_validator("classroom_assignment_source", mode="before")
+    @classmethod
+    def normalize_classroom_assignment_source(cls, v):
+        if v is None:
+            return "curriculum"
+        value = str(v).strip().lower()
+        if value not in {"curriculum", "templates", "create"}:
+            raise ValueError(
+                "classroom_assignment_source must be one of: curriculum, templates, create"
+            )
+        return value
+
+    @field_validator("assignment_template_ids", mode="before")
+    @classmethod
+    def normalize_assignment_template_ids(cls, v):
+        if v is None:
+            return None
+        if not isinstance(v, list):
+            raise ValueError("assignment_template_ids must be a list of UUIDs")
+        out: list[UUID] = []
+        for item in v:
+            try:
+                parsed = UUID(str(item))
+            except (TypeError, ValueError):
+                continue
+            if parsed in out:
+                continue
+            out.append(parsed)
+            if len(out) >= 200:
+                break
+        return out
 
 
 class CourseCreate(CourseBase):
@@ -118,6 +163,14 @@ class CourseUpdate(BaseModel):
         None,
         description="Updated default lab launcher labels for new classes (send [] to clear).",
     )
+    classroom_assignment_source: str | None = Field(
+        None,
+        description="Updated classroom assignment source policy.",
+    )
+    assignment_template_ids: list[UUID] | None = Field(
+        None,
+        description="Updated curated assignment template IDs for this curriculum (send [] to clear).",
+    )
 
     @field_validator("default_permitted_labs", mode="before")
     @classmethod
@@ -135,6 +188,38 @@ class CourseUpdate(BaseModel):
                 continue
             out.append(s[:80])
             if len(out) >= 32:
+                break
+        return out
+
+    @field_validator("classroom_assignment_source", mode="before")
+    @classmethod
+    def normalize_classroom_assignment_source_update(cls, v):
+        if v is None:
+            return None
+        value = str(v).strip().lower()
+        if value not in {"curriculum", "templates", "create"}:
+            raise ValueError(
+                "classroom_assignment_source must be one of: curriculum, templates, create"
+            )
+        return value
+
+    @field_validator("assignment_template_ids", mode="before")
+    @classmethod
+    def normalize_assignment_template_ids_update(cls, v):
+        if v is None:
+            return None
+        if not isinstance(v, list):
+            raise ValueError("assignment_template_ids must be a list of UUIDs")
+        out: list[UUID] = []
+        for item in v:
+            try:
+                parsed = UUID(str(item))
+            except (TypeError, ValueError):
+                continue
+            if parsed in out:
+                continue
+            out.append(parsed)
+            if len(out) >= 200:
                 break
         return out
 

@@ -90,3 +90,19 @@ class ConnectRedirect(BaseModel):
         ...,
         description="URL to redirect the user to for OAuth authorization.",
     )
+
+
+class YouTubeVideoSummary(BaseModel):
+    id: str
+    title: str | None = None
+    description: str | None = None
+    thumbnail_url: str | None = None
+    published_at: str | None = None
+    privacy_status: str | None = None
+    duration: str | None = None
+
+
+class YouTubeVideoListResponse(BaseModel):
+    items: list[YouTubeVideoSummary]
+    next_page_token: str | None = None
+    prev_page_token: str | None = None

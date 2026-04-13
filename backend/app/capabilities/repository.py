@@ -18,6 +18,7 @@ _LAB_TYPES_ROBOTICS: tuple[str, ...] = (
     "access_robotics_lab",
     "robotics_lab",
     "micro-maker",
+    "robotics-lab",
 )
 _LAB_TYPES_GAME_MAKER: tuple[str, ...] = ("access_game_maker", "game_maker", "game-maker")
 _LAB_TYPES_DESIGN_MAKER: tuple[str, ...] = (

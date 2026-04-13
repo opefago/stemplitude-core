@@ -35,6 +35,13 @@ services:
       - S3_ACCESS_KEY_ID=test
       - S3_SECRET_ACCESS_KEY=test
       - S3_BUCKET_NAME=stemplitude-assets
+      - ROBOTICS_COMPILER_URL=${ROBOTICS_COMPILER_URL:-}
+      - ROBOTICS_COMPILER_TOKEN=${ROBOTICS_COMPILER_TOKEN:-}
+      - ROBOTICS_COMPILER_TIMEOUT_SECONDS=${ROBOTICS_COMPILER_TIMEOUT_SECONDS:-45}
+      - ROBOTICS_LOCAL_TOOLCHAIN_ENABLED=${ROBOTICS_LOCAL_TOOLCHAIN_ENABLED:-true}
+      - ROBOTICS_LOCAL_TOOLCHAIN_FAIL_OPEN=${ROBOTICS_LOCAL_TOOLCHAIN_FAIL_OPEN:-true}
+      - ROBOTICS_PROS_BIN=${ROBOTICS_PROS_BIN:-pros}
+      - ROBOTICS_ARM_GCC_BIN_DIR=${ROBOTICS_ARM_GCC_BIN_DIR:-}
 
   celery_worker:
     build: .
@@ -105,6 +112,14 @@ services:
   #   image: redis:7-alpine
   #   ports:
   #     - "6379:6379"
+
+  # Optional robotics compiler service for production-like deploys.
+  # Wire ROBOTICS_COMPILER_URL to this service when available, e.g.:
+  # ROBOTICS_COMPILER_URL=http://robotics_compiler:8080/compile
+  # robotics_compiler:
+  #   image: your-org/vex-compiler:latest
+  #   expose:
+  #     - "8080"
 
   localstack:
     image: localstack/localstack:latest

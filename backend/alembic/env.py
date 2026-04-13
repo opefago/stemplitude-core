@@ -42,6 +42,7 @@ from app.member_billing.models import *  # noqa: F401, F403
 from app.platform.models import *  # noqa: F401, F403
 from app.analytics.models import *  # noqa: F401, F403
 from app.growth.models import *  # noqa: F401, F403
+from app.lesson_content.models import *  # noqa: F401, F403
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)

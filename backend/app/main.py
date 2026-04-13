@@ -85,6 +85,12 @@ from app.invitations.router import router as invitations_router  # noqa: E402
 from app.growth.router import router as growth_router  # noqa: E402
 from app.member_billing.router import router as member_billing_router  # noqa: E402
 from app.analytics.router import router as analytics_router  # noqa: E402
+from app.admin_content.router import router as admin_content_router  # noqa: E402
+from app.tenant_content.router import router as tenant_content_router  # noqa: E402
+from app.session_content.router import router as session_content_router  # noqa: E402
+from app.media.router import router as media_router  # noqa: E402
+from app.search.router import router as search_router  # noqa: E402
+from app.robotics.router import router as robotics_router  # noqa: E402
 
 prefix = settings.API_V1_PREFIX
 
@@ -119,6 +125,13 @@ app.include_router(invitations_router, prefix=f"{prefix}/invitations", tags=["In
 app.include_router(growth_router, prefix=f"{prefix}/growth", tags=["Growth"])
 app.include_router(member_billing_router, prefix=f"{prefix}/member-billing", tags=["Member billing"])
 app.include_router(analytics_router, prefix=f"{prefix}/analytics", tags=["Analytics"])
+app.include_router(robotics_router, prefix=f"{prefix}/robotics", tags=["Robotics"])
+if settings.TRACK_LESSON_SURFACES_ENABLED:
+    app.include_router(admin_content_router, prefix=f"{prefix}/admin", tags=["Admin Content"])
+    app.include_router(tenant_content_router, prefix=f"{prefix}/tenant", tags=["Tenant Content"])
+    app.include_router(session_content_router, prefix=f"{prefix}/classrooms", tags=["Session Content"])
+    app.include_router(media_router, prefix=f"{prefix}/media", tags=["Media"])
+    app.include_router(search_router, prefix=f"{prefix}/search", tags=["Search"])
 
 
 @app.get("/health")

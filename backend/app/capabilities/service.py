@@ -23,6 +23,7 @@ from .schemas import (
 LAB_LAUNCHER_CAPABILITIES: tuple[tuple[str, str], ...] = (
     ("circuit-maker", "access_electronics_lab"),
     ("micro-maker", "access_robotics_lab"),
+    ("robotics-lab", "access_robotics_lab"),
     ("python-game", "access_python_lab"),
     ("game-maker", "access_game_maker"),
     ("design-maker", "access_design_maker"),

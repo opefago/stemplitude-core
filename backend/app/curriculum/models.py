@@ -24,6 +24,10 @@ class Course(Base):
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     is_published: Mapped[bool] = mapped_column(Boolean, default=False)
     default_permitted_labs: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    classroom_assignment_source: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="curriculum"
+    )
+    assignment_template_ids: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
 
 class Module(Base):

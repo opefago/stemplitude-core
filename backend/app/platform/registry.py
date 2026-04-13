@@ -7,12 +7,16 @@ Each handler receives validated, typed parameters and a database session.
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Coroutine
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.core.security import hash_password
 from app.licenses.models import License, LicenseFeature, LicenseLimit, SeatUsage
 from app.plans.models import Plan, PlanFeature, PlanLimit
@@ -143,6 +147,146 @@ def validate_params(cmd: CommandDef, raw: dict[str, str]) -> dict[str, str]:
             validated[canonical] = p.default
 
     return validated
+
+
+# ─── Robotics Toolchain Handlers ──────────────────────────────────────────────
+
+
+def _detect_pros_binary() -> str | None:
+    configured = (settings.ROBOTICS_PROS_BIN or "").strip()
+    if configured:
+        resolved = shutil.which(configured)
+        if resolved:
+            return resolved
+        if Path(configured).exists():
+            return configured
+    return shutil.which("pros")
+
+
+def _run_version_command(cmd: list[str]) -> str | None:
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=20)
+        if proc.returncode != 0:
+            return None
+        return (proc.stdout or proc.stderr or "").strip() or None
+    except Exception:
+        return None
+
+
+def _detect_arm_gcc_bin_dir() -> str | None:
+    configured = (settings.ROBOTICS_ARM_GCC_BIN_DIR or "").strip()
+    if configured and Path(configured).exists():
+        return configured
+    xpack_bins = sorted(
+        Path.home().glob("Library/xPacks/@xpack-dev-tools/arm-none-eabi-gcc/*/.content/bin"),
+        reverse=True,
+    )
+    for candidate in xpack_bins:
+        if candidate.exists():
+            return str(candidate)
+    return None
+
+
+async def handle_robotics_toolchain_status(
+    session: AsyncSession, params: dict[str, str]
+) -> CommandResult:
+    _ = session, params
+    pros_bin = _detect_pros_binary()
+    pros_version = _run_version_command([pros_bin, "--version"]) if pros_bin else None
+
+    arm_bin = shutil.which("arm-none-eabi-gcc")
+    arm_bin_dir = _detect_arm_gcc_bin_dir()
+    if arm_bin_dir and Path(arm_bin_dir, "arm-none-eabi-gcc").exists():
+        arm_bin = str(Path(arm_bin_dir, "arm-none-eabi-gcc"))
+    arm_version = _run_version_command([arm_bin, "--version"]) if arm_bin else None
+
+    return {
+        "ok": True,
+        "toolchain": {
+            "pros_bin": pros_bin,
+            "pros_version": pros_version,
+            "arm_none_eabi_gcc_bin": arm_bin,
+            "arm_none_eabi_gcc_version": arm_version,
+            "arm_none_eabi_gcc_bin_dir": arm_bin_dir,
+            "local_compile_enabled": bool(settings.ROBOTICS_LOCAL_TOOLCHAIN_ENABLED),
+            "fail_open": bool(settings.ROBOTICS_LOCAL_TOOLCHAIN_FAIL_OPEN),
+        },
+    }
+
+
+async def handle_robotics_toolchain_install(
+    session: AsyncSession, params: dict[str, str]
+) -> CommandResult:
+    _ = session
+    python_bin = params.get("python", "python3")
+    brew_bin = params.get("brew", "brew")
+    xpm_bin = params.get("xpm", "npx xpm")
+    install_log: list[dict[str, Any]] = []
+
+    steps: list[tuple[str, list[str], int]] = [
+        ("install_pros_cli", [python_bin, "-m", "pip", "install", "--user", "pros-cli"], 300),
+        (
+            "install_arm_gcc",
+            [brew_bin, "install", "homebrew/core/arm-none-eabi-gcc"],
+            300,
+        ),
+        (
+            "install_xpack_arm_gcc",
+            xpm_bin.split() + ["install", "--global", "@xpack-dev-tools/arm-none-eabi-gcc"],
+            300,
+        ),
+    ]
+
+    for step_name, command, timeout_s in steps:
+        try:
+            proc = subprocess.run(command, capture_output=True, text=True, check=False, timeout=timeout_s)
+            install_log.append(
+                {
+                    "step": step_name,
+                    "command": " ".join(command),
+                    "exit_code": proc.returncode,
+                    "stdout_tail": (proc.stdout or "")[-1200:],
+                    "stderr_tail": (proc.stderr or "")[-1200:],
+                }
+            )
+            if proc.returncode != 0:
+                return {"ok": False, "error": f"{step_name} failed", "logs": install_log}
+        except Exception as exc:
+            install_log.append({"step": step_name, "command": " ".join(command), "error": str(exc)})
+            return {"ok": False, "error": f"{step_name} raised exception", "logs": install_log}
+
+    status = await handle_robotics_toolchain_status(session, {})
+    return {
+        "ok": True,
+        "message": "Robotics toolchain install steps completed",
+        "logs": install_log,
+        "toolchain": status.get("toolchain"),
+    }
+
+
+register(
+    CommandDef(
+        domain="robotics",
+        action="toolchain-status",
+        help="Show local robotics compile toolchain status (PROS + ARM GCC)",
+        params=[],
+        handler=handle_robotics_toolchain_status,
+    )
+)
+
+register(
+    CommandDef(
+        domain="robotics",
+        action="toolchain-install",
+        help="Install local robotics compile toolchain dependencies",
+        params=[
+            ParamDef(name="python", long="--python", help="Python executable", default="python3"),
+            ParamDef(name="brew", long="--brew", help="Homebrew executable", default="brew"),
+            ParamDef(name="xpm", long="--xpm", help="xpm runner command", default="npx xpm"),
+        ],
+        handler=handle_robotics_toolchain_install,
+    )
+)
 
 
 # ─── Handlers ───────────────────────────────────────────────────────────────

@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     APP_ENV: str = "development"
     DEBUG: bool = True
     SECRET_KEY: str = "change-me"
+    APP_URL: str = "http://localhost:8000"
     API_V1_PREFIX: str = "/api/v1"
     ALLOWED_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:3000"]
 
@@ -87,6 +88,12 @@ class Settings(BaseSettings):
     STRIPE_DEV_FALLBACK_PRICE_YEARLY: str = ""
     # Stripe Connect (tenant → student/parent payments). OAuth client id from Stripe Dashboard → Connect.
     STRIPE_CONNECT_CLIENT_ID: str = ""
+
+    # Google / YouTube OAuth
+    GOOGLE_OAUTH_CLIENT_ID: str = ""
+    GOOGLE_OAUTH_CLIENT_SECRET: str = ""
+    YOUTUBE_OAUTH_CLIENT_ID: str = ""
+    YOUTUBE_OAUTH_CLIENT_SECRET: str = ""
 
     # PayPal (subscriptions / billing — optional until integrated)
     PAYPAL_CLIENT_ID: str = ""
@@ -194,6 +201,16 @@ class Settings(BaseSettings):
     # Classroom session recording governance
     SESSION_RECORDING_RETENTION_DAYS: int = 30
     SESSION_RECORDING_PRESIGNED_EXPIRES_SECONDS: int = 900
+    TRACK_LESSON_SURFACES_ENABLED: bool = True
+
+    # Robotics compile gateway (optional remote compiler service)
+    ROBOTICS_COMPILER_URL: str = ""
+    ROBOTICS_COMPILER_TOKEN: str = ""
+    ROBOTICS_COMPILER_TIMEOUT_SECONDS: int = 45
+    ROBOTICS_LOCAL_TOOLCHAIN_ENABLED: bool = True
+    ROBOTICS_LOCAL_TOOLCHAIN_FAIL_OPEN: bool = True
+    ROBOTICS_PROS_BIN: str = "pros"
+    ROBOTICS_ARM_GCC_BIN_DIR: str = ""
 
     # Public API origin for signed email actions (unsubscribe one-click). No trailing slash.
     # Use scheme + host[:port] only (e.g. https://api.yourdomain.com), not …/api/v1 — the app appends API_V1_PREFIX.
