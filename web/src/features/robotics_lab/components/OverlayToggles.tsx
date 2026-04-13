@@ -31,7 +31,7 @@ export function OverlayToggles({ overlays, onToggle }: Props) {
           onClick={() => onToggle(key)}
           title={label}
         >
-          <Icon size={14} />
+          <Icon size={14} /> {label}
         </button>
       ))}
     </div>

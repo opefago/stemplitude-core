@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { OrbitControls, Grid } from "@react-three/drei";
+import { OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import { useCameraController } from "../../labs/robotics/view/useCameraController";
 import { overlayOpacityForMode } from "../../labs/robotics/view/overlayManager";
@@ -11,6 +11,35 @@ import { PathTrailOverlay } from "../../labs/robotics/view/overlays/PathTrailOve
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function buildGridLines(width, depth, step, y) {
+  const points = [];
+  for (let x = 0; x <= width; x += step) {
+    points.push(x, y, 0, x, y, depth);
+  }
+  for (let z = 0; z <= depth; z += step) {
+    points.push(0, y, z, width, y, z);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(points, 3));
+  return geo;
+}
+
+function WorkspaceGrid({ width, depth }) {
+  const cellGeo = useMemo(() => buildGridLines(width, depth, 20, 0.06), [width, depth]);
+  const sectionGeo = useMemo(() => buildGridLines(width, depth, 100, 0.1), [width, depth]);
+
+  return (
+    <group>
+      <lineSegments geometry={cellGeo}>
+        <lineBasicMaterial color="#a0aec0" transparent opacity={0.45} depthWrite={false} />
+      </lineSegments>
+      <lineSegments geometry={sectionGeo}>
+        <lineBasicMaterial color="#7a8ba0" transparent opacity={0.7} depthWrite={false} />
+      </lineSegments>
+    </group>
+  );
 }
 
 function WorldObject({ object, editable = false, selected = false, onPointerDown, onPointerMove, onPointerUp }) {
@@ -95,6 +124,7 @@ function EditableObjectsLayer({
   onObjectDragStart,
   onObjectDragEnd,
   onDragStateChange,
+  onObjectSelect,
 }) {
   const { camera } = useThree();
   const dragPlane = useMemo(() => new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), []);
@@ -103,8 +133,9 @@ function EditableObjectsLayer({
 
   const handlePointerDown = useCallback(
     (event, object) => {
-      if (!onObjectMove) return;
       event.stopPropagation();
+      onObjectSelect?.(object.id);
+      if (!onObjectMove) return;
       event.target.setPointerCapture?.(event.pointerId);
       if (!event.ray.intersectPlane(dragPlane, dragHit)) return;
       setDragState({
@@ -116,7 +147,7 @@ function EditableObjectsLayer({
       onObjectDragStart?.(object.id);
       onDragStateChange?.(true);
     },
-    [dragHit, dragPlane, onDragStateChange, onObjectDragStart, onObjectMove],
+    [dragHit, dragPlane, onDragStateChange, onObjectDragStart, onObjectMove, onObjectSelect],
   );
 
   const handlePointerMove = useCallback(
@@ -181,6 +212,7 @@ export function ThreeSimViewport({
   onObjectMove,
   onObjectDragStart,
   onObjectDragEnd,
+  onObjectSelect,
   robotStartPose,
   onRobotStartMove,
   onRobotStartMoveEnd,
@@ -264,21 +296,10 @@ export function ThreeSimViewport({
         <group name="worldRoot">
           <group name="floorLayer">
             {resolvedOverlayState.showGrid ? (
-              <Grid
-                position={[worldCenter.x, 0.02, worldCenter.z]}
-                args={[planeSize, planeSize]}
-                cellSize={20}
-                cellThickness={0.85}
-                sectionSize={100}
-                sectionThickness={1.4}
-                cellColor="#a9b4c4"
-                sectionColor="#8793a7"
-                fadeDistance={1800}
-                fadeStrength={0.7}
-              />
+              <WorkspaceGrid width={worldWidth} depth={worldDepth} />
             ) : null}
             <mesh position={[worldCenter.x, 0, worldCenter.z]} rotation={[-Math.PI / 2, 0, 0]}>
-              <planeGeometry args={[planeSize, planeSize]} />
+              <planeGeometry args={[worldWidth, worldDepth]} />
               <meshStandardMaterial color="#e8edf5" />
             </mesh>
           </group>
@@ -291,6 +312,7 @@ export function ThreeSimViewport({
                 onObjectDragStart={onObjectDragStart}
                 onObjectDragEnd={onObjectDragEnd}
                 onDragStateChange={handleDragStateChange}
+                onObjectSelect={onObjectSelect}
               />
             ) : (
           (worldScene?.objects ?? [])

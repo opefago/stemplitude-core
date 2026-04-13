@@ -299,6 +299,66 @@ export default function RoboticsSimEditorPage() {
         </section>
 
         <section className="robotics-left-card">
+          <h4>Workplane</h4>
+          <div className="robotics-workplane-controls">
+            <div className="robotics-workplane-presets">
+              {[
+                { label: "Small", w: 20, h: 20, cm: "400x400" },
+                { label: "Medium", w: 40, h: 24, cm: "800x480" },
+                { label: "Large", w: 50, h: 50, cm: "1000x1000" },
+                { label: "VEX", w: 90, h: 90, cm: "1800x1800" },
+              ].map((preset) => (
+                <button
+                  key={preset.label}
+                  className={`robotics-lab-btn robotics-workplane-preset${
+                    world.width_cells === preset.w && world.height_cells === preset.h ? " active" : ""
+                  }`}
+                  onClick={() => {
+                    setWorld((prev) => ({ ...prev, width_cells: preset.w, height_cells: preset.h }));
+                    resetCamera();
+                  }}
+                  title={preset.cm + " cm"}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+            <div className="robotics-workplane-dims">
+              <label className="robotics-form-field">
+                <span>Width (cm)</span>
+                <input
+                  type="number"
+                  min={200}
+                  max={2000}
+                  step={GRID_CELL_CM}
+                  value={world.width_cells * GRID_CELL_CM}
+                  onChange={(event) => {
+                    const cm = Math.max(200, Math.min(2000, Number(event.target.value) || 200));
+                    setWorld((prev) => ({ ...prev, width_cells: Math.round(cm / GRID_CELL_CM) }));
+                  }}
+                  onBlur={resetCamera}
+                />
+              </label>
+              <label className="robotics-form-field">
+                <span>Depth (cm)</span>
+                <input
+                  type="number"
+                  min={200}
+                  max={2000}
+                  step={GRID_CELL_CM}
+                  value={world.height_cells * GRID_CELL_CM}
+                  onChange={(event) => {
+                    const cm = Math.max(200, Math.min(2000, Number(event.target.value) || 200));
+                    setWorld((prev) => ({ ...prev, height_cells: Math.round(cm / GRID_CELL_CM) }));
+                  }}
+                  onBlur={resetCamera}
+                />
+              </label>
+            </div>
+          </div>
+        </section>
+
+        <section className="robotics-left-card">
           <h4>Drag to place</h4>
           <div className="robotics-placement-library">
             {PLACEMENT_ITEMS.map((item) => (
@@ -338,6 +398,10 @@ export default function RoboticsSimEditorPage() {
             }}
             onObjectMove={updateObjectPosition}
             onObjectDragEnd={commitObjectMove}
+            onObjectSelect={(id) => {
+              setSelectedObjectId(id);
+              setRightTab("properties");
+            }}
             robotStartPose={startPose}
             onRobotStartMove={handleRobotStartMove}
             onRobotStartMoveEnd={commitRobotStartMove}
