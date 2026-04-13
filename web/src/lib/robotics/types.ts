@@ -64,6 +64,8 @@ export type RoboticsIRNode =
   | RoboticsTurnNode
   | RoboticsWaitNode
   | RoboticsSetMotorNode
+  | RoboticsActuatorActionNode
+  | RoboticsReturnNode
   | RoboticsIfNode
   | RoboticsRepeatNode
   | RoboticsSensorReadNode
@@ -103,6 +105,14 @@ export interface RoboticsSetMotorNode extends RoboticsNodeBase {
   duration_sec?: number;
 }
 
+export interface RoboticsActuatorActionNode extends RoboticsNodeBase {
+  kind: "actuator_action";
+  actuator_id: string;
+  action: string;
+  value?: string | number | boolean;
+  duration_sec?: number;
+}
+
 export interface RoboticsIfNode extends RoboticsNodeBase {
   kind: "if";
   condition: RoboticsCondition;
@@ -132,13 +142,18 @@ export interface RoboticsEmitEventNode extends RoboticsNodeBase {
 export interface RoboticsCallNode extends RoboticsNodeBase {
   kind: "call";
   function_id: string;
-  args?: Array<string | number | boolean>;
+  args?: RoboticsExpression[];
 }
 
 export interface RoboticsAssignNode extends RoboticsNodeBase {
   kind: "assign";
   variable: string;
   value: RoboticsExpression;
+}
+
+export interface RoboticsReturnNode extends RoboticsNodeBase {
+  kind: "return";
+  value?: RoboticsExpression;
 }
 
 export type RoboticsCondition =
@@ -154,7 +169,8 @@ export type RoboticsExpression =
   | { type: "boolean"; value: boolean }
   | { type: "string"; value: string }
   | { type: "var"; name: string }
-  | { type: "sensor"; sensor: SensorKind };
+  | { type: "sensor"; sensor: SensorKind }
+  | { type: "binary"; op: "add" | "sub" | "mul" | "div"; left: RoboticsExpression; right: RoboticsExpression };
 
 export interface RoboticsAttemptRecord {
   id: string;

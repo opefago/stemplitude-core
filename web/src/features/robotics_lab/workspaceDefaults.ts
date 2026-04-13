@@ -132,6 +132,12 @@ export function describeNode(node: { kind: string; [key: string]: unknown }) {
   if (node.kind === "wait") {
     return `wait ${node.seconds}s`;
   }
+  if (node.kind === "actuator_action") {
+    return `${node.actuator_id}.${node.action}`;
+  }
+  if (node.kind === "return") {
+    return "return";
+  }
   if (node.kind === "read_sensor") {
     return `read ${node.sensor} -> ${node.output_var}`;
   }
@@ -147,17 +153,4 @@ export function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
 
-export function getRobotModel() {
-  return {
-    wheel_base_cm: 14,
-    width_cm: 16,
-    length_cm: 18,
-    sensors: [
-      { id: "distance", kind: "distance", mount: { offset_cm: { x: 5, y: 0 }, heading_offset_deg: 0 }, config: { max_range_cm: 250 } },
-      { id: "line", kind: "line", mount: { offset_cm: { x: 0, y: 0 }, heading_offset_deg: 0 }, config: {} },
-      { id: "color", kind: "color", mount: { offset_cm: { x: 0, y: 0 }, heading_offset_deg: 0 }, config: {} },
-      { id: "bumper", kind: "bumper", mount: { offset_cm: { x: 7, y: 0 }, heading_offset_deg: 0 }, config: {} },
-      { id: "gyro", kind: "gyro", mount: { offset_cm: { x: 0, y: 0 }, heading_offset_deg: 0 }, config: {} },
-    ],
-  };
-}
+// Robot model resolution has moved to labs/robotics/adapters/kitRegistry.ts

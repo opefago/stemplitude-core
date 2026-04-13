@@ -3,6 +3,85 @@ import * as Blockly from "blockly";
 import { registerGrowableIfElseChainBlocks } from "../../lib/blockly/growableIfElseChain";
 
 let roboticsBlocksRegistered = false;
+let roboticsSensorOptions = [
+  ["distance", "distance"],
+  ["line", "line"],
+  ["color", "color"],
+  ["bumper", "bumper"],
+  ["gyro", "gyro"],
+];
+let roboticsActuatorOptions = [
+  ["left_motor", "left_motor"],
+  ["right_motor", "right_motor"],
+  ["arm_motor", "arm_motor"],
+];
+
+function normalizeSensorOptions(sensorKinds) {
+  if (!Array.isArray(sensorKinds) || sensorKinds.length === 0) return roboticsSensorOptions;
+  const next = sensorKinds
+    .map((sensor) => String(sensor || "").trim().toLowerCase())
+    .filter(Boolean)
+    .map((sensor) => [sensor, sensor]);
+  const deduped = [];
+  const seen = new Set();
+  for (const [label, value] of next) {
+    if (seen.has(value)) continue;
+    seen.add(value);
+    deduped.push([label, value]);
+  }
+  if (!seen.has("gyro")) deduped.push(["gyro", "gyro"]);
+  return deduped.length > 0 ? deduped : roboticsSensorOptions;
+}
+
+function normalizeActuatorOptions(actuatorKinds) {
+  if (!Array.isArray(actuatorKinds) || actuatorKinds.length === 0) return roboticsActuatorOptions;
+  const next = actuatorKinds
+    .map((actuator) => String(actuator || "").trim().toLowerCase())
+    .filter(Boolean)
+    .map((actuator) => [actuator, actuator]);
+  const deduped = [];
+  const seen = new Set();
+  for (const [label, value] of next) {
+    if (seen.has(value)) continue;
+    seen.add(value);
+    deduped.push([label, value]);
+  }
+  return deduped.length > 0 ? deduped : roboticsActuatorOptions;
+}
+
+function setSensorFieldOptions(workspace, nextOptions) {
+  if (!workspace) return;
+  const allowed = new Set(nextOptions.map(([, value]) => value));
+  const defaultValue = nextOptions[0]?.[1] || "distance";
+  for (const block of workspace.getAllBlocks(false)) {
+    if (block.type !== "robotics_read_sensor" && block.type !== "robotics_sensor_condition") continue;
+    const field = block.getField("SENSOR");
+    if (!field) continue;
+    field.menuGenerator_ = nextOptions;
+    const currentValue = String(field.getValue() || "");
+    if (!allowed.has(currentValue)) {
+      field.setValue(defaultValue);
+    }
+    block.render?.();
+  }
+}
+
+function setActuatorFieldOptions(workspace, nextOptions) {
+  if (!workspace) return;
+  const allowed = new Set(nextOptions.map(([, value]) => value));
+  const defaultValue = nextOptions[0]?.[1] || "left_motor";
+  for (const block of workspace.getAllBlocks(false)) {
+    if (block.type !== "robotics_set_motor") continue;
+    const field = block.getField("MOTOR");
+    if (!field) continue;
+    field.menuGenerator_ = nextOptions;
+    const currentValue = String(field.getValue() || "");
+    if (!allowed.has(currentValue)) {
+      field.setValue(defaultValue);
+    }
+    block.render?.();
+  }
+}
 
 function registerRoboticsBlocks() {
   if (roboticsBlocksRegistered) return;
@@ -86,13 +165,7 @@ function registerRoboticsBlocks() {
       this.appendDummyInput()
         .appendField("read sensor")
         .appendField(
-          new Blockly.FieldDropdown([
-            ["distance", "distance"],
-            ["line", "line"],
-            ["color", "color"],
-            ["bumper", "bumper"],
-            ["gyro", "gyro"],
-          ]),
+          new Blockly.FieldDropdown(() => roboticsSensorOptions),
           "SENSOR",
         )
         .appendField("as")
@@ -107,14 +180,7 @@ function registerRoboticsBlocks() {
     init() {
       this.appendDummyInput()
         .appendField("set motor")
-        .appendField(
-          new Blockly.FieldDropdown([
-            ["left", "left_motor"],
-            ["right", "right_motor"],
-            ["arm", "arm_motor"],
-          ]),
-          "MOTOR",
-        )
+        .appendField(new Blockly.FieldDropdown(() => roboticsActuatorOptions), "MOTOR")
         .appendField("speed")
         .appendField(new Blockly.FieldNumber(60, -100, 100, 1), "SPEED")
         .appendField("% for")
@@ -144,13 +210,7 @@ function registerRoboticsBlocks() {
       this.appendDummyInput()
         .appendField("sensor")
         .appendField(
-          new Blockly.FieldDropdown([
-            ["distance", "distance"],
-            ["line", "line"],
-            ["color", "color"],
-            ["bumper", "bumper"],
-            ["gyro", "gyro"],
-          ]),
+          new Blockly.FieldDropdown(() => roboticsSensorOptions),
           "SENSOR",
         )
         .appendField(
@@ -190,17 +250,22 @@ function registerRoboticsBlocks() {
 }
 
 function parseSensorCondition(block) {
+  const fallbackSensor = roboticsSensorOptions[0]?.[1] || "distance";
   if (!block) {
-    return { op: "sensor_gt", sensor: "distance", value: 20 };
+    return { op: "sensor_gt", sensor: fallbackSensor, value: 20 };
   }
   if (block.type === "robotics_sensor_condition") {
     return {
       op: block.getFieldValue("OP") || "sensor_gt",
-      sensor: block.getFieldValue("SENSOR") || "distance",
+      sensor: block.getFieldValue("SENSOR") || fallbackSensor,
       value: Number(block.getFieldValue("VALUE") || 20),
     };
   }
-  return { op: "sensor_gt", sensor: "distance", value: 20 };
+  return { op: "sensor_gt", sensor: fallbackSensor, value: 20 };
+}
+
+function defaultActuatorValue() {
+  return roboticsActuatorOptions[0]?.[1] || "left_motor";
 }
 
 function buildIfNodeFromChain(cursor, index = 0) {
@@ -281,7 +346,7 @@ function parseStatementChain(firstBlock) {
       nodes.push({
         id: cursor.id,
         kind: "set_motor",
-        motor_id: cursor.getFieldValue("MOTOR") || "left_motor",
+        motor_id: cursor.getFieldValue("MOTOR") || defaultActuatorValue(),
         speed_pct: Number(cursor.getFieldValue("SPEED") || 60),
         duration_sec: Number(cursor.getFieldValue("DURATION") || 0.8),
       });
@@ -370,7 +435,7 @@ function createBlockForNode(workspace, node) {
     block.setFieldValue(String(node.sensor || "distance"), "SENSOR");
     block.setFieldValue(String(node.output_var || "sensor_value"), "OUT");
   } else if (node.kind === "set_motor") {
-    block.setFieldValue(String(node.motor_id || "left_motor"), "MOTOR");
+    block.setFieldValue(String(node.motor_id || defaultActuatorValue()), "MOTOR");
     block.setFieldValue(String(node.speed_pct ?? 60), "SPEED");
     block.setFieldValue(String(node.duration_sec ?? 0.8), "DURATION");
   } else if (node.kind === "repeat") {
@@ -435,7 +500,7 @@ function applyProgram(workspace, program) {
   }
 }
 
-export function RoboticsBlocklyEditor({ program, onProgramChange, onProgramCommit }) {
+export function RoboticsBlocklyEditor({ program, onProgramChange, onProgramCommit, sensorKinds, actuatorKinds }) {
   const divRef = useRef(null);
   const workspaceRef = useRef(null);
   const applyingRef = useRef(false);
@@ -444,6 +509,16 @@ export function RoboticsBlocklyEditor({ program, onProgramChange, onProgramCommi
   const onProgramCommitRef = useRef(onProgramCommit);
   const signatureRef = useRef("");
   const [mountError, setMountError] = useState("");
+
+  useEffect(() => {
+    roboticsSensorOptions = normalizeSensorOptions(sensorKinds);
+    setSensorFieldOptions(workspaceRef.current, roboticsSensorOptions);
+  }, [sensorKinds]);
+
+  useEffect(() => {
+    roboticsActuatorOptions = normalizeActuatorOptions(actuatorKinds);
+    setActuatorFieldOptions(workspaceRef.current, roboticsActuatorOptions);
+  }, [actuatorKinds]);
 
   useEffect(() => {
     onProgramChangeRef.current = onProgramChange;

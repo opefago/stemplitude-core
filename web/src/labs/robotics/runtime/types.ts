@@ -1,9 +1,19 @@
 import type { RoboticsExecutionState, RoboticsProgram } from "../../../lib/robotics";
+import type { IssueCategory, IssueCode, IssueSeverity } from "./issueCodes";
+
+export interface RuntimeIssue {
+  code: IssueCode;
+  severity: IssueSeverity;
+  category: IssueCategory;
+  message: string;
+  line?: number;
+}
 
 export interface RuntimeTickResult {
   state: RoboticsExecutionState;
   highlightedNodeId?: string;
   diagnostics?: string[];
+  issues: RuntimeIssue[];
 }
 
 export interface RuntimeExecutor {

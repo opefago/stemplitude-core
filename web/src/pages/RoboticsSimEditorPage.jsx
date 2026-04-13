@@ -2,9 +2,11 @@ import { Eye, EyeOff, Pause, Play, RotateCcw, RotateCw, Save, StepForward, Trash
 import { useEffect, useMemo, useState } from "react";
 import { useRoboticsWorkspaceContext } from "../features/robotics_lab/RoboticsWorkspaceContext";
 import { GRID_CELL_CM } from "../features/robotics_lab/workspaceDefaults";
-import { ThreeSimViewport } from "../features/robotics_lab/ThreeSimViewport";
+import { ThreeSimViewport } from "../features/robotics_lab/ThreeSimViewport.tsx";
 import { CameraToolbar } from "../features/robotics_lab/components/CameraToolbar";
 import { OverlayToggles } from "../features/robotics_lab/components/OverlayToggles";
+import { ViewportSettingsDialog } from "../features/robotics_lab/components/ViewportSettingsDialog";
+import { resolveKitCapabilities } from "../labs/robotics";
 
 const PLACEMENT_ITEMS = [
   { type: "wall", label: "Wall", size: { x: 120, y: 28, z: 18 }, defaultColor: "#6b7280" },
@@ -12,6 +14,17 @@ const PLACEMENT_ITEMS = [
   { type: "target_zone", label: "Target Zone", size: { x: 60, y: 10, z: 60 }, defaultColor: "#22c55e" },
   { type: "color_zone", label: "Color Zone", size: { x: 50, y: 6, z: 50 }, defaultColor: "#f59e0b" },
 ];
+function formatSensorValue(sensorKind, value) {
+  if (sensorKind === "distance") return `${Number(value ?? 0).toFixed(1)} cm`;
+  if (sensorKind === "gyro") return `${Math.round(Number(value ?? 0))} deg`;
+  if (sensorKind === "line") return value ? "Detected" : "No line";
+  if (sensorKind === "bumper" || sensorKind === "touch") return value ? "Pressed" : "Released";
+  if (sensorKind === "color") return String(value ?? "default");
+  if (typeof value === "boolean") return value ? "On" : "Off";
+  if (typeof value === "number") return Number.isFinite(value) ? String(value) : "0";
+  if (value === null || value === undefined || value === "") return "--";
+  return String(value);
+}
 
 function makeSceneObject(item, x, z) {
   return {
@@ -28,6 +41,9 @@ function makeSceneObject(item, x, z) {
 
 export default function RoboticsSimEditorPage() {
   const {
+    manifests,
+    selectedVendor,
+    selectedRobotType,
     world,
     setWorld,
     pose,
@@ -63,6 +79,14 @@ export default function RoboticsSimEditorPage() {
   const [dragType, setDragType] = useState(null);
   const [rightTab, setRightTab] = useState("scene");
   const [selectedObjectId, setSelectedObjectId] = useState(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [viewportBackgroundColor, setViewportBackgroundColor] = useState("#f4f6f8");
+
+  useEffect(() => {
+    const onOpenSettings = () => setSettingsOpen(true);
+    window.addEventListener("robotics:openViewportSettings", onOpenSettings);
+    return () => window.removeEventListener("robotics:openViewportSettings", onOpenSettings);
+  }, []);
 
   const worldScene = world.world_scene || { version: 1, gravity_m_s2: 9.81, objects: [] };
   const worldSummary = useMemo(
@@ -73,6 +97,21 @@ export default function RoboticsSimEditorPage() {
     () => worldScene.objects.find((object) => object.id === selectedObjectId) || null,
     [selectedObjectId, worldScene.objects],
   );
+  const selectedManifest = useMemo(
+    () => manifests.find((item) => item.vendor === selectedVendor && item.robot_type === selectedRobotType) || null,
+    [manifests, selectedRobotType, selectedVendor],
+  );
+  const kitCapabilities = useMemo(
+    () =>
+      resolveKitCapabilities({
+        vendor: selectedVendor,
+        robotType: selectedRobotType,
+        manifest: selectedManifest,
+      }),
+    [selectedManifest, selectedRobotType, selectedVendor],
+  );
+  const sensorCapabilities = useMemo(() => kitCapabilities.sensors, [kitCapabilities.sensors]);
+  const actuatorCapabilities = useMemo(() => kitCapabilities.actuators, [kitCapabilities.actuators]);
 
   useEffect(() => {
     if (!worldScene.objects.length) {
@@ -396,6 +435,7 @@ export default function RoboticsSimEditorPage() {
               width: world.width_cells * GRID_CELL_CM,
               depth: world.height_cells * GRID_CELL_CM,
             }}
+            backgroundColor={viewportBackgroundColor}
             onObjectMove={updateObjectPosition}
             onObjectDragEnd={commitObjectMove}
             onObjectSelect={(id) => {
@@ -428,6 +468,12 @@ export default function RoboticsSimEditorPage() {
           </div>
         </div>
       </section>
+      <ViewportSettingsDialog
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        backgroundColor={viewportBackgroundColor}
+        onBackgroundColorChange={setViewportBackgroundColor}
+      />
 
       <aside className="robotics-lab-right robotics-lab-right--editor">
         <section className="robotics-side-section robotics-side-section--grow robotics-side-main-panel">
@@ -593,72 +639,73 @@ export default function RoboticsSimEditorPage() {
             <span className="robotics-side-tab active">Sensors</span>
           </div>
           <div className="robotics-sensor-cards robotics-sensor-cards--sensor-panel">
-            <div className="robotics-sensor-card">
-              <span>Distance</span>
-              <strong>{Number(sensorValues?.distance ?? 0).toFixed(1)} cm</strong>
-              <label>
-                Override
-                <input
-                  type="number"
-                  min={0}
-                  value={
-                    sensorOverrides.distance === undefined || sensorOverrides.distance === null
-                      ? ""
-                      : String(sensorOverrides.distance)
-                  }
-                  placeholder="auto"
-                  onChange={(event) => {
-                    const next = normalizedDistanceValue(event.target.value);
-                    if (next === "") clearSensorOverride("distance");
-                    else setSensorOverride("distance", Number(next));
-                  }}
-                />
-              </label>
-            </div>
-            <div className="robotics-sensor-card">
-              <span>Bumper</span>
-              <strong>{sensorValues?.bumper ? "Pressed" : "Released"}</strong>
-              <div className="robotics-sensor-actions">
-                <button className="robotics-lab-btn" onClick={() => clearSensorOverride("bumper")}>Auto</button>
-                <button className="robotics-lab-btn" onClick={() => setSensorOverride("bumper", true)}>On</button>
-                <button className="robotics-lab-btn" onClick={() => setSensorOverride("bumper", false)}>Off</button>
+            {sensorCapabilities.map((sensorCapability) => (
+              <div key={sensorCapability.kind} className="robotics-sensor-card">
+                <span>{sensorCapability.label}</span>
+                <strong>{formatSensorValue(sensorCapability.kind, sensorValues?.[sensorCapability.kind])}</strong>
+                {sensorCapability.override.type === "number" ? (
+                  <label>
+                    Override
+                    <input
+                      type="number"
+                      min={0}
+                      value={
+                        sensorOverrides[sensorCapability.kind] === undefined || sensorOverrides[sensorCapability.kind] === null
+                          ? ""
+                          : String(sensorOverrides[sensorCapability.kind])
+                      }
+                      placeholder="auto"
+                      onChange={(event) => {
+                        const next = normalizedDistanceValue(event.target.value);
+                        if (next === "") clearSensorOverride(sensorCapability.kind);
+                        else setSensorOverride(sensorCapability.kind, Number(next));
+                      }}
+                    />
+                  </label>
+                ) : null}
+                {sensorCapability.override.type === "select" ? (
+                  <label>
+                    Override
+                    <select
+                      value={
+                        sensorOverrides[sensorCapability.kind] === undefined || sensorOverrides[sensorCapability.kind] === null
+                          ? ""
+                          : String(sensorOverrides[sensorCapability.kind])
+                      }
+                      onChange={(event) => {
+                        if (!event.target.value) clearSensorOverride(sensorCapability.kind);
+                        else setSensorOverride(sensorCapability.kind, event.target.value);
+                      }}
+                    >
+                      <option value="">auto</option>
+                      {(sensorCapability.override.options || []).map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
+                {sensorCapability.override.type === "boolean" ? (
+                  <div className="robotics-sensor-actions">
+                    <button className="robotics-lab-btn" onClick={() => clearSensorOverride(sensorCapability.kind)}>Auto</button>
+                    <button className="robotics-lab-btn" onClick={() => setSensorOverride(sensorCapability.kind, true)}>On</button>
+                    <button className="robotics-lab-btn" onClick={() => setSensorOverride(sensorCapability.kind, false)}>Off</button>
+                  </div>
+                ) : null}
               </div>
-            </div>
-            <div className="robotics-sensor-card">
-              <span>Line</span>
-              <strong>{sensorValues?.line ? "Detected" : "No line"}</strong>
-              <div className="robotics-sensor-actions">
-                <button className="robotics-lab-btn" onClick={() => clearSensorOverride("line")}>Auto</button>
-                <button className="robotics-lab-btn" onClick={() => setSensorOverride("line", true)}>On</button>
-                <button className="robotics-lab-btn" onClick={() => setSensorOverride("line", false)}>Off</button>
+            ))}
+          </div>
+          <div className="robotics-side-tabs robotics-side-tabs--sensors">
+            <span className="robotics-side-tab active">Actuators</span>
+          </div>
+          <div className="robotics-sensor-cards robotics-sensor-cards--sensor-panel">
+            {actuatorCapabilities.map((actuatorCapability) => (
+              <div key={actuatorCapability.kind} className="robotics-sensor-card">
+                <span>{actuatorCapability.label}</span>
+                <strong>Available</strong>
               </div>
-            </div>
-            <div className="robotics-sensor-card">
-              <span>Color</span>
-              <strong>{String(sensorValues?.color ?? "default")}</strong>
-              <label>
-                Override
-                <select
-                  value={sensorOverrides.color === undefined || sensorOverrides.color === null ? "" : String(sensorOverrides.color)}
-                  onChange={(event) => {
-                    if (!event.target.value) clearSensorOverride("color");
-                    else setSensorOverride("color", event.target.value);
-                  }}
-                >
-                  <option value="">auto</option>
-                  <option value="default">default</option>
-                  <option value="zone">zone</option>
-                  <option value="goal">goal</option>
-                  <option value="red">red</option>
-                  <option value="green">green</option>
-                  <option value="blue">blue</option>
-                </select>
-              </label>
-            </div>
-            <div className="robotics-sensor-card">
-              <span>Gyro</span>
-              <strong>{Math.round(Number(sensorValues?.gyro ?? 0))} deg</strong>
-            </div>
+            ))}
           </div>
         </section>
       </aside>

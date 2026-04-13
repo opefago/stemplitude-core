@@ -5,6 +5,7 @@ import { KidDropdown } from "../components/ui";
 import { useRoboticsWorkspaceContext } from "../features/robotics_lab/RoboticsWorkspaceContext";
 import { describeNode } from "../features/robotics_lab/workspaceDefaults";
 import { RoboticsBlocklyEditor } from "../features/robotics_lab/RoboticsBlocklyEditor";
+import { resolveKitCapabilities } from "../labs/robotics";
 import { createRoboticsCompileJob } from "../lib/api/robotics";
 
 export default function RoboticsCodeEditorPage() {
@@ -60,6 +61,20 @@ export default function RoboticsCodeEditorPage() {
         label: language,
       })),
     [selectedManifest?.languages],
+  );
+  const kitCapabilities = useMemo(
+    () =>
+      resolveKitCapabilities({
+        vendor: selectedVendor,
+        robotType: selectedRobotType,
+        manifest: selectedManifest,
+      }),
+    [selectedManifest, selectedRobotType, selectedVendor],
+  );
+  const selectedSensorKinds = useMemo(() => kitCapabilities.sensors.map((sensor) => sensor.kind), [kitCapabilities.sensors]);
+  const selectedActuatorKinds = useMemo(
+    () => kitCapabilities.actuators.map((actuator) => actuator.kind),
+    [kitCapabilities.actuators],
   );
 
   function moveDistanceToCm(node) {
@@ -234,6 +249,8 @@ export default function RoboticsCodeEditorPage() {
             <h4>Blockly Workspace</h4>
             <RoboticsBlocklyEditor
               program={program}
+              sensorKinds={selectedSensorKinds}
+              actuatorKinds={selectedActuatorKinds}
               onProgramChange={(nextProgram) => setProgram(nextProgram)}
               onProgramCommit={(nextProgram) => {
                 void saveProjectSnapshot("program_changed", { program: nextProgram });

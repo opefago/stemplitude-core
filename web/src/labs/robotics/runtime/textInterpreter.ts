@@ -1,31 +1,66 @@
+import type { SyntaxNode } from "@lezer/common";
 import type {
   RoboticsCodeMode,
   RoboticsCondition,
   RoboticsExpression,
-  RoboticsIRNode,
   RoboticsProgram,
   SensorKind,
 } from "../../../lib/robotics";
+import { parseCppLegacy, parseCppWithAst } from "./cppInterpreter";
+import type {
+  BaseInterpreterContext,
+  CppInterpreterContext,
+  InterpreterDiagnostic,
+  PythonInterpreterContext,
+  TextInterpretResult,
+} from "./interpreterTypes";
+import { ISSUE_CODES } from "./issueCodes";
+import type { IssueCode } from "./issueCodes";
+import { parsePythonLegacy, parsePythonWithAst } from "./pythonInterpreter";
 
-export interface TextInterpretResult {
-  ok: boolean;
-  program: RoboticsProgram;
-  diagnostics: string[];
-}
+export type {
+  BaseInterpreterContext,
+  CppInterpreterContext,
+  InterpreterDiagnostic,
+  PythonInterpreterContext,
+  TextInterpretResult,
+} from "./interpreterTypes";
 
 function emptyProgram(): RoboticsProgram {
   return { version: 1, entrypoint: "main", nodes: [] };
 }
 
-function asNumber(value: string): number {
+function createInterpreterIssue(
+  code: IssueCode,
+  category: "syntax" | "semantic",
+  message: string,
+  line?: number,
+): InterpreterDiagnostic {
+  return {
+    code,
+    severity: "error",
+    category,
+    message,
+    line,
+  };
+}
+
+function withStructuredDiagnostics(
+  result: TextInterpretResult,
+  fallbackIssues?: InterpreterDiagnostic[],
+): TextInterpretResult {
+  return {
+    ...result,
+    issues: fallbackIssues && fallbackIssues.length > 0 ? fallbackIssues : result.issues,
+  };
+}
+
+export function asNumber(value: string): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-type PythonLine = { number: number; indent: number; raw: string; text: string };
-type CppLine = { number: number; text: string };
-
-function splitTopLevel(input: string, needle: string): string[] {
+export function splitTopLevel(input: string, needle: string): string[] {
   const parts: string[] = [];
   let depth = 0;
   let inString: "'" | '"' | null = null;
@@ -52,64 +87,329 @@ function splitTopLevel(input: string, needle: string): string[] {
   return parts.filter(Boolean);
 }
 
-function normalizeSensorName(sensor: string): SensorKind {
+export function normalizeSensorName(sensor: string): SensorKind {
   return sensor as SensorKind;
 }
 
-function parseExpression(value: string): RoboticsExpression | null {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  if (/^[-+]?\d*\.?\d+$/.test(trimmed)) return { type: "number", value: asNumber(trimmed) };
-  if (/^(true|True)$/.test(trimmed)) return { type: "boolean", value: true };
-  if (/^(false|False)$/.test(trimmed)) return { type: "boolean", value: false };
-  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
-    return { type: "string", value: trimmed.slice(1, -1) };
+function hasBalancedOuterParens(value: string): boolean {
+  if (!value.startsWith("(") || !value.endsWith(")")) return false;
+  let depth = 0;
+  let inString: "'" | '"' | null = null;
+  for (let i = 0; i < value.length; i += 1) {
+    const ch = value[i];
+    if (inString) {
+      if (ch === inString && value[i - 1] !== "\\") inString = null;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      inString = ch;
+      continue;
+    }
+    if (ch === "(") depth += 1;
+    if (ch === ")") {
+      depth -= 1;
+      if (depth === 0 && i < value.length - 1) return false;
+    }
+    if (depth < 0) return false;
   }
-  let match = trimmed.match(/^robot\.read_sensor\("([A-Za-z_]+)"\)$/);
-  if (match) return { type: "sensor", sensor: normalizeSensorName(match[1]) };
-  match = trimmed.match(/^robot\.read_sensor\('([A-Za-z_]+)'\)$/);
-  if (match) return { type: "sensor", sensor: normalizeSensorName(match[1]) };
-  match = trimmed.match(/^robot\.read_sensor\("([A-Za-z_]+)"\)$/);
-  if (match) return { type: "sensor", sensor: normalizeSensorName(match[1]) };
-  if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(trimmed)) return { type: "var", name: trimmed };
-  return null;
+  return depth === 0;
+}
+
+function parseSensorCall(input: string, startIndex: number): { sensor: SensorKind; nextIndex: number } | null {
+  const prefix = "robot.read_sensor(";
+  if (!input.startsWith(prefix, startIndex)) return null;
+  let index = startIndex + prefix.length;
+  const quote = input[index];
+  if (quote !== "'" && quote !== '"') return null;
+  index += 1;
+  let sensor = "";
+  while (index < input.length && input[index] !== quote) {
+    sensor += input[index];
+    index += 1;
+  }
+  if (index >= input.length || input[index] !== quote) return null;
+  index += 1;
+  while (index < input.length && /\s/.test(input[index])) index += 1;
+  if (input[index] !== ")") return null;
+  index += 1;
+  if (!/^[A-Za-z_]+$/.test(sensor)) return null;
+  return {
+    sensor: normalizeSensorName(sensor),
+    nextIndex: index,
+  };
+}
+
+export function parseExpression(value: string): RoboticsExpression | null {
+  const source = value.trim();
+  if (!source) return null;
+  let index = 0;
+
+  function skipWs() {
+    while (index < source.length && /\s/.test(source[index])) index += 1;
+  }
+
+  function parsePrimary(): RoboticsExpression | null {
+    skipWs();
+    if (index >= source.length) return null;
+    const ch = source[index];
+    if (ch === "(") {
+      index += 1;
+      const expr = parseAddSub();
+      skipWs();
+      if (!expr || source[index] !== ")") return null;
+      index += 1;
+      return expr;
+    }
+    if (ch === "'" || ch === '"') {
+      const quote = ch;
+      index += 1;
+      let str = "";
+      while (index < source.length && source[index] !== quote) {
+        str += source[index];
+        index += 1;
+      }
+      if (index >= source.length || source[index] !== quote) return null;
+      index += 1;
+      return { type: "string", value: str };
+    }
+    const sensorCall = parseSensorCall(source, index);
+    if (sensorCall) {
+      index = sensorCall.nextIndex;
+      return { type: "sensor", sensor: sensorCall.sensor };
+    }
+    const numberMatch = source.slice(index).match(/^[-+]?\d*\.?\d+/);
+    if (numberMatch) {
+      index += numberMatch[0].length;
+      return { type: "number", value: asNumber(numberMatch[0]) };
+    }
+    const booleanMatch = source.slice(index).match(/^(true|True|false|False)\b/);
+    if (booleanMatch) {
+      index += booleanMatch[0].length;
+      return { type: "boolean", value: /^(true|True)$/.test(booleanMatch[0]) };
+    }
+    const variableMatch = source.slice(index).match(/^[A-Za-z_][A-Za-z0-9_]*/);
+    if (variableMatch) {
+      index += variableMatch[0].length;
+      return { type: "var", name: variableMatch[0] };
+    }
+    return null;
+  }
+
+  function parseUnary(): RoboticsExpression | null {
+    skipWs();
+    if (source[index] === "+") {
+      index += 1;
+      return parseUnary();
+    }
+    if (source[index] === "-") {
+      index += 1;
+      const rhs = parseUnary();
+      if (!rhs) return null;
+      return {
+        type: "binary",
+        op: "sub",
+        left: { type: "number", value: 0 },
+        right: rhs,
+      };
+    }
+    return parsePrimary();
+  }
+
+  function parseMulDiv(): RoboticsExpression | null {
+    let left = parseUnary();
+    if (!left) return null;
+    while (true) {
+      skipWs();
+      const op = source[index];
+      if (op !== "*" && op !== "/") break;
+      index += 1;
+      const right = parseUnary();
+      if (!right) return null;
+      left = {
+        type: "binary",
+        op: op === "*" ? "mul" : "div",
+        left,
+        right,
+      };
+    }
+    return left;
+  }
+
+  function parseAddSub(): RoboticsExpression | null {
+    let left = parseMulDiv();
+    if (!left) return null;
+    while (true) {
+      skipWs();
+      const op = source[index];
+      if (op !== "+" && op !== "-") break;
+      index += 1;
+      const right = parseMulDiv();
+      if (!right) return null;
+      left = {
+        type: "binary",
+        op: op === "+" ? "add" : "sub",
+        left,
+        right,
+      };
+    }
+    return left;
+  }
+
+  const expression = parseAddSub();
+  if (!expression) return null;
+  skipWs();
+  return index === source.length ? expression : null;
 }
 
 function parseComparisonCondition(raw: string): RoboticsCondition | null {
-  const comparisonOps = ["==", ">", "<"];
-  for (const op of comparisonOps) {
-    const [left, right] = splitTopLevel(raw, op);
-    if (!left || !right || splitTopLevel(raw, op).length !== 2) continue;
-    const leftExpr = parseExpression(left);
-    const rightExpr = parseExpression(right);
-    if (!leftExpr || !rightExpr) return null;
-    if (op === "==") {
-      return { op: "eq", left: leftExpr, right: rightExpr };
+  function tokenizeComparisonChain(input: string): { parts: string[]; operators: string[] } | null {
+    const parts: string[] = [];
+    const operators: string[] = [];
+    let depth = 0;
+    let inString: "'" | '"' | null = null;
+    let start = 0;
+    for (let i = 0; i < input.length; i += 1) {
+      const ch = input[i];
+      if (inString) {
+        if (ch === inString && input[i - 1] !== "\\") inString = null;
+        continue;
+      }
+      if (ch === "'" || ch === '"') {
+        inString = ch;
+        continue;
+      }
+      if (ch === "(") {
+        depth += 1;
+        continue;
+      }
+      if (ch === ")") {
+        depth = Math.max(0, depth - 1);
+        continue;
+      }
+      if (depth !== 0) continue;
+      const two = input.slice(i, i + 2);
+      let matchedOp: string | null = null;
+      if (two === "==" || two === "!=" || two === ">=" || two === "<=") {
+        matchedOp = two;
+      } else if (ch === ">" || ch === "<") {
+        matchedOp = ch;
+      }
+      if (matchedOp) {
+        parts.push(input.slice(start, i).trim());
+        operators.push(matchedOp);
+        start = i + matchedOp.length;
+        i += matchedOp.length - 1;
+      }
     }
-    if (op === ">" || op === "<") {
-      if (leftExpr.type === "sensor" && rightExpr.type === "number") {
-        return {
-          op: op === ">" ? "sensor_gt" : "sensor_lt",
-          sensor: leftExpr.sensor,
-          value: rightExpr.value,
-        };
-      }
-      if (rightExpr.type === "sensor" && leftExpr.type === "number") {
-        return {
-          op: op === ">" ? "sensor_lt" : "sensor_gt",
-          sensor: rightExpr.sensor,
-          value: leftExpr.value,
-        };
-      }
+    if (operators.length === 0) return null;
+    parts.push(input.slice(start).trim());
+    if (parts.length !== operators.length + 1) return null;
+    if (parts.some((part) => !part)) return null;
+    return { parts, operators };
+  }
+
+  const chain = tokenizeComparisonChain(raw);
+  if (!chain) return null;
+  const { parts: chainParts, operators: chainOperators } = chain;
+  if (chainOperators.length > 1) {
+    const conditions: RoboticsCondition[] = [];
+    for (let i = 0; i < chainOperators.length; i += 1) {
+      const left = chainParts[i];
+      const right = chainParts[i + 1];
+      const op = chainOperators[i];
+      const parsed = parseComparisonCondition(`${left} ${op} ${right}`);
+      if (!parsed) return null;
+      conditions.push(parsed);
+    }
+    return {
+      op: "and",
+      conditions,
+    };
+  }
+
+  const op = chainOperators[0];
+  const leftExpr = parseExpression(chainParts[0]);
+  const rightExpr = parseExpression(chainParts[1]);
+  if (!leftExpr || !rightExpr) return null;
+  if (op === "==") return { op: "eq", left: leftExpr, right: rightExpr };
+  if (op === "!=") {
+    return {
+      op: "not",
+      condition: { op: "eq", left: leftExpr, right: rightExpr },
+    };
+  }
+  if (leftExpr.type === "sensor" && rightExpr.type === "number") {
+    if (op === ">=") {
+      return {
+        op: "not",
+        condition: { op: "sensor_lt", sensor: leftExpr.sensor, value: rightExpr.value },
+      };
+    }
+    if (op === "<=") {
+      return {
+        op: "not",
+        condition: { op: "sensor_gt", sensor: leftExpr.sensor, value: rightExpr.value },
+      };
+    }
+    return {
+      op: op === ">" ? "sensor_gt" : "sensor_lt",
+      sensor: leftExpr.sensor,
+      value: rightExpr.value,
+    };
+  }
+  if (rightExpr.type === "sensor" && leftExpr.type === "number") {
+    if (op === ">=") {
+      return {
+        op: "not",
+        condition: { op: "sensor_gt", sensor: rightExpr.sensor, value: leftExpr.value },
+      };
+    }
+    if (op === "<=") {
+      return {
+        op: "not",
+        condition: { op: "sensor_lt", sensor: rightExpr.sensor, value: leftExpr.value },
+      };
+    }
+    return {
+      op: op === ">" ? "sensor_lt" : "sensor_gt",
+      sensor: rightExpr.sensor,
+      value: leftExpr.value,
+    };
+  }
+  return null;
+}
+
+export function diagnoseCondition(rawValue: string): string | null {
+  const raw = rawValue.trim();
+  if (!raw) return "condition is empty";
+  const withoutOuter = hasBalancedOuterParens(raw) ? raw.slice(1, -1).trim() : raw;
+  const chainOperatorPattern = /(==|!=|>=|<=|>|<)/g;
+  const chainParts = withoutOuter.split(chainOperatorPattern).map((part) => part.trim()).filter(Boolean);
+  if (chainParts.length < 3) return null;
+  for (let i = 1; i < chainParts.length; i += 2) {
+    const op = chainParts[i];
+    if (op === "==" || op === "!=") continue;
+    const leftText = chainParts[i - 1];
+    const rightText = chainParts[i + 1];
+    const leftExpr = parseExpression(leftText);
+    const rightExpr = parseExpression(rightText);
+    if (!leftExpr || !rightExpr) {
+      return `unsupported comparator operands around "${leftText} ${op} ${rightText}"`;
+    }
+    const isSensorThreshold =
+      (leftExpr.type === "sensor" && rightExpr.type === "number") ||
+      (rightExpr.type === "sensor" && leftExpr.type === "number");
+    if (!isSensorThreshold) {
+      return `unsupported comparator "${leftText} ${op} ${rightText}" (only sensor-to-number threshold comparisons are supported)`;
     }
   }
   return null;
 }
 
-function parseCondition(rawValue: string): RoboticsCondition | null {
+export function parseCondition(rawValue: string): RoboticsCondition | null {
   const raw = rawValue.trim();
   if (!raw) return null;
-  const withoutOuter = raw.startsWith("(") && raw.endsWith(")") ? raw.slice(1, -1).trim() : raw;
+  const withoutOuter = hasBalancedOuterParens(raw) ? raw.slice(1, -1).trim() : raw;
 
   const orParts = splitTopLevel(withoutOuter, " or ");
   if (orParts.length > 1) {
@@ -134,343 +434,105 @@ function parseCondition(rawValue: string): RoboticsCondition | null {
   return null;
 }
 
-function parsePythonLines(code: string): PythonLine[] {
-  const wrappers = [/^def main\(\):$/, /^if __name__ == ['"]__main__['"]:\s*$/, /^main\(\)\s*$/];
-  const rows = code.split(/\r?\n/);
-  const lines: PythonLine[] = [];
-  rows.forEach((raw, index) => {
-    if (!raw.trim() || raw.trim().startsWith("#")) return;
-    if (raw.trim() === "pass") return;
-    if (raw.trim().startsWith("import ")) return;
-    if (wrappers.some((re) => re.test(raw.trim()))) return;
-    const indent = raw.length - raw.trimStart().length;
-    lines.push({ number: index + 1, indent, raw, text: raw.trim() });
-  });
-  return lines;
+export function textOf(source: string, node: SyntaxNode): string {
+  return source.slice(node.from, node.to);
 }
 
-function parsePythonStatement(
-  line: PythonLine,
-  nextId: () => string,
-  diagnostics: string[],
-): RoboticsIRNode | null {
-  let match = line.text.match(/^robot\.move_(forward|backward)\(([-+]?\d*\.?\d+),\s*speed_pct=([-+]?\d*\.?\d+)\)$/);
-  if (match) {
-    return {
-      id: nextId(),
-      kind: "move",
-      direction: match[1] as "forward" | "backward",
-      unit: "distance_cm",
-      value: asNumber(match[2]),
-      speed_pct: asNumber(match[3]),
-    };
+export function lineNumberAt(source: string, offset: number): number {
+  let line = 1;
+  for (let i = 0; i < offset && i < source.length; i += 1) {
+    if (source[i] === "\n") line += 1;
   }
-  match = line.text.match(/^robot\.move_(forward|backward)_for\(([-+]?\d*\.?\d+),\s*speed_pct=([-+]?\d*\.?\d+)\)$/);
-  if (match) {
-    return {
-      id: nextId(),
-      kind: "move",
-      direction: match[1] as "forward" | "backward",
-      unit: "seconds",
-      value: asNumber(match[2]),
-      speed_pct: asNumber(match[3]),
-    };
+  return line;
+}
+
+export function childrenOf(node: SyntaxNode): SyntaxNode[] {
+  const children: SyntaxNode[] = [];
+  let cursor = node.firstChild;
+  while (cursor) {
+    children.push(cursor);
+    cursor = cursor.nextSibling;
   }
-  match = line.text.match(/^robot\.turn_(left|right)\(([-+]?\d*\.?\d+),\s*speed_pct=([-+]?\d*\.?\d+)\)$/);
-  if (match) {
-    return {
-      id: nextId(),
-      kind: "turn",
-      direction: match[1] as "left" | "right",
-      angle_deg: asNumber(match[2]),
-      speed_pct: asNumber(match[3]),
-    };
+  return children;
+}
+
+export function firstChildByNames(node: SyntaxNode, names: string[]): SyntaxNode | null {
+  for (const name of names) {
+    const child = node.getChild(name);
+    if (child) return child;
   }
-  match = line.text.match(/^robot\.wait\(([-+]?\d*\.?\d+)\)$/);
-  if (match) {
-    return { id: nextId(), kind: "wait", seconds: asNumber(match[1]) };
-  }
-  match = line.text.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*robot\.read_sensor\("([A-Za-z_]+)"\)$/);
-  if (match) {
-    return {
-      id: nextId(),
-      kind: "read_sensor",
-      output_var: match[1],
-      sensor: normalizeSensorName(match[2]),
-    };
-  }
-  match = line.text.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/);
-  if (match) {
-    const expr = parseExpression(match[2]);
-    if (!expr) {
-      diagnostics.push(`Line ${line.number}: unsupported assignment expression "${match[2]}"`);
-      return null;
-    }
-    return { id: nextId(), kind: "assign", variable: match[1], value: expr };
-  }
-  diagnostics.push(`Line ${line.number}: unsupported Python statement "${line.text}"`);
   return null;
 }
 
-function parsePythonBlock(
-  lines: PythonLine[],
-  startIndex: number,
-  indent: number,
-  nextId: () => string,
-  diagnostics: string[],
-): { nodes: RoboticsIRNode[]; index: number } {
-  const nodes: RoboticsIRNode[] = [];
-  let index = startIndex;
-  while (index < lines.length) {
-    const line = lines[index];
-    if (line.indent < indent) break;
-    if (line.indent > indent) {
-      diagnostics.push(`Line ${line.number}: unexpected indentation`);
-      index += 1;
-      continue;
-    }
-
-    let match = line.text.match(/^if\s+(.+):$/);
-    if (match) {
-      const condition = parseCondition(match[1]);
-      if (!condition) diagnostics.push(`Line ${line.number}: unsupported if condition "${match[1]}"`);
-      const thenIndent = lines[index + 1]?.indent ?? indent + 2;
-      const thenParsed = parsePythonBlock(lines, index + 1, thenIndent, nextId, diagnostics);
-      let elseNodes: RoboticsIRNode[] | undefined;
-      index = thenParsed.index;
-      if (index < lines.length && lines[index].indent === indent && /^else:\s*$/.test(lines[index].text)) {
-        const elseIndent = lines[index + 1]?.indent ?? indent + 2;
-        const elseParsed = parsePythonBlock(lines, index + 1, elseIndent, nextId, diagnostics);
-        elseNodes = elseParsed.nodes;
-        index = elseParsed.index;
-      }
-      nodes.push({
-        id: nextId(),
-        kind: "if",
-        condition: condition ?? { op: "eq", left: { type: "boolean", value: false }, right: { type: "boolean", value: true } },
-        then_nodes: thenParsed.nodes,
-        else_nodes: elseNodes,
-      });
-      continue;
-    }
-
-    match = line.text.match(/^for\s+[A-Za-z_][A-Za-z0-9_]*\s+in\s+range\(([-+]?\d+)\):$/);
-    if (match) {
-      const bodyIndent = lines[index + 1]?.indent ?? indent + 2;
-      const parsed = parsePythonBlock(lines, index + 1, bodyIndent, nextId, diagnostics);
-      nodes.push({
-        id: nextId(),
-        kind: "repeat",
-        times: Math.max(0, Math.floor(asNumber(match[1]))),
-        body: parsed.nodes,
-      });
-      index = parsed.index;
-      continue;
-    }
-
-    match = line.text.match(/^while\s+(.+):$/);
-    if (match) {
-      const condition = parseCondition(match[1]);
-      if (!condition) diagnostics.push(`Line ${line.number}: unsupported while condition "${match[1]}"`);
-      const bodyIndent = lines[index + 1]?.indent ?? indent + 2;
-      const parsed = parsePythonBlock(lines, index + 1, bodyIndent, nextId, diagnostics);
-      nodes.push({
-        id: nextId(),
-        kind: "repeat",
-        while: condition ?? { op: "eq", left: { type: "boolean", value: false }, right: { type: "boolean", value: true } },
-        body: parsed.nodes,
-      });
-      index = parsed.index;
-      continue;
-    }
-
-    const node = parsePythonStatement(line, nextId, diagnostics);
-    if (node) nodes.push(node);
-    index += 1;
-  }
-  return { nodes, index };
-}
-
-function parsePython(code: string): TextInterpretResult {
-  let nodeIndex = 1;
-  const diagnostics: string[] = [];
-  const lines = parsePythonLines(code);
-  const parsed = parsePythonBlock(lines, 0, lines[0]?.indent ?? 0, () => `txt_${nodeIndex++}`, diagnostics);
+function fallbackFalseCondition(): RoboticsCondition {
   return {
-    ok: diagnostics.length === 0,
-    diagnostics,
-    program: { version: 1, entrypoint: "main", nodes: parsed.nodes },
+    op: "eq",
+    left: { type: "boolean", value: false },
+    right: { type: "boolean", value: true },
   };
 }
 
-function normalizeCppCondition(value: string): string {
-  return value
-    .replace(/\&\&/g, " and ")
-    .replace(/\|\|/g, " or ")
-    .replace(/!\s*(?!=)/g, " not ")
-    .replace(/\btrue\b/g, "True")
-    .replace(/\bfalse\b/g, "False");
-}
-
-function parseCppStatement(line: CppLine, nextId: () => string, diagnostics: string[]): RoboticsIRNode | null {
-  let match = line.text.match(/^robot\.move\("([^"]+)",\s*([-+]?\d*\.?\d+),\s*([-+]?\d*\.?\d+)\);$/);
-  if (match) {
-    return {
-      id: nextId(),
-      kind: "move",
-      direction: (match[1] === "backward" ? "backward" : "forward") as "forward" | "backward",
-      unit: "distance_cm",
-      value: asNumber(match[2]),
-      speed_pct: asNumber(match[3]),
-    };
-  }
-  match = line.text.match(/^robot\.move_for\("([^"]+)",\s*([-+]?\d*\.?\d+),\s*([-+]?\d*\.?\d+)\);$/);
-  if (match) {
-    return {
-      id: nextId(),
-      kind: "move",
-      direction: (match[1] === "backward" ? "backward" : "forward") as "forward" | "backward",
-      unit: "seconds",
-      value: asNumber(match[2]),
-      speed_pct: asNumber(match[3]),
-    };
-  }
-  match = line.text.match(/^robot\.turn\("([^"]+)",\s*([-+]?\d*\.?\d+),\s*([-+]?\d*\.?\d+)\);$/);
-  if (match) {
-    return {
-      id: nextId(),
-      kind: "turn",
-      direction: (match[1] === "left" ? "left" : "right") as "left" | "right",
-      angle_deg: asNumber(match[2]),
-      speed_pct: asNumber(match[3]),
-    };
-  }
-  match = line.text.match(/^robot\.wait\(([-+]?\d*\.?\d+)\);$/);
-  if (match) {
-    return { id: nextId(), kind: "wait", seconds: asNumber(match[1]) };
-  }
-  match = line.text.match(/^(?:auto|int|float|double|bool)?\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*robot\.read_sensor\("([A-Za-z_]+)"\);$/);
-  if (match) {
-    return {
-      id: nextId(),
-      kind: "read_sensor",
-      output_var: match[1],
-      sensor: normalizeSensorName(match[2]),
-    };
-  }
-  match = line.text.match(/^(?:auto|int|float|double|bool)?\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+);$/);
-  if (match) {
-    const expr = parseExpression(match[2]);
-    if (!expr) {
-      diagnostics.push(`Line ${line.number}: unsupported C++ assignment expression "${match[2]}"`);
-      return null;
-    }
-    return { id: nextId(), kind: "assign", variable: match[1], value: expr };
-  }
-  diagnostics.push(`Line ${line.number}: unsupported C++ statement "${line.text}"`);
-  return null;
-}
-
-function parseCppBlock(
-  lines: CppLine[],
-  startIndex: number,
-  nextId: () => string,
-  diagnostics: string[],
-): { nodes: RoboticsIRNode[]; index: number } {
-  const nodes: RoboticsIRNode[] = [];
-  let index = startIndex;
-  while (index < lines.length) {
-    const line = lines[index];
-    if (line.text === "}") return { nodes, index: index + 1 };
-    if (!line.text || line.text.startsWith("//") || line.text.startsWith("#include ")) {
-      index += 1;
-      continue;
-    }
-    if (line.text === "int main() {" || line.text === "{" || line.text === "return 0;" || line.text === "};") {
-      index += 1;
-      continue;
-    }
-
-    let match = line.text.match(/^if\s*\((.+)\)\s*\{$/);
-    if (match) {
-      const condition = parseCondition(normalizeCppCondition(match[1]));
-      if (!condition) diagnostics.push(`Line ${line.number}: unsupported C++ if condition "${match[1]}"`);
-      const thenParsed = parseCppBlock(lines, index + 1, nextId, diagnostics);
-      let elseNodes: RoboticsIRNode[] | undefined;
-      index = thenParsed.index;
-      if (index < lines.length && /^else\s*\{$/.test(lines[index].text)) {
-        const elseParsed = parseCppBlock(lines, index + 1, nextId, diagnostics);
-        elseNodes = elseParsed.nodes;
-        index = elseParsed.index;
-      }
-      nodes.push({
-        id: nextId(),
-        kind: "if",
-        condition: condition ?? { op: "eq", left: { type: "boolean", value: false }, right: { type: "boolean", value: true } },
-        then_nodes: thenParsed.nodes,
-        else_nodes: elseNodes,
-      });
-      continue;
-    }
-
-    match = line.text.match(
-      /^for\s*\(\s*(?:int\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=\s*([-+]?\d+)\s*;\s*[^;]*<\s*([-+]?\d+)\s*;\s*[^\)]*\)\s*\{$/,
-    );
-    if (match) {
-      const times = Math.max(0, Math.floor(asNumber(match[2]) - asNumber(match[1])));
-      const parsed = parseCppBlock(lines, index + 1, nextId, diagnostics);
-      nodes.push({ id: nextId(), kind: "repeat", times, body: parsed.nodes });
-      index = parsed.index;
-      continue;
-    }
-
-    match = line.text.match(/^while\s*\((.+)\)\s*\{$/);
-    if (match) {
-      const condition = parseCondition(normalizeCppCondition(match[1]));
-      if (!condition) diagnostics.push(`Line ${line.number}: unsupported C++ while condition "${match[1]}"`);
-      const parsed = parseCppBlock(lines, index + 1, nextId, diagnostics);
-      nodes.push({
-        id: nextId(),
-        kind: "repeat",
-        while: condition ?? { op: "eq", left: { type: "boolean", value: false }, right: { type: "boolean", value: true } },
-        body: parsed.nodes,
-      });
-      index = parsed.index;
-      continue;
-    }
-
-    const node = parseCppStatement(line, nextId, diagnostics);
-    if (node) nodes.push(node);
-    index += 1;
-  }
-  return { nodes, index };
-}
-
-function parseCpp(code: string): TextInterpretResult {
-  let nodeIndex = 1;
-  const diagnostics: string[] = [];
-  const lines: CppLine[] = code.split(/\r?\n/).map((raw, i) => ({ number: i + 1, text: raw.trim() }));
-  const parsed = parseCppBlock(lines, 0, () => `txt_${nodeIndex++}`, diagnostics);
+function buildInterpreterContext(): BaseInterpreterContext {
   return {
-    ok: diagnostics.length === 0,
-    diagnostics,
-    program: { version: 1, entrypoint: "main", nodes: parsed.nodes },
+    asNumber,
+    splitTopLevel,
+    normalizeSensorName,
+    parseExpression,
+    parseCondition,
+    diagnoseCondition,
+    textOf,
+    lineNumberAt,
+    childrenOf,
+    firstChildByNames,
+    fallbackFalseCondition,
   };
 }
 
 export function interpretTextProgram(code: string, mode: RoboticsCodeMode): TextInterpretResult {
   if (!code.trim()) {
-    return {
+    const message = "Text editor is empty; nothing to run in simulator.";
+    return withStructuredDiagnostics({
       ok: false,
-      diagnostics: ["Text editor is empty; nothing to run in simulator."],
+      diagnostics: [message],
       program: emptyProgram(),
-    };
+      issues: [],
+    }, [createInterpreterIssue(ISSUE_CODES.EMPTY_SOURCE, "syntax", message)]);
   }
-  if (mode === "python") return parsePython(code);
-  if (mode === "cpp") return parseCpp(code);
-  return {
+
+  const context = buildInterpreterContext();
+  if (mode === "python") {
+    const astResult = parsePythonWithAst(code, context);
+    if (astResult.ok) return withStructuredDiagnostics(astResult);
+    const fallback = parsePythonLegacy(code, context);
+    if (fallback.ok) return withStructuredDiagnostics(fallback);
+    const combinedIssues = [...(astResult.issues || []), ...(fallback.issues || [])];
+    return withStructuredDiagnostics({
+      ...fallback,
+      diagnostics: [...astResult.diagnostics, ...fallback.diagnostics],
+    }, combinedIssues);
+  }
+  if (mode === "cpp") {
+    const astResult = parseCppWithAst(code, context);
+    if (astResult.ok) return withStructuredDiagnostics(astResult);
+    const fallback = parseCppLegacy(code, context);
+    if (fallback.ok) return withStructuredDiagnostics(fallback);
+    const combinedIssues = [...(astResult.issues || []), ...(fallback.issues || [])];
+    return withStructuredDiagnostics({
+      ...fallback,
+      diagnostics: [...astResult.diagnostics, ...fallback.diagnostics],
+    }, combinedIssues);
+  }
+
+  return withStructuredDiagnostics({
     ok: false,
     diagnostics: [`Interpreter only supports text modes (python/cpp). Received mode: ${mode}`],
     program: emptyProgram(),
-  };
+    issues: [],
+  }, [
+    createInterpreterIssue(
+      ISSUE_CODES.UNSUPPORTED_SYNTAX,
+      "syntax",
+      `Interpreter only supports text modes (python/cpp). Received mode: ${mode}`,
+    ),
+  ]);
 }

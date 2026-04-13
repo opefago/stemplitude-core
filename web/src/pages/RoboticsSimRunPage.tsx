@@ -1,15 +1,33 @@
 import { Pause, Play, RotateCcw, StepForward } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { useRoboticsWorkspaceContext } from "../features/robotics_lab/RoboticsWorkspaceContext";
 import { GRID_CELL_CM } from "../features/robotics_lab/workspaceDefaults";
-import { ThreeSimViewport } from "../features/robotics_lab/ThreeSimViewport";
+import { ThreeSimViewport } from "../features/robotics_lab/ThreeSimViewport.tsx";
 import { CameraToolbar } from "../features/robotics_lab/components/CameraToolbar";
 import { OverlayToggles } from "../features/robotics_lab/components/OverlayToggles";
+import { ViewportSettingsDialog } from "../features/robotics_lab/components/ViewportSettingsDialog";
+import { resolveKitCapabilities } from "../labs/robotics";
+
+function formatSensorValue(sensorKind: string, value: unknown) {
+  if (sensorKind === "distance") return `${Number(value ?? 0).toFixed(1)} cm`;
+  if (sensorKind === "gyro") return `${Math.round(Number(value ?? 0))} deg`;
+  if (sensorKind === "line") return value ? "Detected" : "No line";
+  if (sensorKind === "bumper" || sensorKind === "touch") return value ? "Pressed" : "Released";
+  if (sensorKind === "color") return String(value ?? "default");
+  if (typeof value === "boolean") return value ? "On" : "Off";
+  if (typeof value === "number") return Number.isFinite(value) ? String(value) : "0";
+  if (value === null || value === undefined || value === "") return "--";
+  return String(value);
+}
 
 export default function RoboticsSimRunPage() {
   const {
     world,
     pose,
     sensorValues,
+    manifests,
+    selectedVendor,
+    selectedRobotType,
     runtimeState,
     runProgram,
     pauseProgram,
@@ -28,9 +46,32 @@ export default function RoboticsSimRunPage() {
     toggleOverlay,
     updateCameraState,
   } = useRoboticsWorkspaceContext();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [viewportBackgroundColor, setViewportBackgroundColor] = useState("#f4f6f8");
+
+  useEffect(() => {
+    const onOpenSettings = () => setSettingsOpen(true);
+    window.addEventListener("robotics:openViewportSettings", onOpenSettings as EventListener);
+    return () => window.removeEventListener("robotics:openViewportSettings", onOpenSettings as EventListener);
+  }, []);
 
   const worldScene = world.world_scene || { version: 1, gravity_m_s2: 9.81, objects: [] };
   const worldSummary = `${world.width_cells * GRID_CELL_CM}cm x ${world.height_cells * GRID_CELL_CM}cm`;
+  const selectedManifest = useMemo(
+    () => manifests.find((item) => item.vendor === selectedVendor && item.robot_type === selectedRobotType) || null,
+    [manifests, selectedRobotType, selectedVendor],
+  );
+  const kitCapabilities = useMemo(
+    () =>
+      resolveKitCapabilities({
+        vendor: selectedVendor,
+        robotType: selectedRobotType,
+        manifest: selectedManifest,
+      }),
+    [selectedManifest, selectedRobotType, selectedVendor],
+  );
+  const sensorCapabilities = useMemo(() => kitCapabilities.sensors, [kitCapabilities.sensors]);
+  const actuatorCapabilities = useMemo(() => kitCapabilities.actuators, [kitCapabilities.actuators]);
 
   return (
     <div className="robotics-sim-run-surface">
@@ -69,6 +110,7 @@ export default function RoboticsSimRunPage() {
             width: world.width_cells * GRID_CELL_CM,
             depth: world.height_cells * GRID_CELL_CM,
           }}
+          backgroundColor={viewportBackgroundColor}
         />
         <div className="robotics-floating-controls-right">
           <CameraToolbar
@@ -94,16 +136,34 @@ export default function RoboticsSimRunPage() {
           <OverlayToggles overlays={overlayState} onToggle={toggleOverlay} />
         </div>
       </section>
+      <ViewportSettingsDialog
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        backgroundColor={viewportBackgroundColor}
+        onBackgroundColorChange={setViewportBackgroundColor}
+      />
 
       <div className="robotics-sim-run-inspector robotics-sim-run-inspector--single">
         <div>
           <h4>Sensors</h4>
           <div className="robotics-sensor-cards">
-            <div className="robotics-sensor-card"><span>Distance</span><strong>{Number(sensorValues?.distance ?? 0).toFixed(1)} cm</strong></div>
-            <div className="robotics-sensor-card"><span>Bumper</span><strong>{sensorValues?.bumper ? "Pressed" : "Released"}</strong></div>
-            <div className="robotics-sensor-card"><span>Line</span><strong>{sensorValues?.line ? "Detected" : "No line"}</strong></div>
-            <div className="robotics-sensor-card"><span>Color</span><strong>{String(sensorValues?.color ?? "default")}</strong></div>
-            <div className="robotics-sensor-card"><span>Gyro</span><strong>{Math.round(Number(sensorValues?.gyro ?? 0))} deg</strong></div>
+            {sensorCapabilities.map((sensorCapability) => (
+              <div key={sensorCapability.kind} className="robotics-sensor-card">
+                <span>{sensorCapability.label}</span>
+                <strong>{formatSensorValue(sensorCapability.kind, sensorValues?.[sensorCapability.kind])}</strong>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div>
+          <h4>Actuators</h4>
+          <div className="robotics-sensor-cards">
+            {actuatorCapabilities.map((actuatorCapability) => (
+              <div key={actuatorCapability.kind} className="robotics-sensor-card">
+                <span>{actuatorCapability.label}</span>
+                <strong>Available</strong>
+              </div>
+            ))}
           </div>
         </div>
       </div>

@@ -789,21 +789,29 @@
   backdrop-filter: blur(8px);
 }
 
+.robotics-floating-controls-right .robotics-floating-group {
+  border: 1px solid rgba(103, 132, 168, 0.3);
+  background: linear-gradient(180deg, rgba(23, 33, 49, 0.65), rgba(13, 20, 31, 0.6));
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(8px);
+}
+
 .robotics-floating-group {
   border: 1px solid rgba(148, 163, 184, 0.22);
   background: rgba(100, 116, 139, 0.28);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  box-shadow:
+    0 10px 24px rgba(2, 8, 20, 0.34),
+    0 3px 8px rgba(2, 8, 20, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
   border-radius: 12px;
   padding: 8px;
   backdrop-filter: blur(10px);
 }
 
 .robotics-floating-group--camera {
-  border-color: rgba(148, 163, 184, 0.38);
-  background: linear-gradient(180deg, rgba(71, 85, 105, 0.34), rgba(51, 65, 85, 0.28));
-  box-shadow:
-    0 10px 22px rgba(15, 23, 42, 0.28),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  border-color: rgba(103, 132, 168, 0.3);
+  background: linear-gradient(180deg, rgba(23, 33, 49, 0.65), rgba(13, 20, 31, 0.6));
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
 }
 
 .robotics-btn-row {
@@ -831,6 +839,101 @@
   flex-direction: column;
   gap: 8px;
   align-items: flex-start;
+}
+
+.robotics-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  background: rgba(5, 10, 16, 0.45);
+}
+
+.robotics-modal {
+  width: min(420px, calc(100vw - 24px));
+  border: 1px solid #314257;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #1a2433, #121a26);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.42);
+  overflow: hidden;
+}
+
+.robotics-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #2b3a4f;
+}
+
+.robotics-modal-header h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.robotics-modal-close {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid #3a4a61;
+  background: #182232;
+  color: #e6edf3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.robotics-modal-body {
+  padding: 12px;
+  display: grid;
+  gap: 12px;
+}
+
+.robotics-modal-row {
+  display: grid;
+  gap: 8px;
+}
+
+.robotics-modal-row > label {
+  font-size: 12px;
+  color: #b5c5d9;
+  font-weight: 700;
+}
+
+.robotics-bg-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #d5e0ee;
+}
+
+.robotics-bg-presets {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.robotics-bg-chip {
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  border: 1px solid rgba(140, 157, 181, 0.55);
+  cursor: pointer;
+}
+
+.robotics-bg-chip.active {
+  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.45);
+  border-color: #93c5fd;
+}
+
+.robotics-modal-toggle-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .robotics-floating-controls-bottom {

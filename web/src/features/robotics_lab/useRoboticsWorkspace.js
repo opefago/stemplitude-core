@@ -12,7 +12,16 @@ import {
   resolveRoboticsTemplate,
   updateRoboticsProject,
 } from "../../lib/api/robotics";
-import { IRRuntimeExecutor, ThreeRuntimeSimulator, interpretTextProgram } from "../../labs/robotics";
+import {
+  IRRuntimeExecutor,
+  ThreeRuntimeSimulator,
+  interpretTextProgram,
+  resolveKitCapabilities,
+  resolveKitActuatorActionHandler,
+  resolveKitRuntimeBehavior,
+  resolveRobotModel,
+  validateProgramForKit,
+} from "../../labs/robotics";
 import { DEFAULT_OVERLAY_STATE } from "../../labs/robotics/view/overlayManager";
 import {
   BASE_WORLD,
@@ -20,7 +29,6 @@ import {
   START_POSE,
   SAMPLE_PROGRAM,
   inferNextNodeId,
-  getRobotModel,
   safeProgram,
 } from "./workspaceDefaults";
 
@@ -85,7 +93,50 @@ export function useRoboticsWorkspace() {
   const [cameraResetToken, setCameraResetToken] = useState(0);
   const [cameraFocusToken, setCameraFocusToken] = useState(0);
 
-  const simulator = useMemo(() => new ThreeRuntimeSimulator(getRobotModel()), []);
+  const selectedManifest = useMemo(
+    () => manifests.find((item) => item.vendor === selectedVendor && item.robot_type === selectedRobotType) || null,
+    [manifests, selectedRobotType, selectedVendor],
+  );
+  const simulator = useMemo(
+    () =>
+      new ThreeRuntimeSimulator(
+        resolveRobotModel({
+          vendor: selectedVendor,
+          robotType: selectedRobotType,
+          manifest: selectedManifest,
+        }),
+      ),
+    [selectedManifest, selectedRobotType, selectedVendor],
+  );
+  const runtimeBehavior = useMemo(
+    () =>
+      resolveKitRuntimeBehavior({
+        vendor: selectedVendor,
+        robotType: selectedRobotType,
+        manifest: selectedManifest,
+      }),
+    [selectedManifest, selectedRobotType, selectedVendor],
+  );
+  const kitCapabilities = useMemo(
+    () =>
+      resolveKitCapabilities({
+        vendor: selectedVendor,
+        robotType: selectedRobotType,
+        manifest: selectedManifest,
+      }),
+    [selectedManifest, selectedRobotType, selectedVendor],
+  );
+  const resolveActuatorAction = useMemo(
+    () => (actuatorId, action) =>
+      resolveKitActuatorActionHandler({
+        vendor: selectedVendor,
+        robotType: selectedRobotType,
+        actuatorId,
+        action,
+        manifest: selectedManifest,
+      }),
+    [selectedManifest, selectedRobotType, selectedVendor],
+  );
   const executorRef = useRef(new IRRuntimeExecutor(simulator));
   const initializedRef = useRef(false);
 
@@ -134,17 +185,18 @@ export function useRoboticsWorkspace() {
   }, [cameraState, overlayState]);
 
   useEffect(() => {
+    executorRef.current = new IRRuntimeExecutor(simulator, runtimeBehavior, resolveActuatorAction);
+    executorRef.current.load(program);
+    setRuntimeState(executorRef.current.getState());
+  }, [program, resolveActuatorAction, runtimeBehavior, simulator]);
+
+  useEffect(() => {
     simulator.setSensorOverrides?.(sensorOverrides);
   }, [sensorOverrides, simulator]);
 
   useEffect(() => {
     simulator.setWorld(world);
   }, [simulator, world]);
-
-  useEffect(() => {
-    executorRef.current.load(program);
-    setRuntimeState(executorRef.current.getState());
-  }, [program]);
 
   useEffect(() => {
     if (initializedRef.current) return;
@@ -157,6 +209,19 @@ export function useRoboticsWorkspace() {
     });
     setPose(snapshot.pose);
     setSensorValues(snapshot.sensor_values);
+  }, [simulator]);
+
+  useEffect(() => {
+    if (!initializedRef.current) return;
+    simulator.reset(startPose);
+    const snapshot = simulator.tick({
+      dt_ms: 0,
+      linear_velocity_cm_s: 0,
+      angular_velocity_deg_s: 0,
+    });
+    setPose(snapshot.pose);
+    setSensorValues(snapshot.sensor_values);
+    setPathTrailResetToken((prev) => prev + 1);
   }, [simulator, startPose]);
 
   useEffect(() => {
@@ -166,9 +231,6 @@ export function useRoboticsWorkspace() {
         const rows = await listRoboticsCapabilityManifests();
         if (!cancelled && rows.length > 0) {
           setManifests(rows);
-          setSelectedVendor(rows[0].vendor);
-          setSelectedRobotType(rows[0].robot_type);
-          setMode(rows[0].languages?.[0] || "blocks");
         }
       } catch {
         // Fallback manifest remains available.
@@ -178,6 +240,16 @@ export function useRoboticsWorkspace() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!Array.isArray(manifests) || manifests.length === 0) return;
+    const active = manifests.find((item) => item.vendor === selectedVendor && item.robot_type === selectedRobotType);
+    if (active) return;
+    const fallback = manifests[0];
+    setSelectedVendor(fallback.vendor);
+    setSelectedRobotType(fallback.robot_type);
+    setMode((prevMode) => (fallback.languages?.includes(prevMode) ? prevMode : fallback.languages?.[0] || "blocks"));
+  }, [manifests, selectedRobotType, selectedVendor]);
 
   useEffect(() => {
     if (templateResolved) return;
@@ -467,7 +539,12 @@ export function useRoboticsWorkspace() {
     setSensorValues(snapshot.sensor_values);
     setRuntimeState(result.state);
     if (result.highlightedNodeId) logLine(`Executed ${result.highlightedNodeId}`);
-    if (Array.isArray(result.diagnostics) && result.diagnostics.length > 0) {
+    if (result.issues.length > 0) {
+      result.issues.forEach((issue) => {
+        const linePart = Number.isFinite(issue.line) ? `L${issue.line} ` : "";
+        logLine(`[runtime/${issue.category}/${issue.code}] ${linePart}${issue.message}`);
+      });
+    } else if (Array.isArray(result.diagnostics) && result.diagnostics.length > 0) {
       result.diagnostics.forEach((line) => logLine(`[runtime] ${line}`));
     }
     if (result.state === "completed" || result.state === "error") {
@@ -483,7 +560,15 @@ export function useRoboticsWorkspace() {
       if (!interpreted.ok) {
         setRuntimeState("error");
         setIsAutoRunning(false);
-        interpreted.diagnostics.forEach((line) => logLine(`[interpreter] ${line}`));
+        const structured = interpreted.issues;
+        if (structured.length > 0) {
+          structured.forEach((issue) => {
+            const linePart = Number.isFinite(issue.line) ? `L${issue.line} ` : "";
+            logLine(`[interpreter/${issue.category}/${issue.code}] ${linePart}${issue.message}`);
+          });
+        } else {
+          interpreted.diagnostics.forEach((line) => logLine(`[interpreter] ${line}`));
+        }
         return;
       }
       runtimeProgram = interpreted.program;
@@ -493,6 +578,25 @@ export function useRoboticsWorkspace() {
       setRuntimeState("error");
       setIsAutoRunning(false);
       logLine("[runtime] Program has no executable commands.");
+      return;
+    }
+    const validation = validateProgramForKit({
+      program: runtimeProgram,
+      capabilities: kitCapabilities,
+      runtimeBehavior,
+      resolveActuatorAction,
+    });
+    if (!validation.ok) {
+      setRuntimeState("error");
+      setIsAutoRunning(false);
+      if (validation.issues.length > 0) {
+        validation.issues.forEach((issue) => {
+          const linePart = Number.isFinite(issue.line) ? `L${issue.line} ` : "";
+          logLine(`[validator/${issue.category}/${issue.code}] ${linePart}${issue.message}`);
+        });
+      } else {
+        validation.diagnostics.forEach((line) => logLine(`[validator] ${line}`));
+      }
       return;
     }
 
