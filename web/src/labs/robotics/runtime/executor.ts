@@ -12,6 +12,7 @@ import type { IssueCode } from "./issueCodes";
 import type { RuntimeExecutor, RuntimeIssue, RuntimeTickResult, RuntimeTraceEntry } from "./types";
 
 const PHYSICS_STEP_MS = 20;
+const COMMAND_SIM_TIME_SCALE = 20;
 type RuntimeValue = string | number | boolean;
 
 interface CallFrame {
@@ -19,6 +20,16 @@ interface CallFrame {
   vars: Map<string, RuntimeValue>;
   didReturn: boolean;
   returnValue: RuntimeValue;
+}
+
+interface ActiveDistanceMove {
+  nodeId: string;
+  remainingCm: number;
+  targetLinearCmS: number;
+  previousPosition: { x: number; y: number };
+  elapsedMs: number;
+  maxDurationMs: number;
+  collisions: Set<string>;
 }
 
 function normalizeSignedAngle(delta: number): number {
@@ -59,6 +70,8 @@ export class IRRuntimeExecutor implements RuntimeExecutor {
   private callFrames: CallFrame[] = [];
   private trace: RuntimeTraceEntry[] = [];
   private callDepth = 0;
+  private activeDistanceMove: ActiveDistanceMove | null = null;
+  private lastStepAtMs: number | null = null;
 
   private static readonly MAX_CALL_DEPTH = 32;
 
@@ -79,6 +92,8 @@ export class IRRuntimeExecutor implements RuntimeExecutor {
     this.globalVariables.clear();
     this.callFrames = [];
     this.trace = [];
+    this.activeDistanceMove = null;
+    this.lastStepAtMs = null;
   }
 
   run(): void {
@@ -102,6 +117,8 @@ export class IRRuntimeExecutor implements RuntimeExecutor {
     this.callFrames = [];
     this.trace = [];
     this.callDepth = 0;
+    this.activeDistanceMove = null;
+    this.lastStepAtMs = null;
   }
 
   getState(): "idle" | "running" | "paused" | "completed" | "error" {
@@ -113,6 +130,9 @@ export class IRRuntimeExecutor implements RuntimeExecutor {
   }
 
   step(): RuntimeTickResult {
+    const nowMs = Date.now();
+    const wallDeltaMs = this.lastStepAtMs === null ? 50 : Math.max(16, Math.min(250, nowMs - this.lastStepAtMs));
+    this.lastStepAtMs = nowMs;
     if (!this.program) {
       this.state = "error";
       const collector: RuntimeCollector = { diagnostics: [], issues: [] };
@@ -129,7 +149,13 @@ export class IRRuntimeExecutor implements RuntimeExecutor {
 
     const node = this.program.nodes[this.cursor];
     const collector: RuntimeCollector = { diagnostics: [], issues: [] };
-    this.executeNode(node, collector);
+    let completedNode = true;
+    if (node.kind === "move" && node.unit !== "seconds") {
+      completedNode = this.executeTopLevelDistanceMove(node, collector, wallDeltaMs * COMMAND_SIM_TIME_SCALE);
+    } else {
+      this.activeDistanceMove = null;
+      this.executeNode(node, collector);
+    }
 
     this.trace.push({
       timestamp_ms: Date.now(),
@@ -138,9 +164,11 @@ export class IRRuntimeExecutor implements RuntimeExecutor {
       sensor_snapshot: {},
     });
 
-    this.cursor += 1;
-    if (this.cursor >= this.program.nodes.length && this.state !== "error") {
-      this.state = "completed";
+    if (completedNode) {
+      this.cursor += 1;
+      if (this.cursor >= this.program.nodes.length && this.state !== "error") {
+        this.state = "completed";
+      }
     }
 
     return {
@@ -149,6 +177,69 @@ export class IRRuntimeExecutor implements RuntimeExecutor {
       diagnostics: collector.diagnostics,
       issues: collector.issues,
     };
+  }
+
+  private executeTopLevelDistanceMove(
+    node: Extract<RoboticsIRNode, { kind: "move" }>,
+    collector: RuntimeCollector,
+    budgetMs: number,
+  ): boolean {
+    const speedPct = node.speed_pct ?? 100;
+    const linearSpeed = (speedPct / 100) * this.runtimeBehavior.maxLinearSpeedCmS;
+    const directionSign = node.direction === "forward" ? 1 : -1;
+    const targetLinear = directionSign * linearSpeed;
+    const distanceCm = toDistanceCm(node.unit, Math.abs(node.value));
+    if (distanceCm <= 0) return true;
+
+    if (!this.activeDistanceMove || this.activeDistanceMove.nodeId !== node.id) {
+      const start = this.simulator.tick({
+        dt_ms: 0,
+        linear_velocity_cm_s: 0,
+        angular_velocity_deg_s: 0,
+      });
+      this.activeDistanceMove = {
+        nodeId: node.id,
+        remainingCm: distanceCm,
+        targetLinearCmS: targetLinear,
+        previousPosition: { ...start.pose.position },
+        elapsedMs: 0,
+        maxDurationMs: Math.max(500, (distanceCm / Math.max(0.001, Math.abs(linearSpeed))) * 1000 * 4),
+        collisions: new Set<string>(),
+      };
+    }
+
+    const move = this.activeDistanceMove;
+    let remainingBudgetMs = Math.max(PHYSICS_STEP_MS, budgetMs);
+    while (remainingBudgetMs > 0 && move.remainingCm > 0 && move.elapsedMs < move.maxDurationMs) {
+      const step = Math.min(PHYSICS_STEP_MS, remainingBudgetMs);
+      const frame = this.simulator.tick({
+        dt_ms: step,
+        linear_velocity_cm_s: move.targetLinearCmS,
+        angular_velocity_deg_s: 0,
+      });
+      const dx = frame.pose.position.x - move.previousPosition.x;
+      const dy = frame.pose.position.y - move.previousPosition.y;
+      move.remainingCm = Math.max(0, move.remainingCm - Math.sqrt(dx * dx + dy * dy));
+      move.previousPosition = frame.pose.position;
+      frame.collisions.forEach((id) => move.collisions.add(id));
+      move.elapsedMs += step;
+      remainingBudgetMs -= step;
+      if (frame.collisions.length > 0) break;
+    }
+
+    const done = move.remainingCm <= 0 || move.elapsedMs >= move.maxDurationMs || move.collisions.size > 0;
+    if (!done) return false;
+
+    this.tickForDuration(120, 0, 0);
+    if (move.collisions.size > 0) {
+      reportRuntimeIssue(
+        collector,
+        ISSUE_CODES.COLLISION_DETECTED,
+        `Collision detected: ${Array.from(move.collisions).join(", ")}`,
+      );
+    }
+    this.activeDistanceMove = null;
+    return true;
   }
 
   private executeNode(node: RoboticsIRNode, collector: RuntimeCollector): void {

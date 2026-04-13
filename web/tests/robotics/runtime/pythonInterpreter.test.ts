@@ -207,4 +207,25 @@ if 1 < 2 < 3:
       code: "UNSUPPORTED_SYNTAX",
     });
   });
+
+  it("reports kit capability mismatch for unsupported sensors during parse", () => {
+    const source = `
+distance_value = robot.read_sensor("distance")
+`;
+    const result = interpretTextProgram(source, "python", { allowedSensors: ["gyro"] });
+    expect(result.ok).toBe(false);
+    expect(result.diagnostics.some((line) => line.includes("is not available for the selected kit"))).toBe(true);
+    expect(result.issues.some((issue) => issue.code === "KIT_CAPABILITY_MISMATCH")).toBe(true);
+  });
+
+  it("reports kit capability mismatch for unsupported sensors in conditions", () => {
+    const source = `
+if robot.read_sensor("distance") > 10:
+  robot.wait(0.1)
+`;
+    const result = interpretTextProgram(source, "python", { allowedSensors: ["gyro"] });
+    expect(result.ok).toBe(false);
+    expect(result.diagnostics.some((line) => line.includes("is not available for the selected kit"))).toBe(true);
+    expect(result.issues.some((issue) => issue.code === "KIT_CAPABILITY_MISMATCH")).toBe(true);
+  });
 });

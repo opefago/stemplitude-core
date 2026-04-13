@@ -26,6 +26,7 @@ export interface BaseInterpreterContext {
   asNumber: (value: string) => number;
   splitTopLevel: (input: string, needle: string) => string[];
   normalizeSensorName: (sensor: string) => SensorKind;
+  isSensorAllowed: (sensor: SensorKind) => boolean;
   parseExpression: (value: string) => RoboticsExpression | null;
   parseCondition: (value: string) => RoboticsCondition | null;
   diagnoseCondition: (value: string) => string | null;

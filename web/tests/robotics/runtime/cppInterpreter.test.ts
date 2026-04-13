@@ -211,4 +211,30 @@ int main() {
       code: "CPP_UNSUPPORTED_CONSTRUCT",
     });
   });
+
+  it("reports kit capability mismatch for unsupported sensors during parse", () => {
+    const source = `
+int main() {
+  int d = robot.read_sensor("distance");
+}
+`;
+    const result = interpretTextProgram(source, "cpp", { allowedSensors: ["gyro"] });
+    expect(result.ok).toBe(false);
+    expect(result.diagnostics.some((line) => line.includes("is not available for the selected kit"))).toBe(true);
+    expect(result.issues.some((issue) => issue.code === "KIT_CAPABILITY_MISMATCH")).toBe(true);
+  });
+
+  it("reports kit capability mismatch for unsupported sensors in conditions", () => {
+    const source = `
+int main() {
+  if (robot.read_sensor("distance") > 10) {
+    robot.wait(0.1);
+  }
+}
+`;
+    const result = interpretTextProgram(source, "cpp", { allowedSensors: ["gyro"] });
+    expect(result.ok).toBe(false);
+    expect(result.diagnostics.some((line) => line.includes("is not available for the selected kit"))).toBe(true);
+    expect(result.issues.some((issue) => issue.code === "KIT_CAPABILITY_MISMATCH")).toBe(true);
+  });
 });

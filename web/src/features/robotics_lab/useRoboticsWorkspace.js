@@ -556,7 +556,9 @@ export function useRoboticsWorkspace() {
   function runProgram() {
     let runtimeProgram = program;
     if (mode === "python" || mode === "cpp") {
-      const interpreted = interpretTextProgram(textCode, mode);
+      const interpreted = interpretTextProgram(textCode, mode, {
+        allowedSensors: kitCapabilities.sensors.map((sensor) => sensor.kind),
+      });
       if (!interpreted.ok) {
         setRuntimeState("error");
         setIsAutoRunning(false);

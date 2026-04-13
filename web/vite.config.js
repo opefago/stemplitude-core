@@ -43,7 +43,7 @@ export default defineConfig({
   plugins: [react(), obfuscateBuildOutput()],
   test: {
     environment: "node",
-    include: ["src/**/*.test.{ts,tsx}"],
+    include: ["src/**/*.test.{ts,tsx}", "tests/**/*.test.{ts,tsx}"],
   },
   server: {
     proxy: {

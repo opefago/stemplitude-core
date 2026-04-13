@@ -26,6 +26,10 @@ export type {
   TextInterpretResult,
 } from "./interpreterTypes";
 
+export interface InterpretTextProgramOptions {
+  allowedSensors?: SensorKind[];
+}
+
 function emptyProgram(): RoboticsProgram {
   return { version: 1, entrypoint: "main", nodes: [] };
 }
@@ -472,11 +476,18 @@ function fallbackFalseCondition(): RoboticsCondition {
   };
 }
 
-function buildInterpreterContext(): BaseInterpreterContext {
+function buildInterpreterContext(options?: InterpretTextProgramOptions): BaseInterpreterContext {
+  const allowedSensors = Array.isArray(options?.allowedSensors)
+    ? new Set(options.allowedSensors.map((sensor) => String(sensor).trim().toLowerCase()).filter(Boolean))
+    : null;
   return {
     asNumber,
     splitTopLevel,
     normalizeSensorName,
+    isSensorAllowed: (sensor) => {
+      if (!allowedSensors) return true;
+      return allowedSensors.has(String(sensor).trim().toLowerCase());
+    },
     parseExpression,
     parseCondition,
     diagnoseCondition,
@@ -488,7 +499,11 @@ function buildInterpreterContext(): BaseInterpreterContext {
   };
 }
 
-export function interpretTextProgram(code: string, mode: RoboticsCodeMode): TextInterpretResult {
+export function interpretTextProgram(
+  code: string,
+  mode: RoboticsCodeMode,
+  options?: InterpretTextProgramOptions,
+): TextInterpretResult {
   if (!code.trim()) {
     const message = "Text editor is empty; nothing to run in simulator.";
     return withStructuredDiagnostics({
@@ -499,7 +514,7 @@ export function interpretTextProgram(code: string, mode: RoboticsCodeMode): Text
     }, [createInterpreterIssue(ISSUE_CODES.EMPTY_SOURCE, "syntax", message)]);
   }
 
-  const context = buildInterpreterContext();
+  const context = buildInterpreterContext(options);
   if (mode === "python") {
     const astResult = parsePythonWithAst(code, context);
     if (astResult.ok) return withStructuredDiagnostics(astResult);

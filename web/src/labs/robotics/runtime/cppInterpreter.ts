@@ -1,6 +1,6 @@
 import type { SyntaxNode } from "@lezer/common";
 import { parser as cppAstParser } from "@lezer/cpp";
-import type { RoboticsExpression, RoboticsIRNode, RoboticsProgram } from "../../../lib/robotics";
+import type { RoboticsCondition, RoboticsExpression, RoboticsIRNode, RoboticsProgram } from "../../../lib/robotics";
 import type { CppInterpreterContext, InterpreterDiagnostic, TextInterpretResult } from "./interpreterTypes";
 import { ISSUE_CODES } from "./issueCodes";
 import type { IssueCode } from "./issueCodes";
@@ -39,6 +39,69 @@ function isChainedComparison(conditionText: string): boolean {
   if (conditionText.includes("&&") || conditionText.includes("||")) return false;
   const operators = conditionText.match(/(<=|>=|==|!=|<|>)/g) || [];
   return operators.length > 1;
+}
+
+function validateSensorKindForKit(
+  sensor: string,
+  line: number,
+  diagnostics: string[],
+  issues: InterpreterDiagnostic[],
+  context: CppInterpreterContext,
+): boolean {
+  const normalized = context.normalizeSensorName(sensor);
+  if (context.isSensorAllowed(normalized)) return true;
+  reportCppIssue(
+    diagnostics,
+    issues,
+    ISSUE_CODES.KIT_CAPABILITY_MISMATCH,
+    "semantic",
+    `Line ${line}: sensor "${sensor}" is not available for the selected kit`,
+    line,
+  );
+  return false;
+}
+
+function validateExpressionSensorsForKit(
+  expression: RoboticsExpression,
+  line: number,
+  diagnostics: string[],
+  issues: InterpreterDiagnostic[],
+  context: CppInterpreterContext,
+) {
+  if (expression.type === "sensor") {
+    validateSensorKindForKit(expression.sensor, line, diagnostics, issues, context);
+    return;
+  }
+  if (expression.type === "binary") {
+    validateExpressionSensorsForKit(expression.left, line, diagnostics, issues, context);
+    validateExpressionSensorsForKit(expression.right, line, diagnostics, issues, context);
+  }
+}
+
+function validateConditionSensorsForKit(
+  condition: RoboticsCondition,
+  line: number,
+  diagnostics: string[],
+  issues: InterpreterDiagnostic[],
+  context: CppInterpreterContext,
+) {
+  if (condition.op === "sensor_gt" || condition.op === "sensor_lt") {
+    validateSensorKindForKit(condition.sensor, line, diagnostics, issues, context);
+    return;
+  }
+  if (condition.op === "eq") {
+    validateExpressionSensorsForKit(condition.left, line, diagnostics, issues, context);
+    validateExpressionSensorsForKit(condition.right, line, diagnostics, issues, context);
+    return;
+  }
+  if (condition.op === "not") {
+    validateConditionSensorsForKit(condition.condition, line, diagnostics, issues, context);
+    return;
+  }
+  if (condition.op === "and" || condition.op === "or") {
+    condition.conditions.forEach((child) =>
+      validateConditionSensorsForKit(child, line, diagnostics, issues, context));
+  }
 }
 
 function parseCppStatement(
@@ -86,6 +149,7 @@ function parseCppStatement(
   }
   match = line.text.match(/^(?:auto|int|float|double|bool)?\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*robot\.read_sensor\("([A-Za-z_]+)"\);$/);
   if (match) {
+    validateSensorKindForKit(match[2], line.number, diagnostics, issues, context);
     return {
       id: nextId(),
       kind: "read_sensor",
@@ -111,6 +175,7 @@ function parseCppStatement(
       );
       return null;
     }
+    validateExpressionSensorsForKit(expr, line.number, diagnostics, issues, context);
     return { id: nextId(), kind: "return", value: expr };
   }
   match = line.text.match(/^(?:auto|int|float|double|bool)?\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+);$/);
@@ -127,6 +192,7 @@ function parseCppStatement(
       );
       return null;
     }
+    validateExpressionSensorsForKit(expr, line.number, diagnostics, issues, context);
     return { id: nextId(), kind: "assign", variable: match[1], value: expr };
   }
   match = line.text.match(/^([A-Za-z_][A-Za-z0-9_]*)\((.*)\);$/);
@@ -149,6 +215,7 @@ function parseCppStatement(
           );
           return null;
         }
+        validateExpressionSensorsForKit(expr, line.number, diagnostics, issues, context);
         args.push(expr);
       }
     }
@@ -211,14 +278,15 @@ function parseCppBodyNodes(
       const normalizedCondition = normalizeCppCondition(conditionText);
       const chainedComparison = isChainedComparison(conditionText);
       const condition = chainedComparison ? null : context.parseCondition(normalizedCondition);
+      const conditionLine = context.lineNumberAt(source, child.from);
       if (chainedComparison) {
         reportCppIssue(
           diagnostics,
           issues,
           ISSUE_CODES.CPP_UNSUPPORTED_CONSTRUCT,
           "semantic",
-          `Line ${context.lineNumberAt(source, child.from)}: unsupported C++ if condition "${conditionText.trim()}" (chained comparisons are not supported in C++; use && to combine comparisons)`,
-          context.lineNumberAt(source, child.from),
+          `Line ${conditionLine}: unsupported C++ if condition "${conditionText.trim()}" (chained comparisons are not supported in C++; use && to combine comparisons)`,
+          conditionLine,
         );
       }
       if (!condition) {
@@ -229,10 +297,12 @@ function parseCppBodyNodes(
             issues,
             ISSUE_CODES.UNSUPPORTED_SYNTAX,
             "syntax",
-            `Line ${context.lineNumberAt(source, child.from)}: unsupported C++ if condition "${conditionText.trim()}"${detail ? ` (${detail})` : ""}`,
-            context.lineNumberAt(source, child.from),
+            `Line ${conditionLine}: unsupported C++ if condition "${conditionText.trim()}"${detail ? ` (${detail})` : ""}`,
+            conditionLine,
           );
         }
+      } else {
+        validateConditionSensorsForKit(condition, conditionLine, diagnostics, issues, context);
       }
       const bodies = child.getChildren("CompoundStatement");
       const thenNodes = bodies[0] ? parseCppBodyNodes(source, bodies[0], nextId, diagnostics, issues, context) : [];
@@ -281,14 +351,15 @@ function parseCppBodyNodes(
       const normalizedCondition = normalizeCppCondition(conditionText);
       const chainedComparison = isChainedComparison(conditionText);
       const condition = chainedComparison ? null : context.parseCondition(normalizedCondition);
+      const conditionLine = context.lineNumberAt(source, child.from);
       if (chainedComparison) {
         reportCppIssue(
           diagnostics,
           issues,
           ISSUE_CODES.CPP_UNSUPPORTED_CONSTRUCT,
           "semantic",
-          `Line ${context.lineNumberAt(source, child.from)}: unsupported C++ while condition "${conditionText.trim()}" (chained comparisons are not supported in C++; use && to combine comparisons)`,
-          context.lineNumberAt(source, child.from),
+          `Line ${conditionLine}: unsupported C++ while condition "${conditionText.trim()}" (chained comparisons are not supported in C++; use && to combine comparisons)`,
+          conditionLine,
         );
       }
       if (!condition) {
@@ -299,10 +370,12 @@ function parseCppBodyNodes(
             issues,
             ISSUE_CODES.UNSUPPORTED_SYNTAX,
             "syntax",
-            `Line ${context.lineNumberAt(source, child.from)}: unsupported C++ while condition "${conditionText.trim()}"${detail ? ` (${detail})` : ""}`,
-            context.lineNumberAt(source, child.from),
+            `Line ${conditionLine}: unsupported C++ while condition "${conditionText.trim()}"${detail ? ` (${detail})` : ""}`,
+            conditionLine,
           );
         }
+      } else {
+        validateConditionSensorsForKit(condition, conditionLine, diagnostics, issues, context);
       }
       const body = child.getChild("CompoundStatement");
       nodes.push({
@@ -365,6 +438,8 @@ function parseCppBlock(
             line.number,
           );
         }
+      } else {
+        validateConditionSensorsForKit(condition, line.number, diagnostics, issues, context);
       }
       const thenParsed = parseCppBlock(lines, index + 1, nextId, diagnostics, issues, context);
       let elseNodes: RoboticsIRNode[] | undefined;
@@ -421,6 +496,8 @@ function parseCppBlock(
             line.number,
           );
         }
+      } else {
+        validateConditionSensorsForKit(condition, line.number, diagnostics, issues, context);
       }
       const parsed = parseCppBlock(lines, index + 1, nextId, diagnostics, issues, context);
       nodes.push({

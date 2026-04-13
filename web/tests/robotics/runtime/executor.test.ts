@@ -316,4 +316,92 @@ describe("IRRuntimeExecutor", () => {
     }
     expect(result.state).toBe("completed");
   });
+
+  it("reaches commanded move distance regardless of speed_pct", () => {
+    const fastSimulator = new MockSimulator();
+    const slowSimulator = new MockSimulator();
+    const fastExecutor = new IRRuntimeExecutor(fastSimulator);
+    const slowExecutor = new IRRuntimeExecutor(slowSimulator);
+
+    const fastProgram: RoboticsProgram = {
+      version: 1,
+      entrypoint: "main",
+      nodes: [{ id: "n1", kind: "move", direction: "forward", unit: "distance_cm", value: 80, speed_pct: 100 }],
+    };
+    const slowProgram: RoboticsProgram = {
+      version: 1,
+      entrypoint: "main",
+      nodes: [{ id: "n1", kind: "move", direction: "forward", unit: "distance_cm", value: 80, speed_pct: 1 }],
+    };
+
+    fastExecutor.load(fastProgram);
+    fastExecutor.run();
+    let fastResult = fastExecutor.step();
+    let fastSteps = 1;
+    while (fastResult.state === "running" && fastSteps < 5000) {
+      fastResult = fastExecutor.step();
+      fastSteps += 1;
+    }
+
+    slowExecutor.load(slowProgram);
+    slowExecutor.run();
+    let slowResult = slowExecutor.step();
+    let slowSteps = 1;
+    while (slowResult.state === "running" && slowSteps < 5000) {
+      slowResult = slowExecutor.step();
+      slowSteps += 1;
+    }
+
+    expect(fastResult.state).toBe("completed");
+    expect(slowResult.state).toBe("completed");
+    expect(slowSteps).toBeGreaterThan(fastSteps);
+    const fastX = fastSimulator.getPose().position.x;
+    const slowX = slowSimulator.getPose().position.x;
+    expect(fastX).toBeGreaterThan(60);
+    expect(slowX).toBeGreaterThan(60);
+    expect(Math.abs(fastX - slowX)).toBeLessThan(5);
+  });
+
+  it("fails with call stack overflow on direct recursion", () => {
+    const simulator = new MockSimulator();
+    const executor = new IRRuntimeExecutor(simulator);
+    const program: RoboticsProgram = {
+      version: 1,
+      entrypoint: "main",
+      nodes: [{ id: "n1", kind: "call", function_id: "recurse", args: [] }],
+      functions: [
+        {
+          id: "recurse",
+          name: "recurse",
+          params: [],
+          body: [{ id: "f1", kind: "call", function_id: "recurse", args: [] }],
+        },
+      ],
+    };
+    executor.load(program);
+    executor.run();
+    const result = executor.step();
+    expect(result.state).toBe("error");
+    expect(result.diagnostics?.some((line) => line.includes("call stack overflow"))).toBe(true);
+    expect(result.issues.some((issue) => issue.code === "CALL_STACK_OVERFLOW")).toBe(true);
+  });
+
+  it("fails with call stack overflow on nested indirect recursion", () => {
+    const simulator = new MockSimulator();
+    const executor = new IRRuntimeExecutor(simulator);
+    const program: RoboticsProgram = {
+      version: 1,
+      entrypoint: "main",
+      nodes: [{ id: "n1", kind: "call", function_id: "a", args: [] }],
+      functions: [
+        { id: "a", name: "a", params: [], body: [{ id: "a1", kind: "call", function_id: "b", args: [] }] },
+        { id: "b", name: "b", params: [], body: [{ id: "b1", kind: "call", function_id: "a", args: [] }] },
+      ],
+    };
+    executor.load(program);
+    executor.run();
+    const result = executor.step();
+    expect(result.state).toBe("error");
+    expect(result.issues.some((issue) => issue.code === "CALL_STACK_OVERFLOW")).toBe(true);
+  });
 });

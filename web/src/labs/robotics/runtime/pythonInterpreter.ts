@@ -25,6 +25,69 @@ function reportPythonIssue(
   });
 }
 
+function validateSensorKindForKit(
+  sensor: string,
+  line: number,
+  diagnostics: string[],
+  issues: InterpreterDiagnostic[],
+  context: PythonInterpreterContext,
+): boolean {
+  const normalized = context.normalizeSensorName(sensor);
+  if (context.isSensorAllowed(normalized)) return true;
+  reportPythonIssue(
+    diagnostics,
+    issues,
+    ISSUE_CODES.KIT_CAPABILITY_MISMATCH,
+    "semantic",
+    `Line ${line}: sensor "${sensor}" is not available for the selected kit`,
+    line,
+  );
+  return false;
+}
+
+function validateExpressionSensorsForKit(
+  expression: RoboticsExpression,
+  line: number,
+  diagnostics: string[],
+  issues: InterpreterDiagnostic[],
+  context: PythonInterpreterContext,
+) {
+  if (expression.type === "sensor") {
+    validateSensorKindForKit(expression.sensor, line, diagnostics, issues, context);
+    return;
+  }
+  if (expression.type === "binary") {
+    validateExpressionSensorsForKit(expression.left, line, diagnostics, issues, context);
+    validateExpressionSensorsForKit(expression.right, line, diagnostics, issues, context);
+  }
+}
+
+function validateConditionSensorsForKit(
+  condition: RoboticsCondition,
+  line: number,
+  diagnostics: string[],
+  issues: InterpreterDiagnostic[],
+  context: PythonInterpreterContext,
+) {
+  if (condition.op === "sensor_gt" || condition.op === "sensor_lt") {
+    validateSensorKindForKit(condition.sensor, line, diagnostics, issues, context);
+    return;
+  }
+  if (condition.op === "eq") {
+    validateExpressionSensorsForKit(condition.left, line, diagnostics, issues, context);
+    validateExpressionSensorsForKit(condition.right, line, diagnostics, issues, context);
+    return;
+  }
+  if (condition.op === "not") {
+    validateConditionSensorsForKit(condition.condition, line, diagnostics, issues, context);
+    return;
+  }
+  if (condition.op === "and" || condition.op === "or") {
+    condition.conditions.forEach((child) =>
+      validateConditionSensorsForKit(child, line, diagnostics, issues, context));
+  }
+}
+
 function parsePythonStatement(
   line: PythonLine,
   nextId: () => string,
@@ -70,6 +133,7 @@ function parsePythonStatement(
   }
   match = line.text.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*robot\.read_sensor\("([A-Za-z_]+)"\)$/);
   if (match) {
+    validateSensorKindForKit(match[2], line.number, diagnostics, issues, context);
     return {
       id: nextId(),
       kind: "read_sensor",
@@ -95,6 +159,7 @@ function parsePythonStatement(
       );
       return null;
     }
+    validateExpressionSensorsForKit(expr, line.number, diagnostics, issues, context);
     return { id: nextId(), kind: "return", value: expr };
   }
   match = line.text.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/);
@@ -111,6 +176,7 @@ function parsePythonStatement(
       );
       return null;
     }
+    validateExpressionSensorsForKit(expr, line.number, diagnostics, issues, context);
     return { id: nextId(), kind: "assign", variable: match[1], value: expr };
   }
   match = line.text.match(/^([A-Za-z_][A-Za-z0-9_]*)\((.*)\)$/);
@@ -133,6 +199,7 @@ function parsePythonStatement(
           );
           return null;
         }
+        validateExpressionSensorsForKit(expr, line.number, diagnostics, issues, context);
         args.push(expr);
       }
     }
@@ -197,6 +264,7 @@ function parsePythonBodyNodes(
       ]);
       const conditionText = conditionNode ? context.textOf(source, conditionNode) : "";
       const condition = context.parseCondition(conditionText);
+      const conditionLine = context.lineNumberAt(source, child.from);
       if (!condition) {
         const detail = context.diagnoseCondition(conditionText);
         reportPythonIssue(
@@ -204,9 +272,11 @@ function parsePythonBodyNodes(
           issues,
           ISSUE_CODES.UNSUPPORTED_SYNTAX,
           "syntax",
-          `Line ${context.lineNumberAt(source, child.from)}: unsupported if condition "${conditionText.trim()}"${detail ? ` (${detail})` : ""}`,
-          context.lineNumberAt(source, child.from),
+          `Line ${conditionLine}: unsupported if condition "${conditionText.trim()}"${detail ? ` (${detail})` : ""}`,
+          conditionLine,
         );
+      } else {
+        validateConditionSensorsForKit(condition, conditionLine, diagnostics, issues, context);
       }
       const bodies = child.getChildren("Body");
       const thenNodes = bodies[0] ? parsePythonBodyNodes(source, bodies[0], nextId, diagnostics, issues, context) : [];
@@ -260,6 +330,7 @@ function parsePythonBodyNodes(
       ]);
       const conditionText = conditionNode ? context.textOf(source, conditionNode) : "";
       const condition = context.parseCondition(conditionText);
+      const conditionLine = context.lineNumberAt(source, child.from);
       if (!condition) {
         const detail = context.diagnoseCondition(conditionText);
         reportPythonIssue(
@@ -267,9 +338,11 @@ function parsePythonBodyNodes(
           issues,
           ISSUE_CODES.UNSUPPORTED_SYNTAX,
           "syntax",
-          `Line ${context.lineNumberAt(source, child.from)}: unsupported while condition "${conditionText.trim()}"${detail ? ` (${detail})` : ""}`,
-          context.lineNumberAt(source, child.from),
+          `Line ${conditionLine}: unsupported while condition "${conditionText.trim()}"${detail ? ` (${detail})` : ""}`,
+          conditionLine,
         );
+      } else {
+        validateConditionSensorsForKit(condition, conditionLine, diagnostics, issues, context);
       }
       const body = child.getChild("Body");
       nodes.push({
@@ -339,6 +412,8 @@ function parsePythonBlock(
           `Line ${line.number}: unsupported if condition "${match[1]}"${detail ? ` (${detail})` : ""}`,
           line.number,
         );
+      } else {
+        validateConditionSensorsForKit(condition, line.number, diagnostics, issues, context);
       }
       const thenIndent = lines[index + 1]?.indent ?? indent + 2;
       const thenParsed = parsePythonBlock(lines, index + 1, thenIndent, nextId, diagnostics, issues, context);
@@ -387,6 +462,8 @@ function parsePythonBlock(
           `Line ${line.number}: unsupported while condition "${match[1]}"${detail ? ` (${detail})` : ""}`,
           line.number,
         );
+      } else {
+        validateConditionSensorsForKit(condition, line.number, diagnostics, issues, context);
       }
       const bodyIndent = lines[index + 1]?.indent ?? indent + 2;
       const parsed = parsePythonBlock(lines, index + 1, bodyIndent, nextId, diagnostics, issues, context);
