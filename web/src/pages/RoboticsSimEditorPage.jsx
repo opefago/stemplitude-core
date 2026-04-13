@@ -402,6 +402,7 @@ export default function RoboticsSimEditorPage() {
               setSelectedObjectId(id);
               setRightTab("properties");
             }}
+            selectedObjectId={selectedObjectId}
             robotStartPose={startPose}
             onRobotStartMove={handleRobotStartMove}
             onRobotStartMoveEnd={commitRobotStartMove}

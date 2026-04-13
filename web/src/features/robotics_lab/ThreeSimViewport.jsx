@@ -5,6 +5,7 @@ import * as THREE from "three";
 import { useCameraController } from "../../labs/robotics/view/useCameraController";
 import { buildPerspectivePose } from "../../labs/robotics/view/cameraPresets";
 import { overlayOpacityForMode } from "../../labs/robotics/view/overlayManager";
+import { toonGradientMap } from "../../lib/three/cartoonStyle";
 import { DistanceRayOverlay } from "../../labs/robotics/view/overlays/DistanceRayOverlay";
 import { HeadingOverlay } from "../../labs/robotics/view/overlays/HeadingOverlay";
 import { LineSensorOverlay } from "../../labs/robotics/view/overlays/LineSensorOverlay";
@@ -69,12 +70,9 @@ function WorldObject({ object, editable = false, selected = false, onPointerDown
             ? "#f59e0b"
             : "#3b82f6");
 
-  const baseMaterialProps = {
+  const toonMaterialProps = {
     color,
-    metalness: object.type === "wall" ? 0.2 : 0.05,
-    roughness: object.type === "wall" ? 0.65 : 0.45,
-    emissive: selected ? "#1d4ed8" : "#000000",
-    emissiveIntensity: selected ? 0.35 : 0,
+    gradientMap: toonGradientMap,
   };
 
   const commonProps = editable
@@ -88,10 +86,22 @@ function WorldObject({ object, editable = false, selected = false, onPointerDown
   if (object.type === "obstacle") {
     const radius = Math.max(6, Math.min(sx, sz) / 2);
     return (
-      <mesh position={[x, y, z]} rotation={[0, yawRad, 0]} {...commonProps}>
-        <cylinderGeometry args={[radius, radius * 0.9, sy, 24]} />
-        <meshStandardMaterial {...baseMaterialProps} />
-      </mesh>
+      <group position={[x, y, z]} rotation={[0, yawRad, 0]} {...commonProps}>
+        <mesh>
+          <cylinderGeometry args={[radius, radius * 0.9, sy, 24]} />
+          <meshToonMaterial {...toonMaterialProps} />
+        </mesh>
+        <mesh scale={[1.02, 1.02, 1.02]} raycast={() => null}>
+          <cylinderGeometry args={[radius, radius * 0.9, sy, 24]} />
+          <meshBasicMaterial color="#0d0d0d" side={THREE.BackSide} />
+        </mesh>
+        {selected ? (
+          <mesh scale={[1.06, 1.06, 1.06]} raycast={() => null}>
+            <cylinderGeometry args={[radius, radius * 0.9, sy, 24]} />
+            <meshBasicMaterial color="#00d4ff" transparent opacity={0.22} side={THREE.BackSide} />
+          </mesh>
+        ) : null}
+      </group>
     );
   }
 
@@ -100,8 +110,18 @@ function WorldObject({ object, editable = false, selected = false, onPointerDown
       <group rotation={[0, yawRad, 0]} {...commonProps}>
         <mesh position={[x, y, z]}>
           <cylinderGeometry args={[Math.max(sx, sz) / 2, Math.max(sx, sz) / 2, sy, 28]} />
-          <meshStandardMaterial {...baseMaterialProps} transparent opacity={0.82} />
+          <meshToonMaterial {...toonMaterialProps} transparent opacity={0.82} />
         </mesh>
+        <mesh position={[x, y, z]} scale={[1.015, 1.015, 1.015]} raycast={() => null}>
+          <cylinderGeometry args={[Math.max(sx, sz) / 2, Math.max(sx, sz) / 2, sy, 28]} />
+          <meshBasicMaterial color="#0d0d0d" side={THREE.BackSide} />
+        </mesh>
+        {selected ? (
+          <mesh position={[x, y, z]} scale={[1.045, 1.045, 1.045]} raycast={() => null}>
+            <cylinderGeometry args={[Math.max(sx, sz) / 2, Math.max(sx, sz) / 2, sy, 28]} />
+            <meshBasicMaterial color="#00d4ff" transparent opacity={0.2} side={THREE.BackSide} />
+          </mesh>
+        ) : null}
         <mesh position={[x, y + sy / 2 + 0.05, z]} rotation={[-Math.PI / 2, 0, 0]}>
           <ringGeometry args={[Math.max(sx, sz) * 0.18, Math.max(sx, sz) * 0.38, 40]} />
           <meshBasicMaterial color="#f8fafc" transparent opacity={0.75} />
@@ -111,15 +131,28 @@ function WorldObject({ object, editable = false, selected = false, onPointerDown
   }
 
   return (
-    <mesh position={[x, y, z]} rotation={[0, yawRad, 0]} {...commonProps}>
-      <boxGeometry args={[sx, sy, sz]} />
-      <meshStandardMaterial {...baseMaterialProps} />
-    </mesh>
+    <group position={[x, y, z]} rotation={[0, yawRad, 0]} {...commonProps}>
+      <mesh>
+        <boxGeometry args={[sx, sy, sz]} />
+        <meshToonMaterial {...toonMaterialProps} />
+      </mesh>
+      <mesh scale={[1.02, 1.02, 1.02]} raycast={() => null}>
+        <boxGeometry args={[sx, sy, sz]} />
+        <meshBasicMaterial color="#0d0d0d" side={THREE.BackSide} />
+      </mesh>
+      {selected ? (
+        <mesh scale={[1.055, 1.055, 1.055]} raycast={() => null}>
+          <boxGeometry args={[sx, sy, sz]} />
+          <meshBasicMaterial color="#00d4ff" transparent opacity={0.22} side={THREE.BackSide} />
+        </mesh>
+      ) : null}
+    </group>
   );
 }
 
 function EditableObjectsLayer({
   objects,
+  selectedObjectId,
   worldSizeCm,
   onObjectMove,
   onObjectDragStart,
@@ -189,7 +222,7 @@ function EditableObjectsLayer({
           key={object.id}
           object={object}
           editable
-          selected={dragState?.id === object.id}
+          selected={selectedObjectId === object.id || dragState?.id === object.id}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
@@ -214,6 +247,7 @@ export function ThreeSimViewport({
   onObjectDragStart,
   onObjectDragEnd,
   onObjectSelect,
+  selectedObjectId,
   robotStartPose,
   onRobotStartMove,
   onRobotStartMoveEnd,
@@ -320,7 +354,8 @@ export function ThreeSimViewport({
           <group name="objectLayer">
             {editable ? (
               <EditableObjectsLayer
-            objects={(worldScene?.objects ?? []).filter((object) => !object?.metadata?.hidden)}
+                objects={(worldScene?.objects ?? []).filter((object) => !object?.metadata?.hidden)}
+                selectedObjectId={selectedObjectId}
                 worldSizeCm={worldSizeCm || { width: worldWidth, depth: worldDepth }}
                 onObjectMove={onObjectMove}
                 onObjectDragStart={onObjectDragStart}
@@ -331,7 +366,9 @@ export function ThreeSimViewport({
             ) : (
           (worldScene?.objects ?? [])
             .filter((object) => !object?.metadata?.hidden)
-            .map((object) => <WorldObject key={object.id} object={object} />)
+            .map((object) => (
+              <WorldObject key={object.id} object={object} selected={selectedObjectId === object.id} />
+            ))
             )}
           </group>
         </group>
@@ -589,7 +626,7 @@ function SceneCameraRig({
       };
     };
 
-    const emitCameraDebug = (shouldLog = false) => {
+    const emitCameraDebug = () => {
       const payload = buildCameraDebugPayload();
 
       window.__roboticsCameraDebug = payload;
@@ -600,24 +637,20 @@ function SceneCameraRig({
         return text;
       };
 
-      if (shouldLog) {
-        console.info("[robotics-camera-debug]", payload);
-        console.info("[robotics-camera-debug-json]", JSON.stringify(payload));
-      }
     };
 
     const onControlsChange = () => {
       if (debugRafRef.current != null) return;
       debugRafRef.current = requestAnimationFrame(() => {
         debugRafRef.current = null;
-        emitCameraDebug(false);
+        emitCameraDebug();
       });
     };
-    const onControlsEnd = () => emitCameraDebug(true);
+    const onControlsEnd = () => emitCameraDebug();
 
     controls.addEventListener("change", onControlsChange);
     controls.addEventListener("end", onControlsEnd);
-    emitCameraDebug(true);
+    emitCameraDebug();
 
     return () => {
       controls.removeEventListener("change", onControlsChange);
@@ -714,15 +747,19 @@ function AnimatedRobot({ pose }) {
     <group ref={robotRef}>
       <mesh>
         <boxGeometry args={[20, 10, 24]} />
-        <meshStandardMaterial color="#38bdf8" />
+        <meshToonMaterial color="#38bdf8" gradientMap={toonGradientMap} />
+      </mesh>
+      <mesh scale={[1.03, 1.03, 1.03]} raycast={() => null}>
+        <boxGeometry args={[20, 10, 24]} />
+        <meshBasicMaterial color="#0d0d0d" side={THREE.BackSide} />
       </mesh>
       <mesh position={[13, 2, 0]}>
         <boxGeometry args={[3, 4, 14]} />
-        <meshStandardMaterial color="#f97316" />
+        <meshToonMaterial color="#f97316" gradientMap={toonGradientMap} />
       </mesh>
       <mesh position={[8, 6, 0]} rotation={[0, 0, -Math.PI / 2]}>
         <coneGeometry args={[4, 8, 4]} />
-        <meshStandardMaterial color="#f97316" />
+        <meshToonMaterial color="#f97316" gradientMap={toonGradientMap} />
       </mesh>
     </group>
   );

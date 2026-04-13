@@ -89,6 +89,18 @@ export function useRoboticsWorkspace() {
   const executorRef = useRef(new IRRuntimeExecutor(simulator));
   const initializedRef = useRef(false);
 
+  function syncPoseToStart(nextStartPose) {
+    simulator.reset(nextStartPose);
+    const snapshot = simulator.tick({
+      dt_ms: 0,
+      linear_velocity_cm_s: 0,
+      angular_velocity_deg_s: 0,
+    });
+    setPose(snapshot.pose);
+    setSensorValues(snapshot.sensor_values);
+    setPathTrailResetToken((prev) => prev + 1);
+  }
+
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem(CAMERA_PREFS_KEY);
@@ -335,6 +347,14 @@ export function useRoboticsWorkspace() {
         },
         heading_deg: Number(storedStartPose.heading_deg),
       });
+      // Keep robot mesh and start marker aligned when project loads.
+      syncPoseToStart({
+        position: {
+          x: Number(storedStartPose.position.x),
+          y: Number(storedStartPose.position.y),
+        },
+        heading_deg: Number(storedStartPose.heading_deg),
+      });
     }
   }
 
@@ -564,20 +584,30 @@ export function useRoboticsWorkspace() {
 
   function setStartHeading(headingDeg) {
     const normalized = ((Number(headingDeg) % 360) + 360) % 360;
-    setStartPose((prev) => ({
-      ...prev,
-      heading_deg: normalized,
-    }));
+    setStartPose((prev) => {
+      const nextStartPose = {
+        ...prev,
+        heading_deg: normalized,
+      };
+      // When editing the start pose, keep simulator pose aligned with the ghost marker.
+      if (!isAutoRunning) syncPoseToStart(nextStartPose);
+      return nextStartPose;
+    });
   }
 
   function setStartPosition(nextX, nextY) {
-    setStartPose((prev) => ({
-      ...prev,
-      position: {
-        x: Number(nextX),
-        y: Number(nextY),
-      },
-    }));
+    setStartPose((prev) => {
+      const nextStartPose = {
+        ...prev,
+        position: {
+          x: Number(nextX),
+          y: Number(nextY),
+        },
+      };
+      // When editing the start pose, keep simulator pose aligned with the ghost marker.
+      if (!isAutoRunning) syncPoseToStart(nextStartPose);
+      return nextStartPose;
+    });
   }
 
   function setSensorOverride(sensorId, value) {

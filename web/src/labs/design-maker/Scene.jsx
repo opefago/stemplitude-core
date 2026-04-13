@@ -30,6 +30,7 @@ import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
 import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
 import { mergeVertices } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { smoothToonGradientMap, toonGradientMap } from "../../lib/three/cartoonStyle";
 
 import {
   useDesignStore,
@@ -244,24 +245,6 @@ function resolveDropPlacement({
     supportObjectId: supportObject?.id ?? null,
   };
 }
-
-const toonGradientMap = (() => {
-  const colors = new Uint8Array([60, 100, 160, 220, 255]);
-  const tex = new THREE.DataTexture(colors, colors.length, 1, THREE.RedFormat);
-  tex.minFilter = THREE.NearestFilter;
-  tex.magFilter = THREE.NearestFilter;
-  tex.needsUpdate = true;
-  return tex;
-})();
-
-const smoothToonGradientMap = (() => {
-  const colors = new Uint8Array([96, 124, 152, 180, 208, 236, 255]);
-  const tex = new THREE.DataTexture(colors, colors.length, 1, THREE.RedFormat);
-  tex.minFilter = THREE.NearestFilter;
-  tex.magFilter = THREE.NearestFilter;
-  tex.needsUpdate = true;
-  return tex;
-})();
 
 const FONT_BASE = "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/fonts";
 export const FONT_MAP = {
