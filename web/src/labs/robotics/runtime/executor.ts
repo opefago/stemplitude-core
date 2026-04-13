@@ -160,7 +160,7 @@ export class IRRuntimeExecutor implements RuntimeExecutor {
       case "turn": {
         const speedPct = node.speed_pct ?? 100;
         const turnSpeed = (speedPct / 100) * DEFAULT_TURN_SPEED_DEG_S;
-        const directionSign = node.direction === "left" ? 1 : -1;
+        const directionSign = node.direction === "left" ? -1 : 1;
         const start = this.simulator.tick({
           dt_ms: 0,
           linear_velocity_cm_s: 0,

@@ -23,13 +23,22 @@ export function buildTopPose(
   };
 }
 
-export function buildPerspectivePose(worldSize: WorldSizeCm): CameraPose {
-  const cx = worldSize.width / 2;
-  const cz = worldSize.depth / 2;
-  const dist = Math.max(worldSize.width, worldSize.depth) * 0.9;
+export function buildPerspectivePose(
+  worldSize: WorldSizeCm,
+  robot?: RobotPoseForCamera,
+): CameraPose {
+  const rx = robot?.x ?? worldSize.width / 2;
+  const rz = robot?.z ?? worldSize.depth / 2;
+  const headingRad = (robot?.headingDeg ?? 0) * DEG2RAD;
+  const behindDist = 620;
+  const height = 440;
   return {
-    position: { x: cx + dist * 0.6, y: dist * 0.55, z: cz + dist * 0.6 },
-    target: { x: cx, y: 0, z: cz },
+    position: {
+      x: rx - Math.cos(headingRad) * behindDist,
+      y: height,
+      z: rz - Math.sin(headingRad) * behindDist - 100,
+    },
+    target: { x: rx, y: 0, z: rz - 100 },
   };
 }
 
@@ -40,8 +49,8 @@ export function buildFollowPose(
   const headingRad = robot.headingDeg * DEG2RAD;
   const d = state.followDistance;
   const h = state.followHeight;
-  const offsetX = state.lockFollowHeading ? -Math.sin(headingRad) * d : -d * 0.7;
-  const offsetZ = state.lockFollowHeading ? -Math.cos(headingRad) * d : -d * 0.7;
+  const offsetX = state.lockFollowHeading ? -Math.cos(headingRad) * d : -d * 0.7;
+  const offsetZ = state.lockFollowHeading ? -Math.sin(headingRad) * d : -d * 0.7;
   return {
     position: { x: robot.x + offsetX, y: h, z: robot.z + offsetZ },
     target: { x: robot.x, y: 0, z: robot.z },
@@ -60,7 +69,7 @@ export function buildPresetPose(
     case "follow":
       return buildFollowPose(robot, state);
     case "perspective":
-      return buildPerspectivePose(worldSize);
+      return buildPerspectivePose(worldSize, robot);
     default:
       return buildTopPose(worldSize, 1);
   }

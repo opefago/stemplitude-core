@@ -13,8 +13,8 @@ interface Props {
 
 export function LineSensorOverlay({ robot, active, opacity = 0.75 }: Props) {
   const headingRad = robot.headingDeg * DEG2RAD;
-  const cx = robot.x + Math.sin(headingRad) * SENSOR_OFFSET;
-  const cz = robot.z + Math.cos(headingRad) * SENSOR_OFFSET;
+  const cx = robot.x + Math.cos(headingRad) * SENSOR_OFFSET;
+  const cz = robot.z + Math.sin(headingRad) * SENSOR_OFFSET;
 
   const color = active ? "#22c55e" : "#64748b";
 

@@ -275,7 +275,7 @@ export function ThreeSimViewport({
   return (
     <div className="robotics-three-viewport">
       <Canvas
-        camera={{ position: [worldCenter.x + planeSize * 0.35, 260, worldCenter.z + planeSize * 0.35], fov: 46, near: 0.1, far: 7000 }}
+        camera={{ position: [robotPose.x - 620, 440, robotPose.z - 100], fov: 46, near: 0.1, far: 7000 }}
         dpr={[1, 1.5]}
         gl={{ antialias: true, powerPreference: "high-performance" }}
       >
@@ -590,9 +590,19 @@ function AnimatedRobot({ pose }) {
   });
 
   return (
-    <mesh ref={robotRef}>
-      <boxGeometry args={[20, 10, 24]} />
-      <meshStandardMaterial color="#38bdf8" />
-    </mesh>
+    <group ref={robotRef}>
+      <mesh>
+        <boxGeometry args={[20, 10, 24]} />
+        <meshStandardMaterial color="#38bdf8" />
+      </mesh>
+      <mesh position={[13, 2, 0]}>
+        <boxGeometry args={[3, 4, 14]} />
+        <meshStandardMaterial color="#f97316" />
+      </mesh>
+      <mesh position={[8, 6, 0]} rotation={[0, 0, -Math.PI / 2]}>
+        <coneGeometry args={[4, 8, 4]} />
+        <meshStandardMaterial color="#f97316" />
+      </mesh>
+    </group>
   );
 }

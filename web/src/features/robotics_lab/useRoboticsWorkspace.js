@@ -30,7 +30,7 @@ function deriveLessonId(search) {
 }
 
 const DEFAULT_CAMERA_STATE = {
-  mode: "top",
+  mode: "perspective",
   previousMode: undefined,
   transitionMs: 280,
   isTransitioning: false,
@@ -87,6 +87,7 @@ export function useRoboticsWorkspace() {
 
   const simulator = useMemo(() => new ThreeRuntimeSimulator(getRobotModel()), []);
   const executorRef = useRef(new IRRuntimeExecutor(simulator));
+  const initializedRef = useRef(false);
 
   useEffect(() => {
     try {
@@ -126,8 +127,17 @@ export function useRoboticsWorkspace() {
 
   useEffect(() => {
     simulator.setWorld(world);
-    simulator.reset(startPose);
+  }, [simulator, world]);
+
+  useEffect(() => {
     executorRef.current.load(program);
+    setRuntimeState(executorRef.current.getState());
+  }, [program]);
+
+  useEffect(() => {
+    if (initializedRef.current) return;
+    initializedRef.current = true;
+    simulator.reset(startPose);
     const snapshot = simulator.tick({
       dt_ms: 0,
       linear_velocity_cm_s: 0,
@@ -135,8 +145,7 @@ export function useRoboticsWorkspace() {
     });
     setPose(snapshot.pose);
     setSensorValues(snapshot.sensor_values);
-    setRuntimeState(executorRef.current.getState());
-  }, [program, simulator, startPose, world]);
+  }, [simulator, startPose]);
 
   useEffect(() => {
     let cancelled = false;
@@ -466,18 +475,6 @@ export function useRoboticsWorkspace() {
       logLine("[runtime] Program has no executable commands.");
       return;
     }
-
-    // Always start runs from the canonical start pose so repeated runs are deterministic
-    // and visibly affect the robot even after a previous collision/out-of-bounds state.
-    simulator.reset(startPose);
-    const snapshot = simulator.tick({
-      dt_ms: 0,
-      linear_velocity_cm_s: 0,
-      angular_velocity_deg_s: 0,
-    });
-    setPose(snapshot.pose);
-    setSensorValues(snapshot.sensor_values);
-    setPathTrailResetToken((prev) => prev + 1);
 
     executorRef.current.load(runtimeProgram);
     executorRef.current.run();
