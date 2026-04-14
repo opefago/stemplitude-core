@@ -21,7 +21,7 @@ export interface RuntimeExecutor {
   run(): void;
   pause(): void;
   reset(): void;
-  step(): RuntimeTickResult;
+  step(simulation_budget_ms?: number): RuntimeTickResult;
   getState(): RoboticsExecutionState;
 }
 

@@ -12,7 +12,6 @@ import type { IssueCode } from "./issueCodes";
 import type { RuntimeExecutor, RuntimeIssue, RuntimeTickResult, RuntimeTraceEntry } from "./types";
 
 const PHYSICS_STEP_MS = 20;
-const COMMAND_SIM_TIME_SCALE = 20;
 type RuntimeValue = string | number | boolean;
 
 interface CallFrame {
@@ -30,6 +29,12 @@ interface ActiveDistanceMove {
   elapsedMs: number;
   maxDurationMs: number;
   collisions: Set<string>;
+}
+
+type MoveCollisionPolicy = "hold_until_distance" | "abort_on_collision" | "timeout_then_continue" | "error_on_collision";
+
+interface RuntimeExecutionOptions {
+  moveCollisionPolicy?: MoveCollisionPolicy;
 }
 
 function normalizeSignedAngle(delta: number): number {
@@ -71,7 +76,6 @@ export class IRRuntimeExecutor implements RuntimeExecutor {
   private trace: RuntimeTraceEntry[] = [];
   private callDepth = 0;
   private activeDistanceMove: ActiveDistanceMove | null = null;
-  private lastStepAtMs: number | null = null;
 
   private static readonly MAX_CALL_DEPTH = 32;
 
@@ -83,6 +87,7 @@ export class IRRuntimeExecutor implements RuntimeExecutor {
       motorBehaviors: {},
     },
     private resolveActuatorAction: ((actuatorId: string, action: string) => KitActuatorActionHandler | null) | null = null,
+    private executionOptions: RuntimeExecutionOptions = {},
   ) {}
 
   load(program: RoboticsProgram): void {
@@ -93,7 +98,6 @@ export class IRRuntimeExecutor implements RuntimeExecutor {
     this.callFrames = [];
     this.trace = [];
     this.activeDistanceMove = null;
-    this.lastStepAtMs = null;
   }
 
   run(): void {
@@ -118,7 +122,6 @@ export class IRRuntimeExecutor implements RuntimeExecutor {
     this.trace = [];
     this.callDepth = 0;
     this.activeDistanceMove = null;
-    this.lastStepAtMs = null;
   }
 
   getState(): "idle" | "running" | "paused" | "completed" | "error" {
@@ -129,10 +132,8 @@ export class IRRuntimeExecutor implements RuntimeExecutor {
     return this.trace.slice();
   }
 
-  step(): RuntimeTickResult {
-    const nowMs = Date.now();
-    const wallDeltaMs = this.lastStepAtMs === null ? 50 : Math.max(16, Math.min(250, nowMs - this.lastStepAtMs));
-    this.lastStepAtMs = nowMs;
+  step(simulation_budget_ms = 200): RuntimeTickResult {
+    const simulationBudgetMs = Math.max(PHYSICS_STEP_MS, Number(simulation_budget_ms) || 200);
     if (!this.program) {
       this.state = "error";
       const collector: RuntimeCollector = { diagnostics: [], issues: [] };
@@ -151,7 +152,7 @@ export class IRRuntimeExecutor implements RuntimeExecutor {
     const collector: RuntimeCollector = { diagnostics: [], issues: [] };
     let completedNode = true;
     if (node.kind === "move" && node.unit !== "seconds") {
-      completedNode = this.executeTopLevelDistanceMove(node, collector, wallDeltaMs * COMMAND_SIM_TIME_SCALE);
+      completedNode = this.executeTopLevelDistanceMove(node, collector, simulationBudgetMs);
     } else {
       this.activeDistanceMove = null;
       this.executeNode(node, collector);
@@ -209,8 +210,13 @@ export class IRRuntimeExecutor implements RuntimeExecutor {
     }
 
     const move = this.activeDistanceMove;
+    const moveCollisionPolicy: MoveCollisionPolicy = this.executionOptions.moveCollisionPolicy || "hold_until_distance";
     let remainingBudgetMs = Math.max(PHYSICS_STEP_MS, budgetMs);
-    while (remainingBudgetMs > 0 && move.remainingCm > 0 && move.elapsedMs < move.maxDurationMs) {
+    while (
+      remainingBudgetMs > 0 &&
+      move.remainingCm > 0 &&
+      (moveCollisionPolicy !== "timeout_then_continue" || move.elapsedMs < move.maxDurationMs)
+    ) {
       const step = Math.min(PHYSICS_STEP_MS, remainingBudgetMs);
       const frame = this.simulator.tick({
         dt_ms: step,
@@ -227,11 +233,26 @@ export class IRRuntimeExecutor implements RuntimeExecutor {
       if (frame.collisions.length > 0) break;
     }
 
-    const done = move.remainingCm <= 0 || move.elapsedMs >= move.maxDurationMs || move.collisions.size > 0;
+    let done = move.remainingCm <= 0;
+    if (!done) {
+      if (moveCollisionPolicy === "abort_on_collision" && move.collisions.size > 0) {
+        done = true;
+      } else if (moveCollisionPolicy === "timeout_then_continue" && move.elapsedMs >= move.maxDurationMs) {
+        done = true;
+      } else if (moveCollisionPolicy === "error_on_collision" && move.collisions.size > 0) {
+        done = true;
+        this.state = "error";
+        reportRuntimeIssue(
+          collector,
+          ISSUE_CODES.COLLISION_DETECTED,
+          `Collision detected and move aborted by policy: ${Array.from(move.collisions).join(", ")}`,
+        );
+      }
+    }
     if (!done) return false;
 
     this.tickForDuration(120, 0, 0);
-    if (move.collisions.size > 0) {
+    if (move.collisions.size > 0 && moveCollisionPolicy !== "error_on_collision") {
       reportRuntimeIssue(
         collector,
         ISSUE_CODES.COLLISION_DETECTED,

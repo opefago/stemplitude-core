@@ -79,12 +79,15 @@ interface ThreeSimViewportProps {
   onRobotStartMove?: (x: number, z: number) => void;
   onRobotStartMoveEnd?: (x: number, z: number) => void;
   backgroundColor?: string;
+  ghostObject?: WorldObjectData | null;
+  onProjectClientToWorkplaneReady?: ((project: (clientX: number, clientY: number) => { x: number; z: number } | null) => void) | null;
 }
 
 interface WorldObjectProps {
   object: WorldObjectData;
   editable?: boolean;
   selected?: boolean;
+  ghost?: boolean;
   onPointerDown?: (event: PointerEvent3D, object: WorldObjectData) => void;
   onPointerMove?: (event: PointerEvent3D, object: WorldObjectData) => void;
   onPointerUp?: (event: PointerEvent3D, object: WorldObjectData) => void;
@@ -185,11 +188,12 @@ function WorldObject({
   object,
   editable = false,
   selected = false,
+  ghost = false,
   onPointerDown,
   onPointerMove,
   onPointerUp,
 }: WorldObjectProps) {
-  const OBJECT_SCALE = 1.25;
+  const OBJECT_SCALE = 1;
   const x = object.position?.x ?? 0;
   const z = object.position?.z ?? 0;
   const sx = Math.max(4, (object.size_cm?.x ?? 20) * OBJECT_SCALE);
@@ -198,8 +202,11 @@ function WorldObject({
   const isZone = object.type === "target_zone" || object.type === "color_zone";
   const yawDeg = Number(object?.rotation_deg?.y) || 0;
   const yawRad = (yawDeg * Math.PI) / 180;
+  const rollXRad = ((Number(object?.metadata?.roll_x_deg) || 0) * Math.PI) / 180;
+  const rollZRad = ((Number(object?.metadata?.roll_z_deg) || 0) * Math.PI) / 180;
   const sy = isZone ? Math.min(8, syRaw) : syRaw;
   const y = sy / 2;
+  const renderShape = typeof object?.metadata?.render_shape === "string" ? object.metadata.render_shape : "default";
   const metadataColor =
     typeof object?.metadata?.color === "string" && object.metadata.color.trim() ? object.metadata.color : null;
   const color =
@@ -215,8 +222,10 @@ function WorldObject({
             : "#3b82f6");
 
   const toonMaterialProps = {
-    color,
+    color: ghost ? "#60a5fa" : color,
     gradientMap: toonGradientMap,
+    transparent: ghost,
+    opacity: ghost ? 0.45 : 1,
   };
 
   const commonProps = editable
@@ -228,6 +237,28 @@ function WorldObject({
     : {};
 
   if (object.type === "obstacle") {
+    if (renderShape === "sphere") {
+      const radius = Math.max(5, Math.min(sx, sy, sz) / 2);
+      return (
+        <group position={[x, y, z]} rotation={[0, yawRad, 0]} {...commonProps}>
+          <mesh rotation={[rollXRad, 0, rollZRad]}>
+            <sphereGeometry args={[radius, 24, 24]} />
+            <meshToonMaterial {...toonMaterialProps} />
+          </mesh>
+          <mesh rotation={[rollXRad, 0, rollZRad]} scale={[1.02, 1.02, 1.02]} raycast={() => null}>
+            <sphereGeometry args={[radius, 24, 24]} />
+            <meshBasicMaterial color="#0d0d0d" side={THREE.BackSide} />
+          </mesh>
+          {selected ? (
+            <mesh rotation={[rollXRad, 0, rollZRad]} scale={[1.06, 1.06, 1.06]} raycast={() => null}>
+              <sphereGeometry args={[radius, 24, 24]} />
+              <meshBasicMaterial color="#00d4ff" transparent opacity={0.22} side={THREE.BackSide} />
+            </mesh>
+          ) : null}
+        </group>
+      );
+    }
+
     const radius = Math.max(6, Math.min(sx, sz) / 2);
     return (
       <group position={[x, y, z]} rotation={[0, yawRad, 0]} {...commonProps}>
@@ -396,6 +427,8 @@ export function ThreeSimViewport({
   onRobotStartMove,
   onRobotStartMoveEnd,
   backgroundColor = "#f4f6f8",
+  ghostObject = null,
+  onProjectClientToWorkplaneReady = null,
 }: ThreeSimViewportProps) {
   const orbitRef = useRef<OrbitControlsImpl | null>(null);
   const worldWidth = Math.max(200, worldSizeCm?.width ?? 1000);
@@ -483,6 +516,7 @@ export function ThreeSimViewport({
           isDraggingObject={isDraggingObject}
           onDebugPose={setDebugPose}
         />
+        <WorkplaneProjectorBridge onReady={onProjectClientToWorkplaneReady} />
         <ambientLight intensity={0.62} />
         <directionalLight position={[180, 260, 160]} intensity={0.88} />
         <pointLight position={[0, 140, 0]} intensity={0.28} />
@@ -496,16 +530,19 @@ export function ThreeSimViewport({
           </group>
           <group name="objectLayer">
             {editable ? (
-              <EditableObjectsLayer
-                objects={(worldScene?.objects ?? []).filter((object) => !object?.metadata?.hidden)}
-                selectedObjectId={selectedObjectId}
-                worldSizeCm={worldSizeCm || { width: worldWidth, depth: worldDepth }}
-                onObjectMove={onObjectMove}
-                onObjectDragStart={onObjectDragStart}
-                onObjectDragEnd={onObjectDragEnd}
-                onDragStateChange={handleDragStateChange}
-                onObjectSelect={onObjectSelect}
-              />
+              <>
+                <EditableObjectsLayer
+                  objects={(worldScene?.objects ?? []).filter((object) => !object?.metadata?.hidden)}
+                  selectedObjectId={selectedObjectId}
+                  worldSizeCm={worldSizeCm || { width: worldWidth, depth: worldDepth }}
+                  onObjectMove={onObjectMove}
+                  onObjectDragStart={onObjectDragStart}
+                  onObjectDragEnd={onObjectDragEnd}
+                  onDragStateChange={handleDragStateChange}
+                  onObjectSelect={onObjectSelect}
+                />
+                {ghostObject ? <WorldObject key={`ghost-${ghostObject.id}`} object={ghostObject} ghost /> : null}
+              </>
             ) : (
               (worldScene?.objects ?? [])
                 .filter((object) => !object?.metadata?.hidden)
@@ -562,6 +599,34 @@ export function ThreeSimViewport({
       ) : null}
     </div>
   );
+}
+
+function WorkplaneProjectorBridge({
+  onReady,
+}: {
+  onReady: ((project: (clientX: number, clientY: number) => { x: number; z: number } | null) => void) | null;
+}) {
+  const { camera, gl } = useThree();
+  const raycasterRef = useRef(new THREE.Raycaster());
+  const planeRef = useRef(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0));
+  const hitRef = useRef(new THREE.Vector3());
+
+  useEffect(() => {
+    if (!onReady) return;
+    const projector = (clientX: number, clientY: number) => {
+      const rect = gl.domElement.getBoundingClientRect();
+      if (!rect || rect.width <= 0 || rect.height <= 0) return null;
+      const ndcX = ((clientX - rect.left) / rect.width) * 2 - 1;
+      const ndcY = -(((clientY - rect.top) / rect.height) * 2 - 1);
+      raycasterRef.current.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
+      if (!raycasterRef.current.ray.intersectPlane(planeRef.current, hitRef.current)) return null;
+      return { x: hitRef.current.x, z: hitRef.current.z };
+    };
+    onReady(projector);
+    return () => onReady(() => null);
+  }, [camera, gl.domElement, onReady]);
+
+  return null;
 }
 
 function EditableRobotStart({
@@ -627,7 +692,7 @@ function EditableRobotStart({
         <meshBasicMaterial color="#22d3ee" transparent opacity={0.7} />
       </mesh>
       <mesh
-        position={[x, 8, z]}
+        position={[x, 5, z]}
         rotation={[0, -headingRad, 0]}
         onPointerDown={handleDown}
         onPointerMove={handleMove}
@@ -869,7 +934,7 @@ function AnimatedRobot({ pose }: { pose?: SimulatorPose }) {
     rendered.z += (target.z - rendered.z) * smoothing;
     rendered.heading_deg += normalizeHeadingDelta(target.heading_deg - rendered.heading_deg) * smoothing;
 
-    robotRef.current.position.set(rendered.x, 10, rendered.z);
+    robotRef.current.position.set(rendered.x, 5, rendered.z);
     robotRef.current.rotation.set(0, -(rendered.heading_deg * Math.PI) / 180, 0);
   });
 

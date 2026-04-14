@@ -71,6 +71,7 @@ export function useRoboticsWorkspace() {
   const [runtimeSettings, setRuntimeSettings] = useState({
     tick_ms: 200,
     deterministic_replay: true,
+    move_collision_policy: "hold_until_distance",
   });
   const [world, setWorld] = useState(BASE_WORLD);
   const [program, setProgram] = useState(SAMPLE_PROGRAM);
@@ -185,10 +186,12 @@ export function useRoboticsWorkspace() {
   }, [cameraState, overlayState]);
 
   useEffect(() => {
-    executorRef.current = new IRRuntimeExecutor(simulator, runtimeBehavior, resolveActuatorAction);
+    executorRef.current = new IRRuntimeExecutor(simulator, runtimeBehavior, resolveActuatorAction, {
+      moveCollisionPolicy: runtimeSettings.move_collision_policy || "hold_until_distance",
+    });
     executorRef.current.load(program);
     setRuntimeState(executorRef.current.getState());
-  }, [program, resolveActuatorAction, runtimeBehavior, simulator]);
+  }, [program, resolveActuatorAction, runtimeBehavior, runtimeSettings.move_collision_policy, simulator]);
 
   useEffect(() => {
     simulator.setSensorOverrides?.(sensorOverrides);
@@ -529,7 +532,8 @@ export function useRoboticsWorkspace() {
 
   function stepProgram() {
     const previousState = runtimeState;
-    const result = executorRef.current.step();
+    const simulationBudgetMs = Math.max(50, Number(runtimeSettings.tick_ms) || 200);
+    const result = executorRef.current.step(simulationBudgetMs);
     const snapshot = simulator.tick({
       dt_ms: 0,
       linear_velocity_cm_s: 0,

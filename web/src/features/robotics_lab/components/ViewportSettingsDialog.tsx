@@ -5,6 +5,8 @@ interface ViewportSettingsDialogProps {
   onClose: () => void;
   backgroundColor: string;
   onBackgroundColorChange: (color: string) => void;
+  moveCollisionPolicy: string;
+  onMoveCollisionPolicyChange: (policy: string) => void;
 }
 
 const BG_PRESETS = ["#f7f8fa", "#f4f6f8", "#f1f3f5", "#eef1f4", "#eceff3"];
@@ -14,6 +16,8 @@ export function ViewportSettingsDialog({
   onClose,
   backgroundColor,
   onBackgroundColorChange,
+  moveCollisionPolicy,
+  onMoveCollisionPolicyChange,
 }: ViewportSettingsDialogProps) {
   if (!open) return null;
 
@@ -44,6 +48,19 @@ export function ViewportSettingsDialog({
                 />
               ))}
             </div>
+          </div>
+          <div className="robotics-modal-row">
+            <label htmlFor="move-collision-policy">Move collision behavior</label>
+            <select
+              id="move-collision-policy"
+              value={moveCollisionPolicy}
+              onChange={(event) => onMoveCollisionPolicyChange(event.target.value)}
+            >
+              <option value="hold_until_distance">Hold until target distance is reached</option>
+              <option value="abort_on_collision">Abort move and continue</option>
+              <option value="timeout_then_continue">Wait until timeout, then continue</option>
+              <option value="error_on_collision">Stop with runtime error</option>
+            </select>
           </div>
         </div>
       </div>

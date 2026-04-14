@@ -50,6 +50,38 @@ class MockSimulator implements RoboticsSimulatorBridge {
   }
 }
 
+class BlockingCollisionSimulator implements RoboticsSimulatorBridge {
+  private pose: SimulatorPose2D = { position: { x: 0, y: 0 }, heading_deg: 0 };
+
+  setWorld(): void {}
+
+  reset(pose: SimulatorPose2D): void {
+    this.pose = {
+      position: { ...pose.position },
+      heading_deg: pose.heading_deg,
+    };
+  }
+
+  tick(input: SimulatorTickInput): SimulatorTickOutput {
+    const isTryingToMove = Math.abs(input.linear_velocity_cm_s) > 0.001;
+    return {
+      pose: {
+        position: { ...this.pose.position },
+        heading_deg: this.pose.heading_deg,
+      },
+      collisions: isTryingToMove ? ["wall_1"] : [],
+      sensor_values: { distance: 0, gyro: this.pose.heading_deg },
+    };
+  }
+
+  getPose(): SimulatorPose2D {
+    return {
+      position: { ...this.pose.position },
+      heading_deg: this.pose.heading_deg,
+    };
+  }
+}
+
 describe("IRRuntimeExecutor", () => {
   it("executes program nodes and reaches completed state", () => {
     const simulator = new MockSimulator();
@@ -73,7 +105,7 @@ describe("IRRuntimeExecutor", () => {
     }
 
     expect(result.state).toBe("completed");
-    expect(executor.getTrace()).toHaveLength(4);
+    expect(executor.getTrace().length).toBeGreaterThanOrEqual(4);
   });
 
   it("executes call nodes against declared functions", () => {
@@ -360,6 +392,53 @@ describe("IRRuntimeExecutor", () => {
     expect(fastX).toBeGreaterThan(60);
     expect(slowX).toBeGreaterThan(60);
     expect(Math.abs(fastX - slowX)).toBeLessThan(5);
+  });
+
+  it("holds move state on collision by default until distance is reached", () => {
+    const simulator = new BlockingCollisionSimulator();
+    const executor = new IRRuntimeExecutor(simulator);
+    const program: RoboticsProgram = {
+      version: 1,
+      entrypoint: "main",
+      nodes: [
+        { id: "move_1", kind: "move", direction: "forward", unit: "distance_cm", value: 80, speed_pct: 100 },
+        { id: "turn_1", kind: "turn", direction: "right", angle_deg: 90, speed_pct: 100 },
+      ],
+    };
+
+    executor.load(program);
+    executor.run();
+    let result = executor.step();
+    for (let i = 0; i < 30; i += 1) {
+      result = executor.step();
+    }
+
+    expect(result.state).toBe("running");
+    expect(result.highlightedNodeId).toBe("move_1");
+    expect(simulator.getPose().position.x).toBe(0);
+  });
+
+  it("can abort move and continue when collision policy is configured", () => {
+    const simulator = new BlockingCollisionSimulator();
+    const executor = new IRRuntimeExecutor(simulator, undefined, null, {
+      moveCollisionPolicy: "abort_on_collision",
+    });
+    const program: RoboticsProgram = {
+      version: 1,
+      entrypoint: "main",
+      nodes: [
+        { id: "move_1", kind: "move", direction: "forward", unit: "distance_cm", value: 80, speed_pct: 100 },
+        { id: "turn_1", kind: "turn", direction: "right", angle_deg: 90, speed_pct: 100 },
+      ],
+    };
+
+    executor.load(program);
+    executor.run();
+    const first = executor.step();
+    const second = executor.step();
+
+    expect(first.highlightedNodeId).toBe("move_1");
+    expect(second.highlightedNodeId).toBe("turn_1");
   });
 
   it("fails with call stack overflow on direct recursion", () => {

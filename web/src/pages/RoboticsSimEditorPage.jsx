@@ -1,5 +1,5 @@
 import { Eye, EyeOff, Pause, Play, RotateCcw, RotateCw, Save, StepForward, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRoboticsWorkspaceContext } from "../features/robotics_lab/RoboticsWorkspaceContext";
 import { GRID_CELL_CM } from "../features/robotics_lab/workspaceDefaults";
 import { ThreeSimViewport } from "../features/robotics_lab/ThreeSimViewport.tsx";
@@ -8,11 +8,74 @@ import { OverlayToggles } from "../features/robotics_lab/components/OverlayToggl
 import { ViewportSettingsDialog } from "../features/robotics_lab/components/ViewportSettingsDialog";
 import { resolveKitCapabilities } from "../labs/robotics";
 
-const PLACEMENT_ITEMS = [
-  { type: "wall", label: "Wall", size: { x: 120, y: 28, z: 18 }, defaultColor: "#6b7280" },
-  { type: "obstacle", label: "Obstacle", size: { x: 40, y: 20, z: 40 }, defaultColor: "#ef4444" },
-  { type: "target_zone", label: "Target Zone", size: { x: 60, y: 10, z: 60 }, defaultColor: "#22c55e" },
-  { type: "color_zone", label: "Color Zone", size: { x: 50, y: 6, z: 50 }, defaultColor: "#f59e0b" },
+let transparentDragImage = null;
+
+function getTransparentDragImage() {
+  if (transparentDragImage) return transparentDragImage;
+  const canvas = document.createElement("canvas");
+  canvas.width = 1;
+  canvas.height = 1;
+  transparentDragImage = canvas;
+  return transparentDragImage;
+}
+
+const OBJECT_PRESETS = [
+  {
+    id: "wall_basic",
+    type: "wall",
+    label: "Wall",
+    subtitle: "Static boundary",
+    size: { x: 120, y: 28, z: 18 },
+    defaultColor: "#6b7280",
+    physicsBody: "static",
+  },
+  {
+    id: "obstacle_box",
+    type: "obstacle",
+    label: "Obstacle Box",
+    subtitle: "Pushable block",
+    size: { x: 40, y: 20, z: 40 },
+    defaultColor: "#ef4444",
+    physicsBody: "dynamic",
+  },
+  {
+    id: "robocup_ball",
+    type: "obstacle",
+    label: "RoboCup Ball",
+    subtitle: "Dynamic game ball",
+    size: { x: 22, y: 22, z: 22 },
+    defaultColor: "#f97316",
+    physicsBody: "dynamic",
+    renderShape: "sphere",
+  },
+  {
+    id: "vex_ball",
+    type: "obstacle",
+    label: "VEX Ball",
+    subtitle: "Competition ball",
+    size: { x: 16, y: 16, z: 16 },
+    defaultColor: "#f59e0b",
+    physicsBody: "dynamic",
+    renderShape: "sphere",
+  },
+  {
+    id: "target_zone",
+    type: "target_zone",
+    label: "Target Zone",
+    subtitle: "Scoring region",
+    size: { x: 60, y: 10, z: 60 },
+    defaultColor: "#22c55e",
+    physicsBody: "static",
+  },
+  {
+    id: "color_zone",
+    type: "color_zone",
+    label: "Color Zone",
+    subtitle: "Floor color marker",
+    size: { x: 50, y: 6, z: 50 },
+    defaultColor: "#f59e0b",
+    physicsBody: "static",
+  },
 ];
 function formatSensorValue(sensorKind, value) {
   if (sensorKind === "distance") return `${Number(value ?? 0).toFixed(1)} cm`;
@@ -26,15 +89,21 @@ function formatSensorValue(sensorKind, value) {
   return String(value);
 }
 
+function snapToGrid(value) {
+  return Math.round(Number(value) / GRID_CELL_CM) * GRID_CELL_CM;
+}
+
 function makeSceneObject(item, x, z) {
   return {
-    id: `${item.type}_${Date.now()}`,
+    id: `${item.type}_${Date.now()}_${Math.floor(Math.random() * 10000)}`,
     type: item.type,
     position: { x, y: 0, z },
     size_cm: item.size,
     rotation_deg: { y: 0 },
     metadata: {
       color: item.defaultColor,
+      physics_body: item.physicsBody || (item.type === "obstacle" ? "dynamic" : "static"),
+      ...(item.renderShape ? { render_shape: item.renderShape } : {}),
     },
   };
 }
@@ -76,7 +145,10 @@ export default function RoboticsSimEditorPage() {
     saveProjectSnapshot,
     panel,
   } = useRoboticsWorkspaceContext();
-  const [dragType, setDragType] = useState(null);
+  const [dragPresetId, setDragPresetId] = useState(null);
+  const [dragPreview, setDragPreview] = useState(null);
+  const dropTargetRef = useRef(null);
+  const projectClientToWorkplaneRef = useRef(null);
   const [rightTab, setRightTab] = useState("scene");
   const [selectedObjectId, setSelectedObjectId] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -132,7 +204,7 @@ export default function RoboticsSimEditorPage() {
   }
 
   function addObjectNearRobot(item) {
-    const next = makeSceneObject(item, pose.position.x + 40, pose.position.y);
+    const next = makeSceneObject(item, snapToGrid(pose.position.x + 40), snapToGrid(pose.position.y));
     updateWorldScene([...worldScene.objects, next], "object_placed");
   }
 
@@ -162,8 +234,8 @@ export default function RoboticsSimEditorPage() {
             ...object,
             position: {
               ...(object.position || {}),
-              x,
-              z,
+              x: snapToGrid(x),
+              z: snapToGrid(z),
               y: 0,
             },
           }
@@ -200,6 +272,21 @@ export default function RoboticsSimEditorPage() {
         : object,
     );
     updateWorldScene(nextObjects, hidden ? "object_hidden" : "object_shown");
+  }
+
+  function updateObjectPhysicsBody(id, physicsBody) {
+    const nextObjects = worldScene.objects.map((object) =>
+      object.id === id
+        ? {
+            ...object,
+            metadata: {
+              ...(object.metadata || {}),
+              physics_body: physicsBody,
+            },
+          }
+        : object,
+    );
+    updateWorldScene(nextObjects, "object_physics_updated");
   }
 
   function updateObjectRotation(id, headingDeg) {
@@ -267,18 +354,112 @@ export default function RoboticsSimEditorPage() {
 
   function handleDrop(event) {
     event.preventDefault();
-    if (!dragType) return;
-    const item = PLACEMENT_ITEMS.find((entry) => entry.type === dragType);
+    if (!dragPresetId) return;
+    const item = OBJECT_PRESETS.find((entry) => entry.id === dragPresetId);
     if (!item) return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    const relX = (event.clientX - rect.left) / rect.width;
-    const relZ = (event.clientY - rect.top) / rect.height;
-    const px = relX * world.width_cells * GRID_CELL_CM;
-    const pz = relZ * world.height_cells * GRID_CELL_CM;
+    const projected = projectClientToWorkplaneRef.current?.(event.clientX, event.clientY) || null;
+    let px;
+    let pz;
+    if (projected) {
+      px = snapToGrid(projected.x);
+      pz = snapToGrid(projected.z);
+    } else {
+      const rect = event.currentTarget.getBoundingClientRect();
+      const relX = (event.clientX - rect.left) / rect.width;
+      const relZ = (event.clientY - rect.top) / rect.height;
+      px = snapToGrid(relX * world.width_cells * GRID_CELL_CM);
+      pz = snapToGrid(relZ * world.height_cells * GRID_CELL_CM);
+    }
+    px = Math.max(0, Math.min(world.width_cells * GRID_CELL_CM, px));
+    pz = Math.max(0, Math.min(world.height_cells * GRID_CELL_CM, pz));
     const next = makeSceneObject(item, px, pz);
     updateWorldScene([...worldScene.objects, next], "object_dropped");
-    setDragType(null);
+    setDragPresetId(null);
+    setDragPreview(null);
   }
+
+  function buildDragPreview(item, presetId, px, pz) {
+    const previewObject = makeSceneObject(item, px, pz);
+    previewObject.id = `ghost_${presetId}`;
+    return {
+      presetId,
+      object: previewObject,
+    };
+  }
+
+  function updateDragPreviewFromEvent(event) {
+    if (!dragPresetId) return;
+    const item = OBJECT_PRESETS.find((entry) => entry.id === dragPresetId);
+    if (!item) return;
+    const projected = projectClientToWorkplaneRef.current?.(event.clientX, event.clientY) || null;
+    let px;
+    let pz;
+    if (projected) {
+      px = snapToGrid(projected.x);
+      pz = snapToGrid(projected.z);
+    } else {
+      const rect = event.currentTarget?.getBoundingClientRect?.() || dropTargetRef.current?.getBoundingClientRect?.();
+      if (!rect || rect.width <= 0 || rect.height <= 0) return;
+      const relX = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+      const relZ = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
+      px = snapToGrid(relX * world.width_cells * GRID_CELL_CM);
+      pz = snapToGrid(relZ * world.height_cells * GRID_CELL_CM);
+    }
+    px = Math.max(0, Math.min(world.width_cells * GRID_CELL_CM, px));
+    pz = Math.max(0, Math.min(world.height_cells * GRID_CELL_CM, pz));
+    const preview = buildDragPreview(item, dragPresetId, px, pz);
+    if (preview) setDragPreview(preview);
+  }
+
+  useEffect(() => {
+    if (!dragPresetId) return undefined;
+    const item = OBJECT_PRESETS.find((entry) => entry.id === dragPresetId);
+    if (!item) return undefined;
+
+    const onWindowDragOver = (event) => {
+      const rect = dropTargetRef.current?.getBoundingClientRect?.();
+      if (!rect) return;
+      const inside =
+        event.clientX >= rect.left &&
+        event.clientX <= rect.right &&
+        event.clientY >= rect.top &&
+        event.clientY <= rect.bottom;
+      if (!inside) {
+        setDragPreview(null);
+        return;
+      }
+      const projected = projectClientToWorkplaneRef.current?.(event.clientX, event.clientY) || null;
+      let px;
+      let pz;
+      if (projected) {
+        px = snapToGrid(projected.x);
+        pz = snapToGrid(projected.z);
+      } else {
+        const relX = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+        const relZ = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
+        px = snapToGrid(relX * world.width_cells * GRID_CELL_CM);
+        pz = snapToGrid(relZ * world.height_cells * GRID_CELL_CM);
+      }
+      px = Math.max(0, Math.min(world.width_cells * GRID_CELL_CM, px));
+      pz = Math.max(0, Math.min(world.height_cells * GRID_CELL_CM, pz));
+      const preview = buildDragPreview(item, dragPresetId, px, pz);
+      if (preview) setDragPreview(preview);
+    };
+
+    const clearDragPreview = () => {
+      setDragPreview(null);
+      setDragPresetId(null);
+    };
+
+    window.addEventListener("dragover", onWindowDragOver);
+    window.addEventListener("dragend", clearDragPreview);
+    window.addEventListener("drop", clearDragPreview);
+    return () => {
+      window.removeEventListener("dragover", onWindowDragOver);
+      window.removeEventListener("dragend", clearDragPreview);
+      window.removeEventListener("drop", clearDragPreview);
+    };
+  }, [dragPresetId, world.height_cells, world.width_cells]);
 
   function normalizedDistanceValue(value) {
     const numeric = Number(value);
@@ -398,17 +579,27 @@ export default function RoboticsSimEditorPage() {
         </section>
 
         <section className="robotics-left-card">
-          <h4>Drag to place</h4>
+          <h4>Object Presets</h4>
           <div className="robotics-placement-library">
-            {PLACEMENT_ITEMS.map((item) => (
+            {OBJECT_PRESETS.map((item) => (
               <button
-                key={item.type}
-                className="robotics-block-btn"
+                key={item.id}
+                className="robotics-placement-card"
                 draggable
-                onDragStart={() => setDragType(item.type)}
+                onDragStart={(event) => {
+                  setDragPresetId(item.id);
+                  event.dataTransfer.effectAllowed = "copy";
+                  event.dataTransfer.setData("text/plain", item.id);
+                  event.dataTransfer.setDragImage(getTransparentDragImage(), 0, 0);
+                }}
                 onClick={() => addObjectNearRobot(item)}
+                title="Click to add near robot, or drag into scene"
               >
-                {item.label}
+                <span className="robotics-placement-card__title">{item.label}</span>
+                <small className="robotics-placement-card__subtitle">{item.subtitle}</small>
+                <span className="robotics-placement-card__meta">
+                  {item.physicsBody === "dynamic" ? "Dynamic" : "Static"} · {Math.round(item.size.x)}x{Math.round(item.size.z)} cm
+                </span>
               </button>
             ))}
           </div>
@@ -417,9 +608,28 @@ export default function RoboticsSimEditorPage() {
 
       <section className="robotics-sim-pane">
         <div
+          ref={dropTargetRef}
           className="robotics-drop-target robotics-drop-target--floating"
           onDrop={handleDrop}
-          onDragOver={(event) => event.preventDefault()}
+          onDragEnter={(event) => {
+            event.preventDefault();
+            updateDragPreviewFromEvent(event);
+          }}
+          onDragOver={(event) => {
+            event.preventDefault();
+            updateDragPreviewFromEvent(event);
+          }}
+          onDragLeave={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect();
+            const isOutside =
+              event.clientX < rect.left ||
+              event.clientX > rect.right ||
+              event.clientY < rect.top ||
+              event.clientY > rect.bottom;
+            if (isOutside) {
+              setDragPreview(null);
+            }
+          }}
         >
           <ThreeSimViewport
             worldScene={worldScene}
@@ -446,6 +656,10 @@ export default function RoboticsSimEditorPage() {
             robotStartPose={startPose}
             onRobotStartMove={handleRobotStartMove}
             onRobotStartMoveEnd={commitRobotStartMove}
+            ghostObject={dragPreview?.object || null}
+            onProjectClientToWorkplaneReady={(project) => {
+              projectClientToWorkplaneRef.current = project;
+            }}
           />
           <div className="robotics-floating-controls-right">
             <CameraToolbar
@@ -473,6 +687,11 @@ export default function RoboticsSimEditorPage() {
         onClose={() => setSettingsOpen(false)}
         backgroundColor={viewportBackgroundColor}
         onBackgroundColorChange={setViewportBackgroundColor}
+        moveCollisionPolicy={runtimeSettings.move_collision_policy || "hold_until_distance"}
+        onMoveCollisionPolicyChange={(policy) => {
+          setRuntimeSettings((prev) => ({ ...prev, move_collision_policy: policy }));
+          void saveProjectSnapshot("runtime_settings_changed");
+        }}
       />
 
       <aside className="robotics-lab-right robotics-lab-right--editor">
@@ -540,6 +759,22 @@ export default function RoboticsSimEditorPage() {
                     <span>Type</span>
                     <strong>{selectedObject.type}</strong>
                   </div>
+                  {(selectedObject.type === "obstacle" || selectedObject.type === "wall") && (
+                    <div className="robotics-sensor-card">
+                      <span>Physics body</span>
+                      <label>
+                        Body
+                        <select
+                          value={selectedObject?.metadata?.physics_body === "dynamic" ? "dynamic" : "static"}
+                          onChange={(event) => updateObjectPhysicsBody(selectedObject.id, event.target.value)}
+                          disabled={selectedObject.type === "wall"}
+                        >
+                          <option value="static">Static (fixed)</option>
+                          <option value="dynamic">Dynamic (pushable)</option>
+                        </select>
+                      </label>
+                    </div>
+                  )}
                   <div className="robotics-sensor-card">
                     <span>Color</span>
                     <label>

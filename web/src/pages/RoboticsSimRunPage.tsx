@@ -29,6 +29,8 @@ export default function RoboticsSimRunPage() {
     selectedVendor,
     selectedRobotType,
     runtimeState,
+    runtimeSettings,
+    setRuntimeSettings,
     runProgram,
     pauseProgram,
     stepProgram,
@@ -141,6 +143,10 @@ export default function RoboticsSimRunPage() {
         onClose={() => setSettingsOpen(false)}
         backgroundColor={viewportBackgroundColor}
         onBackgroundColorChange={setViewportBackgroundColor}
+        moveCollisionPolicy={String(runtimeSettings?.move_collision_policy || "hold_until_distance")}
+        onMoveCollisionPolicyChange={(policy) =>
+          setRuntimeSettings((prev: Record<string, unknown>) => ({ ...prev, move_collision_policy: policy }))
+        }
       />
 
       <div className="robotics-sim-run-inspector robotics-sim-run-inspector--single">

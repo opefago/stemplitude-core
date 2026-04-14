@@ -2,6 +2,7 @@ import type {
   RoboticsSimulatorBridge,
   SimulatorPose2D,
   SimulatorRobotModel,
+  SimulatorSceneObject,
   SimulatorTickInput,
   SimulatorTickOutput,
   SimulatorWorldMap,
@@ -111,6 +112,7 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
   private static readonly ANGULAR_FRICTION_COEFF = 5.2;
   private static readonly EPS = 0.01;
   private static readonly MIN_SENSOR_RANGE_CM = 2;
+  private static readonly PUSH_STEP_MULTIPLIERS = [1, 1.25, 1.5, 1.75, 2];
 
   constructor(robot: SimulatorRobotModel) {
     this.robot = robot;
@@ -198,13 +200,19 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
 
       const collisions = this.detectCollisions(nextPose);
       if (collisions.length > 0) {
+        const blockedCollisions = this.resolveDynamicCollisions(nextPose, collisions);
+        if (blockedCollisions.length === 0) {
+          this.pose = nextPose;
+          this.lastCollisions = [];
+          continue;
+        }
         // Keep rotation but block translational penetration into world bounds/obstacles.
         this.pose = {
           ...this.pose,
           heading_deg: nextPose.heading_deg,
         };
         this.linearVelocityCmS = 0;
-        this.lastCollisions = collisions;
+        this.lastCollisions = blockedCollisions;
       } else {
         this.pose = nextPose;
         this.lastCollisions = [];
@@ -222,7 +230,10 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
   }
 
   private robotCollisionRadiusCm(): number {
-    return Math.max(4, Math.min(this.robot.width_cm, this.robot.length_cm) * 0.45);
+    const halfWidth = this.robot.width_cm / 2;
+    const halfLength = this.robot.length_cm / 2;
+    const footprintRadius = Math.hypot(halfWidth, halfLength) * 0.85;
+    return Math.max(6, footprintRadius);
   }
 
   private clampPoseToWorld(pose: SimulatorPose2D): SimulatorPose2D {
@@ -259,7 +270,7 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
 
     for (const object of this.world.world_scene.objects) {
       if (object?.metadata?.hidden) continue;
-      if (object.type !== "obstacle" && object.type !== "wall") continue;
+      if (!this.isCollidableObject(object)) continue;
       const objectYaw = Number(object.rotation_deg?.y) || 0;
       if (
         circleIntersectsOrientedBox2d(
@@ -277,6 +288,133 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
       }
     }
     return collisions;
+  }
+
+  private resolveDynamicCollisions(candidate: SimulatorPose2D, collisions: string[]): string[] {
+    if (!this.world?.world_scene) return collisions;
+    const collidingObjects = this.world.world_scene.objects.filter((obj) => collisions.includes(obj.id));
+    if (collidingObjects.length === 0) return collisions;
+
+    const moveDx = candidate.position.x - this.pose.position.x;
+    const moveDy = candidate.position.y - this.pose.position.y;
+    const moveMagnitude = Math.hypot(moveDx, moveDy);
+    const fallbackHeading = toRadians(this.pose.heading_deg);
+    const dirX = moveMagnitude > ThreeRuntimeSimulator.EPS ? moveDx / moveMagnitude : Math.cos(fallbackHeading);
+    const dirY = moveMagnitude > ThreeRuntimeSimulator.EPS ? moveDy / moveMagnitude : Math.sin(fallbackHeading);
+    const basePushDistance = Math.max(0.5, moveMagnitude);
+    const blocked: string[] = [];
+
+    for (const object of collidingObjects) {
+      if (!this.isDynamicObject(object)) {
+        blocked.push(object.id);
+        continue;
+      }
+      let moved = false;
+      for (const multiplier of ThreeRuntimeSimulator.PUSH_STEP_MULTIPLIERS) {
+        const candidateX = object.position.x + dirX * basePushDistance * multiplier;
+        const candidateZ = object.position.z + dirY * basePushDistance * multiplier;
+        if (!this.canPlaceObject(object, candidateX, candidateZ, candidate)) continue;
+        const dx = candidateX - object.position.x;
+        const dz = candidateZ - object.position.z;
+        object.position = { ...object.position, x: candidateX, z: candidateZ };
+        this.applyRollingForSphere(object, dx, dz);
+        moved = true;
+        break;
+      }
+      if (!moved) {
+        blocked.push(object.id);
+      }
+    }
+
+    if (blocked.length > 0) return blocked;
+    return this.detectCollisions(candidate);
+  }
+
+  private applyRollingForSphere(object: SimulatorSceneObject, dx: number, dz: number): void {
+    const renderShape = typeof object?.metadata?.render_shape === "string" ? object.metadata.render_shape : "";
+    if (renderShape !== "sphere") return;
+    const radiusCm = Math.max(1, Math.min(object.size_cm.x, object.size_cm.z) / 2);
+    const rollFromXDeg = (-dx / radiusCm) * (180 / Math.PI);
+    const rollFromZDeg = (dz / radiusCm) * (180 / Math.PI);
+    const metadata = object.metadata || {};
+    const prevRollX = Number(metadata.roll_x_deg) || 0;
+    const prevRollZ = Number(metadata.roll_z_deg) || 0;
+    object.metadata = {
+      ...metadata,
+      roll_x_deg: prevRollX + rollFromZDeg,
+      roll_z_deg: prevRollZ + rollFromXDeg,
+    };
+  }
+
+  private canPlaceObject(
+    object: SimulatorSceneObject,
+    centerX: number,
+    centerZ: number,
+    candidateRobotPose: SimulatorPose2D,
+  ): boolean {
+    if (!this.world?.world_scene) return false;
+    const worldWidthCm = this.world.width_cells * this.world.grid_cell_cm;
+    const worldDepthCm = this.world.height_cells * this.world.grid_cell_cm;
+    const halfW = Math.max(1, (Number(object.size_cm?.x) || 0) / 2);
+    const halfD = Math.max(1, (Number(object.size_cm?.z) || 0) / 2);
+
+    if (centerX - halfW < 0 || centerZ - halfD < 0 || centerX + halfW > worldWidthCm || centerZ + halfD > worldDepthCm) {
+      return false;
+    }
+
+    const objectYaw = Number(object.rotation_deg?.y) || 0;
+    const robotRadius = this.robotCollisionRadiusCm();
+    if (
+      circleIntersectsOrientedBox2d(
+        candidateRobotPose.position.x,
+        candidateRobotPose.position.y,
+        robotRadius,
+        centerX,
+        centerZ,
+        object.size_cm.x,
+        object.size_cm.z,
+        objectYaw,
+      )
+    ) {
+      return false;
+    }
+
+    const movingRadius = Math.hypot(object.size_cm.x / 2, object.size_cm.z / 2) * 0.9;
+    for (const other of this.world.world_scene.objects) {
+      if (!other || other.id === object.id) continue;
+      if (other?.metadata?.hidden) continue;
+      if (!this.isCollidableObject(other)) continue;
+      const otherYaw = Number(other.rotation_deg?.y) || 0;
+      if (
+        circleIntersectsOrientedBox2d(
+          centerX,
+          centerZ,
+          movingRadius,
+          other.position.x,
+          other.position.z,
+          other.size_cm.x,
+          other.size_cm.z,
+          otherYaw,
+        )
+      ) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private isCollidableObject(object: SimulatorSceneObject): boolean {
+    return object.type === "obstacle" || object.type === "wall";
+  }
+
+  private isDynamicObject(object: SimulatorSceneObject): boolean {
+    if (!this.isCollidableObject(object)) return false;
+    if (object.type === "wall") return false;
+    const metadata = object.metadata || {};
+    if (metadata.physics_body === "dynamic") return true;
+    if (metadata.physics_body === "static") return false;
+    if (typeof metadata.dynamic === "boolean") return metadata.dynamic;
+    return object.type === "obstacle";
   }
 
   private readSensors(collisions: string[]): Record<string, string | number | boolean> {
@@ -327,7 +465,7 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
       const py = sensorPose.y + Math.sin(headingRad) * d;
       const hit = this.world.world_scene.objects.some((obj) => {
         if (obj?.metadata?.hidden) return false;
-        if (obj.type !== "obstacle" && obj.type !== "wall") return false;
+        if (!this.isCollidableObject(obj)) return false;
         const objectYaw = Number(obj.rotation_deg?.y) || 0;
         return pointInOrientedBox2d(px, py, obj.position.x, obj.position.z, obj.size_cm.x, obj.size_cm.z, objectYaw);
       });
