@@ -89,6 +89,14 @@ export interface SimulatorRobotModel {
   wheel_base_cm: number;
   width_cm: number;
   length_cm: number;
+  wheel_radius_cm?: number;
+  wheel_width_cm?: number;
+  track_width_cm?: number;
+  wheelbase_cm?: number;
+  traction_longitudinal?: number;
+  traction_lateral?: number;
+  rolling_resistance?: number;
+  max_wheel_accel_cm_s2?: number;
   sensors: SimulatorSensor[];
 }
 

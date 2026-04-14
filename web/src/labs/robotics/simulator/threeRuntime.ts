@@ -7,15 +7,24 @@ import type {
   SimulatorTickOutput,
   SimulatorWorldMap,
 } from "./types";
+import { resolveWheelProfile, type ResolvedWheelProfile } from "./wheelProfile";
 
 function toRadians(degrees: number) {
   return (degrees * Math.PI) / 180;
+}
+
+function toDegrees(radians: number) {
+  return (radians * 180) / Math.PI;
 }
 
 function normalizeHeading(heading: number) {
   let next = heading % 360;
   if (next < 0) next += 360;
   return next;
+}
+
+function normalizeSignedAngle(delta: number) {
+  return ((delta + 540) % 360) - 180;
 }
 
 function pointInBox2d(
@@ -101,21 +110,21 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
   private world: SimulatorWorldMap | null = null;
   private pose: SimulatorPose2D = { position: { x: 0, y: 0 }, heading_deg: 0 };
   private readonly robot: SimulatorRobotModel;
-  private linearVelocityCmS = 0;
-  private angularVelocityDegS = 0;
+  private readonly wheelProfile: ResolvedWheelProfile;
+  private leftWheelVelocityCmS = 0;
+  private rightWheelVelocityCmS = 0;
   private lastCollisions: string[] = [];
   private sensorOverrides: Record<string, number | boolean | string | null | undefined> = {};
 
-  private static readonly LINEAR_ACCEL_CM_S2 = 140;
-  private static readonly LINEAR_FRICTION_COEFF = 4.2;
-  private static readonly ANGULAR_ACCEL_DEG_S2 = 420;
-  private static readonly ANGULAR_FRICTION_COEFF = 5.2;
   private static readonly EPS = 0.01;
   private static readonly MIN_SENSOR_RANGE_CM = 2;
   private static readonly PUSH_STEP_MULTIPLIERS = [1, 1.25, 1.5, 1.75, 2];
+  private static readonly MIN_SWEEP_STEP_CM = 2;
+  private static readonly MAX_SWEEP_SAMPLES = 12;
 
   constructor(robot: SimulatorRobotModel) {
     this.robot = robot;
+    this.wheelProfile = resolveWheelProfile(robot);
   }
 
   setWorld(map: SimulatorWorldMap): void {
@@ -141,8 +150,8 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
       position: { ...clamped.position },
       heading_deg: normalizeHeading(clamped.heading_deg),
     };
-    this.linearVelocityCmS = 0;
-    this.angularVelocityDegS = 0;
+    this.leftWheelVelocityCmS = 0;
+    this.rightWheelVelocityCmS = 0;
     this.lastCollisions = [];
   }
 
@@ -174,33 +183,56 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
       const subDt = Math.min(0.02, remaining);
       remaining -= subDt;
 
-      this.linearVelocityCmS = this.approachVelocity(
-        this.linearVelocityCmS,
-        targetLinearCmS,
-        ThreeRuntimeSimulator.LINEAR_ACCEL_CM_S2,
-        ThreeRuntimeSimulator.LINEAR_FRICTION_COEFF,
+      const adjustedLinearTarget =
+        Math.abs(targetAngularDegS) > ThreeRuntimeSimulator.EPS &&
+        Math.abs(targetLinearCmS) < this.wheelProfile.wheelRadiusCm * 1.5
+          ? this.wheelProfile.wheelRadiusCm * 1.5
+          : targetLinearCmS;
+      const trackWidthCm = this.wheelProfile.trackWidthCm;
+      const targetAngularRadS = toRadians(targetAngularDegS);
+      const tractionLinear = this.wheelProfile.tractionLongitudinal;
+      const targetLeftWheelCmS =
+        (adjustedLinearTarget - (targetAngularRadS * trackWidthCm) / 2) * tractionLinear;
+      const targetRightWheelCmS =
+        (adjustedLinearTarget + (targetAngularRadS * trackWidthCm) / 2) * tractionLinear;
+      this.leftWheelVelocityCmS = this.approachVelocity(
+        this.leftWheelVelocityCmS,
+        targetLeftWheelCmS,
+        this.wheelProfile.maxWheelAccelCmS2 * this.wheelProfile.tractionLongitudinal,
+        this.wheelProfile.rollingResistance,
         subDt,
       );
-      this.angularVelocityDegS = this.approachVelocity(
-        this.angularVelocityDegS,
-        targetAngularDegS,
-        ThreeRuntimeSimulator.ANGULAR_ACCEL_DEG_S2,
-        ThreeRuntimeSimulator.ANGULAR_FRICTION_COEFF,
+      this.rightWheelVelocityCmS = this.approachVelocity(
+        this.rightWheelVelocityCmS,
+        targetRightWheelCmS,
+        this.wheelProfile.maxWheelAccelCmS2 * this.wheelProfile.tractionLongitudinal,
+        this.wheelProfile.rollingResistance,
         subDt,
       );
+      const linearVelocityCmS = (this.leftWheelVelocityCmS + this.rightWheelVelocityCmS) / 2;
+      const trackGripFactor = clamp(18 / Math.max(8, this.wheelProfile.trackWidthCm), 0.68, 1.08);
+      const angularVelocityDegS =
+        toDegrees(
+        (this.rightWheelVelocityCmS - this.leftWheelVelocityCmS) / Math.max(1, trackWidthCm),
+      ) *
+        this.wheelProfile.tractionLateral *
+        trackGripFactor;
+
+      this.integrateDynamicObjectGravity(subDt);
+      this.integrateDynamicObjectMomentum(subDt);
 
       const headingRad = toRadians(this.pose.heading_deg);
       const nextPose: SimulatorPose2D = {
         position: {
-          x: this.pose.position.x + Math.cos(headingRad) * this.linearVelocityCmS * subDt,
-          y: this.pose.position.y + Math.sin(headingRad) * this.linearVelocityCmS * subDt,
+          x: this.pose.position.x + Math.cos(headingRad) * linearVelocityCmS * subDt,
+          y: this.pose.position.y + Math.sin(headingRad) * linearVelocityCmS * subDt,
         },
-        heading_deg: normalizeHeading(this.pose.heading_deg + this.angularVelocityDegS * subDt),
+        heading_deg: normalizeHeading(this.pose.heading_deg + angularVelocityDegS * subDt),
       };
 
-      const collisions = this.detectCollisions(nextPose);
+      const collisions = this.detectCollisionsSwept(this.pose, nextPose);
       if (collisions.length > 0) {
-        const blockedCollisions = this.resolveDynamicCollisions(nextPose, collisions);
+        const blockedCollisions = this.resolveDynamicCollisions(nextPose, collisions, subDt);
         if (blockedCollisions.length === 0) {
           this.pose = nextPose;
           this.lastCollisions = [];
@@ -211,12 +243,70 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
           ...this.pose,
           heading_deg: nextPose.heading_deg,
         };
-        this.linearVelocityCmS = 0;
+        this.leftWheelVelocityCmS = 0;
+        this.rightWheelVelocityCmS = 0;
         this.lastCollisions = blockedCollisions;
       } else {
         this.pose = nextPose;
         this.lastCollisions = [];
       }
+    }
+  }
+
+  private integrateDynamicObjectGravity(subDt: number): void {
+    if (!this.world?.world_scene || subDt <= 0) return;
+    const gravityCmS2 = Math.max(0, Number(this.world.world_scene.gravity_m_s2) || 9.81) * 100;
+    for (const object of this.world.world_scene.objects) {
+      if (!this.isDynamicObject(object)) continue;
+      if (!this.isGravityEnabledForObject(object)) continue;
+      const metadata = object.metadata || {};
+      const y = Number(object.position?.y) || 0;
+      const vy = Number(metadata.vy_cm_s) || 0;
+      const nextVy = vy - gravityCmS2 * subDt;
+      let nextY = y + nextVy * subDt;
+      let resolvedVy = nextVy;
+      const restitution = clamp(Number(metadata.restitution ?? 0.22), 0, 0.95);
+      if (nextY < 0) {
+        nextY = 0;
+        resolvedVy = Math.abs(nextVy) > 20 ? -nextVy * restitution : 0;
+      }
+      object.position = {
+        ...object.position,
+        y: nextY,
+      };
+      object.metadata = {
+        ...metadata,
+        vy_cm_s: resolvedVy,
+      };
+    }
+  }
+
+  private integrateDynamicObjectMomentum(subDt: number): void {
+    if (!this.world?.world_scene || subDt <= 0) return;
+    for (const object of this.world.world_scene.objects) {
+      if (!this.isDynamicObject(object)) continue;
+      const metadata = object.metadata || {};
+      const vx = Number(metadata.vx_cm_s) || 0;
+      const vz = Number(metadata.vz_cm_s) || 0;
+      const damping = clamp(Number(metadata.linear_damping ?? 3.2), 0, 25);
+      const dampFactor = Math.max(0, 1 - damping * subDt);
+      const nextVx = Math.abs(vx * dampFactor) < ThreeRuntimeSimulator.EPS ? 0 : vx * dampFactor;
+      const nextVz = Math.abs(vz * dampFactor) < ThreeRuntimeSimulator.EPS ? 0 : vz * dampFactor;
+      const nextX = object.position.x + nextVx * subDt;
+      const nextZ = object.position.z + nextVz * subDt;
+      if (this.canPlaceObject(object, nextX, nextZ, this.pose)) {
+        object.position = {
+          ...object.position,
+          x: nextX,
+          z: nextZ,
+        };
+        this.applyRollingForSphere(object, nextVx * subDt, nextVz * subDt);
+      }
+      object.metadata = {
+        ...metadata,
+        vx_cm_s: nextVx,
+        vz_cm_s: nextVz,
+      };
     }
   }
 
@@ -290,7 +380,33 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
     return collisions;
   }
 
-  private resolveDynamicCollisions(candidate: SimulatorPose2D, collisions: string[]): string[] {
+  private detectCollisionsSwept(startPose: SimulatorPose2D, endPose: SimulatorPose2D): string[] {
+    const direct = this.detectCollisions(endPose);
+    if (direct.length > 0) return direct;
+    const dx = endPose.position.x - startPose.position.x;
+    const dy = endPose.position.y - startPose.position.y;
+    const distance = Math.hypot(dx, dy);
+    if (distance <= ThreeRuntimeSimulator.MIN_SWEEP_STEP_CM) return [];
+    const samples = Math.min(
+      ThreeRuntimeSimulator.MAX_SWEEP_SAMPLES,
+      Math.max(2, Math.ceil(distance / ThreeRuntimeSimulator.MIN_SWEEP_STEP_CM)),
+    );
+    for (let i = 1; i < samples; i += 1) {
+      const t = i / samples;
+      const samplePose: SimulatorPose2D = {
+        position: {
+          x: startPose.position.x + dx * t,
+          y: startPose.position.y + dy * t,
+        },
+        heading_deg: normalizeHeading(startPose.heading_deg + normalizeSignedAngle(endPose.heading_deg - startPose.heading_deg) * t),
+      };
+      const sampled = this.detectCollisions(samplePose);
+      if (sampled.length > 0) return sampled;
+    }
+    return [];
+  }
+
+  private resolveDynamicCollisions(candidate: SimulatorPose2D, collisions: string[], subDtS: number): string[] {
     if (!this.world?.world_scene) return collisions;
     const collidingObjects = this.world.world_scene.objects.filter((obj) => collisions.includes(obj.id));
     if (collidingObjects.length === 0) return collisions;
@@ -317,6 +433,8 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
         const dx = candidateX - object.position.x;
         const dz = candidateZ - object.position.z;
         object.position = { ...object.position, x: candidateX, z: candidateZ };
+        this.applyDynamicObjectRotation(object, dx, dz);
+        this.applyDynamicObjectImpulse(object, dx, dz, subDtS);
         this.applyRollingForSphere(object, dx, dz);
         moved = true;
         break;
@@ -328,6 +446,32 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
 
     if (blocked.length > 0) return blocked;
     return this.detectCollisions(candidate);
+  }
+
+  private applyDynamicObjectRotation(object: SimulatorSceneObject, dx: number, dz: number): void {
+    const renderShape = typeof object?.metadata?.render_shape === "string" ? object.metadata.render_shape : "";
+    if (renderShape === "sphere") return;
+    const turnDeltaDeg = clamp((dz - dx) * 0.8, -6, 6);
+    const currentYaw = Number(object.rotation_deg?.y) || 0;
+    object.rotation_deg = {
+      ...(object.rotation_deg || {}),
+      y: normalizeHeading(currentYaw + turnDeltaDeg),
+    };
+  }
+
+  private applyDynamicObjectImpulse(object: SimulatorSceneObject, dx: number, dz: number, subDtS: number): void {
+    if (subDtS <= 0) return;
+    const metadata = object.metadata || {};
+    const vx = Number(metadata.vx_cm_s) || 0;
+    const vz = Number(metadata.vz_cm_s) || 0;
+    const impulseScale = clamp(Number(metadata.impulse_scale ?? 0.9), 0.1, 3);
+    const nextVx = vx + (dx / subDtS) * impulseScale;
+    const nextVz = vz + (dz / subDtS) * impulseScale;
+    object.metadata = {
+      ...metadata,
+      vx_cm_s: nextVx,
+      vz_cm_s: nextVz,
+    };
   }
 
   private applyRollingForSphere(object: SimulatorSceneObject, dx: number, dz: number): void {
@@ -415,6 +559,13 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
     if (metadata.physics_body === "static") return false;
     if (typeof metadata.dynamic === "boolean") return metadata.dynamic;
     return object.type === "obstacle";
+  }
+
+  private isGravityEnabledForObject(object: SimulatorSceneObject): boolean {
+    const metadata = object.metadata || {};
+    if (typeof metadata.use_gravity === "boolean") return metadata.use_gravity;
+    const renderShape = typeof metadata.render_shape === "string" ? metadata.render_shape : "";
+    return renderShape === "sphere";
   }
 
   private readSensors(collisions: string[]): Record<string, string | number | boolean> {

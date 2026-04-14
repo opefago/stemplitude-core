@@ -241,7 +241,6 @@ export default function RoboticsCodeEditorPage() {
           </label>
         </div>
       </div>
-
       <div className={`robotics-code-grid ${previewCollapsed ? "collapsed" : ""}`}>
         <section className="robotics-code-editor-pane">
         {mode === "blocks" || mode === "hybrid" ? (

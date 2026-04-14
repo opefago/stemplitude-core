@@ -68,19 +68,33 @@ function withDefaultSensors(sensors: SimulatorSensor[]): SimulatorSensor[] {
   ];
 }
 
+function withWheelDefaults(model: SimulatorRobotModel): SimulatorRobotModel {
+  return {
+    ...model,
+    wheel_radius_cm: model.wheel_radius_cm ?? 3.4,
+    wheel_width_cm: model.wheel_width_cm ?? 2.2,
+    track_width_cm: model.track_width_cm ?? Math.max(8, model.width_cm * 0.85),
+    wheelbase_cm: model.wheelbase_cm ?? model.wheel_base_cm ?? Math.max(8, model.length_cm * 0.72),
+    traction_longitudinal: model.traction_longitudinal ?? 0.92,
+    traction_lateral: model.traction_lateral ?? 0.9,
+    rolling_resistance: model.rolling_resistance ?? 4.2,
+    max_wheel_accel_cm_s2: model.max_wheel_accel_cm_s2 ?? 140,
+  };
+}
+
 export function buildRobotModelFromManifest(manifest: RoboticsCapabilityManifest): SimulatorRobotModel {
   const rawSensors = Array.isArray(manifest.sensors) ? manifest.sensors : [];
   const sensors = rawSensors.map((sensorKind, index) => sensorByKind(String(sensorKind), String(sensorKind || `sensor_${index}`)));
-  return {
+  return withWheelDefaults({
     wheel_base_cm: 14,
     width_cm: 16,
     length_cm: 18,
     sensors: withDefaultSensors(sensors),
-  };
+  });
 }
 
 export function getDefaultRobotModel(): SimulatorRobotModel {
-  return {
+  return withWheelDefaults({
     wheel_base_cm: 14,
     width_cm: 16,
     length_cm: 18,
@@ -90,7 +104,7 @@ export function getDefaultRobotModel(): SimulatorRobotModel {
       sensorByKind("color", "color"),
       sensorByKind("bumper", "bumper"),
     ]),
-  };
+  });
 }
 
 export function resolveRobotModel(input: ResolveRobotModelInput): SimulatorRobotModel {

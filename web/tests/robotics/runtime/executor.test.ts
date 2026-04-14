@@ -120,7 +120,12 @@ describe("IRRuntimeExecutor", () => {
 
     executor.load(program);
     executor.run();
-    const result = executor.step();
+    let result = executor.step();
+    let guard = 0;
+    while (result.state === "running" && guard < 40) {
+      result = executor.step();
+      guard += 1;
+    }
 
     expect(result.state).toBe("completed");
     expect(result.diagnostics || []).toHaveLength(0);
@@ -262,7 +267,12 @@ describe("IRRuntimeExecutor", () => {
     };
     executor.load(program);
     executor.run();
-    const result = executor.step();
+    let result = executor.step();
+    let guard = 0;
+    while (result.state === "running" && guard < 40) {
+      result = executor.step();
+      guard += 1;
+    }
     expect(result.state).toBe("completed");
     expect(result.diagnostics || []).toEqual([]);
   });
@@ -394,6 +404,96 @@ describe("IRRuntimeExecutor", () => {
     expect(Math.abs(fastX - slowX)).toBeLessThan(5);
   });
 
+  it("snaps completed turn commands to exact target heading", () => {
+    const simulator = new MockSimulator();
+    const executor = new IRRuntimeExecutor(simulator);
+    const program: RoboticsProgram = {
+      version: 1,
+      entrypoint: "main",
+      nodes: [
+        { id: "t1", kind: "turn", direction: "left", angle_deg: 90, speed_pct: 100 },
+        { id: "t2", kind: "turn", direction: "left", angle_deg: 90, speed_pct: 100 },
+        { id: "t3", kind: "turn", direction: "left", angle_deg: 90, speed_pct: 100 },
+        { id: "t4", kind: "turn", direction: "left", angle_deg: 90, speed_pct: 100 },
+      ],
+    };
+    executor.load(program);
+    executor.run();
+    let result = executor.step();
+    let guard = 0;
+    while (result.state === "running" && guard < 300) {
+      result = executor.step();
+      guard += 1;
+    }
+    expect(result.state).toBe("completed");
+    expect(simulator.getPose().heading_deg).toBeCloseTo(0, 6);
+  });
+
+  it("does not fast-forward static repeat loops in a single tick", () => {
+    const simulator = new MockSimulator();
+    const executor = new IRRuntimeExecutor(simulator);
+    const program: RoboticsProgram = {
+      version: 1,
+      entrypoint: "main",
+      nodes: [
+        {
+          id: "repeat_1",
+          kind: "repeat",
+          times: 4,
+          body: [
+            { id: "move_1", kind: "move", direction: "forward", unit: "distance_cm", value: 80, speed_pct: 100 },
+            { id: "turn_1", kind: "turn", direction: "left", angle_deg: 90, speed_pct: 75 },
+          ],
+        },
+      ],
+    };
+    executor.load(program);
+    executor.run();
+    const first = executor.step(200);
+    expect(first.state).toBe("running");
+    let result = first;
+    let guard = 0;
+    while (result.state === "running" && guard < 800) {
+      result = executor.step(200);
+      guard += 1;
+    }
+    expect(result.state).toBe("completed");
+    expect(guard).toBeGreaterThan(8);
+  });
+
+  it("does not fast-forward conditional branches in a single tick", () => {
+    const simulator = new MockSimulator();
+    const executor = new IRRuntimeExecutor(simulator);
+    const program: RoboticsProgram = {
+      version: 1,
+      entrypoint: "main",
+      nodes: [
+        {
+          id: "if_1",
+          kind: "if",
+          condition: {
+            op: "eq",
+            left: { type: "number", value: 1 },
+            right: { type: "number", value: 1 },
+          },
+          then_nodes: [
+            { id: "m1", kind: "move", direction: "forward", unit: "distance_cm", value: 80, speed_pct: 100 },
+            { id: "t1", kind: "turn", direction: "left", angle_deg: 90, speed_pct: 75 },
+          ],
+          else_nodes: [],
+        },
+      ],
+    };
+    executor.load(program);
+    executor.run();
+    const first = executor.step(200);
+    expect(first.state).toBe("running");
+    expect(first.highlightedNodeId).toBe("if_1");
+    const second = executor.step(200);
+    expect(second.state).toBe("running");
+    expect(second.highlightedNodeId).toContain("m1");
+  });
+
   it("holds move state on collision by default until distance is reached", () => {
     const simulator = new BlockingCollisionSimulator();
     const executor = new IRRuntimeExecutor(simulator);
@@ -459,7 +559,13 @@ describe("IRRuntimeExecutor", () => {
     };
     executor.load(program);
     executor.run();
-    const result = executor.step();
+    let result = executor.step({ policy: "step_over" });
+    let guard = 0;
+    while (result.state === "running" && guard < 2000) {
+      result = executor.step({ policy: "step_over" });
+      guard += 1;
+    }
+    expect(guard).toBeLessThan(2000);
     expect(result.state).toBe("error");
     expect(result.diagnostics?.some((line) => line.includes("call stack overflow"))).toBe(true);
     expect(result.issues.some((issue) => issue.code === "CALL_STACK_OVERFLOW")).toBe(true);
@@ -479,8 +585,78 @@ describe("IRRuntimeExecutor", () => {
     };
     executor.load(program);
     executor.run();
-    const result = executor.step();
+    let result = executor.step({ policy: "step_over" });
+    let guard = 0;
+    while (result.state === "running" && guard < 2000) {
+      result = executor.step({ policy: "step_over" });
+      guard += 1;
+    }
+    expect(guard).toBeLessThan(2000);
     expect(result.state).toBe("error");
     expect(result.issues.some((issue) => issue.code === "CALL_STACK_OVERFLOW")).toBe(true);
+  });
+
+  it("supports step_into and step_over semantics for function calls", () => {
+    const simulator = new MockSimulator();
+    const executor = new IRRuntimeExecutor(simulator);
+    const program: RoboticsProgram = {
+      version: 1,
+      entrypoint: "main",
+      nodes: [{ id: "call_1", kind: "call", function_id: "spin_loop", args: [] }],
+      functions: [{ id: "spin_loop", name: "spin_loop", params: [], body: [{ id: "f_wait", kind: "wait", seconds: 0.1 }] }],
+    };
+    executor.load(program);
+    executor.run();
+    const intoResult = executor.step({ policy: "step_into" });
+    expect(intoResult.state).toBe("running");
+    expect(intoResult.semanticEvent?.type).toBe("call_enter");
+
+    const overExecutor = new IRRuntimeExecutor(new MockSimulator());
+    overExecutor.load(program);
+    overExecutor.run();
+    let overResult = overExecutor.step({ policy: "step_over" });
+    expect(overResult.semanticEvent?.type).toBe("call_enter");
+    let guard = 0;
+    while (overResult.state === "running" && overResult.semanticEvent?.type !== "call_return" && guard < 200) {
+      overResult = overExecutor.step({ policy: "step_over" });
+      guard += 1;
+    }
+    expect(guard).toBeLessThan(200);
+    expect(overResult.semanticEvent?.type).toBe("call_return");
+    while (overResult.state === "running" && guard < 400) {
+      overResult = overExecutor.step({ policy: "step_over" });
+      guard += 1;
+    }
+    expect(overResult.state).toBe("completed");
+  });
+
+  it("supports step_over semantics for repeat loops", () => {
+    const simulator = new MockSimulator();
+    const executor = new IRRuntimeExecutor(simulator);
+    executor.load({
+      version: 1,
+      entrypoint: "main",
+      nodes: [
+        {
+          id: "loop_1",
+          kind: "repeat",
+          times: 3,
+          body: [{ id: "w1", kind: "wait", seconds: 0.05 }],
+        },
+        { id: "move_1", kind: "move", direction: "forward", unit: "distance_cm", value: 20, speed_pct: 60 },
+      ],
+    });
+    executor.run();
+    let result = executor.step({ policy: "step_over" });
+    expect(result.semanticEvent?.type).toBe("loop_check");
+    let guard = 0;
+    while (result.state === "running" && result.semanticEvent?.type !== "loop_exit" && guard < 300) {
+      result = executor.step({ policy: "step_over" });
+      guard += 1;
+    }
+    expect(guard).toBeLessThan(300);
+    expect(result.semanticEvent?.type).toBe("loop_exit");
+    const next = executor.step({ policy: "step_over" });
+    expect(next.highlightedNodeId).toBe("move_1");
   });
 });

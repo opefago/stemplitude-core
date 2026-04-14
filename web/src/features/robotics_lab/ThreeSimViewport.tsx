@@ -13,12 +13,16 @@ import { LineSensorOverlay } from "../../labs/robotics/view/overlays/LineSensorO
 import { PathTrailOverlay } from "../../labs/robotics/view/overlays/PathTrailOverlay";
 import type { CameraPose, CameraState, OverlayState, RobotPoseForCamera, WorldSizeCm } from "../../labs/robotics/view/types";
 import type { RoboticsCameraController } from "../../labs/robotics/view/cameraController";
+import type { SimulatorRobotModel } from "../../labs/robotics/simulator/types";
+import { resolveWheelProfile } from "../../labs/robotics/simulator/wheelProfile";
+import { GRID_CELL_CM } from "./workspaceDefaults";
 
 type PointerEvent3D = any;
 
 interface Position2D {
   x?: number;
   y?: number;
+  z?: number;
 }
 
 interface Rotation3D {
@@ -62,6 +66,7 @@ interface SensorValues {
 interface ThreeSimViewportProps {
   worldScene?: WorldSceneData;
   pose?: SimulatorPose;
+  robotModel?: SimulatorRobotModel | null;
   sensorValues?: SensorValues;
   cameraState?: CameraState;
   overlayState?: OverlayState;
@@ -81,6 +86,7 @@ interface ThreeSimViewportProps {
   backgroundColor?: string;
   ghostObject?: WorldObjectData | null;
   onProjectClientToWorkplaneReady?: ((project: (clientX: number, clientY: number) => { x: number; z: number } | null) => void) | null;
+  onWorkplaneClick?: ((x: number, z: number) => void) | null;
 }
 
 interface WorldObjectProps {
@@ -155,6 +161,14 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
+function snapToGrid(value: number, step = GRID_CELL_CM, mode: "center" | "edge" = "center"): number {
+  if (mode === "edge") {
+    return Math.round(value / step) * step;
+  }
+  const half = step / 2;
+  return Math.round((value - half) / step) * step + half;
+}
+
 function buildGridLines(width: number, depth: number, step: number, y: number): THREE.BufferGeometry {
   const points: number[] = [];
   for (let x = 0; x <= width; x += step) {
@@ -197,16 +211,20 @@ function WorldObject({
   const x = object.position?.x ?? 0;
   const z = object.position?.z ?? 0;
   const sx = Math.max(4, (object.size_cm?.x ?? 20) * OBJECT_SCALE);
-  const syRaw = Math.max(2, (object.size_cm?.y ?? 20) * OBJECT_SCALE);
+  const isLineTrack = object.type === "line_segment";
+  const syRaw = isLineTrack
+    ? Math.max(0.4, (object.size_cm?.y ?? 1) * OBJECT_SCALE)
+    : Math.max(2, (object.size_cm?.y ?? 20) * OBJECT_SCALE);
   const sz = Math.max(4, (object.size_cm?.z ?? 20) * OBJECT_SCALE);
   const isZone = object.type === "target_zone" || object.type === "color_zone";
   const yawDeg = Number(object?.rotation_deg?.y) || 0;
   const yawRad = (yawDeg * Math.PI) / 180;
   const rollXRad = ((Number(object?.metadata?.roll_x_deg) || 0) * Math.PI) / 180;
   const rollZRad = ((Number(object?.metadata?.roll_z_deg) || 0) * Math.PI) / 180;
-  const sy = isZone ? Math.min(8, syRaw) : syRaw;
-  const y = sy / 2;
+  const sy = isLineTrack ? Math.min(1.2, syRaw) : isZone ? Math.min(8, syRaw) : syRaw;
+  const y = (Number(object.position?.y) || 0) + sy / 2;
   const renderShape = typeof object?.metadata?.render_shape === "string" ? object.metadata.render_shape : "default";
+  const placementShape = typeof object?.metadata?.placement_shape === "string" ? object.metadata.placement_shape : null;
   const metadataColor =
     typeof object?.metadata?.color === "string" && object.metadata.color.trim() ? object.metadata.color : null;
   const color =
@@ -236,6 +254,100 @@ function WorldObject({
       }
     : {};
 
+  const rampGeometry = useMemo(() => {
+    if (renderShape !== "ramp") return null;
+    const shape = new THREE.Shape();
+    shape.moveTo(-sx / 2, -sy / 2);
+    shape.lineTo(sx / 2, -sy / 2);
+    shape.lineTo(-sx / 2, sy / 2);
+    shape.lineTo(-sx / 2, -sy / 2);
+    const geometry = new THREE.ExtrudeGeometry(shape, {
+      depth: sz,
+      bevelEnabled: false,
+      steps: 1,
+    });
+    geometry.translate(0, 0, -sz / 2);
+    geometry.computeVertexNormals();
+    return geometry;
+  }, [renderShape, sx, sy, sz]);
+
+  if (renderShape === "waypoint_marker") {
+    const baseRadius = Math.max(6, Math.min(sx, sz) / 2);
+    const poleHeight = Math.max(10, sy * 1.8);
+    return (
+      <group position={[x, 0, z]} rotation={[0, yawRad, 0]} {...commonProps}>
+        <mesh position={[0, Math.max(0.8, sy * 0.35), 0]}>
+          <cylinderGeometry args={[baseRadius, baseRadius, Math.max(1, sy * 0.7), 24]} />
+          <meshToonMaterial {...toonMaterialProps} />
+        </mesh>
+        <mesh position={[0, Math.max(1.2, sy * 0.7) + poleHeight / 2, 0]}>
+          <cylinderGeometry args={[Math.max(1.8, baseRadius * 0.22), Math.max(1.8, baseRadius * 0.22), poleHeight, 16]} />
+          <meshToonMaterial color={ghost ? "#67e8f9" : "#e2e8f0"} gradientMap={toonGradientMap} transparent={ghost} opacity={ghost ? 0.45 : 1} />
+        </mesh>
+        <mesh position={[0, Math.max(1.2, sy * 0.7) + poleHeight + Math.max(2.8, baseRadius * 0.28), 0]}>
+          <sphereGeometry args={[Math.max(2.8, baseRadius * 0.28), 16, 16]} />
+          <meshToonMaterial {...toonMaterialProps} />
+        </mesh>
+      </group>
+    );
+  }
+
+  if (renderShape === "ramp" && rampGeometry) {
+    return (
+      <group position={[x, y, z]} rotation={[0, yawRad, 0]} {...commonProps}>
+        <mesh geometry={rampGeometry}>
+          <meshToonMaterial {...toonMaterialProps} />
+        </mesh>
+        <mesh geometry={rampGeometry} scale={[1.02, 1.02, 1.02]} raycast={() => null}>
+          <meshBasicMaterial color="#0d0d0d" side={THREE.BackSide} />
+        </mesh>
+        {selected ? (
+          <mesh geometry={rampGeometry} scale={[1.05, 1.05, 1.05]} raycast={() => null}>
+            <meshBasicMaterial color="#00d4ff" transparent opacity={0.2} side={THREE.BackSide} />
+          </mesh>
+        ) : null}
+      </group>
+    );
+  }
+
+  if (isLineTrack || renderShape === "flat_rect") {
+    return (
+      <group position={[x, y, z]} rotation={[0, yawRad, 0]} {...commonProps}>
+        <mesh>
+          <boxGeometry args={[sx, sy, sz]} />
+          <meshToonMaterial {...toonMaterialProps} />
+        </mesh>
+        <mesh scale={[1.02, 1.12, 1.02]} raycast={() => null}>
+          <boxGeometry args={[sx, sy, sz]} />
+          <meshBasicMaterial color="#0d0d0d" side={THREE.BackSide} />
+        </mesh>
+        {selected ? (
+          <mesh scale={[1.05, 1.2, 1.05]} raycast={() => null}>
+            <boxGeometry args={[sx, sy, sz]} />
+            <meshBasicMaterial color="#00d4ff" transparent opacity={0.18} side={THREE.BackSide} />
+          </mesh>
+        ) : null}
+      </group>
+    );
+  }
+
+  if (renderShape === "ring") {
+    const ringRadius = Math.max(4, Math.min(sx, sz) * 0.36);
+    const tubeRadius = Math.max(1.2, sy * 0.22);
+    return (
+      <group position={[x, y, z]} rotation={[Math.PI / 2, 0, yawRad]} {...commonProps}>
+        <mesh>
+          <torusGeometry args={[ringRadius, tubeRadius, 18, 36]} />
+          <meshToonMaterial {...toonMaterialProps} />
+        </mesh>
+        <mesh scale={[1.03, 1.03, 1.03]} raycast={() => null}>
+          <torusGeometry args={[ringRadius, tubeRadius, 18, 36]} />
+          <meshBasicMaterial color="#0d0d0d" side={THREE.BackSide} />
+        </mesh>
+      </group>
+    );
+  }
+
   if (object.type === "obstacle") {
     if (renderShape === "sphere") {
       const radius = Math.max(5, Math.min(sx, sy, sz) / 2);
@@ -258,29 +370,43 @@ function WorldObject({
         </group>
       );
     }
-
-    const radius = Math.max(6, Math.min(sx, sz) / 2);
-    return (
-      <group position={[x, y, z]} rotation={[0, yawRad, 0]} {...commonProps}>
-        <mesh>
-          <cylinderGeometry args={[radius, radius * 0.9, sy, 24]} />
-          <meshToonMaterial {...toonMaterialProps} />
-        </mesh>
-        <mesh scale={[1.02, 1.02, 1.02]} raycast={() => null}>
-          <cylinderGeometry args={[radius, radius * 0.9, sy, 24]} />
-          <meshBasicMaterial color="#0d0d0d" side={THREE.BackSide} />
-        </mesh>
-        {selected ? (
-          <mesh scale={[1.06, 1.06, 1.06]} raycast={() => null}>
-            <cylinderGeometry args={[radius, radius * 0.9, sy, 24]} />
-            <meshBasicMaterial color="#00d4ff" transparent opacity={0.22} side={THREE.BackSide} />
+    if (renderShape === "cylinder" || renderShape === "disc") {
+      const radius = Math.max(6, Math.min(sx, sz) / 2);
+      return (
+        <group position={[x, y, z]} rotation={[0, yawRad, 0]} {...commonProps}>
+          <mesh>
+            <cylinderGeometry args={[radius, radius * 0.94, Math.max(1.6, sy), 24]} />
+            <meshToonMaterial {...toonMaterialProps} />
           </mesh>
-        ) : null}
-      </group>
-    );
+          <mesh scale={[1.02, 1.02, 1.02]} raycast={() => null}>
+            <cylinderGeometry args={[radius, radius * 0.94, Math.max(1.6, sy), 24]} />
+            <meshBasicMaterial color="#0d0d0d" side={THREE.BackSide} />
+          </mesh>
+        </group>
+      );
+    }
   }
 
   if (isZone) {
+    const zoneAsRect = placementShape === "flat_zone" || renderShape === "flat_rect" || renderShape === "box";
+    if (zoneAsRect) {
+      return (
+        <group position={[x, y, z]} rotation={[0, yawRad, 0]} {...commonProps}>
+          <mesh>
+            <boxGeometry args={[sx, sy, sz]} />
+            <meshToonMaterial {...toonMaterialProps} transparent opacity={0.82} />
+          </mesh>
+          <mesh scale={[1.02, 1.08, 1.02]} raycast={() => null}>
+            <boxGeometry args={[sx, sy, sz]} />
+            <meshBasicMaterial color="#0d0d0d" side={THREE.BackSide} />
+          </mesh>
+          <mesh position={[0, sy / 2 + 0.05, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+            <ringGeometry args={[Math.min(sx, sz) * 0.18, Math.min(sx, sz) * 0.34, 36]} />
+            <meshBasicMaterial color="#f8fafc" transparent opacity={0.7} />
+          </mesh>
+        </group>
+      );
+    }
     return (
       <group rotation={[0, yawRad, 0]} {...commonProps}>
         <mesh position={[x, y, z]}>
@@ -290,16 +416,6 @@ function WorldObject({
         <mesh position={[x, y, z]} scale={[1.015, 1.015, 1.015]} raycast={() => null}>
           <cylinderGeometry args={[Math.max(sx, sz) / 2, Math.max(sx, sz) / 2, sy, 28]} />
           <meshBasicMaterial color="#0d0d0d" side={THREE.BackSide} />
-        </mesh>
-        {selected ? (
-          <mesh position={[x, y, z]} scale={[1.045, 1.045, 1.045]} raycast={() => null}>
-            <cylinderGeometry args={[Math.max(sx, sz) / 2, Math.max(sx, sz) / 2, sy, 28]} />
-            <meshBasicMaterial color="#00d4ff" transparent opacity={0.2} side={THREE.BackSide} />
-          </mesh>
-        ) : null}
-        <mesh position={[x, y + sy / 2 + 0.05, z]} rotation={[-Math.PI / 2, 0, 0]}>
-          <ringGeometry args={[Math.max(sx, sz) * 0.18, Math.max(sx, sz) * 0.38, 40]} />
-          <meshBasicMaterial color="#f8fafc" transparent opacity={0.75} />
         </mesh>
       </group>
     );
@@ -366,8 +482,11 @@ function EditableObjectsLayer({
       if (!event.ray.intersectPlane(dragPlane, dragHit)) return;
       const sizeX = Math.max(4, object.size_cm?.x ?? 20);
       const sizeZ = Math.max(4, object.size_cm?.z ?? 20);
-      const nextX = clamp(dragHit.x - dragState.offsetX, sizeX / 2, worldSizeCm.width - sizeX / 2);
-      const nextZ = clamp(dragHit.z - dragState.offsetZ, sizeZ / 2, worldSizeCm.depth - sizeZ / 2);
+      const rawX = clamp(dragHit.x - dragState.offsetX, sizeX / 2, worldSizeCm.width - sizeX / 2);
+      const rawZ = clamp(dragHit.z - dragState.offsetZ, sizeZ / 2, worldSizeCm.depth - sizeZ / 2);
+      const snapMode = object.type === "wall" ? "edge" : "center";
+      const nextX = clamp(snapToGrid(rawX, GRID_CELL_CM, snapMode), sizeX / 2, worldSizeCm.width - sizeX / 2);
+      const nextZ = clamp(snapToGrid(rawZ, GRID_CELL_CM, snapMode), sizeZ / 2, worldSizeCm.depth - sizeZ / 2);
       onObjectMove?.(object.id, nextX, nextZ);
     },
     [dragHit, dragPlane, dragState, onObjectMove, worldSizeCm.depth, worldSizeCm.width],
@@ -410,6 +529,7 @@ function EditableObjectsLayer({
 export function ThreeSimViewport({
   worldScene,
   pose,
+  robotModel,
   sensorValues = {},
   cameraState,
   overlayState,
@@ -429,6 +549,7 @@ export function ThreeSimViewport({
   backgroundColor = "#f4f6f8",
   ghostObject = null,
   onProjectClientToWorkplaneReady = null,
+  onWorkplaneClick = null,
 }: ThreeSimViewportProps) {
   const orbitRef = useRef<OrbitControlsImpl | null>(null);
   const worldWidth = Math.max(200, worldSizeCm?.width ?? 1000);
@@ -523,7 +644,18 @@ export function ThreeSimViewport({
         <group name="worldRoot">
           <group name="floorLayer">
             {resolvedOverlayState.showGrid ? <WorkspaceGrid width={worldWidth} depth={worldDepth} /> : null}
-            <mesh position={[worldCenter.x, 0, worldCenter.z]} rotation={[-Math.PI / 2, 0, 0]}>
+            <mesh
+              position={[worldCenter.x, 0, worldCenter.z]}
+              rotation={[-Math.PI / 2, 0, 0]}
+              onPointerDown={
+                editable && onWorkplaneClick
+                  ? (event: PointerEvent3D) => {
+                      if (!event.point) return;
+                      onWorkplaneClick(event.point.x, event.point.z);
+                    }
+                  : undefined
+              }
+            >
               <planeGeometry args={[worldWidth, worldDepth]} />
               <meshStandardMaterial color="#e8edf5" />
             </mesh>
@@ -551,7 +683,7 @@ export function ThreeSimViewport({
           </group>
         </group>
         <group name="robotLayer">
-          <AnimatedRobot pose={pose} />
+          <AnimatedRobot pose={pose} robotModel={robotModel} />
           {editable && robotStartPose ? (
             <EditableRobotStart
               robotStartPose={robotStartPose}
@@ -897,9 +1029,12 @@ function normalizeHeadingDelta(delta: number): number {
   return ((delta + 540) % 360) - 180;
 }
 
-function AnimatedRobot({ pose }: { pose?: SimulatorPose }) {
+function AnimatedRobot({ pose, robotModel }: { pose?: SimulatorPose; robotModel?: SimulatorRobotModel | null }) {
   const robotRef = useRef<THREE.Group | null>(null);
+  const wheelGroupRefs = useRef<Array<THREE.Group | null>>([]);
   const initializedRef = useRef(false);
+  const wheelSpinRef = useRef({ left: 0, right: 0 });
+  const steeringAngleRef = useRef(0);
   const targetRef = useRef<RenderedRobotState>({
     x: pose?.position?.x ?? 0,
     z: pose?.position?.y ?? 0,
@@ -910,6 +1045,25 @@ function AnimatedRobot({ pose }: { pose?: SimulatorPose }) {
     z: pose?.position?.y ?? 0,
     heading_deg: pose?.heading_deg ?? 0,
   });
+  const resolvedRobotModel = useMemo(
+    () =>
+      robotModel || {
+        wheel_base_cm: 14,
+        width_cm: 16,
+        length_cm: 18,
+        sensors: [],
+      },
+    [robotModel],
+  );
+  const wheelProfile = useMemo(() => resolveWheelProfile(resolvedRobotModel), [resolvedRobotModel]);
+  const chassisLength = Math.max(12, Number(resolvedRobotModel.length_cm) || 18);
+  const chassisWidth = Math.max(12, Number(resolvedRobotModel.width_cm) || 16);
+  const chassisHeight = Math.max(7, Math.min(14, wheelProfile.wheelRadiusCm * 2.3));
+  const wheelRadius = wheelProfile.wheelRadiusCm;
+  const wheelWidth = wheelProfile.wheelWidthCm;
+  const wheelbaseOffset = wheelProfile.wheelbaseCm / 2;
+  const trackOffset = wheelProfile.trackWidthCm / 2;
+  const wheelY = -chassisHeight / 2 + wheelRadius;
 
   useEffect(() => {
     targetRef.current = {
@@ -930,32 +1084,85 @@ function AnimatedRobot({ pose }: { pose?: SimulatorPose }) {
     const smoothing = 1 - Math.exp(-8 * delta);
     const rendered = renderedRef.current;
     const target = targetRef.current;
+    const previousX = rendered.x;
+    const previousZ = rendered.z;
+    const previousHeadingDeg = rendered.heading_deg;
     rendered.x += (target.x - rendered.x) * smoothing;
     rendered.z += (target.z - rendered.z) * smoothing;
     rendered.heading_deg += normalizeHeadingDelta(target.heading_deg - rendered.heading_deg) * smoothing;
 
-    robotRef.current.position.set(rendered.x, 5, rendered.z);
+    const headingDeltaRad = (normalizeHeadingDelta(rendered.heading_deg - previousHeadingDeg) * Math.PI) / 180;
+    const dx = rendered.x - previousX;
+    const dz = rendered.z - previousZ;
+    const headingRad = (rendered.heading_deg * Math.PI) / 180;
+    const forwardDistance = dx * Math.cos(headingRad) + dz * Math.sin(headingRad);
+    const leftDistance = forwardDistance - (headingDeltaRad * wheelProfile.trackWidthCm) / 2;
+    const rightDistance = forwardDistance + (headingDeltaRad * wheelProfile.trackWidthCm) / 2;
+    wheelSpinRef.current.left += leftDistance / Math.max(0.5, wheelRadius);
+    wheelSpinRef.current.right += rightDistance / Math.max(0.5, wheelRadius);
+    const absForward = Math.max(0.001, Math.abs(forwardDistance));
+    const rawSteerAngle = Math.atan2(wheelProfile.wheelbaseCm * headingDeltaRad, absForward);
+    const maxSteerAngle = Math.PI / 5;
+    const targetSteerAngle = clamp(rawSteerAngle, -maxSteerAngle, maxSteerAngle);
+    steeringAngleRef.current += (targetSteerAngle - steeringAngleRef.current) * Math.min(1, delta * 12);
+    const spins = [
+      wheelSpinRef.current.left,
+      wheelSpinRef.current.left,
+      wheelSpinRef.current.right,
+      wheelSpinRef.current.right,
+    ];
+    spins.forEach((spin, index) => {
+      const wheelGroup = wheelGroupRefs.current[index];
+      if (!wheelGroup) return;
+      const isFrontWheel = index === 0 || index === 2;
+      wheelGroup.rotation.set(0, isFrontWheel ? -steeringAngleRef.current : 0, spin);
+    });
+
+    robotRef.current.position.set(rendered.x, wheelRadius + chassisHeight / 2 - 0.2, rendered.z);
     robotRef.current.rotation.set(0, -(rendered.heading_deg * Math.PI) / 180, 0);
   });
 
   return (
     <group ref={robotRef}>
-      <mesh>
-        <boxGeometry args={[20, 10, 24]} />
+      <mesh position={[0, wheelRadius, 0]}>
+        <boxGeometry args={[chassisLength, chassisHeight, chassisWidth]} />
         <meshToonMaterial color="#38bdf8" gradientMap={toonGradientMap} />
       </mesh>
-      <mesh scale={[1.03, 1.03, 1.03]} raycast={() => null}>
-        <boxGeometry args={[20, 10, 24]} />
+      <mesh position={[0, wheelRadius, 0]} scale={[1.03, 1.03, 1.03]} raycast={() => null}>
+        <boxGeometry args={[chassisLength, chassisHeight, chassisWidth]} />
         <meshBasicMaterial color="#0d0d0d" side={THREE.BackSide} />
       </mesh>
-      <mesh position={[13, 2, 0]}>
+      <mesh position={[chassisLength / 2 + 2.2, wheelRadius + 1.8, 0]}>
         <boxGeometry args={[3, 4, 14]} />
         <meshToonMaterial color="#f97316" gradientMap={toonGradientMap} />
       </mesh>
-      <mesh position={[8, 6, 0]} rotation={[0, 0, -Math.PI / 2]}>
+      <mesh position={[chassisLength / 2 - 3, wheelRadius + chassisHeight * 0.55, 0]} rotation={[0, 0, -Math.PI / 2]}>
         <coneGeometry args={[4, 8, 4]} />
         <meshToonMaterial color="#f97316" gradientMap={toonGradientMap} />
       </mesh>
+      {[
+        { x: wheelbaseOffset, z: -trackOffset },
+        { x: -wheelbaseOffset, z: -trackOffset },
+        { x: wheelbaseOffset, z: trackOffset },
+        { x: -wheelbaseOffset, z: trackOffset },
+      ].map((wheel, index) => (
+        <group
+          key={`wheel_${index}`}
+          position={[wheel.x, wheelY, wheel.z]}
+          ref={(node) => {
+            wheelGroupRefs.current[index] = node;
+          }}
+        >
+          <mesh rotation={[Math.PI / 2, 0, 0]}>
+            <cylinderGeometry args={[wheelRadius, wheelRadius, wheelWidth, 22]} />
+            <meshToonMaterial color="#111827" gradientMap={toonGradientMap} />
+          </mesh>
+          <mesh rotation={[Math.PI / 2, 0, 0]} scale={[1.04, 1.04, 1.04]} raycast={() => null}>
+            <cylinderGeometry args={[wheelRadius, wheelRadius, wheelWidth, 22]} />
+            <meshBasicMaterial color="#090909" side={THREE.BackSide} />
+          </mesh>
+        </group>
+      ))}
     </group>
   );
 }

@@ -1,10 +1,12 @@
-import { Pause, Play, RotateCcw, StepForward } from "lucide-react";
+import { Pause, Play, RotateCcw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useRoboticsWorkspaceContext } from "../features/robotics_lab/RoboticsWorkspaceContext";
 import { GRID_CELL_CM } from "../features/robotics_lab/workspaceDefaults";
 import { ThreeSimViewport } from "../features/robotics_lab/ThreeSimViewport.tsx";
 import { CameraToolbar } from "../features/robotics_lab/components/CameraToolbar";
+import { DebuggerStatusPanel } from "../features/robotics_lab/components/DebuggerStatusPanel";
 import { OverlayToggles } from "../features/robotics_lab/components/OverlayToggles";
+import { StepSplitButton } from "../features/robotics_lab/components/StepSplitButton";
 import { ViewportSettingsDialog } from "../features/robotics_lab/components/ViewportSettingsDialog";
 import { resolveKitCapabilities } from "../labs/robotics";
 
@@ -29,11 +31,15 @@ export default function RoboticsSimRunPage() {
     selectedVendor,
     selectedRobotType,
     runtimeState,
+    debugSession,
     runtimeSettings,
     setRuntimeSettings,
+    robotModel,
     runProgram,
     pauseProgram,
     stepProgram,
+    stepIntoProgram,
+    stepOverProgram,
     resetProgram,
     panel,
     cameraState,
@@ -85,9 +91,7 @@ export default function RoboticsSimRunPage() {
           <button className="robotics-lab-btn robotics-lab-btn--icon" onClick={pauseProgram}>
             <Pause size={16} /> Pause
           </button>
-          <button className="robotics-lab-btn robotics-lab-btn--icon" onClick={stepProgram}>
-            <StepForward size={16} /> Step
-          </button>
+          <StepSplitButton onStep={stepProgram} onStepInto={stepIntoProgram} onStepOver={stepOverProgram} />
           <button className="robotics-lab-btn robotics-lab-btn--icon" onClick={resetProgram}>
             <RotateCcw size={16} /> Reset
           </button>
@@ -97,11 +101,11 @@ export default function RoboticsSimRunPage() {
           <span>World: {worldSummary}</span>
         </div>
       </div>
-
       <section className="robotics-sim-run-viewport robotics-sim-run-viewport--floating">
         <ThreeSimViewport
           worldScene={worldScene}
           pose={pose}
+          robotModel={robotModel}
           sensorValues={sensorValues}
           cameraState={cameraState}
           overlayState={overlayState}
@@ -130,6 +134,9 @@ export default function RoboticsSimRunPage() {
             }
           />
         </div>
+        <div className="robotics-floating-debugger-panel">
+          <DebuggerStatusPanel debugSession={debugSession} compact />
+        </div>
         <div className="robotics-floating-controls-bottom">
           <div className="robotics-floating-group robotics-floating-status-bar">
             <span>Runtime: {runtimeState}</span>
@@ -146,6 +153,22 @@ export default function RoboticsSimRunPage() {
         moveCollisionPolicy={String(runtimeSettings?.move_collision_policy || "hold_until_distance")}
         onMoveCollisionPolicyChange={(policy) =>
           setRuntimeSettings((prev: Record<string, unknown>) => ({ ...prev, move_collision_policy: policy }))
+        }
+        physicsEngine={String(runtimeSettings?.physics_engine || "three_runtime")}
+        onPhysicsEngineChange={(engine) =>
+          setRuntimeSettings((prev: Record<string, unknown>) => ({ ...prev, physics_engine: engine }))
+        }
+        tractionLongitudinal={Number(runtimeSettings?.traction_longitudinal ?? 0.92)}
+        onTractionLongitudinalChange={(value) =>
+          setRuntimeSettings((prev: Record<string, unknown>) => ({ ...prev, traction_longitudinal: value }))
+        }
+        tractionLateral={Number(runtimeSettings?.traction_lateral ?? 0.9)}
+        onTractionLateralChange={(value) =>
+          setRuntimeSettings((prev: Record<string, unknown>) => ({ ...prev, traction_lateral: value }))
+        }
+        rollingResistance={Number(runtimeSettings?.rolling_resistance ?? 4.2)}
+        onRollingResistanceChange={(value) =>
+          setRuntimeSettings((prev: Record<string, unknown>) => ({ ...prev, rolling_resistance: value }))
         }
       />
 

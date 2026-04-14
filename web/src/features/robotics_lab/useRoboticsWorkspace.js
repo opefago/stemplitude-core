@@ -13,13 +13,14 @@ import {
   updateRoboticsProject,
 } from "../../lib/api/robotics";
 import {
+  createRoboticsSimulator,
   IRRuntimeExecutor,
-  ThreeRuntimeSimulator,
   interpretTextProgram,
   resolveKitCapabilities,
   resolveKitActuatorActionHandler,
   resolveKitRuntimeBehavior,
   resolveRobotModel,
+  resolveWheelProfile,
   validateProgramForKit,
 } from "../../labs/robotics";
 import { DEFAULT_OVERLAY_STATE } from "../../labs/robotics/view/overlayManager";
@@ -28,9 +29,16 @@ import {
   FALLBACK_MANIFESTS,
   START_POSE,
   SAMPLE_PROGRAM,
+  describeNode,
   inferNextNodeId,
   safeProgram,
 } from "./workspaceDefaults";
+import {
+  createInitialDebugSession,
+  nextDebugSession,
+  resolveDebugActionLabel,
+  resolveDebugSourceMode,
+} from "./debugSession";
 
 function deriveLessonId(search) {
   const params = new URLSearchParams(search);
@@ -52,6 +60,80 @@ const DEFAULT_CAMERA_STATE = {
 
 const CAMERA_PREFS_KEY = "stemplitude.robotics.cameraPrefs.v1";
 
+function optionalNumber(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return undefined;
+  return parsed;
+}
+
+function normalizeDebugNodeId(nodeId) {
+  if (typeof nodeId !== "string") return "";
+  const queueMarker = nodeId.indexOf("__q");
+  const returnMarker = nodeId.indexOf("__return");
+  const cut = [queueMarker, returnMarker].filter((index) => index >= 0).sort((a, b) => a - b)[0];
+  return cut >= 0 ? nodeId.slice(0, cut) : nodeId;
+}
+
+function collectDebugNodeLabels(program) {
+  const labels = new Map();
+  const walk = (nodeList, contextLabel = "") => {
+    if (!Array.isArray(nodeList)) return;
+    nodeList.forEach((node) => {
+      if (!node || typeof node !== "object" || typeof node.id !== "string") return;
+      const baseId = normalizeDebugNodeId(node.id);
+      let label = describeNode(node);
+      if (node.kind === "call") label = `call ${String(node.function_id || "function")}`;
+      if (node.kind === "repeat") {
+        label = typeof node.times === "number" ? `repeat ${node.times} times` : "repeat while condition";
+      }
+      if (node.kind === "if") label = "if condition";
+      labels.set(baseId, contextLabel ? `${contextLabel} -> ${label}` : label);
+      if (node.kind === "if") {
+        walk(node.then_nodes, `${label} (then)`);
+        walk(node.else_nodes, `${label} (else)`);
+      } else if (node.kind === "repeat") {
+        walk(node.body, label);
+      }
+    });
+  };
+  walk(program?.nodes);
+  if (Array.isArray(program?.functions)) {
+    program.functions.forEach((fn) => {
+      const fnLabel = `function ${String(fn?.name || fn?.id || "fn")}`;
+      walk(fn?.body, fnLabel);
+    });
+  }
+  return labels;
+}
+
+function collectDebugNodeSequence(program) {
+  const sequence = [];
+  const pushNodes = (nodeList) => {
+    if (!Array.isArray(nodeList)) return;
+    nodeList.forEach((node) => {
+      if (!node || typeof node !== "object" || typeof node.id !== "string") return;
+      sequence.push({
+        id: normalizeDebugNodeId(node.id),
+        kind: node.kind,
+        label: describeNode(node),
+      });
+      if (node.kind === "if") {
+        pushNodes(node.then_nodes);
+        pushNodes(node.else_nodes);
+      } else if (node.kind === "repeat") {
+        pushNodes(node.body);
+      }
+    });
+  };
+  pushNodes(program?.nodes);
+  if (Array.isArray(program?.functions)) {
+    program.functions.forEach((fn) => {
+      pushNodes(fn?.body);
+    });
+  }
+  return sequence;
+}
+
 export function useRoboticsWorkspace() {
   const { user, isAuthenticated } = useAuth();
   const location = useLocation();
@@ -72,6 +154,11 @@ export function useRoboticsWorkspace() {
     tick_ms: 200,
     deterministic_replay: true,
     move_collision_policy: "hold_until_distance",
+    physics_engine: "three_runtime",
+    step_policy: "semantic_next",
+    traction_longitudinal: 0.92,
+    traction_lateral: 0.9,
+    rolling_resistance: 4.2,
   });
   const [world, setWorld] = useState(BASE_WORLD);
   const [program, setProgram] = useState(SAMPLE_PROGRAM);
@@ -83,6 +170,8 @@ export function useRoboticsWorkspace() {
   const [logs, setLogs] = useState([]);
   const [runtimeState, setRuntimeState] = useState("idle");
   const [isAutoRunning, setIsAutoRunning] = useState(false);
+  const [stepSession, setStepSession] = useState(null);
+  const [debugSession, setDebugSession] = useState(createInitialDebugSession("blocks"));
   const [projectId, setProjectId] = useState(null);
   const [projectRevision, setProjectRevision] = useState(1);
   const [persistenceStatus, setPersistenceStatus] = useState("Local-only");
@@ -98,16 +187,37 @@ export function useRoboticsWorkspace() {
     () => manifests.find((item) => item.vendor === selectedVendor && item.robot_type === selectedRobotType) || null,
     [manifests, selectedRobotType, selectedVendor],
   );
+  const baseRobotModel = useMemo(
+    () =>
+      resolveRobotModel({
+        vendor: selectedVendor,
+        robotType: selectedRobotType,
+        manifest: selectedManifest,
+      }),
+    [selectedManifest, selectedRobotType, selectedVendor],
+  );
+  const robotModel = useMemo(() => {
+    const profile = resolveWheelProfile(baseRobotModel);
+    return {
+      ...baseRobotModel,
+      traction_longitudinal:
+        optionalNumber(runtimeSettings.traction_longitudinal) ?? profile.tractionLongitudinal,
+      traction_lateral: optionalNumber(runtimeSettings.traction_lateral) ?? profile.tractionLateral,
+      rolling_resistance: optionalNumber(runtimeSettings.rolling_resistance) ?? profile.rollingResistance,
+    };
+  }, [
+    baseRobotModel,
+    runtimeSettings.rolling_resistance,
+    runtimeSettings.traction_lateral,
+    runtimeSettings.traction_longitudinal,
+  ]);
   const simulator = useMemo(
     () =>
-      new ThreeRuntimeSimulator(
-        resolveRobotModel({
-          vendor: selectedVendor,
-          robotType: selectedRobotType,
-          manifest: selectedManifest,
-        }),
-      ),
-    [selectedManifest, selectedRobotType, selectedVendor],
+      createRoboticsSimulator({
+        engineId: String(runtimeSettings.physics_engine || "three_runtime"),
+        robotModel,
+      }),
+    [robotModel, runtimeSettings.physics_engine],
   );
   const runtimeBehavior = useMemo(
     () =>
@@ -139,6 +249,8 @@ export function useRoboticsWorkspace() {
     [selectedManifest, selectedRobotType, selectedVendor],
   );
   const executorRef = useRef(new IRRuntimeExecutor(simulator));
+  const debugNodeLabelsRef = useRef(new Map());
+  const debugNodeSequenceRef = useRef([]);
   const initializedRef = useRef(false);
 
   function syncPoseToStart(nextStartPose) {
@@ -186,10 +298,19 @@ export function useRoboticsWorkspace() {
   }, [cameraState, overlayState]);
 
   useEffect(() => {
+    setDebugSession((prev) => ({
+      ...prev,
+      sourceMode: resolveDebugSourceMode(mode),
+    }));
+  }, [mode]);
+
+  useEffect(() => {
     executorRef.current = new IRRuntimeExecutor(simulator, runtimeBehavior, resolveActuatorAction, {
       moveCollisionPolicy: runtimeSettings.move_collision_policy || "hold_until_distance",
     });
     executorRef.current.load(program);
+    debugNodeLabelsRef.current = collectDebugNodeLabels(program);
+    debugNodeSequenceRef.current = collectDebugNodeSequence(program);
     setRuntimeState(executorRef.current.getState());
   }, [program, resolveActuatorAction, runtimeBehavior, runtimeSettings.move_collision_policy, simulator]);
 
@@ -374,12 +495,30 @@ export function useRoboticsWorkspace() {
   ]);
 
   useEffect(() => {
-    if (!isAutoRunning) return undefined;
+    if (!isAutoRunning && !stepSession) return undefined;
     const id = window.setInterval(() => {
-      stepProgram();
+      if (isAutoRunning) {
+        stepProgram("semantic_next", {
+          manual: false,
+          coalesceProgress: false,
+          debugAction: "run",
+        });
+        return;
+      }
+      if (!stepSession) return;
+      const result = stepProgram(stepSession.policy, {
+        manual: false,
+        skipStructural: stepSession.skipStructural,
+        coalesceProgress: false,
+        debugAction: stepSession.action,
+      });
+      const continueSession = shouldContinueStepSession(stepSession.policy, result);
+      if (!continueSession) {
+        setStepSession(null);
+      }
     }, Math.max(50, Number(runtimeSettings.tick_ms) || 200));
     return () => window.clearInterval(id);
-  }, [isAutoRunning, runtimeSettings.tick_ms]);
+  }, [isAutoRunning, runtimeSettings.tick_ms, stepSession]);
 
   function hydrateFromProject(project) {
     setProjectId(project.id);
@@ -530,10 +669,57 @@ export function useRoboticsWorkspace() {
     }
   }
 
-  function stepProgram() {
+  function stepProgram(policy = "semantic_next", options = {}) {
+    const manual = options.manual !== false;
+    const coalesceProgress = options.coalesceProgress === true;
+    const skipStructural = options.skipStructural !== false;
+    const debugAction = resolveDebugActionLabel(policy, options.debugAction);
+    if (manual) {
+      setIsAutoRunning(false);
+      setStepSession(null);
+    }
+    if (executorRef.current.getState() === "completed") {
+      executorRef.current.reset();
+      simulator.reset(startPose);
+    }
+    if (executorRef.current.getState() === "idle" || executorRef.current.getState() === "paused") {
+      executorRef.current.run();
+    }
     const previousState = runtimeState;
     const simulationBudgetMs = Math.max(50, Number(runtimeSettings.tick_ms) || 200);
-    const result = executorRef.current.step(simulationBudgetMs);
+    let result = executorRef.current.step({
+      simulation_budget_ms: simulationBudgetMs,
+      policy,
+    });
+    if (manual && policy === "semantic_next" && skipStructural) {
+      let structuralGuard = 0;
+      while (
+        result.state === "running" &&
+        [
+          "condition_evaluated",
+          "branch_selected",
+          "loop_check",
+          "loop_exit",
+        ].includes(result.semanticEvent?.type || "") &&
+        structuralGuard < 50
+      ) {
+        result = executorRef.current.step({
+          simulation_budget_ms: simulationBudgetMs,
+          policy,
+        });
+        structuralGuard += 1;
+      }
+    }
+    if (manual && coalesceProgress) {
+      let guard = 0;
+      while (result.state === "running" && result.semanticEvent?.type === "action_progress" && guard < 200) {
+        result = executorRef.current.step({
+          simulation_budget_ms: simulationBudgetMs,
+          policy,
+        });
+        guard += 1;
+      }
+    }
     const snapshot = simulator.tick({
       dt_ms: 0,
       linear_velocity_cm_s: 0,
@@ -542,7 +728,19 @@ export function useRoboticsWorkspace() {
     setPose(snapshot.pose);
     setSensorValues(snapshot.sensor_values);
     setRuntimeState(result.state);
-    if (result.highlightedNodeId) logLine(`Executed ${result.highlightedNodeId}`);
+    setDebugSession((prev) =>
+      nextDebugSession(prev, {
+        mode,
+        action: debugAction,
+        result,
+        nodeLabels: debugNodeLabelsRef.current,
+        nodeSequence: debugNodeSequenceRef.current,
+      }),
+    );
+    if (result.highlightedNodeId) {
+      const semantic = result.semanticEvent?.type ? ` [${result.semanticEvent.type}]` : "";
+      logLine(`Executed ${result.highlightedNodeId}${semantic}`);
+    }
     if (result.issues.length > 0) {
       result.issues.forEach((issue) => {
         const linePart = Number.isFinite(issue.line) ? `L${issue.line} ` : "";
@@ -553,8 +751,58 @@ export function useRoboticsWorkspace() {
     }
     if (result.state === "completed" || result.state === "error") {
       setIsAutoRunning(false);
+      setStepSession(null);
       if (previousState !== result.state) void persistAttempt(result.state);
     }
+    return result;
+  }
+
+  function shouldContinueStepSession(policy, result) {
+    if (result?.state !== "running") return false;
+    const type = result?.semanticEvent?.type;
+    if (policy === "step_over") {
+      return type !== "call_return" && type !== "loop_exit";
+    }
+    return type === "action_progress";
+  }
+
+  function stepIntoProgram() {
+    stepProgram("step_into", { skipStructural: false });
+  }
+
+  function stepOverProgram() {
+    const initial = stepProgram("step_over", {
+      skipStructural: false,
+      coalesceProgress: false,
+      debugAction: "step_over",
+    });
+    setStepSession(
+      shouldContinueStepSession("step_over", initial)
+        ? {
+            policy: "step_over",
+            skipStructural: false,
+            action: "step_over",
+          }
+        : null,
+    );
+  }
+
+  function stepBlockProgram() {
+    const initial = stepProgram("semantic_next", {
+      skipStructural: true,
+      coalesceProgress: false,
+      debugAction: "step",
+    });
+    const continueSession = initial?.state === "running" && initial?.semanticEvent?.type === "action_progress";
+    setStepSession(
+      continueSession
+        ? {
+            policy: "semantic_next",
+            skipStructural: true,
+            action: "step",
+          }
+        : null,
+    );
   }
 
   function runProgram() {
@@ -566,6 +814,21 @@ export function useRoboticsWorkspace() {
       if (!interpreted.ok) {
         setRuntimeState("error");
         setIsAutoRunning(false);
+        setDebugSession((prev) =>
+          nextDebugSession(prev, {
+            mode,
+            action: "run",
+            result: {
+              state: "error",
+              highlightedNodeId: undefined,
+              diagnostics: interpreted.diagnostics,
+              issues: interpreted.issues || [],
+              semanticEvent: undefined,
+            },
+            nodeLabels: debugNodeLabelsRef.current,
+            nodeSequence: debugNodeSequenceRef.current,
+          }),
+        );
         const structured = interpreted.issues;
         if (structured.length > 0) {
           structured.forEach((issue) => {
@@ -583,6 +846,21 @@ export function useRoboticsWorkspace() {
     if (!Array.isArray(runtimeProgram?.nodes) || runtimeProgram.nodes.length === 0) {
       setRuntimeState("error");
       setIsAutoRunning(false);
+      setDebugSession((prev) =>
+        nextDebugSession(prev, {
+          mode,
+          action: "run",
+          result: {
+            state: "error",
+            highlightedNodeId: undefined,
+            diagnostics: ["Program has no executable commands."],
+            issues: [],
+            semanticEvent: undefined,
+          },
+          nodeLabels: debugNodeLabelsRef.current,
+          nodeSequence: debugNodeSequenceRef.current,
+        }),
+      );
       logLine("[runtime] Program has no executable commands.");
       return;
     }
@@ -592,9 +870,26 @@ export function useRoboticsWorkspace() {
       runtimeBehavior,
       resolveActuatorAction,
     });
+    debugNodeLabelsRef.current = collectDebugNodeLabels(runtimeProgram);
+    debugNodeSequenceRef.current = collectDebugNodeSequence(runtimeProgram);
     if (!validation.ok) {
       setRuntimeState("error");
       setIsAutoRunning(false);
+      setDebugSession((prev) =>
+        nextDebugSession(prev, {
+          mode,
+          action: "run",
+          result: {
+            state: "error",
+            highlightedNodeId: undefined,
+            diagnostics: validation.diagnostics,
+            issues: validation.issues || [],
+            semanticEvent: undefined,
+          },
+          nodeLabels: debugNodeLabelsRef.current,
+          nodeSequence: debugNodeSequenceRef.current,
+        }),
+      );
       if (validation.issues.length > 0) {
         validation.issues.forEach((issue) => {
           const linePart = Number.isFinite(issue.line) ? `L${issue.line} ` : "";
@@ -609,8 +904,27 @@ export function useRoboticsWorkspace() {
     executorRef.current.load(runtimeProgram);
     executorRef.current.run();
     setRuntimeState(executorRef.current.getState());
+    setDebugSession((prev) =>
+      nextDebugSession(prev, {
+        mode,
+        action: "run",
+        result: {
+          state: executorRef.current.getState(),
+          highlightedNodeId: undefined,
+          diagnostics: [],
+          issues: [],
+          semanticEvent: undefined,
+        },
+        resetTrace: true,
+        nodeLabels: debugNodeLabelsRef.current,
+        nodeSequence: debugNodeSequenceRef.current,
+      }),
+    );
+    setStepSession(null);
     setIsAutoRunning(true);
     logLine(`[runtime] Run started (${runtimeProgram.nodes.length} command${runtimeProgram.nodes.length === 1 ? "" : "s"})`);
+    // Kick off the first semantic step immediately so Run has instant feedback.
+    stepProgram("semantic_next", { manual: false, debugAction: "run" });
     void emitEvent("robotics.project.run.started", {
       robot_vendor: selectedVendor,
       robot_type: selectedRobotType,
@@ -622,6 +936,12 @@ export function useRoboticsWorkspace() {
     executorRef.current.pause();
     setRuntimeState(executorRef.current.getState());
     setIsAutoRunning(false);
+    setStepSession(null);
+    setDebugSession((prev) => ({
+      ...prev,
+      activeStepPolicy: "paused",
+      runtimeState: executorRef.current.getState(),
+    }));
   }
 
   function resetProgram() {
@@ -636,6 +956,8 @@ export function useRoboticsWorkspace() {
     setSensorValues(snapshot.sensor_values);
     setRuntimeState(executorRef.current.getState());
     setIsAutoRunning(false);
+    setStepSession(null);
+    setDebugSession(createInitialDebugSession(mode));
     setPathTrailResetToken((prev) => prev + 1);
     logLine("Simulation reset");
     void saveProjectSnapshot("reset");
@@ -760,8 +1082,10 @@ export function useRoboticsWorkspace() {
     sensorValues,
     logs,
     runtimeState,
+    debugSession,
     runtimeSettings,
     setRuntimeSettings,
+    robotModel,
     projectId,
     projectRevision,
     persistenceStatus,
@@ -793,7 +1117,9 @@ export function useRoboticsWorkspace() {
     runProgram,
     pauseProgram,
     resetProgram,
-    stepProgram,
+    stepProgram: stepBlockProgram,
+    stepIntoProgram,
+    stepOverProgram,
     logLine,
     emitEvent,
   };

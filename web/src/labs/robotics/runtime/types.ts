@@ -14,6 +14,33 @@ export interface RuntimeTickResult {
   highlightedNodeId?: string;
   diagnostics?: string[];
   issues: RuntimeIssue[];
+  semanticEvent?: RuntimeSemanticEvent;
+}
+
+export type RuntimeStepPolicy = "semantic_next" | "step_into" | "step_over";
+
+export interface RuntimeStepOptions {
+  simulation_budget_ms?: number;
+  policy?: RuntimeStepPolicy;
+}
+
+export type RuntimeSemanticBoundaryType =
+  | "node_executed"
+  | "condition_evaluated"
+  | "branch_selected"
+  | "loop_check"
+  | "loop_exit"
+  | "call_enter"
+  | "call_return"
+  | "action_progress";
+
+export interface RuntimeSemanticEvent {
+  type: RuntimeSemanticBoundaryType;
+  nodeId: string;
+  detail?: string;
+  callDepth: number;
+  conditionResult?: boolean;
+  variables?: Record<string, string | number | boolean>;
 }
 
 export interface RuntimeExecutor {
@@ -21,7 +48,7 @@ export interface RuntimeExecutor {
   run(): void;
   pause(): void;
   reset(): void;
-  step(simulation_budget_ms?: number): RuntimeTickResult;
+  step(input?: number | RuntimeStepOptions): RuntimeTickResult;
   getState(): RoboticsExecutionState;
 }
 

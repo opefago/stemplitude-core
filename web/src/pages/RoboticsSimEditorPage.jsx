@@ -1,11 +1,15 @@
-import { Eye, EyeOff, Pause, Play, RotateCcw, RotateCw, Save, StepForward, Trash2 } from "lucide-react";
+import { Eye, EyeOff, Pause, Play, RotateCcw, RotateCw, Save, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRoboticsWorkspaceContext } from "../features/robotics_lab/RoboticsWorkspaceContext";
 import { GRID_CELL_CM } from "../features/robotics_lab/workspaceDefaults";
 import { ThreeSimViewport } from "../features/robotics_lab/ThreeSimViewport.tsx";
 import { CameraToolbar } from "../features/robotics_lab/components/CameraToolbar";
+import { DebuggerStatusPanel } from "../features/robotics_lab/components/DebuggerStatusPanel";
 import { OverlayToggles } from "../features/robotics_lab/components/OverlayToggles";
+import { StepSplitButton } from "../features/robotics_lab/components/StepSplitButton";
 import { ViewportSettingsDialog } from "../features/robotics_lab/components/ViewportSettingsDialog";
+import { ObjectPalette } from "../features/robotics_lab/components/object_palette";
+import { createSceneObjectFromPalette, getObjectDefinitionById } from "../features/robotics_lab/objectPalette";
 import { resolveKitCapabilities } from "../labs/robotics";
 
 let transparentDragImage = null;
@@ -19,64 +23,6 @@ function getTransparentDragImage() {
   return transparentDragImage;
 }
 
-const OBJECT_PRESETS = [
-  {
-    id: "wall_basic",
-    type: "wall",
-    label: "Wall",
-    subtitle: "Static boundary",
-    size: { x: 120, y: 28, z: 18 },
-    defaultColor: "#6b7280",
-    physicsBody: "static",
-  },
-  {
-    id: "obstacle_box",
-    type: "obstacle",
-    label: "Obstacle Box",
-    subtitle: "Pushable block",
-    size: { x: 40, y: 20, z: 40 },
-    defaultColor: "#ef4444",
-    physicsBody: "dynamic",
-  },
-  {
-    id: "robocup_ball",
-    type: "obstacle",
-    label: "RoboCup Ball",
-    subtitle: "Dynamic game ball",
-    size: { x: 22, y: 22, z: 22 },
-    defaultColor: "#f97316",
-    physicsBody: "dynamic",
-    renderShape: "sphere",
-  },
-  {
-    id: "vex_ball",
-    type: "obstacle",
-    label: "VEX Ball",
-    subtitle: "Competition ball",
-    size: { x: 16, y: 16, z: 16 },
-    defaultColor: "#f59e0b",
-    physicsBody: "dynamic",
-    renderShape: "sphere",
-  },
-  {
-    id: "target_zone",
-    type: "target_zone",
-    label: "Target Zone",
-    subtitle: "Scoring region",
-    size: { x: 60, y: 10, z: 60 },
-    defaultColor: "#22c55e",
-    physicsBody: "static",
-  },
-  {
-    id: "color_zone",
-    type: "color_zone",
-    label: "Color Zone",
-    subtitle: "Floor color marker",
-    size: { x: 50, y: 6, z: 50 },
-    defaultColor: "#f59e0b",
-    physicsBody: "static",
-  },
-];
 function formatSensorValue(sensorKind, value) {
   if (sensorKind === "distance") return `${Number(value ?? 0).toFixed(1)} cm`;
   if (sensorKind === "gyro") return `${Math.round(Number(value ?? 0))} deg`;
@@ -89,23 +35,22 @@ function formatSensorValue(sensorKind, value) {
   return String(value);
 }
 
-function snapToGrid(value) {
-  return Math.round(Number(value) / GRID_CELL_CM) * GRID_CELL_CM;
+function snapToGridCenter(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return GRID_CELL_CM / 2;
+  const half = GRID_CELL_CM / 2;
+  return Math.round((numeric - half) / GRID_CELL_CM) * GRID_CELL_CM + half;
 }
 
-function makeSceneObject(item, x, z) {
-  return {
-    id: `${item.type}_${Date.now()}_${Math.floor(Math.random() * 10000)}`,
-    type: item.type,
-    position: { x, y: 0, z },
-    size_cm: item.size,
-    rotation_deg: { y: 0 },
-    metadata: {
-      color: item.defaultColor,
-      physics_body: item.physicsBody || (item.type === "obstacle" ? "dynamic" : "static"),
-      ...(item.renderShape ? { render_shape: item.renderShape } : {}),
-    },
-  };
+function snapToGridEdge(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.round(numeric / GRID_CELL_CM) * GRID_CELL_CM;
+}
+
+function snapForObjectType(value, objectType) {
+  if (objectType === "wall") return snapToGridEdge(value);
+  return snapToGridCenter(value);
 }
 
 export default function RoboticsSimEditorPage() {
@@ -121,8 +66,10 @@ export default function RoboticsSimEditorPage() {
     setSensorOverride,
     clearSensorOverride,
     runtimeState,
+    debugSession,
     runtimeSettings,
     setRuntimeSettings,
+    robotModel,
     startPose,
     setStartPosition,
     rotateStartHeading,
@@ -141,6 +88,8 @@ export default function RoboticsSimEditorPage() {
     runProgram,
     pauseProgram,
     stepProgram,
+    stepIntoProgram,
+    stepOverProgram,
     resetProgram,
     saveProjectSnapshot,
     panel,
@@ -153,6 +102,11 @@ export default function RoboticsSimEditorPage() {
   const [selectedObjectId, setSelectedObjectId] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [viewportBackgroundColor, setViewportBackgroundColor] = useState("#f4f6f8");
+  const [linePaintMode, setLinePaintMode] = useState(false);
+  const [leftPanelCollapsed, setLeftPanelCollapsed] = useState({
+    runtime: false,
+    workplane: false,
+  });
 
   useEffect(() => {
     const onOpenSettings = () => setSettingsOpen(true);
@@ -203,9 +157,42 @@ export default function RoboticsSimEditorPage() {
     }
   }
 
-  function addObjectNearRobot(item) {
-    const next = makeSceneObject(item, snapToGrid(pose.position.x + 40), snapToGrid(pose.position.y));
+  function addObjectNearRobot(definition) {
+    const objectType = definition?.placement?.objectType;
+    const next = createSceneObjectFromPalette(
+      definition,
+      snapForObjectType(pose.position.x + 40, objectType),
+      snapForObjectType(pose.position.y, objectType),
+    );
     updateWorldScene([...worldScene.objects, next], "object_placed");
+  }
+
+  function paintLineTrackAt(x, z) {
+    const definition = getObjectDefinitionById("sensor_line_track");
+    if (!definition) return;
+    const half = GRID_CELL_CM / 2;
+    const px = Math.max(half, Math.min(world.width_cells * GRID_CELL_CM - half, snapToGridCenter(x)));
+    const pz = Math.max(half, Math.min(world.height_cells * GRID_CELL_CM - half, snapToGridCenter(z)));
+    const existing = worldScene.objects.find(
+      (object) =>
+        object.type === "line_segment" &&
+        snapToGridCenter(object.position?.x ?? 0) === px &&
+        snapToGridCenter(object.position?.z ?? 0) === pz,
+    );
+    if (existing) {
+      updateWorldScene(
+        worldScene.objects.filter((object) => object.id !== existing.id),
+        "line_track_erased",
+      );
+      return;
+    }
+    const next = createSceneObjectFromPalette(definition, px, pz);
+    next.size_cm = {
+      x: GRID_CELL_CM - 2,
+      y: 1,
+      z: GRID_CELL_CM - 2,
+    };
+    updateWorldScene([...worldScene.objects, next], "line_track_painted");
   }
 
   function removeObject(id) {
@@ -234,8 +221,8 @@ export default function RoboticsSimEditorPage() {
             ...object,
             position: {
               ...(object.position || {}),
-              x: snapToGrid(x),
-              z: snapToGrid(z),
+              x: snapForObjectType(x, object.type),
+              z: snapForObjectType(z, object.type),
               y: 0,
             },
           }
@@ -355,31 +342,34 @@ export default function RoboticsSimEditorPage() {
   function handleDrop(event) {
     event.preventDefault();
     if (!dragPresetId) return;
-    const item = OBJECT_PRESETS.find((entry) => entry.id === dragPresetId);
-    if (!item) return;
+    const definition = getObjectDefinitionById(dragPresetId);
+    if (!definition) return;
     const projected = projectClientToWorkplaneRef.current?.(event.clientX, event.clientY) || null;
     let px;
     let pz;
     if (projected) {
-      px = snapToGrid(projected.x);
-      pz = snapToGrid(projected.z);
+      px = snapForObjectType(projected.x, definition.placement.objectType);
+      pz = snapForObjectType(projected.z, definition.placement.objectType);
     } else {
       const rect = event.currentTarget.getBoundingClientRect();
       const relX = (event.clientX - rect.left) / rect.width;
       const relZ = (event.clientY - rect.top) / rect.height;
-      px = snapToGrid(relX * world.width_cells * GRID_CELL_CM);
-      pz = snapToGrid(relZ * world.height_cells * GRID_CELL_CM);
+      px = snapForObjectType(relX * world.width_cells * GRID_CELL_CM, definition.placement.objectType);
+      pz = snapForObjectType(relZ * world.height_cells * GRID_CELL_CM, definition.placement.objectType);
     }
-    px = Math.max(0, Math.min(world.width_cells * GRID_CELL_CM, px));
-    pz = Math.max(0, Math.min(world.height_cells * GRID_CELL_CM, pz));
-    const next = makeSceneObject(item, px, pz);
+    {
+      const half = GRID_CELL_CM / 2;
+      px = Math.max(half, Math.min(world.width_cells * GRID_CELL_CM - half, px));
+      pz = Math.max(half, Math.min(world.height_cells * GRID_CELL_CM - half, pz));
+    }
+    const next = createSceneObjectFromPalette(definition, px, pz);
     updateWorldScene([...worldScene.objects, next], "object_dropped");
     setDragPresetId(null);
     setDragPreview(null);
   }
 
-  function buildDragPreview(item, presetId, px, pz) {
-    const previewObject = makeSceneObject(item, px, pz);
+  function buildDragPreview(definition, presetId, px, pz) {
+    const previewObject = createSceneObjectFromPalette(definition, px, pz);
     previewObject.id = `ghost_${presetId}`;
     return {
       presetId,
@@ -389,32 +379,35 @@ export default function RoboticsSimEditorPage() {
 
   function updateDragPreviewFromEvent(event) {
     if (!dragPresetId) return;
-    const item = OBJECT_PRESETS.find((entry) => entry.id === dragPresetId);
-    if (!item) return;
+    const definition = getObjectDefinitionById(dragPresetId);
+    if (!definition) return;
     const projected = projectClientToWorkplaneRef.current?.(event.clientX, event.clientY) || null;
     let px;
     let pz;
     if (projected) {
-      px = snapToGrid(projected.x);
-      pz = snapToGrid(projected.z);
+      px = snapForObjectType(projected.x, definition.placement.objectType);
+      pz = snapForObjectType(projected.z, definition.placement.objectType);
     } else {
       const rect = event.currentTarget?.getBoundingClientRect?.() || dropTargetRef.current?.getBoundingClientRect?.();
       if (!rect || rect.width <= 0 || rect.height <= 0) return;
       const relX = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
       const relZ = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
-      px = snapToGrid(relX * world.width_cells * GRID_CELL_CM);
-      pz = snapToGrid(relZ * world.height_cells * GRID_CELL_CM);
+      px = snapForObjectType(relX * world.width_cells * GRID_CELL_CM, definition.placement.objectType);
+      pz = snapForObjectType(relZ * world.height_cells * GRID_CELL_CM, definition.placement.objectType);
     }
-    px = Math.max(0, Math.min(world.width_cells * GRID_CELL_CM, px));
-    pz = Math.max(0, Math.min(world.height_cells * GRID_CELL_CM, pz));
-    const preview = buildDragPreview(item, dragPresetId, px, pz);
+    {
+      const half = GRID_CELL_CM / 2;
+      px = Math.max(half, Math.min(world.width_cells * GRID_CELL_CM - half, px));
+      pz = Math.max(half, Math.min(world.height_cells * GRID_CELL_CM - half, pz));
+    }
+    const preview = buildDragPreview(definition, dragPresetId, px, pz);
     if (preview) setDragPreview(preview);
   }
 
   useEffect(() => {
     if (!dragPresetId) return undefined;
-    const item = OBJECT_PRESETS.find((entry) => entry.id === dragPresetId);
-    if (!item) return undefined;
+    const definition = getObjectDefinitionById(dragPresetId);
+    if (!definition) return undefined;
 
     const onWindowDragOver = (event) => {
       const rect = dropTargetRef.current?.getBoundingClientRect?.();
@@ -432,17 +425,20 @@ export default function RoboticsSimEditorPage() {
       let px;
       let pz;
       if (projected) {
-        px = snapToGrid(projected.x);
-        pz = snapToGrid(projected.z);
+        px = snapForObjectType(projected.x, definition.placement.objectType);
+        pz = snapForObjectType(projected.z, definition.placement.objectType);
       } else {
         const relX = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
         const relZ = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
-        px = snapToGrid(relX * world.width_cells * GRID_CELL_CM);
-        pz = snapToGrid(relZ * world.height_cells * GRID_CELL_CM);
+        px = snapForObjectType(relX * world.width_cells * GRID_CELL_CM, definition.placement.objectType);
+        pz = snapForObjectType(relZ * world.height_cells * GRID_CELL_CM, definition.placement.objectType);
       }
-      px = Math.max(0, Math.min(world.width_cells * GRID_CELL_CM, px));
-      pz = Math.max(0, Math.min(world.height_cells * GRID_CELL_CM, pz));
-      const preview = buildDragPreview(item, dragPresetId, px, pz);
+      {
+        const half = GRID_CELL_CM / 2;
+        px = Math.max(half, Math.min(world.width_cells * GRID_CELL_CM - half, px));
+        pz = Math.max(half, Math.min(world.height_cells * GRID_CELL_CM - half, pz));
+      }
+      const preview = buildDragPreview(definition, dragPresetId, px, pz);
       if (preview) setDragPreview(preview);
     };
 
@@ -467,142 +463,182 @@ export default function RoboticsSimEditorPage() {
     return Math.max(0, Math.round(numeric));
   }
 
+  function toggleLeftPanelSection(sectionKey) {
+    setLeftPanelCollapsed((prev) => ({
+      ...prev,
+      [sectionKey]: !prev[sectionKey],
+    }));
+  }
+
   return (
     <div className="robotics-split-content">
       <aside className="robotics-lab-left">
         <section className="robotics-left-card">
-          <h3>Simulation Runtime</h3>
-          <div className="robotics-runtime-stats">
-            <span className="robotics-runtime-pill"><strong>Runtime</strong> {runtimeState}</span>
-            <span className="robotics-runtime-pill"><strong>World</strong> {worldSummary}</span>
-          </div>
-          <div className="robotics-lab-controls robotics-lab-controls--compact">
-            <button className="robotics-lab-btn robotics-lab-btn--icon" onClick={runProgram}><Play size={16} /> Run</button>
-            <button className="robotics-lab-btn robotics-lab-btn--icon" onClick={pauseProgram}><Pause size={16} /> Pause</button>
-            <button className="robotics-lab-btn robotics-lab-btn--icon" onClick={stepProgram}><StepForward size={16} /> Step</button>
-            <button className="robotics-lab-btn robotics-lab-btn--icon" onClick={resetProgram}><RotateCcw size={16} /> Reset</button>
-            <button className="robotics-lab-btn robotics-lab-btn--icon" onClick={() => void saveProjectSnapshot("manual")}><Save size={16} /> Save</button>
-          </div>
-          <div className="robotics-config-grid">
-            <label className="robotics-form-field">
-              <span>Tick (ms)</span>
-              <input
-                type="number"
-                min={50}
-                max={1000}
-                value={runtimeSettings.tick_ms ?? 200}
-                onChange={(event) =>
-                  setRuntimeSettings((prev) => ({ ...prev, tick_ms: Number(event.target.value) || 200 }))
-                }
-                onBlur={() => void saveProjectSnapshot("runtime_settings_changed")}
-              />
-            </label>
-            <label className="robotics-form-field">
-              <span>Robot start heading (deg)</span>
-              <input
-                type="number"
-                min={0}
-                max={359}
-                value={Math.round(startPose.heading_deg ?? 0)}
-                onChange={(event) => setStartHeading(Number(event.target.value))}
-              />
-            </label>
-          </div>
-          <div className="robotics-lab-controls robotics-lab-controls--compact">
-            <button className="robotics-lab-btn robotics-lab-btn--icon" onClick={() => rotateStartHeading(-15)}>
-              <RotateCcw size={14} /> Robot -15°
-            </button>
-            <button className="robotics-lab-btn robotics-lab-btn--icon" onClick={() => rotateStartHeading(15)}>
-              <RotateCw size={14} /> Robot +15°
-            </button>
-          </div>
-        </section>
-
-        <section className="robotics-left-card">
-          <h4>Workplane</h4>
-          <div className="robotics-workplane-controls">
-            <div className="robotics-workplane-presets">
-              {[
-                { label: "Small", w: 20, h: 20, cm: "400x400" },
-                { label: "Medium", w: 40, h: 24, cm: "800x480" },
-                { label: "Large", w: 50, h: 50, cm: "1000x1000" },
-                { label: "VEX", w: 90, h: 90, cm: "1800x1800" },
-              ].map((preset) => (
-                <button
-                  key={preset.label}
-                  className={`robotics-lab-btn robotics-workplane-preset${
-                    world.width_cells === preset.w && world.height_cells === preset.h ? " active" : ""
-                  }`}
-                  onClick={() => {
-                    setWorld((prev) => ({ ...prev, width_cells: preset.w, height_cells: preset.h }));
-                    resetCamera();
-                  }}
-                  title={preset.cm + " cm"}
-                >
-                  {preset.label}
+          <button
+            type="button"
+            className="robotics-left-card-toggle"
+            onClick={() => toggleLeftPanelSection("runtime")}
+            aria-expanded={!leftPanelCollapsed.runtime}
+          >
+            <h3>Simulation Runtime</h3>
+            <span className="robotics-left-card-toggle__hint">
+              {leftPanelCollapsed.runtime ? "Expand" : "Collapse"}
+            </span>
+          </button>
+          {!leftPanelCollapsed.runtime ? (
+            <>
+              <div className="robotics-runtime-stats">
+                <span className="robotics-runtime-pill"><strong>Runtime</strong> {runtimeState}</span>
+                <span className="robotics-runtime-pill"><strong>World</strong> {worldSummary}</span>
+              </div>
+              <div className="robotics-lab-controls robotics-lab-controls--compact">
+                <button className="robotics-lab-btn robotics-lab-btn--icon" onClick={runProgram}><Play size={16} /> Run</button>
+                <button className="robotics-lab-btn robotics-lab-btn--icon" onClick={pauseProgram}><Pause size={16} /> Pause</button>
+                <StepSplitButton onStep={stepProgram} onStepInto={stepIntoProgram} onStepOver={stepOverProgram} />
+                <button className="robotics-lab-btn robotics-lab-btn--icon" onClick={resetProgram}><RotateCcw size={16} /> Reset</button>
+                <button className="robotics-lab-btn robotics-lab-btn--icon" onClick={() => void saveProjectSnapshot("manual")}><Save size={16} /> Save</button>
+              </div>
+              <div className="robotics-config-grid">
+                <label className="robotics-form-field">
+                  <span>Tick (ms)</span>
+                  <input
+                    type="number"
+                    min={50}
+                    max={1000}
+                    value={runtimeSettings.tick_ms ?? 200}
+                    onChange={(event) =>
+                      setRuntimeSettings((prev) => ({ ...prev, tick_ms: Number(event.target.value) || 200 }))
+                    }
+                    onBlur={() => void saveProjectSnapshot("runtime_settings_changed")}
+                  />
+                </label>
+                <label className="robotics-form-field">
+                  <span>Robot start heading (deg)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={359}
+                    value={Math.round(startPose.heading_deg ?? 0)}
+                    onChange={(event) => setStartHeading(Number(event.target.value))}
+                  />
+                </label>
+              </div>
+              <div className="robotics-lab-controls robotics-lab-controls--compact">
+                <button className="robotics-lab-btn robotics-lab-btn--icon" onClick={() => rotateStartHeading(-15)}>
+                  <RotateCcw size={14} /> Robot -15°
                 </button>
-              ))}
+                <button className="robotics-lab-btn robotics-lab-btn--icon" onClick={() => rotateStartHeading(15)}>
+                  <RotateCw size={14} /> Robot +15°
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="robotics-runtime-stats">
+              <span className="robotics-runtime-pill"><strong>Runtime</strong> {runtimeState}</span>
+              <span className="robotics-runtime-pill"><strong>World</strong> {worldSummary}</span>
             </div>
-            <div className="robotics-workplane-dims">
-              <label className="robotics-form-field">
-                <span>Width (cm)</span>
-                <input
-                  type="number"
-                  min={200}
-                  max={2000}
-                  step={GRID_CELL_CM}
-                  value={world.width_cells * GRID_CELL_CM}
-                  onChange={(event) => {
-                    const cm = Math.max(200, Math.min(2000, Number(event.target.value) || 200));
-                    setWorld((prev) => ({ ...prev, width_cells: Math.round(cm / GRID_CELL_CM) }));
-                  }}
-                  onBlur={resetCamera}
-                />
-              </label>
-              <label className="robotics-form-field">
-                <span>Depth (cm)</span>
-                <input
-                  type="number"
-                  min={200}
-                  max={2000}
-                  step={GRID_CELL_CM}
-                  value={world.height_cells * GRID_CELL_CM}
-                  onChange={(event) => {
-                    const cm = Math.max(200, Math.min(2000, Number(event.target.value) || 200));
-                    setWorld((prev) => ({ ...prev, height_cells: Math.round(cm / GRID_CELL_CM) }));
-                  }}
-                  onBlur={resetCamera}
-                />
-              </label>
-            </div>
-          </div>
+          )}
         </section>
 
         <section className="robotics-left-card">
-          <h4>Object Presets</h4>
-          <div className="robotics-placement-library">
-            {OBJECT_PRESETS.map((item) => (
-              <button
-                key={item.id}
-                className="robotics-placement-card"
-                draggable
-                onDragStart={(event) => {
-                  setDragPresetId(item.id);
-                  event.dataTransfer.effectAllowed = "copy";
-                  event.dataTransfer.setData("text/plain", item.id);
-                  event.dataTransfer.setDragImage(getTransparentDragImage(), 0, 0);
-                }}
-                onClick={() => addObjectNearRobot(item)}
-                title="Click to add near robot, or drag into scene"
-              >
-                <span className="robotics-placement-card__title">{item.label}</span>
-                <small className="robotics-placement-card__subtitle">{item.subtitle}</small>
-                <span className="robotics-placement-card__meta">
-                  {item.physicsBody === "dynamic" ? "Dynamic" : "Static"} · {Math.round(item.size.x)}x{Math.round(item.size.z)} cm
-                </span>
+          <button
+            type="button"
+            className="robotics-left-card-toggle"
+            onClick={() => toggleLeftPanelSection("workplane")}
+            aria-expanded={!leftPanelCollapsed.workplane}
+          >
+            <h4>Workplane</h4>
+            <span className="robotics-left-card-toggle__hint">
+              {leftPanelCollapsed.workplane ? "Expand" : "Collapse"}
+            </span>
+          </button>
+          {!leftPanelCollapsed.workplane ? (
+            <div className="robotics-workplane-controls">
+              <div className="robotics-workplane-presets">
+                {[
+                  { label: "Small", w: 20, h: 20, cm: "400x400" },
+                  { label: "Medium", w: 40, h: 24, cm: "800x480" },
+                  { label: "Large", w: 50, h: 50, cm: "1000x1000" },
+                  { label: "VEX", w: 90, h: 90, cm: "1800x1800" },
+                ].map((preset) => (
+                  <button
+                    key={preset.label}
+                    className={`robotics-lab-btn robotics-workplane-preset${
+                      world.width_cells === preset.w && world.height_cells === preset.h ? " active" : ""
+                    }`}
+                    onClick={() => {
+                      setWorld((prev) => ({ ...prev, width_cells: preset.w, height_cells: preset.h }));
+                      resetCamera();
+                    }}
+                    title={preset.cm + " cm"}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+              <div className="robotics-workplane-dims">
+                <label className="robotics-form-field">
+                  <span>Width (cm)</span>
+                  <input
+                    type="number"
+                    min={200}
+                    max={2000}
+                    step={GRID_CELL_CM}
+                    value={world.width_cells * GRID_CELL_CM}
+                    onChange={(event) => {
+                      const cm = Math.max(200, Math.min(2000, Number(event.target.value) || 200));
+                      setWorld((prev) => ({ ...prev, width_cells: Math.round(cm / GRID_CELL_CM) }));
+                    }}
+                    onBlur={resetCamera}
+                  />
+                </label>
+                <label className="robotics-form-field">
+                  <span>Depth (cm)</span>
+                  <input
+                    type="number"
+                    min={200}
+                    max={2000}
+                    step={GRID_CELL_CM}
+                    value={world.height_cells * GRID_CELL_CM}
+                    onChange={(event) => {
+                      const cm = Math.max(200, Math.min(2000, Number(event.target.value) || 200));
+                      setWorld((prev) => ({ ...prev, height_cells: Math.round(cm / GRID_CELL_CM) }));
+                    }}
+                    onBlur={resetCamera}
+                  />
+                </label>
+              </div>
+            </div>
+          ) : null}
+        </section>
+
+        <section className="robotics-left-card">
+          <h4>Object Library</h4>
+          {linePaintMode ? (
+            <div className="robotics-line-paint-mode">
+              <span>Line paint mode active: click workplane squares to draw/erase.</span>
+              <button className="robotics-lab-btn robotics-lab-btn--icon" onClick={() => setLinePaintMode(false)}>
+                Exit line paint
               </button>
-            ))}
-          </div>
+            </div>
+          ) : null}
+          <ObjectPalette
+            onAdd={(definition) => {
+              if (definition.id === "sensor_line_track") {
+                setLinePaintMode(true);
+                return;
+              }
+              setLinePaintMode(false);
+              addObjectNearRobot(definition);
+            }}
+            onDragStart={(definition, event) => {
+              setLinePaintMode(false);
+              setDragPresetId(definition.id);
+              event.dataTransfer.effectAllowed = "copy";
+              event.dataTransfer.setData("text/plain", definition.id);
+              event.dataTransfer.setDragImage(getTransparentDragImage(), 0, 0);
+            }}
+          />
         </section>
       </aside>
 
@@ -634,6 +670,7 @@ export default function RoboticsSimEditorPage() {
           <ThreeSimViewport
             worldScene={worldScene}
             pose={pose}
+            robotModel={robotModel}
             sensorValues={sensorValues}
             cameraState={cameraState}
             overlayState={overlayState}
@@ -660,6 +697,10 @@ export default function RoboticsSimEditorPage() {
             onProjectClientToWorkplaneReady={(project) => {
               projectClientToWorkplaneRef.current = project;
             }}
+            onWorkplaneClick={(x, z) => {
+              if (!linePaintMode) return;
+              paintLineTrackAt(x, z);
+            }}
           />
           <div className="robotics-floating-controls-right">
             <CameraToolbar
@@ -677,6 +718,9 @@ export default function RoboticsSimEditorPage() {
               }
             />
           </div>
+          <div className="robotics-floating-debugger-panel">
+            <DebuggerStatusPanel debugSession={debugSession} compact />
+          </div>
           <div className="robotics-floating-controls-bottom">
             <OverlayToggles overlays={overlayState} onToggle={toggleOverlay} />
           </div>
@@ -690,6 +734,26 @@ export default function RoboticsSimEditorPage() {
         moveCollisionPolicy={runtimeSettings.move_collision_policy || "hold_until_distance"}
         onMoveCollisionPolicyChange={(policy) => {
           setRuntimeSettings((prev) => ({ ...prev, move_collision_policy: policy }));
+          void saveProjectSnapshot("runtime_settings_changed");
+        }}
+        physicsEngine={runtimeSettings.physics_engine || "three_runtime"}
+        onPhysicsEngineChange={(engine) => {
+          setRuntimeSettings((prev) => ({ ...prev, physics_engine: engine }));
+          void saveProjectSnapshot("runtime_settings_changed");
+        }}
+        tractionLongitudinal={Number(runtimeSettings.traction_longitudinal ?? 0.92)}
+        onTractionLongitudinalChange={(value) => {
+          setRuntimeSettings((prev) => ({ ...prev, traction_longitudinal: value }));
+          void saveProjectSnapshot("runtime_settings_changed");
+        }}
+        tractionLateral={Number(runtimeSettings.traction_lateral ?? 0.9)}
+        onTractionLateralChange={(value) => {
+          setRuntimeSettings((prev) => ({ ...prev, traction_lateral: value }));
+          void saveProjectSnapshot("runtime_settings_changed");
+        }}
+        rollingResistance={Number(runtimeSettings.rolling_resistance ?? 4.2)}
+        onRollingResistanceChange={(value) => {
+          setRuntimeSettings((prev) => ({ ...prev, rolling_resistance: value }));
           void saveProjectSnapshot("runtime_settings_changed");
         }}
       />

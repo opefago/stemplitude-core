@@ -9,42 +9,73 @@ import type { KitRuntimeBehaviorProfile } from "../adapters/kitRuntimeBehaviorFa
 import type { RoboticsSimulatorBridge } from "../simulator/types";
 import { ISSUE_CODES } from "./issueCodes";
 import type { IssueCode } from "./issueCodes";
-import type { RuntimeExecutor, RuntimeIssue, RuntimeTickResult, RuntimeTraceEntry } from "./types";
+import {
+  DEFAULT_PHYSICS_STEP_MS,
+  type ActiveDistanceMoveState,
+  type ActiveTurnMoveState,
+  type MoveCollisionPolicy,
+  RuntimePhysicsEngine,
+} from "./physicsEngine";
+import type {
+  RuntimeExecutor,
+  RuntimeIssue,
+  RuntimeSemanticEvent,
+  RuntimeStepOptions,
+  RuntimeStepPolicy,
+  RuntimeTickResult,
+  RuntimeTraceEntry,
+} from "./types";
 
-const PHYSICS_STEP_MS = 20;
 type RuntimeValue = string | number | boolean;
 
 interface CallFrame {
+  frameId: string;
   functionId: string;
   vars: Map<string, RuntimeValue>;
   didReturn: boolean;
   returnValue: RuntimeValue;
 }
 
-interface ActiveDistanceMove {
-  nodeId: string;
-  remainingCm: number;
-  targetLinearCmS: number;
-  previousPosition: { x: number; y: number };
-  elapsedMs: number;
-  maxDurationMs: number;
-  collisions: Set<string>;
-}
-
-type MoveCollisionPolicy = "hold_until_distance" | "abort_on_collision" | "timeout_then_continue" | "error_on_collision";
-
 interface RuntimeExecutionOptions {
   moveCollisionPolicy?: MoveCollisionPolicy;
 }
 
-function normalizeSignedAngle(delta: number): number {
-  return ((delta + 540) % 360) - 180;
+interface PendingNodeEntry {
+  kind: "node";
+  node: RoboticsIRNode;
+  ownerCallFrameId?: string;
+}
+
+interface PendingCallEndEntry {
+  kind: "call_end";
+  callFrameId: string;
+  nodeId: string;
+}
+
+type PendingExecutionEntry = PendingNodeEntry | PendingCallEndEntry;
+
+interface StepOverTarget {
+  kind: "call" | "loop";
+  baseNodeId: string;
+  startCallDepth: number;
+}
+
+function computeTurnCreepLinearCmS(maxLinearSpeedCmS: number, speedPct: number): number {
+  const normalized = Math.max(0, Math.min(100, Number(speedPct) || 0)) / 100;
+  const target = maxLinearSpeedCmS * 0.18 * normalized;
+  return Math.max(4, Math.min(14, target));
 }
 
 function toDistanceCm(unit: string, value: number): number {
   if (unit === "distance_mm") return value / 10;
   if (unit === "distance_in") return value * 2.54;
   return value;
+}
+
+function baseNodeId(nodeId?: string): string {
+  if (!nodeId) return "";
+  const markerIndex = nodeId.indexOf("__q");
+  return markerIndex >= 0 ? nodeId.slice(0, markerIndex) : nodeId;
 }
 
 interface RuntimeCollector {
@@ -75,7 +106,15 @@ export class IRRuntimeExecutor implements RuntimeExecutor {
   private callFrames: CallFrame[] = [];
   private trace: RuntimeTraceEntry[] = [];
   private callDepth = 0;
-  private activeDistanceMove: ActiveDistanceMove | null = null;
+  private activeDistanceMove: ActiveDistanceMoveState | null = null;
+  private activeTurnMove: ActiveTurnMoveState | null = null;
+  private physicsEngine: RuntimePhysicsEngine;
+  private pendingNodes: PendingExecutionEntry[] = [];
+  private repeatWhileGuards = new Map<string, number>();
+  private queueSequence = 0;
+  private callFrameSequence = 0;
+  private currentStepPolicy: RuntimeStepPolicy = "semantic_next";
+  private stepOverTarget: StepOverTarget | null = null;
 
   private static readonly MAX_CALL_DEPTH = 32;
 
@@ -88,16 +127,24 @@ export class IRRuntimeExecutor implements RuntimeExecutor {
     },
     private resolveActuatorAction: ((actuatorId: string, action: string) => KitActuatorActionHandler | null) | null = null,
     private executionOptions: RuntimeExecutionOptions = {},
-  ) {}
+  ) {
+    this.physicsEngine = new RuntimePhysicsEngine(simulator, { fixedStepMs: DEFAULT_PHYSICS_STEP_MS });
+  }
 
   load(program: RoboticsProgram): void {
-    this.program = program;
+    this.program = cloneProgram(program);
     this.cursor = 0;
     this.state = "idle";
     this.globalVariables.clear();
     this.callFrames = [];
     this.trace = [];
     this.activeDistanceMove = null;
+    this.activeTurnMove = null;
+    this.pendingNodes = [];
+    this.repeatWhileGuards.clear();
+    this.queueSequence = 0;
+    this.callFrameSequence = 0;
+    this.stepOverTarget = null;
   }
 
   run(): void {
@@ -122,6 +169,12 @@ export class IRRuntimeExecutor implements RuntimeExecutor {
     this.trace = [];
     this.callDepth = 0;
     this.activeDistanceMove = null;
+    this.activeTurnMove = null;
+    this.pendingNodes = [];
+    this.repeatWhileGuards.clear();
+    this.queueSequence = 0;
+    this.callFrameSequence = 0;
+    this.stepOverTarget = null;
   }
 
   getState(): "idle" | "running" | "paused" | "completed" | "error" {
@@ -132,52 +185,200 @@ export class IRRuntimeExecutor implements RuntimeExecutor {
     return this.trace.slice();
   }
 
-  step(simulation_budget_ms = 200): RuntimeTickResult {
-    const simulationBudgetMs = Math.max(PHYSICS_STEP_MS, Number(simulation_budget_ms) || 200);
+  step(input?: number | RuntimeStepOptions): RuntimeTickResult {
+    const { simulationBudgetMs, policy } = this.resolveStepInput(input);
+    this.currentStepPolicy = policy;
+    if (policy !== "step_over") {
+      this.stepOverTarget = null;
+    }
     if (!this.program) {
       this.state = "error";
       const collector: RuntimeCollector = { diagnostics: [], issues: [] };
       reportRuntimeIssue(collector, ISSUE_CODES.RUNTIME_DIAGNOSTIC, "No program loaded");
       return { state: this.state, diagnostics: collector.diagnostics, issues: collector.issues };
     }
-    if (this.state === "paused" || this.state === "idle") {
-      return { state: this.state, issues: [] };
+    if (this.state === "idle" || this.state === "paused") {
+      this.state = "running";
     }
-    if (this.cursor >= this.program.nodes.length) {
-      this.state = "completed";
-      return { state: this.state, issues: [] };
+    if (policy === "step_over") {
+      return this.stepOver(simulationBudgetMs);
+    }
+    return this.stepToBoundary(simulationBudgetMs);
+  }
+
+  private resolveStepInput(input?: number | RuntimeStepOptions): { simulationBudgetMs: number; policy: RuntimeStepPolicy } {
+    if (typeof input === "number" || input === undefined) {
+      return {
+        simulationBudgetMs: Math.max(this.physicsEngine.getFixedStepMs(), Number(input) || 200),
+        policy: "semantic_next",
+      };
+    }
+    const rawBudget = Number(input.simulation_budget_ms);
+    return {
+      simulationBudgetMs: Math.max(this.physicsEngine.getFixedStepMs(), Number.isFinite(rawBudget) ? rawBudget : 200),
+      policy: input.policy || "semantic_next",
+    };
+  }
+
+  private stepOver(simulationBudgetMs: number): RuntimeTickResult {
+    const result = this.stepToBoundary(simulationBudgetMs);
+    const event = result.semanticEvent;
+    if (!event) return result;
+    const eventBaseNodeId = baseNodeId(event.nodeId);
+
+    if (!this.stepOverTarget) {
+      if (event.type === "call_enter") {
+        this.stepOverTarget = {
+          kind: "call",
+          baseNodeId: eventBaseNodeId,
+          startCallDepth: event.callDepth,
+        };
+      } else if (event.type === "loop_check" || event.type === "condition_evaluated" || event.type === "branch_selected") {
+        this.stepOverTarget = {
+          kind: "loop",
+          baseNodeId: eventBaseNodeId,
+          startCallDepth: event.callDepth,
+        };
+      }
+      if (result.state !== "running") {
+        this.stepOverTarget = null;
+      }
+      return result;
     }
 
-    const node = this.program.nodes[this.cursor];
-    const collector: RuntimeCollector = { diagnostics: [], issues: [] };
-    let completedNode = true;
-    if (node.kind === "move" && node.unit !== "seconds") {
-      completedNode = this.executeTopLevelDistanceMove(node, collector, simulationBudgetMs);
-    } else {
-      this.activeDistanceMove = null;
-      this.executeNode(node, collector);
+    if (
+      this.stepOverTarget.kind === "call" &&
+      event.type === "call_return" &&
+      event.callDepth < this.stepOverTarget.startCallDepth
+    ) {
+      this.stepOverTarget = null;
+    } else if (
+      this.stepOverTarget.kind === "loop" &&
+      event.type === "loop_exit" &&
+      eventBaseNodeId === this.stepOverTarget.baseNodeId
+    ) {
+      this.stepOverTarget = null;
+    } else if (result.state !== "running") {
+      this.stepOverTarget = null;
     }
 
+    return result;
+  }
+
+  private stepToBoundary(simulationBudgetMs: number): RuntimeTickResult {
+    let guard = 0;
+    while (guard < 5000) {
+      guard += 1;
+      if (this.cursor >= (this.program?.nodes.length || 0) && this.pendingNodes.length === 0) {
+        this.state = "completed";
+        return { state: this.state, issues: [] };
+      }
+      const next = this.peekNextEntry();
+      if (!next) {
+        this.state = "completed";
+        return { state: this.state, issues: [] };
+      }
+      const collector: RuntimeCollector = { diagnostics: [], issues: [] };
+      const currentIsQueued = this.pendingNodes.length > 0;
+      if (next.kind === "call_end") {
+        this.consumeNextEntry();
+        this.popCallFrame(next.callFrameId);
+        const event = this.buildSemanticEvent("call_return", next.nodeId, `return:${next.callFrameId}`);
+        this.pushTrace(next.nodeId);
+        this.markCompletedIfDone();
+        return {
+          state: this.state,
+          highlightedNodeId: next.nodeId,
+          diagnostics: collector.diagnostics,
+          issues: collector.issues,
+          semanticEvent: event,
+        };
+      }
+      const node = next.node;
+      if (next.ownerCallFrameId && this.isCallFrameReturned(next.ownerCallFrameId)) {
+        this.consumeNextEntry();
+        continue;
+      }
+      if (node.kind === "if" || node.kind === "repeat") {
+        if (currentIsQueued) {
+          this.pendingNodes.shift();
+        } else {
+          this.cursor += 1;
+        }
+        if (this.tryExpandControlNode(node, collector, next.ownerCallFrameId)) {
+          this.pushTrace(node.id);
+          const event = this.buildControlBoundaryEvent(node);
+          this.markCompletedIfDone();
+          return {
+            state: this.state,
+            highlightedNodeId: node.id,
+            diagnostics: collector.diagnostics,
+            issues: collector.issues,
+            semanticEvent: event,
+          };
+        }
+      }
+      if (node.kind === "call") {
+        if (currentIsQueued) {
+          this.pendingNodes.shift();
+        } else {
+          this.cursor += 1;
+        }
+        const callEvent = this.scheduleFunctionCall(node, collector, next.ownerCallFrameId);
+        this.pushTrace(node.id);
+        this.markCompletedIfDone();
+        return {
+          state: this.state,
+          highlightedNodeId: node.id,
+          diagnostics: collector.diagnostics,
+          issues: collector.issues,
+          semanticEvent: callEvent,
+        };
+      }
+
+      let completedNode = true;
+      if (node.kind === "move" && node.unit !== "seconds") {
+        completedNode = this.executeTopLevelDistanceMove(node, collector, simulationBudgetMs);
+      } else if (node.kind === "turn") {
+        completedNode = this.executeTopLevelTurn(node, simulationBudgetMs);
+      } else {
+        this.activeDistanceMove = null;
+        this.activeTurnMove = null;
+        this.executeNode(node, collector);
+      }
+      this.pushTrace(node.id);
+      if (completedNode) {
+        this.consumeNextEntry();
+      }
+      this.markCompletedIfDone();
+      return {
+        state: this.state,
+        highlightedNodeId: node.id,
+        diagnostics: collector.diagnostics,
+        issues: collector.issues,
+        semanticEvent: this.buildSemanticEvent(completedNode ? "node_executed" : "action_progress", node.id),
+      };
+    }
+    this.state = "error";
+    return {
+      state: this.state,
+      issues: [{
+        code: ISSUE_CODES.RUNTIME_DIAGNOSTIC,
+        severity: "error",
+        category: "runtime",
+        message: "step guard exhausted",
+      }],
+      diagnostics: ["step guard exhausted"],
+    };
+  }
+
+  private pushTrace(nodeId: string): void {
     this.trace.push({
       timestamp_ms: Date.now(),
-      node_id: node.id,
+      node_id: nodeId,
       state: this.state,
       sensor_snapshot: {},
     });
-
-    if (completedNode) {
-      this.cursor += 1;
-      if (this.cursor >= this.program.nodes.length && this.state !== "error") {
-        this.state = "completed";
-      }
-    }
-
-    return {
-      state: this.state,
-      highlightedNodeId: node.id,
-      diagnostics: collector.diagnostics,
-      issues: collector.issues,
-    };
   }
 
   private executeTopLevelDistanceMove(
@@ -193,65 +394,32 @@ export class IRRuntimeExecutor implements RuntimeExecutor {
     if (distanceCm <= 0) return true;
 
     if (!this.activeDistanceMove || this.activeDistanceMove.nodeId !== node.id) {
-      const start = this.simulator.tick({
-        dt_ms: 0,
-        linear_velocity_cm_s: 0,
-        angular_velocity_deg_s: 0,
-      });
-      this.activeDistanceMove = {
+      this.activeDistanceMove = this.physicsEngine.startDistanceMove({
         nodeId: node.id,
-        remainingCm: distanceCm,
+        distanceCm,
         targetLinearCmS: targetLinear,
-        previousPosition: { ...start.pose.position },
-        elapsedMs: 0,
         maxDurationMs: Math.max(500, (distanceCm / Math.max(0.001, Math.abs(linearSpeed))) * 1000 * 4),
-        collisions: new Set<string>(),
-      };
+      });
     }
 
     const move = this.activeDistanceMove;
     const moveCollisionPolicy: MoveCollisionPolicy = this.executionOptions.moveCollisionPolicy || "hold_until_distance";
-    let remainingBudgetMs = Math.max(PHYSICS_STEP_MS, budgetMs);
-    while (
-      remainingBudgetMs > 0 &&
-      move.remainingCm > 0 &&
-      (moveCollisionPolicy !== "timeout_then_continue" || move.elapsedMs < move.maxDurationMs)
-    ) {
-      const step = Math.min(PHYSICS_STEP_MS, remainingBudgetMs);
-      const frame = this.simulator.tick({
-        dt_ms: step,
-        linear_velocity_cm_s: move.targetLinearCmS,
-        angular_velocity_deg_s: 0,
-      });
-      const dx = frame.pose.position.x - move.previousPosition.x;
-      const dy = frame.pose.position.y - move.previousPosition.y;
-      move.remainingCm = Math.max(0, move.remainingCm - Math.sqrt(dx * dx + dy * dy));
-      move.previousPosition = frame.pose.position;
-      frame.collisions.forEach((id) => move.collisions.add(id));
-      move.elapsedMs += step;
-      remainingBudgetMs -= step;
-      if (frame.collisions.length > 0) break;
+    const result = this.physicsEngine.progressDistanceMove({
+      state: move,
+      budgetMs,
+      collisionPolicy: moveCollisionPolicy,
+    });
+    if (result.hasCollisionError) {
+      this.state = "error";
+      reportRuntimeIssue(
+        collector,
+        ISSUE_CODES.COLLISION_DETECTED,
+        `Collision detected and move aborted by policy: ${Array.from(move.collisions).join(", ")}`,
+      );
     }
+    if (!result.done) return false;
 
-    let done = move.remainingCm <= 0;
-    if (!done) {
-      if (moveCollisionPolicy === "abort_on_collision" && move.collisions.size > 0) {
-        done = true;
-      } else if (moveCollisionPolicy === "timeout_then_continue" && move.elapsedMs >= move.maxDurationMs) {
-        done = true;
-      } else if (moveCollisionPolicy === "error_on_collision" && move.collisions.size > 0) {
-        done = true;
-        this.state = "error";
-        reportRuntimeIssue(
-          collector,
-          ISSUE_CODES.COLLISION_DETECTED,
-          `Collision detected and move aborted by policy: ${Array.from(move.collisions).join(", ")}`,
-        );
-      }
-    }
-    if (!done) return false;
-
-    this.tickForDuration(120, 0, 0);
+    this.physicsEngine.settle(120);
     if (move.collisions.size > 0 && moveCollisionPolicy !== "error_on_collision") {
       reportRuntimeIssue(
         collector,
@@ -260,6 +428,33 @@ export class IRRuntimeExecutor implements RuntimeExecutor {
       );
     }
     this.activeDistanceMove = null;
+    return true;
+  }
+
+  private executeTopLevelTurn(node: Extract<RoboticsIRNode, { kind: "turn" }>, budgetMs: number): boolean {
+    const speedPct = node.speed_pct ?? 100;
+    const turnSpeed = (speedPct / 100) * this.runtimeBehavior.maxTurnSpeedDegS;
+    const directionSign = node.direction === "left" ? -1 : 1;
+    const targetAngle = Math.abs(node.angle_deg);
+    const turnLinearCreep = computeTurnCreepLinearCmS(this.runtimeBehavior.maxLinearSpeedCmS, speedPct);
+    if (targetAngle <= 0) return true;
+    if (!this.activeTurnMove || this.activeTurnMove.nodeId !== node.id) {
+      this.activeTurnMove = this.physicsEngine.startTurnMove({
+        nodeId: node.id,
+        targetAngleDeg: targetAngle,
+        targetAngularDegS: directionSign * turnSpeed,
+        targetLinearCmS: turnLinearCreep,
+        maxDurationMs: Math.max(500, (targetAngle / Math.max(0.001, Math.abs(turnSpeed))) * 1000 * 4),
+      });
+    }
+    const result = this.physicsEngine.progressTurnMove({
+      state: this.activeTurnMove,
+      budgetMs,
+    });
+    if (!result.done) return false;
+    this.physicsEngine.snapTurnHeading(this.activeTurnMove);
+    this.physicsEngine.settle(90);
+    this.activeTurnMove = null;
     return true;
   }
 
@@ -287,11 +482,7 @@ export class IRRuntimeExecutor implements RuntimeExecutor {
 
         const distanceCm = toDistanceCm(node.unit, Math.abs(node.value));
         if (distanceCm <= 0) return;
-        const start = this.simulator.tick({
-          dt_ms: 0,
-          linear_velocity_cm_s: 0,
-          angular_velocity_deg_s: 0,
-        });
+        const start = this.physicsEngine.sample();
         let traveled = 0;
         let guardMs = 0;
         let previousPosition = start.pose.position;
@@ -301,21 +492,20 @@ export class IRRuntimeExecutor implements RuntimeExecutor {
         );
         const allCollisions = new Set<string>();
         while (traveled < distanceCm && guardMs < maxDurationMs) {
-          const step = Math.min(PHYSICS_STEP_MS, maxDurationMs - guardMs);
-          const frame = this.simulator.tick({
-            dt_ms: step,
-            linear_velocity_cm_s: targetLinear,
-            angular_velocity_deg_s: 0,
-          });
-          const dx = frame.pose.position.x - previousPosition.x;
-          const dy = frame.pose.position.y - previousPosition.y;
+          const step = Math.min(this.physicsEngine.getFixedStepMs(), maxDurationMs - guardMs);
+          const frame = this.physicsEngine.tickForDuration(step, targetLinear, 0);
+          const sampled = this.physicsEngine.sample();
+          const frameCollisions = frame.collisions;
+          const posePosition = sampled.pose.position;
+          const dx = posePosition.x - previousPosition.x;
+          const dy = posePosition.y - previousPosition.y;
           traveled += Math.sqrt(dx * dx + dy * dy);
-          previousPosition = frame.pose.position;
-          frame.collisions.forEach((id) => allCollisions.add(id));
-          if (frame.collisions.length > 0) break;
+          previousPosition = posePosition;
+          frameCollisions.forEach((id) => allCollisions.add(id));
+          if (frameCollisions.size > 0) break;
           guardMs += step;
         }
-        this.tickForDuration(120, 0, 0);
+        this.physicsEngine.settle(120);
         if (allCollisions.size > 0) {
           reportRuntimeIssue(
             collector,
@@ -329,32 +519,22 @@ export class IRRuntimeExecutor implements RuntimeExecutor {
         const speedPct = node.speed_pct ?? 100;
         const turnSpeed = (speedPct / 100) * this.runtimeBehavior.maxTurnSpeedDegS;
         const directionSign = node.direction === "left" ? -1 : 1;
-        const start = this.simulator.tick({
-          dt_ms: 0,
-          linear_velocity_cm_s: 0,
-          angular_velocity_deg_s: 0,
-        });
         const targetAngle = Math.abs(node.angle_deg);
-        let turned = 0;
-        let lastHeading = start.pose.heading_deg;
-        let guardMs = 0;
-        const maxDurationMs = Math.max(
-          500,
-          (targetAngle / Math.max(0.001, Math.abs(turnSpeed))) * 1000 * 4,
-        );
-        while (turned < targetAngle && guardMs < maxDurationMs) {
-          const step = Math.min(PHYSICS_STEP_MS, maxDurationMs - guardMs);
-          const frame = this.simulator.tick({
-            dt_ms: step,
-            linear_velocity_cm_s: 0,
-            angular_velocity_deg_s: directionSign * turnSpeed,
-          });
-          const delta = normalizeSignedAngle(frame.pose.heading_deg - lastHeading);
-          turned += Math.abs(delta);
-          lastHeading = frame.pose.heading_deg;
-          guardMs += step;
-        }
-        this.tickForDuration(90, 0, 0);
+        if (targetAngle <= 0) return;
+        const inlineTurn = this.physicsEngine.startTurnMove({
+          nodeId: node.id,
+          targetAngleDeg: targetAngle,
+          targetAngularDegS: directionSign * turnSpeed,
+          targetLinearCmS: computeTurnCreepLinearCmS(this.runtimeBehavior.maxLinearSpeedCmS, speedPct),
+          maxDurationMs: Math.max(500, (targetAngle / Math.max(0.001, Math.abs(turnSpeed))) * 1000 * 4),
+        });
+        const inlineBudget = inlineTurn.maxDurationMs + this.physicsEngine.getFixedStepMs() * 2;
+        this.physicsEngine.progressTurnMove({
+          state: inlineTurn,
+          budgetMs: inlineBudget,
+        });
+        this.physicsEngine.snapTurnHeading(inlineTurn);
+        this.physicsEngine.settle(90);
         return;
       }
       case "wait": {
@@ -368,11 +548,7 @@ export class IRRuntimeExecutor implements RuntimeExecutor {
         this.executeActuatorAction(node.actuator_id, node.action, node.value, node.duration_sec, collector);
         return;
       case "read_sensor": {
-        const result = this.simulator.tick({
-          dt_ms: 0,
-          linear_velocity_cm_s: 0,
-          angular_velocity_deg_s: 0,
-        });
+        const result = this.physicsEngine.sample();
         this.setVariable(node.output_var, (result.sensor_values[node.sensor] ?? 0) as RuntimeValue);
         return;
       }
@@ -473,6 +649,7 @@ export class IRRuntimeExecutor implements RuntimeExecutor {
     }
 
     const frame: CallFrame = {
+      frameId: `legacy_call_${this.callFrameSequence++}_${functionId}`,
       functionId,
       vars: new Map<string, RuntimeValue>(),
       didReturn: false,
@@ -493,19 +670,7 @@ export class IRRuntimeExecutor implements RuntimeExecutor {
   }
 
   private tickForDuration(totalMs: number, linearVelocityCmS: number, angularVelocityDegS: number): { collisions: Set<string> } {
-    let remaining = Math.max(0, totalMs);
-    const collisions = new Set<string>();
-    while (remaining > 0.0001) {
-      const step = Math.min(PHYSICS_STEP_MS, remaining);
-      const result = this.simulator.tick({
-        dt_ms: step,
-        linear_velocity_cm_s: linearVelocityCmS,
-        angular_velocity_deg_s: angularVelocityDegS,
-      });
-      result.collisions.forEach((id) => collisions.add(id));
-      remaining -= step;
-    }
-    return { collisions };
+    return this.physicsEngine.tickForDuration(totalMs, linearVelocityCmS, angularVelocityDegS);
   }
 
   private executeSetMotor(motorId: string, speedPctRaw: number, durationSecRaw: number | undefined, collector: RuntimeCollector): void {
@@ -657,11 +822,7 @@ export class IRRuntimeExecutor implements RuntimeExecutor {
   }
 
   private readSensorValue(sensor: string): string | number | boolean {
-    const result = this.simulator.tick({
-      dt_ms: 0,
-      linear_velocity_cm_s: 0,
-      angular_velocity_deg_s: 0,
-    });
+    const result = this.physicsEngine.sample();
     return result.sensor_values[sensor] ?? 0;
   }
 
@@ -711,5 +872,225 @@ export class IRRuntimeExecutor implements RuntimeExecutor {
     const frame = this.currentFrame();
     return Boolean(frame?.didReturn);
   }
+
+  private tryExpandControlNode(node: RoboticsIRNode, collector: RuntimeCollector, ownerCallFrameId?: string): boolean {
+    if (node.kind === "if") {
+      const branch = this.evaluateCondition(node.condition) ? node.then_nodes : node.else_nodes || [];
+      this.enqueueFront(branch, `${node.id}_if`, ownerCallFrameId);
+      return true;
+    }
+    if (node.kind !== "repeat") return false;
+    if (typeof node.times === "number") {
+      const repeatCount = Math.max(0, Math.floor(node.times));
+      if (repeatCount <= 0) return true;
+      const repeatNode = cloneNode(node) as Extract<RoboticsIRNode, { kind: "repeat" }>;
+      const nextRepeat: Extract<RoboticsIRNode, { kind: "repeat" }> = {
+        ...repeatNode,
+        times: repeatCount - 1,
+      };
+      this.enqueueFront([...node.body, nextRepeat], `${node.id}_repeat`, ownerCallFrameId);
+      return true;
+    }
+    if (!node.while) return true;
+    const key = node.id;
+    if (!this.evaluateCondition(node.while)) {
+      this.repeatWhileGuards.delete(key);
+      return true;
+    }
+    const nextCount = (this.repeatWhileGuards.get(key) || 0) + 1;
+    this.repeatWhileGuards.set(key, nextCount);
+    if (nextCount > 1000) {
+      reportRuntimeIssue(
+        collector,
+        ISSUE_CODES.LOOP_SAFETY_CAP,
+        "repeat while loop reached safety cap (1000 iterations)",
+      );
+      return true;
+    }
+    this.enqueueFront([...node.body, node], `${node.id}_while`, ownerCallFrameId);
+    return true;
+  }
+
+  private enqueueFront(nodes: RoboticsIRNode[], tag: string, ownerCallFrameId?: string): void {
+    if (!Array.isArray(nodes) || nodes.length === 0) return;
+    const cloned: PendingExecutionEntry[] = nodes.map((child, index) => ({
+      kind: "node",
+      node: this.cloneNodeForQueue(child, `${tag}_${index}`),
+      ownerCallFrameId,
+    }));
+    this.pendingNodes = [...cloned, ...this.pendingNodes];
+  }
+
+  private scheduleFunctionCall(
+    node: Extract<RoboticsIRNode, { kind: "call" }>,
+    collector: RuntimeCollector,
+    ownerCallFrameId?: string,
+  ): RuntimeSemanticEvent {
+    if (!this.program?.functions?.length) {
+      reportRuntimeIssue(
+        collector,
+        ISSUE_CODES.CALL_UNRESOLVED,
+        `call unresolved: function "${node.function_id}" is not defined`,
+      );
+      this.state = "error";
+      return this.buildSemanticEvent("node_executed", node.id, "call_unresolved");
+    }
+    const fn =
+      this.program.functions.find((item) => item.id === node.function_id) ??
+      this.program.functions.find((item) => item.name === node.function_id);
+    if (!fn) {
+      reportRuntimeIssue(
+        collector,
+        ISSUE_CODES.CALL_UNRESOLVED,
+        `call unresolved: function "${node.function_id}" is not defined`,
+      );
+      this.state = "error";
+      return this.buildSemanticEvent("node_executed", node.id, "call_unresolved");
+    }
+    if (this.callDepth >= IRRuntimeExecutor.MAX_CALL_DEPTH) {
+      reportRuntimeIssue(
+        collector,
+        ISSUE_CODES.CALL_STACK_OVERFLOW,
+        `call stack overflow at function "${node.function_id}"`,
+      );
+      this.state = "error";
+      return this.buildSemanticEvent("node_executed", node.id, "call_stack_overflow");
+    }
+    const frameId = `call_${this.callFrameSequence++}_${fn.id}`;
+    const frame: CallFrame = {
+      frameId,
+      functionId: fn.id,
+      vars: new Map<string, RuntimeValue>(),
+      didReturn: false,
+      returnValue: 0,
+    };
+    for (let i = 0; i < fn.params.length; i += 1) {
+      const param = fn.params[i];
+      const argExpr = node.args?.[i];
+      const resolvedArg = this.resolveCallArgument(argExpr);
+      frame.vars.set(param, (resolvedArg ?? 0) as RuntimeValue);
+    }
+    this.callFrames.push(frame);
+    this.callDepth += 1;
+    const bodyEntries: PendingExecutionEntry[] = fn.body.map((child, index) => ({
+      kind: "node",
+      node: this.cloneNodeForQueue(child, `${node.id}_call_${index}`),
+      ownerCallFrameId: frameId,
+    }));
+    bodyEntries.push({
+      kind: "call_end",
+      callFrameId: frameId,
+      nodeId: `${node.id}__return`,
+    });
+    if (ownerCallFrameId) {
+      for (const entry of bodyEntries) {
+        if (entry.kind === "node" && !entry.ownerCallFrameId) {
+          entry.ownerCallFrameId = ownerCallFrameId;
+        }
+      }
+    }
+    this.pendingNodes = [...bodyEntries, ...this.pendingNodes];
+    return this.buildSemanticEvent("call_enter", node.id, fn.name || fn.id);
+  }
+
+  private cloneNodeForQueue(node: RoboticsIRNode, tag: string): RoboticsIRNode {
+    const clone = cloneNode(node);
+    clone.id = `${clone.id}__q${this.queueSequence++}_${tag}`;
+    return clone;
+  }
+
+  private peekNextEntry(): PendingExecutionEntry | null {
+    if (this.pendingNodes.length > 0) {
+      return this.pendingNodes[0] || null;
+    }
+    if (!this.program || this.cursor >= this.program.nodes.length) return null;
+    return {
+      kind: "node",
+      node: this.program.nodes[this.cursor],
+    };
+  }
+
+  private consumeNextEntry(): void {
+    if (this.pendingNodes.length > 0) {
+      this.pendingNodes.shift();
+      return;
+    }
+    this.cursor += 1;
+  }
+
+  private markCompletedIfDone(): void {
+    if (this.cursor >= (this.program?.nodes.length || 0) && this.pendingNodes.length === 0 && this.state !== "error") {
+      this.state = "completed";
+    }
+  }
+
+  private isCallFrameReturned(frameId: string): boolean {
+    const frame = this.callFrames.find((item) => item.frameId === frameId);
+    return Boolean(frame?.didReturn);
+  }
+
+  private popCallFrame(frameId: string): void {
+    const idx = this.callFrames.findIndex((frame) => frame.frameId === frameId);
+    if (idx >= 0) {
+      this.callFrames.splice(idx, 1);
+      this.callDepth = Math.max(0, this.callDepth - 1);
+    }
+  }
+
+  private buildControlBoundaryEvent(node: RoboticsIRNode): RuntimeSemanticEvent {
+    if (node.kind === "if") {
+      const result = this.evaluateCondition(node.condition);
+      return this.buildSemanticEvent("condition_evaluated", node.id, result ? "then" : "else", result);
+    }
+    if (node.kind === "repeat") {
+      if (typeof node.times === "number") {
+        return this.buildSemanticEvent(node.times > 0 ? "loop_check" : "loop_exit", node.id, `times:${node.times}`);
+      }
+      if (node.while) {
+        const result = this.evaluateCondition(node.while);
+        return this.buildSemanticEvent(result ? "loop_check" : "loop_exit", node.id, "while", result);
+      }
+      return this.buildSemanticEvent("loop_exit", node.id);
+    }
+    return this.buildSemanticEvent("node_executed", node.id);
+  }
+
+  private buildSemanticEvent(
+    type: RuntimeSemanticEvent["type"],
+    nodeId: string,
+    detail?: string,
+    conditionResult?: boolean,
+  ): RuntimeSemanticEvent {
+    return {
+      type,
+      nodeId,
+      detail,
+      callDepth: this.callDepth,
+      conditionResult,
+      variables: this.snapshotVariables(),
+    };
+  }
+
+  private snapshotVariables(): Record<string, RuntimeValue> {
+    const snapshot: Record<string, RuntimeValue> = {};
+    this.globalVariables.forEach((value, key) => {
+      snapshot[key] = value;
+    });
+    const frame = this.currentFrame();
+    if (frame) {
+      frame.vars.forEach((value, key) => {
+        snapshot[`local:${key}`] = value;
+      });
+    }
+    return snapshot;
+  }
+}
+
+function cloneProgram(program: RoboticsProgram): RoboticsProgram {
+  return JSON.parse(JSON.stringify(program)) as RoboticsProgram;
+}
+
+function cloneNode(node: RoboticsIRNode): RoboticsIRNode {
+  return JSON.parse(JSON.stringify(node)) as RoboticsIRNode;
 }
 
