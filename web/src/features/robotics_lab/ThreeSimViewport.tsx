@@ -19,6 +19,8 @@ import { resolveWheelProfile } from "../../labs/robotics/simulator/wheelProfile"
 import { GRID_CELL_CM } from "./workspaceDefaults";
 
 type PointerEvent3D = any;
+type ViteLikeImportMeta = ImportMeta & { env?: { DEV?: boolean } };
+const IS_DEV_MODE = Boolean((import.meta as ViteLikeImportMeta).env?.DEV);
 
 interface Position2D {
   x?: number;
@@ -150,6 +152,9 @@ interface RenderedRobotState {
   x: number;
   z: number;
   heading_deg: number;
+  elevation_cm: number;
+  pitch_deg: number;
+  roll_deg: number;
 }
 
 declare global {
@@ -186,16 +191,16 @@ function buildGridLines(width: number, depth: number, step: number, y: number): 
 }
 
 function WorkspaceGrid({ width, depth }: { width: number; depth: number }) {
-  const cellGeo = useMemo(() => buildGridLines(width, depth, 20, 0.06), [width, depth]);
+  const cellGeo = useMemo(() => buildGridLines(width, depth, 20, 0.08), [width, depth]);
   const sectionGeo = useMemo(() => buildGridLines(width, depth, 100, 0.1), [width, depth]);
 
   return (
     <group>
       <lineSegments geometry={cellGeo}>
-        <lineBasicMaterial color="#a0aec0" transparent opacity={0.45} depthWrite={false} />
+        <lineBasicMaterial color="#5f7f9f" transparent opacity={0.9} depthWrite={false} />
       </lineSegments>
       <lineSegments geometry={sectionGeo}>
-        <lineBasicMaterial color="#7a8ba0" transparent opacity={0.7} depthWrite={false} />
+        <lineBasicMaterial color="#3f6488" transparent opacity={0.98} depthWrite={false} />
       </lineSegments>
     </group>
   );
@@ -620,6 +625,24 @@ export function ThreeSimViewport({
     if (orbitRef.current) orbitRef.current.enabled = !isDragging;
   }, []);
   const overlayOpacity = overlayOpacityForMode(resolvedCameraState.mode);
+  const physicsDebug = useMemo(() => {
+    const groundedRaw = sensorValues?.__physics_grounded;
+    const elevationRaw = sensorValues?.__physics_elevation_cm;
+    const supportRaw = sensorValues?.__physics_support;
+    const grounded = typeof groundedRaw === "boolean" ? groundedRaw : null;
+    const elevationCm =
+      typeof elevationRaw === "number"
+        ? elevationRaw
+        : typeof elevationRaw === "string"
+          ? Number(elevationRaw)
+          : null;
+    const support = typeof supportRaw === "string" && supportRaw.trim() ? supportRaw : null;
+    return {
+      grounded,
+      elevationCm: Number.isFinite(elevationCm as number) ? (elevationCm as number) : null,
+      support,
+    };
+  }, [sensorValues]);
 
   return (
     <div className="robotics-three-viewport">
@@ -695,7 +718,7 @@ export function ThreeSimViewport({
           </group>
         </group>
         <group name="robotLayer">
-          <AnimatedRobot pose={pose} robotModel={robotModel} />
+          <AnimatedRobot pose={pose} robotModel={robotModel} sensorValues={sensorValues} />
           {editable && robotStartPose ? (
             <EditableRobotStart
               robotStartPose={robotStartPose}
@@ -750,11 +773,32 @@ export function ThreeSimViewport({
         </group>
         <OrbitControls ref={orbitRef} makeDefault enableDamping dampingFactor={0.08} />
       </Canvas>
-      {import.meta.env.DEV && debugPose ? (
+      {IS_DEV_MODE && debugPose ? (
         <div className="robotics-camera-debug">
-          <strong>{resolvedCameraState.mode}</strong>{" "}
-          p({Math.round(debugPose.position.x)},{Math.round(debugPose.position.y)},{Math.round(debugPose.position.z)}) t(
-          {Math.round(debugPose.target.x)},{Math.round(debugPose.target.y)},{Math.round(debugPose.target.z)})
+          <div className="robotics-camera-debug-line">
+            <strong>{resolvedCameraState.mode}</strong>{" "}
+            p({Math.round(debugPose.position.x)},{Math.round(debugPose.position.y)},{Math.round(debugPose.position.z)}) t(
+            {Math.round(debugPose.target.x)},{Math.round(debugPose.target.y)},{Math.round(debugPose.target.z)})
+          </div>
+          {physicsDebug.grounded !== null || physicsDebug.elevationCm !== null || physicsDebug.support ? (
+            <div className="robotics-camera-debug-line">
+              phys: {physicsDebug.grounded === null ? "?" : physicsDebug.grounded ? "grounded" : "airborne"} | elev{" "}
+              {physicsDebug.elevationCm === null ? "?" : `${physicsDebug.elevationCm.toFixed(1)}cm`} | support{" "}
+              {physicsDebug.support || "none"}
+            </div>
+          ) : null}
+          {typeof sensorValues?.__physics_pitch_deg === "number" || typeof sensorValues?.__physics_roll_deg === "number" ? (
+            <div className="robotics-camera-debug-line">
+              tilt: pitch{" "}
+              {typeof sensorValues?.__physics_pitch_deg === "number"
+                ? `${Number(sensorValues.__physics_pitch_deg).toFixed(1)}deg`
+                : "?"}{" "}
+              | roll{" "}
+              {typeof sensorValues?.__physics_roll_deg === "number"
+                ? `${Number(sensorValues.__physics_roll_deg).toFixed(1)}deg`
+                : "?"}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -935,7 +979,7 @@ function SceneCameraRig({
   }, [cameraFocusToken, controller, orbitRef, robotPose]);
 
   useEffect(() => {
-    if (!import.meta.env.DEV) return;
+    if (!IS_DEV_MODE) return;
     const controls = orbitRef.current;
     if (!controls) return;
 
@@ -1057,7 +1101,15 @@ function normalizeHeadingDelta(delta: number): number {
   return ((delta + 540) % 360) - 180;
 }
 
-function AnimatedRobot({ pose, robotModel }: { pose?: SimulatorPose; robotModel?: SimulatorRobotModel | null }) {
+function AnimatedRobot({
+  pose,
+  robotModel,
+  sensorValues,
+}: {
+  pose?: SimulatorPose;
+  robotModel?: SimulatorRobotModel | null;
+  sensorValues?: SensorValues;
+}) {
   const robotRef = useRef<THREE.Group | null>(null);
   const wheelGroupRefs = useRef<Array<THREE.Group | null>>([]);
   const initializedRef = useRef(false);
@@ -1067,11 +1119,17 @@ function AnimatedRobot({ pose, robotModel }: { pose?: SimulatorPose; robotModel?
     x: pose?.position?.x ?? 0,
     z: pose?.position?.y ?? 0,
     heading_deg: pose?.heading_deg ?? 0,
+    elevation_cm: 0,
+    pitch_deg: 0,
+    roll_deg: 0,
   });
   const renderedRef = useRef<RenderedRobotState>({
     x: pose?.position?.x ?? 0,
     z: pose?.position?.y ?? 0,
     heading_deg: pose?.heading_deg ?? 0,
+    elevation_cm: 0,
+    pitch_deg: 0,
+    roll_deg: 0,
   });
   const resolvedRobotModel = useMemo(
     () =>
@@ -1093,13 +1151,29 @@ function AnimatedRobot({ pose, robotModel }: { pose?: SimulatorPose; robotModel?
   const trackOffset = wheelProfile.trackWidthCm / 2;
   const wheelY = -chassisHeight / 2 + wheelRadius;
 
+  const numericSensor = useCallback(
+    (key: string): number => {
+      const value = sensorValues?.[key];
+      if (typeof value === "number") return value;
+      if (typeof value === "string") {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : 0;
+      }
+      return 0;
+    },
+    [sensorValues],
+  );
+
   useEffect(() => {
     targetRef.current = {
       x: pose?.position?.x ?? 0,
       z: pose?.position?.y ?? 0,
       heading_deg: pose?.heading_deg ?? 0,
+      elevation_cm: numericSensor("__physics_elevation_cm"),
+      pitch_deg: numericSensor("__physics_pitch_deg"),
+      roll_deg: numericSensor("__physics_roll_deg"),
     };
-  }, [pose]);
+  }, [numericSensor, pose]);
 
   useFrame((_, delta) => {
     if (!robotRef.current) return;
@@ -1118,6 +1192,9 @@ function AnimatedRobot({ pose, robotModel }: { pose?: SimulatorPose; robotModel?
     rendered.x += (target.x - rendered.x) * smoothing;
     rendered.z += (target.z - rendered.z) * smoothing;
     rendered.heading_deg += normalizeHeadingDelta(target.heading_deg - rendered.heading_deg) * smoothing;
+    rendered.elevation_cm += (target.elevation_cm - rendered.elevation_cm) * smoothing;
+    rendered.pitch_deg += (target.pitch_deg - rendered.pitch_deg) * smoothing;
+    rendered.roll_deg += (target.roll_deg - rendered.roll_deg) * smoothing;
 
     const headingDeltaRad = (normalizeHeadingDelta(rendered.heading_deg - previousHeadingDeg) * Math.PI) / 180;
     const dx = rendered.x - previousX;
@@ -1146,8 +1223,17 @@ function AnimatedRobot({ pose, robotModel }: { pose?: SimulatorPose; robotModel?
       wheelGroup.rotation.set(0, isFrontWheel ? -steeringAngleRef.current : 0, spin);
     });
 
-    robotRef.current.position.set(rendered.x, wheelRadius + chassisHeight / 2 - 0.2, rendered.z);
-    robotRef.current.rotation.set(0, -(rendered.heading_deg * Math.PI) / 180, 0);
+    const baseY = wheelRadius + chassisHeight / 2 - 0.2;
+    robotRef.current.position.set(rendered.x, baseY + Math.max(0, rendered.elevation_cm), rendered.z);
+    // Robot forward axis is local +X, so:
+    // - roll rotates around X
+    // - pitch rotates around Z
+    robotRef.current.rotation.set(
+      (rendered.roll_deg * Math.PI) / 180,
+      -(rendered.heading_deg * Math.PI) / 180,
+      (rendered.pitch_deg * Math.PI) / 180,
+      "YXZ",
+    );
   });
 
   return (

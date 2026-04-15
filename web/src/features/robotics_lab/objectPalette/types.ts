@@ -13,6 +13,8 @@ export type ObjectCategoryId =
 export type SimulatorPlacementShape = "box" | "sphere" | "cylinder" | "flat_zone";
 
 export type SimulatorPhysicsBodyType = "static" | "dynamic" | "kinematic";
+export type SimulatorContactMode = "solid" | "sensor_only" | "pass_through";
+export type SimulatorSurfaceType = "default" | "ramp" | "low_friction" | "high_friction";
 
 export type EditablePropertyControl =
   | "number"
@@ -71,6 +73,20 @@ export interface SimulatorObjectPhysicsBehavior {
   notes?: string;
 }
 
+export interface SimulatorObjectContactBehavior {
+  contactMode?: SimulatorContactMode;
+  surfaceType?: SimulatorSurfaceType;
+  frictionCoefficient?: number;
+  restitutionCoefficient?: number;
+  slopeDeg?: number;
+  maxClimbSlopeDeg?: number;
+  isRampEntryBlocking?: boolean;
+  rampEntrySide?: "positive_x" | "negative_x";
+  rampSideBlocking?: boolean;
+  rampDescentAssist?: number;
+  pushResistance?: number;
+}
+
 export interface SimulatorObjectDefinition {
   id: string;
   displayName: string;
@@ -83,6 +99,7 @@ export interface SimulatorObjectDefinition {
   placement: SimulatorObjectPlacementDefaults;
   editableProperties: EditablePropertyDescriptor[];
   physicsBehavior: SimulatorObjectPhysicsBehavior;
+  contactBehavior?: SimulatorObjectContactBehavior;
   sensorInteraction: SensorInteractionDefinition[];
   eventsEmitted: SimulatorObjectEventDefinition[];
   runtimeMetadata?: Record<string, unknown>;

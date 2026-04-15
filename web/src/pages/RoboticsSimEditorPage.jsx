@@ -764,6 +764,12 @@ export default function RoboticsSimEditorPage() {
           setRuntimeSettings((prev) => ({ ...prev, rolling_resistance: value }));
           void saveProjectSnapshot("runtime_settings_changed");
         }}
+        robotMaxClimbSlopeDeg={Number(runtimeSettings.robot_max_climb_slope_deg ?? 16)}
+        onRobotMaxClimbSlopeDegChange={(value) => {
+          const clamped = Math.max(0, Math.min(60, Number(value) || 0));
+          setRuntimeSettings((prev) => ({ ...prev, robot_max_climb_slope_deg: clamped }));
+          void saveProjectSnapshot("runtime_settings_changed");
+        }}
       />
 
       <aside className="robotics-lab-right robotics-lab-right--editor">

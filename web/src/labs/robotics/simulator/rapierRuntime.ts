@@ -1,5 +1,6 @@
 import type {
   RoboticsSimulatorBridge,
+  SimulatorContactMode,
   SimulatorPose2D,
   SimulatorRobotModel,
   SimulatorSceneObject,
@@ -24,6 +25,10 @@ function normalizeHeading(heading: number): number {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
+}
+
+function dot2(ax: number, ay: number, bx: number, by: number): number {
+  return ax * bx + ay * by;
 }
 
 function quaternionToYawDeg(rotation: { x: number; y: number; z: number; w: number }): number {
@@ -73,6 +78,8 @@ export class RapierRuntimeSimulator implements RoboticsSimulatorBridge {
   private rightWheelVelocityCmS = 0;
 
   private static readonly EPS = 0.01;
+  private static readonly DEFAULT_MAX_CLIMB_SLOPE_DEG = 16;
+  private static readonly RAMP_ENTRY_ALIGNMENT_MIN = 0.45;
 
   constructor(robot: SimulatorRobotModel) {
     this.robot = robot;
@@ -118,6 +125,7 @@ export class RapierRuntimeSimulator implements RoboticsSimulatorBridge {
       return this.fallback.tick(input);
     }
 
+    const poseBeforeStep = { position: { ...this.pose.position }, heading_deg: this.pose.heading_deg };
     const dtSeconds = Math.max(0, Number(input.dt_ms) || 0) / 1000;
     if (dtSeconds > 0) {
       this.rapierWorld.integrationParameters.dt = dtSeconds;
@@ -169,7 +177,16 @@ export class RapierRuntimeSimulator implements RoboticsSimulatorBridge {
       heading_deg: quaternionToYawDeg(r),
     };
     this.syncDynamicObjectTransforms();
-    this.lastCollisions = this.computeRobotCollisions();
+    this.lastCollisions = this.computeRobotCollisions(poseBeforeStep, this.pose);
+    if (dtSeconds > 0 && this.lastCollisions.length > 0) {
+      this.pose = {
+        position: { ...poseBeforeStep.position },
+        heading_deg: this.pose.heading_deg,
+      };
+      const halfHeight = this.robotHeightCm() / 2;
+      this.robotBody.setTranslation({ x: this.pose.position.x, y: halfHeight, z: this.pose.position.y }, true);
+      this.robotBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    }
 
     return {
       pose: { ...this.pose, position: { ...this.pose.position } },
@@ -266,7 +283,9 @@ export class RapierRuntimeSimulator implements RoboticsSimulatorBridge {
   private createSceneObjectBody(object: SimulatorSceneObject): void {
     const R = this.rapier;
     const metadata = object.metadata || {};
-    const dynamic = metadata.physics_body === "dynamic" && object.type !== "wall";
+    const contactMode = this.getContactMode(object);
+    if (contactMode === "pass_through") return;
+    const dynamic = contactMode === "solid" && metadata.physics_body === "dynamic" && object.type !== "wall";
     const bodyDesc = dynamic ? R.RigidBodyDesc.dynamic() : R.RigidBodyDesc.fixed();
     const halfY = Math.max(1, Number(object.size_cm?.y) || 20) / 2;
     const body = this.rapierWorld.createRigidBody(
@@ -284,6 +303,17 @@ export class RapierRuntimeSimulator implements RoboticsSimulatorBridge {
         Math.max(1, object.size_cm.y / 2),
         Math.max(1, object.size_cm.z / 2),
       );
+    }
+    const friction = Number(metadata.friction_coefficient ?? metadata.friction);
+    if (Number.isFinite(friction)) {
+      colliderDesc.setFriction(clamp(friction, 0, 5));
+    }
+    const restitution = Number(metadata.restitution_coefficient ?? metadata.restitution);
+    if (Number.isFinite(restitution)) {
+      colliderDesc.setRestitution(clamp(restitution, 0, 1));
+    }
+    if (contactMode === "sensor_only" || this.getSurfaceType(object) === "ramp") {
+      colliderDesc.setSensor(true);
     }
     const collider = this.rapierWorld.createCollider(colliderDesc, body);
     this.colliderToObjectId.set(collider.handle, object.id);
@@ -312,13 +342,21 @@ export class RapierRuntimeSimulator implements RoboticsSimulatorBridge {
     }
   }
 
-  private computeRobotCollisions(): string[] {
+  private computeRobotCollisions(previousPose: SimulatorPose2D, currentPose: SimulatorPose2D): string[] {
     if (!this.robotCollider) return [];
     const collisions = new Set<string>();
     try {
       this.rapierWorld.intersectionsWith(this.robotCollider, (otherCollider: any) => {
         const id = this.colliderToObjectId.get(otherCollider.handle);
-        if (id) collisions.add(id);
+        if (!id) return true;
+        if (id.startsWith("world_bounds_")) {
+          collisions.add("world_bounds");
+          return true;
+        }
+        const object = this.findSceneObjectById(id);
+        if (object && this.shouldObjectBlockRobot(object, previousPose, currentPose)) {
+          collisions.add(id);
+        }
         return true;
       });
     } catch {
@@ -429,6 +467,127 @@ export class RapierRuntimeSimulator implements RoboticsSimulatorBridge {
       z: 0,
       w: Math.cos(yawRad / 2),
     };
+  }
+
+  private isBaseCollidableType(object: SimulatorSceneObject): boolean {
+    return object.type === "obstacle" || object.type === "wall";
+  }
+
+  private getContactMode(object: SimulatorSceneObject): SimulatorContactMode {
+    const value = object.metadata?.contact_mode;
+    if (value === "pass_through" || value === "sensor_only" || value === "solid") return value;
+    return "solid";
+  }
+
+  private getSurfaceType(object: SimulatorSceneObject): string {
+    const surface = object.metadata?.surface_type;
+    if (typeof surface === "string" && surface.trim()) return surface;
+    if (object.metadata?.render_shape === "ramp") return "ramp";
+    return "default";
+  }
+
+  private robotMaxClimbSlopeDeg(): number {
+    const raw = Number(this.robot.max_climb_slope_deg);
+    if (!Number.isFinite(raw)) return RapierRuntimeSimulator.DEFAULT_MAX_CLIMB_SLOPE_DEG;
+    return clamp(raw, 0, 89);
+  }
+
+  private requiredSlopeToTraverseDeg(object: SimulatorSceneObject): number {
+    const overrideRequired = Number(object.metadata?.max_climb_slope_deg);
+    if (Number.isFinite(overrideRequired)) return clamp(overrideRequired, 0, 89);
+    const slopeDeg = Number(object.metadata?.slope_deg);
+    if (Number.isFinite(slopeDeg)) return clamp(slopeDeg, 0, 89);
+    return 14;
+  }
+
+  private isRampTraversable(object: SimulatorSceneObject): boolean {
+    if (this.getSurfaceType(object) !== "ramp") return false;
+    if (object.metadata?.is_ramp_entry_blocking === true) return false;
+    return this.robotMaxClimbSlopeDeg() + 1e-6 >= this.requiredSlopeToTraverseDeg(object);
+  }
+
+  private shouldObjectBlockRobot(
+    object: SimulatorSceneObject,
+    previousPose: SimulatorPose2D,
+    currentPose: SimulatorPose2D,
+  ): boolean {
+    if (!this.isBaseCollidableType(object)) return false;
+    const contactMode = this.getContactMode(object);
+    if (contactMode === "pass_through" || contactMode === "sensor_only") return false;
+    if (this.getSurfaceType(object) === "ramp") {
+      return !this.canTraverseRampForMotion(object, previousPose, currentPose);
+    }
+    return true;
+  }
+
+  private toObjectLocal(pointX: number, pointY: number, object: SimulatorSceneObject): { x: number; z: number } {
+    const yawDeg = Number(object.rotation_deg?.y) || 0;
+    const yawRad = toRadians(yawDeg);
+    const cos = Math.cos(-yawRad);
+    const sin = Math.sin(-yawRad);
+    return {
+      x: (pointX - object.position.x) * cos - (pointY - object.position.z) * sin,
+      z: (pointX - object.position.x) * sin + (pointY - object.position.z) * cos,
+    };
+  }
+
+  private rampUphillDirection(object: SimulatorSceneObject): { x: number; y: number } {
+    const yawDeg = Number(object.rotation_deg?.y) || 0;
+    const yawRad = toRadians(yawDeg);
+    const entrySide = object.metadata?.ramp_entry_side === "negative_x" ? -1 : 1;
+    const axisSign = entrySide === 1 ? -1 : 1;
+    return { x: axisSign * Math.cos(yawRad), y: axisSign * Math.sin(yawRad) };
+  }
+
+  private canTraverseRampForMotion(
+    object: SimulatorSceneObject,
+    previousPose: SimulatorPose2D,
+    currentPose: SimulatorPose2D,
+  ): boolean {
+    if (!this.isRampTraversable(object)) return false;
+    const dx = currentPose.position.x - previousPose.position.x;
+    const dy = currentPose.position.y - previousPose.position.y;
+    const magnitude = Math.hypot(dx, dy);
+    if (magnitude <= RapierRuntimeSimulator.EPS) return true;
+    const dirX = dx / magnitude;
+    const dirY = dy / magnitude;
+    const uphill = this.rampUphillDirection(object);
+    const headingDot = dot2(dirX, dirY, uphill.x, uphill.y);
+    const sideBlocking = object.metadata?.ramp_side_blocking !== false;
+    if (sideBlocking && Math.abs(headingDot) < RapierRuntimeSimulator.RAMP_ENTRY_ALIGNMENT_MIN) return false;
+
+    const halfW = Math.max(1, Number(object.size_cm?.x) || 0) / 2;
+    const halfD = Math.max(1, Number(object.size_cm?.z) || 0) / 2;
+    const radius = Math.hypot(this.robot.length_cm, this.robot.width_cm) * 0.4;
+    const entryBand = Math.max(radius, halfW * 0.24);
+    const localPrevious = this.toObjectLocal(previousPose.position.x, previousPose.position.y, object);
+    const localCurrent = this.toObjectLocal(currentPose.position.x, currentPose.position.y, object);
+    const startsInside =
+      Math.abs(localPrevious.x) <= halfW + radius && Math.abs(localPrevious.z) <= halfD + radius;
+
+    if (headingDot > 0) {
+      const tractionGate = clamp(this.wheelProfile.tractionLongitudinal, 0.25, 1.2);
+      const effectiveCapability = this.robotMaxClimbSlopeDeg() * tractionGate;
+      if (effectiveCapability + 1e-6 < this.requiredSlopeToTraverseDeg(object)) return false;
+      if (!startsInside) {
+        const entrySide = object.metadata?.ramp_entry_side === "negative_x" ? -1 : 1;
+        if (entrySide === 1 && localPrevious.x < halfW - entryBand) return false;
+        if (entrySide === -1 && localPrevious.x > -halfW + entryBand) return false;
+      }
+      return Math.abs(localCurrent.z) <= halfD + radius * 0.35;
+    }
+
+    if (!startsInside) {
+      const entrySide = object.metadata?.ramp_entry_side === "negative_x" ? -1 : 1;
+      if (entrySide === 1 && localPrevious.x > -halfW + entryBand) return false;
+      if (entrySide === -1 && localPrevious.x < halfW - entryBand) return false;
+    }
+    return Math.abs(localCurrent.z) <= halfD + radius * 0.35;
+  }
+
+  private findSceneObjectById(objectId: string): SimulatorSceneObject | null {
+    if (!this.world?.world_scene?.objects) return null;
+    return this.world.world_scene.objects.find((item) => item.id === objectId) || null;
   }
 }
 

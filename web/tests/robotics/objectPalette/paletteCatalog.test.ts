@@ -45,6 +45,20 @@ describe("object palette catalog", () => {
     expect(sceneObject.position).toEqual({ x: 120, y: 0, z: 160 });
     expect(sceneObject.metadata?.palette_object_id).toBe(definition.id);
     expect(sceneObject.metadata?.render_shape).toBe("sphere");
+    expect(sceneObject.metadata?.contact_mode).toBe("solid");
+    expect(sceneObject.metadata?.friction_coefficient).toBeCloseTo(0.7, 3);
+    expect(sceneObject.metadata?.restitution_coefficient).toBeCloseTo(0.3, 3);
+  });
+
+  it("propagates ramp contact metadata for slope-limited traversal", () => {
+    const definition = getObjectDefinitionById("nav_ramp");
+    expect(definition).toBeTruthy();
+    if (!definition) return;
+    const sceneObject = createSceneObjectFromPalette(definition, 80, 80);
+    expect(sceneObject.metadata?.surface_type).toBe("ramp");
+    expect(sceneObject.metadata?.slope_deg).toBeGreaterThan(0);
+    expect(sceneObject.metadata?.ramp_entry_side).toBe("positive_x");
+    expect(sceneObject.metadata?.ramp_side_blocking).toBe(true);
   });
 });
 

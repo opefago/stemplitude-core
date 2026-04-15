@@ -82,6 +82,36 @@ class BlockingCollisionSimulator implements RoboticsSimulatorBridge {
   }
 }
 
+class RampBlockingSimulator implements RoboticsSimulatorBridge {
+  private pose: SimulatorPose2D = { position: { x: 0, y: 0 }, heading_deg: 0 };
+
+  setWorld(): void {}
+
+  reset(pose: SimulatorPose2D): void {
+    this.pose = {
+      position: { ...pose.position },
+      heading_deg: pose.heading_deg,
+    };
+  }
+
+  tick(input: SimulatorTickInput): SimulatorTickOutput {
+    const isTryingToMove = Math.abs(input.linear_velocity_cm_s) > 0.001;
+    return {
+      pose: {
+        position: { ...this.pose.position },
+        heading_deg: this.pose.heading_deg,
+      },
+      collisions: isTryingToMove ? ["ramp_1"] : [],
+      sensor_values: {
+        distance: 0,
+        gyro: this.pose.heading_deg,
+        __physics_grounded: false,
+        __physics_elevation_cm: 12,
+      },
+    };
+  }
+}
+
 describe("IRRuntimeExecutor", () => {
   it("executes program nodes and reaches completed state", () => {
     const simulator = new MockSimulator();
@@ -539,6 +569,24 @@ describe("IRRuntimeExecutor", () => {
 
     expect(first.highlightedNodeId).toBe("move_1");
     expect(second.highlightedNodeId).toBe("turn_1");
+  });
+
+  it("keeps hold-until-distance behavior for ramp collision ids", () => {
+    const simulator = new RampBlockingSimulator();
+    const executor = new IRRuntimeExecutor(simulator);
+    const program: RoboticsProgram = {
+      version: 1,
+      entrypoint: "main",
+      nodes: [{ id: "move_1", kind: "move", direction: "forward", unit: "distance_cm", value: 80, speed_pct: 100 }],
+    };
+    executor.load(program);
+    executor.run();
+    let result = executor.step();
+    for (let i = 0; i < 20; i += 1) {
+      result = executor.step();
+    }
+    expect(result.state).toBe("running");
+    expect(result.highlightedNodeId).toBe("move_1");
   });
 
   it("fails with call stack overflow on direct recursion", () => {

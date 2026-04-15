@@ -159,6 +159,7 @@ export function useRoboticsWorkspace() {
     traction_longitudinal: 0.92,
     traction_lateral: 0.9,
     rolling_resistance: 4.2,
+    robot_max_climb_slope_deg: 16,
   });
   const [world, setWorld] = useState(BASE_WORLD);
   const [program, setProgram] = useState(SAMPLE_PROGRAM);
@@ -205,10 +206,12 @@ export function useRoboticsWorkspace() {
         optionalNumber(runtimeSettings.traction_longitudinal) ?? profile.tractionLongitudinal,
       traction_lateral: optionalNumber(runtimeSettings.traction_lateral) ?? profile.tractionLateral,
       rolling_resistance: optionalNumber(runtimeSettings.rolling_resistance) ?? profile.rollingResistance,
+      max_climb_slope_deg: optionalNumber(runtimeSettings.robot_max_climb_slope_deg) ?? 16,
     };
   }, [
     baseRobotModel,
     runtimeSettings.rolling_resistance,
+    runtimeSettings.robot_max_climb_slope_deg,
     runtimeSettings.traction_lateral,
     runtimeSettings.traction_longitudinal,
   ]);

@@ -28,6 +28,7 @@ function buildWorld(
   objectType: "obstacle" | "wall",
   physicsBody: "dynamic" | "static",
   renderShape?: "sphere",
+  extraMetadata?: Record<string, unknown>,
 ): SimulatorWorldMap {
   return {
     id: "test_world",
@@ -49,6 +50,7 @@ function buildWorld(
           metadata: {
             physics_body: physicsBody,
             ...(renderShape ? { render_shape: renderShape } : {}),
+            ...(extraMetadata || {}),
           },
         },
       ],
@@ -220,5 +222,133 @@ describe("ThreeRuntimeSimulator dynamic contacts", () => {
     expect(first.position.x).toBeCloseTo(second.position.x, 6);
     expect(first.position.y).toBeCloseTo(second.position.y, 6);
     expect(first.heading_deg).toBeCloseTo(second.heading_deg, 6);
+  });
+
+  it("traverses ramps when slope is within robot climb capability", () => {
+    const simulator = new ThreeRuntimeSimulator(createRobot({ max_climb_slope_deg: 20 }));
+    const world = buildWorld("obstacle", "static", undefined, {
+      render_shape: "ramp",
+      surface_type: "ramp",
+      slope_deg: 12,
+    });
+    simulator.setWorld(world);
+    simulator.reset({ position: { x: 135, y: 100 }, heading_deg: 180 });
+    let collided = false;
+    for (let i = 0; i < 30; i += 1) {
+      const frame = simulator.tick({ dt_ms: 50, linear_velocity_cm_s: 80, angular_velocity_deg_s: 0 });
+      if (frame.collisions.includes("obj_1")) {
+        collided = true;
+      }
+    }
+    const pose = simulator.tick({ dt_ms: 0, linear_velocity_cm_s: 0, angular_velocity_deg_s: 0 }).pose;
+    expect(collided).toBe(false);
+    expect(pose.position.x).toBeLessThan(112);
+  });
+
+  it("blocks ramps when slope exceeds robot climb capability", () => {
+    const simulator = new ThreeRuntimeSimulator(createRobot({ max_climb_slope_deg: 10 }));
+    const world = buildWorld("obstacle", "static", undefined, {
+      render_shape: "ramp",
+      surface_type: "ramp",
+      slope_deg: 22,
+    });
+    simulator.setWorld(world);
+    simulator.reset({ position: { x: 135, y: 100 }, heading_deg: 180 });
+    let collided = false;
+    for (let i = 0; i < 30; i += 1) {
+      const frame = simulator.tick({ dt_ms: 50, linear_velocity_cm_s: 80, angular_velocity_deg_s: 0 });
+      if (frame.collisions.includes("obj_1")) {
+        collided = true;
+        break;
+      }
+    }
+    const pose = simulator.tick({ dt_ms: 0, linear_velocity_cm_s: 0, angular_velocity_deg_s: 0 }).pose;
+    expect(collided).toBe(true);
+    expect(pose.position.x).toBeGreaterThan(112);
+  });
+
+  it("does not block movement for sensor-only contacts", () => {
+    const simulator = new ThreeRuntimeSimulator(TEST_ROBOT);
+    const world = buildWorld("obstacle", "static", undefined, {
+      contact_mode: "sensor_only",
+    });
+    simulator.setWorld(world);
+    simulator.reset({ position: { x: 55, y: 100 }, heading_deg: 0 });
+    let collided = false;
+    for (let i = 0; i < 30; i += 1) {
+      const frame = simulator.tick({ dt_ms: 50, linear_velocity_cm_s: 80, angular_velocity_deg_s: 0 });
+      if (frame.collisions.includes("obj_1")) {
+        collided = true;
+      }
+    }
+    const pose = simulator.tick({ dt_ms: 0, linear_velocity_cm_s: 0, angular_velocity_deg_s: 0 }).pose;
+    expect(collided).toBe(false);
+    expect(pose.position.x).toBeGreaterThan(80);
+  });
+
+  it("blocks side-entry attempts on ramps even when slope is climbable", () => {
+    const simulator = new ThreeRuntimeSimulator(createRobot({ max_climb_slope_deg: 25 }));
+    const world = buildWorld("obstacle", "static", undefined, {
+      render_shape: "ramp",
+      surface_type: "ramp",
+      slope_deg: 10,
+    });
+    simulator.setWorld(world);
+    simulator.reset({ position: { x: 95, y: 65 }, heading_deg: 90 });
+    let collided = false;
+    for (let i = 0; i < 30; i += 1) {
+      const frame = simulator.tick({ dt_ms: 50, linear_velocity_cm_s: 80, angular_velocity_deg_s: 0 });
+      if (frame.collisions.includes("obj_1")) {
+        collided = true;
+        break;
+      }
+    }
+    const pose = simulator.tick({ dt_ms: 0, linear_velocity_cm_s: 0, angular_velocity_deg_s: 0 }).pose;
+    expect(collided).toBe(true);
+    expect(pose.position.y).toBeLessThan(90);
+  });
+
+  it("supports alternate ramp entry side metadata", () => {
+    const simulator = new ThreeRuntimeSimulator(createRobot({ max_climb_slope_deg: 25 }));
+    const world = buildWorld("obstacle", "static", undefined, {
+      render_shape: "ramp",
+      surface_type: "ramp",
+      slope_deg: 10,
+      ramp_entry_side: "negative_x",
+    });
+    simulator.setWorld(world);
+    simulator.reset({ position: { x: 55, y: 100 }, heading_deg: 0 });
+    let collided = false;
+    for (let i = 0; i < 30; i += 1) {
+      const frame = simulator.tick({ dt_ms: 50, linear_velocity_cm_s: 80, angular_velocity_deg_s: 0 });
+      if (frame.collisions.includes("obj_1")) {
+        collided = true;
+      }
+    }
+    const pose = simulator.tick({ dt_ms: 0, linear_velocity_cm_s: 0, angular_velocity_deg_s: 0 }).pose;
+    expect(collided).toBe(false);
+    expect(pose.position.x).toBeGreaterThan(80);
+  });
+
+  it("tracks grounded and elevation diagnostics while traversing ramp edges", () => {
+    const simulator = new ThreeRuntimeSimulator(createRobot({ max_climb_slope_deg: 25 }));
+    const world = buildWorld("obstacle", "static", undefined, {
+      render_shape: "ramp",
+      surface_type: "ramp",
+      slope_deg: 12,
+    });
+    simulator.setWorld(world);
+    simulator.reset({ position: { x: 135, y: 100 }, heading_deg: 180 });
+    let peakElevation = 0;
+    for (let i = 0; i < 60; i += 1) {
+      const frame = simulator.tick({ dt_ms: 50, linear_velocity_cm_s: 80, angular_velocity_deg_s: 0 });
+      const elevation = Number(frame.sensor_values.__physics_elevation_cm) || 0;
+      peakElevation = Math.max(peakElevation, elevation);
+    }
+    const landingFrame = simulator.tick({ dt_ms: 50, linear_velocity_cm_s: 0, angular_velocity_deg_s: 0 });
+    expect(peakElevation).toBeGreaterThan(1);
+    expect(typeof landingFrame.sensor_values.__physics_grounded).toBe("boolean");
+    expect(typeof landingFrame.sensor_values.__physics_pitch_deg).toBe("number");
+    expect(typeof landingFrame.sensor_values.__physics_roll_deg).toBe("number");
   });
 });

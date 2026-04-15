@@ -15,6 +15,8 @@ interface ViewportSettingsDialogProps {
   onTractionLateralChange?: (value: number) => void;
   rollingResistance?: number;
   onRollingResistanceChange?: (value: number) => void;
+  robotMaxClimbSlopeDeg?: number;
+  onRobotMaxClimbSlopeDegChange?: (value: number) => void;
 }
 
 const BG_PRESETS = ["#f7f8fa", "#f4f6f8", "#f1f3f5", "#eef1f4", "#eceff3"];
@@ -34,6 +36,8 @@ export function ViewportSettingsDialog({
   onTractionLateralChange,
   rollingResistance,
   onRollingResistanceChange,
+  robotMaxClimbSlopeDeg,
+  onRobotMaxClimbSlopeDegChange,
 }: ViewportSettingsDialogProps) {
   if (!open) return null;
 
@@ -131,6 +135,20 @@ export function ViewportSettingsDialog({
                 step={0.2}
                 value={Number(rollingResistance ?? 4.2)}
                 onChange={(event) => onRollingResistanceChange(Number(event.target.value))}
+              />
+            </div>
+          ) : null}
+          {onRobotMaxClimbSlopeDegChange ? (
+            <div className="robotics-modal-row">
+              <label htmlFor="robot-max-climb-slope">Robot max climb slope (deg)</label>
+              <input
+                id="robot-max-climb-slope"
+                type="number"
+                min={0}
+                max={60}
+                step={1}
+                value={Number(robotMaxClimbSlopeDeg ?? 16)}
+                onChange={(event) => onRobotMaxClimbSlopeDegChange(Number(event.target.value))}
               />
             </div>
           ) : null}

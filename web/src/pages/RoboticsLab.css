@@ -918,6 +918,13 @@
   border-radius: 8px;
   padding: 6px 8px;
   font-size: 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.robotics-camera-debug-line {
+  line-height: 1.25;
 }
 
 .robotics-sim-run-surface {

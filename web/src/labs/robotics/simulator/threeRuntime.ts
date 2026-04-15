@@ -1,5 +1,6 @@
 import type {
   RoboticsSimulatorBridge,
+  SimulatorContactMode,
   SimulatorPose2D,
   SimulatorRobotModel,
   SimulatorSceneObject,
@@ -7,6 +8,12 @@ import type {
   SimulatorTickOutput,
   SimulatorWorldMap,
 } from "./types";
+import {
+  detectContactsAtPose,
+  type ContactCandidate,
+  type ContactManifold,
+  sweepCircleContacts,
+} from "./contactKernel";
 import { resolveWheelProfile, type ResolvedWheelProfile } from "./wheelProfile";
 
 function toRadians(degrees: number) {
@@ -60,44 +67,12 @@ function pointInOrientedBox2d(
   return Math.abs(localX) <= width / 2 && Math.abs(localY) <= depth / 2;
 }
 
-function circleIntersectsBox2d(
-  centerX: number,
-  centerY: number,
-  radius: number,
-  boxCenterX: number,
-  boxCenterY: number,
-  width: number,
-  depth: number,
-) {
-  const halfW = width / 2;
-  const halfD = depth / 2;
-  const nearestX = Math.max(boxCenterX - halfW, Math.min(centerX, boxCenterX + halfW));
-  const nearestY = Math.max(boxCenterY - halfD, Math.min(centerY, boxCenterY + halfD));
-  const dx = centerX - nearestX;
-  const dy = centerY - nearestY;
-  return dx * dx + dy * dy <= radius * radius;
-}
-
-function circleIntersectsOrientedBox2d(
-  centerX: number,
-  centerY: number,
-  radius: number,
-  boxCenterX: number,
-  boxCenterY: number,
-  width: number,
-  depth: number,
-  yawDeg = 0,
-) {
-  const yawRad = toRadians(yawDeg);
-  const cos = Math.cos(-yawRad);
-  const sin = Math.sin(-yawRad);
-  const localX = (centerX - boxCenterX) * cos - (centerY - boxCenterY) * sin;
-  const localY = (centerX - boxCenterX) * sin + (centerY - boxCenterY) * cos;
-  return circleIntersectsBox2d(localX, localY, radius, 0, 0, width, depth);
-}
-
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
+}
+
+function dot2(ax: number, ay: number, bx: number, by: number) {
+  return ax * bx + ay * by;
 }
 
 function deterministicNoise(seed: number, amplitude: number) {
@@ -115,12 +90,19 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
   private rightWheelVelocityCmS = 0;
   private lastCollisions: string[] = [];
   private sensorOverrides: Record<string, number | boolean | string | null | undefined> = {};
+  private robotElevationCm = 0;
+  private robotVerticalVelocityCmS = 0;
+  private robotGrounded = true;
+  private supportSurfaceId: string | null = null;
 
   private static readonly EPS = 0.01;
   private static readonly MIN_SENSOR_RANGE_CM = 2;
   private static readonly PUSH_STEP_MULTIPLIERS = [1, 1.25, 1.5, 1.75, 2];
   private static readonly MIN_SWEEP_STEP_CM = 2;
   private static readonly MAX_SWEEP_SAMPLES = 12;
+  private static readonly DEFAULT_MAX_CLIMB_SLOPE_DEG = 16;
+  private static readonly RAMP_ENTRY_ALIGNMENT_MIN = 0.45;
+  private lastSweepToi = 1;
 
   constructor(robot: SimulatorRobotModel) {
     this.robot = robot;
@@ -153,6 +135,10 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
     this.leftWheelVelocityCmS = 0;
     this.rightWheelVelocityCmS = 0;
     this.lastCollisions = [];
+    this.robotElevationCm = 0;
+    this.robotVerticalVelocityCmS = 0;
+    this.robotGrounded = true;
+    this.supportSurfaceId = null;
   }
 
   setSensorOverrides(overrides: Record<string, number | boolean | string | null | undefined>): void {
@@ -188,13 +174,14 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
         Math.abs(targetLinearCmS) < this.wheelProfile.wheelRadiusCm * 1.5
           ? this.wheelProfile.wheelRadiusCm * 1.5
           : targetLinearCmS;
+      const rampAdjustedLinearTarget = this.applyRampGradeEffect(adjustedLinearTarget);
       const trackWidthCm = this.wheelProfile.trackWidthCm;
       const targetAngularRadS = toRadians(targetAngularDegS);
       const tractionLinear = this.wheelProfile.tractionLongitudinal;
       const targetLeftWheelCmS =
-        (adjustedLinearTarget - (targetAngularRadS * trackWidthCm) / 2) * tractionLinear;
+        (rampAdjustedLinearTarget - (targetAngularRadS * trackWidthCm) / 2) * tractionLinear;
       const targetRightWheelCmS =
-        (adjustedLinearTarget + (targetAngularRadS * trackWidthCm) / 2) * tractionLinear;
+        (rampAdjustedLinearTarget + (targetAngularRadS * trackWidthCm) / 2) * tractionLinear;
       this.leftWheelVelocityCmS = this.approachVelocity(
         this.leftWheelVelocityCmS,
         targetLeftWheelCmS,
@@ -232,10 +219,36 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
 
       const collisions = this.detectCollisionsSwept(this.pose, nextPose);
       if (collisions.length > 0) {
-        const blockedCollisions = this.resolveDynamicCollisions(nextPose, collisions, subDt);
+        const collisionPose =
+          this.lastSweepToi < 1
+            ? {
+                position: {
+                  x: this.pose.position.x + (nextPose.position.x - this.pose.position.x) * this.lastSweepToi,
+                  y: this.pose.position.y + (nextPose.position.y - this.pose.position.y) * this.lastSweepToi,
+                },
+                heading_deg: normalizeHeading(
+                  this.pose.heading_deg +
+                    normalizeSignedAngle(nextPose.heading_deg - this.pose.heading_deg) * this.lastSweepToi,
+                ),
+              }
+            : nextPose;
+        const blockedCollisions = this.resolveDynamicCollisions(collisionPose, collisions, subDt);
         if (blockedCollisions.length === 0) {
-          this.pose = nextPose;
-          this.lastCollisions = [];
+          const priorPose = this.pose;
+          this.pose = collisionPose;
+          const moveDx = collisionPose.position.x - priorPose.position.x;
+          const moveDy = collisionPose.position.y - priorPose.position.y;
+          const moveMagnitude = Math.hypot(moveDx, moveDy);
+          const fallbackHeading = toRadians(this.pose.heading_deg);
+          const dirX = moveMagnitude > ThreeRuntimeSimulator.EPS ? moveDx / moveMagnitude : Math.cos(fallbackHeading);
+          const dirY = moveMagnitude > ThreeRuntimeSimulator.EPS ? moveDy / moveMagnitude : Math.sin(fallbackHeading);
+          this.lastCollisions = collisions.filter((collisionId) => {
+            if (collisionId === "world_bounds") return true;
+            const object = this.findSceneObjectById(collisionId);
+            if (!object) return false;
+            return this.shouldObjectBlockRobot(object, priorPose, collisionPose, dirX, dirY);
+          });
+          this.updateGroundingState(subDt);
           continue;
         }
         // Keep rotation but block translational penetration into world bounds/obstacles.
@@ -247,9 +260,11 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
         this.rightWheelVelocityCmS = 0;
         this.lastCollisions = blockedCollisions;
       } else {
+        this.lastSweepToi = 1;
         this.pose = nextPose;
         this.lastCollisions = [];
       }
+      this.updateGroundingState(subDt);
     }
   }
 
@@ -346,6 +361,26 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
     };
   }
 
+  private buildContactCandidates(
+    predicate: (object: SimulatorSceneObject) => boolean,
+  ): ContactCandidate[] {
+    if (!this.world?.world_scene?.objects) return [];
+    const candidates: ContactCandidate[] = [];
+    for (const object of this.world.world_scene.objects) {
+      if (!object || object.metadata?.hidden) continue;
+      if (!predicate(object)) continue;
+      candidates.push({
+        object,
+        centerX: object.position.x,
+        centerY: object.position.z,
+        width: Math.max(1, object.size_cm.x),
+        depth: Math.max(1, object.size_cm.z),
+        yawDeg: Number(object.rotation_deg?.y) || 0,
+      });
+    }
+    return candidates;
+  }
+
   private detectCollisions(candidate: SimulatorPose2D): string[] {
     if (!this.world?.world_scene) return [];
     const { x, y } = candidate.position;
@@ -358,52 +393,125 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
       collisions.push("world_bounds");
     }
 
-    for (const object of this.world.world_scene.objects) {
-      if (object?.metadata?.hidden) continue;
-      if (!this.isCollidableObject(object)) continue;
-      const objectYaw = Number(object.rotation_deg?.y) || 0;
-      if (
-        circleIntersectsOrientedBox2d(
-          x,
-          y,
-          radius,
-          object.position.x,
-          object.position.z,
-          object.size_cm.x,
-          object.size_cm.z,
-          objectYaw,
-        )
-      ) {
-        collisions.push(object.id);
-      }
+    const candidates = this.buildContactCandidates((object) => this.isRobotCollisionCandidate(object));
+    const contacts = detectContactsAtPose(x, y, radius, candidates);
+    for (const contact of contacts) {
+      collisions.push(contact.objectId);
     }
     return collisions;
   }
 
   private detectCollisionsSwept(startPose: SimulatorPose2D, endPose: SimulatorPose2D): string[] {
-    const direct = this.detectCollisions(endPose);
-    if (direct.length > 0) return direct;
-    const dx = endPose.position.x - startPose.position.x;
-    const dy = endPose.position.y - startPose.position.y;
-    const distance = Math.hypot(dx, dy);
-    if (distance <= ThreeRuntimeSimulator.MIN_SWEEP_STEP_CM) return [];
-    const samples = Math.min(
-      ThreeRuntimeSimulator.MAX_SWEEP_SAMPLES,
-      Math.max(2, Math.ceil(distance / ThreeRuntimeSimulator.MIN_SWEEP_STEP_CM)),
-    );
-    for (let i = 1; i < samples; i += 1) {
-      const t = i / samples;
-      const samplePose: SimulatorPose2D = {
-        position: {
-          x: startPose.position.x + dx * t,
-          y: startPose.position.y + dy * t,
-        },
-        heading_deg: normalizeHeading(startPose.heading_deg + normalizeSignedAngle(endPose.heading_deg - startPose.heading_deg) * t),
-      };
-      const sampled = this.detectCollisions(samplePose);
-      if (sampled.length > 0) return sampled;
+    const radius = this.robotCollisionRadiusCm();
+    const candidates = this.buildContactCandidates((object) => this.isRobotCollisionCandidate(object));
+    const sweptContacts = sweepCircleContacts({
+      startX: startPose.position.x,
+      startY: startPose.position.y,
+      endX: endPose.position.x,
+      endY: endPose.position.y,
+      radius,
+      candidates,
+      minStepCm: ThreeRuntimeSimulator.MIN_SWEEP_STEP_CM,
+      maxSamples: ThreeRuntimeSimulator.MAX_SWEEP_SAMPLES,
+    });
+    if (sweptContacts.length === 0) {
+      this.lastSweepToi = 1;
+      return [];
     }
-    return [];
+    const toi = Math.min(...sweptContacts.map((entry) => entry.toi));
+    this.lastSweepToi = clamp(toi, 0, 1);
+    return sweptContacts.map((entry) => entry.objectId);
+  }
+
+  private supportHeightForPose(object: SimulatorSceneObject, pose: SimulatorPose2D): number {
+    if (this.getSurfaceType(object) === "ramp") {
+      const local = this.toObjectLocal(pose.position.x, pose.position.y, object);
+      const halfW = Math.max(1, Number(object.size_cm?.x) || 0) / 2;
+      const entrySide = object.metadata?.ramp_entry_side === "negative_x" ? -1 : 1;
+      const normalized =
+        entrySide === 1 ? clamp((halfW - local.x) / (halfW * 2), 0, 1) : clamp((local.x + halfW) / (halfW * 2), 0, 1);
+      return Math.max(0, Number(object.size_cm?.y) || 0) * normalized;
+    }
+    return Number(object.size_cm?.y) || 0;
+  }
+
+  private findSupportSurface(pose: SimulatorPose2D): { id: string; height: number } | null {
+    if (!this.world?.world_scene?.objects) return null;
+    let best: { id: string; height: number } | null = null;
+    for (const object of this.world.world_scene.objects) {
+      if (!object || object.metadata?.hidden) continue;
+      const isSupport =
+        this.getSurfaceType(object) === "ramp" ||
+        object.metadata?.support_surface === true ||
+        object.type === "wall";
+      if (!isSupport) continue;
+      const local = this.toObjectLocal(pose.position.x, pose.position.y, object);
+      const halfW = Math.max(1, Number(object.size_cm?.x) || 0) / 2;
+      const halfD = Math.max(1, Number(object.size_cm?.z) || 0) / 2;
+      if (Math.abs(local.x) > halfW || Math.abs(local.z) > halfD) continue;
+      const height = this.supportHeightForPose(object, pose);
+      if (!best || height > best.height) {
+        best = { id: object.id, height };
+      }
+    }
+    return best;
+  }
+
+  private updateGroundingState(subDtS: number): void {
+    const support = this.findSupportSurface(this.pose);
+    const gravityCmS2 = Math.max(0, Number(this.world?.world_scene?.gravity_m_s2) || 9.81) * 100;
+    if (support) {
+      this.supportSurfaceId = support.id;
+      if (this.robotElevationCm > support.height + 0.1) {
+        this.robotGrounded = false;
+        this.robotVerticalVelocityCmS -= gravityCmS2 * subDtS;
+        this.robotElevationCm += this.robotVerticalVelocityCmS * subDtS;
+        if (this.robotElevationCm <= support.height) {
+          this.robotElevationCm = support.height;
+          this.robotVerticalVelocityCmS = 0;
+          this.robotGrounded = true;
+        }
+      } else {
+        this.robotGrounded = true;
+        this.robotVerticalVelocityCmS = 0;
+        this.robotElevationCm = support.height;
+      }
+      return;
+    }
+    this.supportSurfaceId = null;
+    this.robotGrounded = false;
+    this.robotVerticalVelocityCmS -= gravityCmS2 * subDtS;
+    this.robotElevationCm += this.robotVerticalVelocityCmS * subDtS;
+    if (this.robotElevationCm <= 0) {
+      this.robotElevationCm = 0;
+      this.robotVerticalVelocityCmS = 0;
+      this.robotGrounded = true;
+    }
+  }
+
+  private computeRobotTiltDiagnosticsDeg(): { pitchDeg: number; rollDeg: number } {
+    if (!this.robotGrounded || !this.supportSurfaceId) return { pitchDeg: 0, rollDeg: 0 };
+    const support = this.findSceneObjectById(this.supportSurfaceId);
+    if (!support || this.getSurfaceType(support) !== "ramp") return { pitchDeg: 0, rollDeg: 0 };
+    const slopeDeg = this.requiredSlopeToTraverseDeg(support);
+    const uphill = this.rampUphillDirection(support);
+    const headingRad = toRadians(this.pose.heading_deg);
+    const headingX = Math.cos(headingRad);
+    const headingY = Math.sin(headingRad);
+    const forwardAlongSlope = dot2(headingX, headingY, uphill.x, uphill.y);
+    const crossSlope = headingX * uphill.y - headingY * uphill.x;
+    const pitchDeg = clamp(slopeDeg * forwardAlongSlope, -35, 35);
+    const rollDeg = clamp(slopeDeg * crossSlope * 0.35, -15, 15);
+    return { pitchDeg, rollDeg };
+  }
+
+  private detectContactManifoldsForPose(
+    pose: SimulatorPose2D,
+    predicate: (object: SimulatorSceneObject) => boolean,
+  ): ContactManifold[] {
+    const radius = this.robotCollisionRadiusCm();
+    const candidates = this.buildContactCandidates(predicate);
+    return detectContactsAtPose(pose.position.x, pose.position.y, radius, candidates);
   }
 
   private resolveDynamicCollisions(candidate: SimulatorPose2D, collisions: string[], subDtS: number): string[] {
@@ -421,14 +529,18 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
     const blocked: string[] = [];
 
     for (const object of collidingObjects) {
+      if (!this.shouldObjectBlockRobot(object, this.pose, candidate, dirX, dirY)) {
+        continue;
+      }
       if (!this.isDynamicObject(object)) {
         blocked.push(object.id);
         continue;
       }
+      const pushResistance = clamp(Number(object.metadata?.push_resistance ?? 1), 0.2, 5);
       let moved = false;
       for (const multiplier of ThreeRuntimeSimulator.PUSH_STEP_MULTIPLIERS) {
-        const candidateX = object.position.x + dirX * basePushDistance * multiplier;
-        const candidateZ = object.position.z + dirY * basePushDistance * multiplier;
+        const candidateX = object.position.x + (dirX * basePushDistance * multiplier) / pushResistance;
+        const candidateZ = object.position.z + (dirY * basePushDistance * multiplier) / pushResistance;
         if (!this.canPlaceObject(object, candidateX, candidateZ, candidate)) continue;
         const dx = candidateX - object.position.x;
         const dz = candidateZ - object.position.z;
@@ -444,8 +556,49 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
       }
     }
 
-    if (blocked.length > 0) return blocked;
-    return this.detectCollisions(candidate);
+    if (blocked.length > 0) {
+      const blockingSet = new Set(blocked);
+      const manifolds = this.detectContactManifoldsForPose(
+        candidate,
+        (object) => blockingSet.has(object.id) && this.shouldObjectBlockRobot(object, this.pose, candidate, dirX, dirY),
+      );
+      if (manifolds.length > 0) {
+        let correctedX = candidate.position.x;
+        let correctedY = candidate.position.y;
+        let slideX = moveDx;
+        let slideY = moveDy;
+        for (const manifold of manifolds) {
+          const pushOut = Math.max(0, manifold.penetration + 0.1);
+          correctedX += manifold.normalX * pushOut;
+          correctedY += manifold.normalY * pushOut;
+          const motionInto = dot2(slideX, slideY, manifold.normalX, manifold.normalY);
+          if (motionInto > 0) {
+            slideX -= manifold.normalX * motionInto;
+            slideY -= manifold.normalY * motionInto;
+          }
+        }
+        correctedX += slideX * 0.15;
+        correctedY += slideY * 0.15;
+        candidate.position = { x: correctedX, y: correctedY };
+        const residualBlocking = this.detectContactManifoldsForPose(
+          candidate,
+          (object) => this.shouldObjectBlockRobot(object, this.pose, candidate, dirX, dirY),
+        );
+        if (residualBlocking.length === 0) {
+          return [];
+        }
+        return Array.from(new Set(residualBlocking.map((entry) => entry.objectId)));
+      }
+      return blocked;
+    }
+    const residual = this.detectCollisions(candidate);
+    if (residual.length === 0) return residual;
+    return residual.filter((collisionId) => {
+      if (collisionId === "world_bounds") return true;
+      const object = this.findSceneObjectById(collisionId);
+      if (!object) return true;
+      return this.shouldObjectBlockRobot(object, this.pose, candidate, dirX, dirY);
+    });
   }
 
   private applyDynamicObjectRotation(object: SimulatorSceneObject, dx: number, dz: number): void {
@@ -508,18 +661,17 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
 
     const objectYaw = Number(object.rotation_deg?.y) || 0;
     const robotRadius = this.robotCollisionRadiusCm();
-    if (
-      circleIntersectsOrientedBox2d(
-        candidateRobotPose.position.x,
-        candidateRobotPose.position.y,
-        robotRadius,
+    const robotOverlap = detectContactsAtPose(candidateRobotPose.position.x, candidateRobotPose.position.y, robotRadius, [
+      {
+        object,
         centerX,
-        centerZ,
-        object.size_cm.x,
-        object.size_cm.z,
-        objectYaw,
-      )
-    ) {
+        centerY: centerZ,
+        width: Math.max(1, object.size_cm.x),
+        depth: Math.max(1, object.size_cm.z),
+        yawDeg: objectYaw,
+      },
+    ]);
+    if (robotOverlap.length > 0) {
       return false;
     }
 
@@ -527,32 +679,223 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
     for (const other of this.world.world_scene.objects) {
       if (!other || other.id === object.id) continue;
       if (other?.metadata?.hidden) continue;
-      if (!this.isCollidableObject(other)) continue;
+      if (!this.isSolidCollisionObject(other)) continue;
       const otherYaw = Number(other.rotation_deg?.y) || 0;
-      if (
-        circleIntersectsOrientedBox2d(
-          centerX,
-          centerZ,
-          movingRadius,
-          other.position.x,
-          other.position.z,
-          other.size_cm.x,
-          other.size_cm.z,
-          otherYaw,
-        )
-      ) {
+      const contact = detectContactsAtPose(centerX, centerZ, movingRadius, [
+        {
+          object: other,
+          centerX: other.position.x,
+          centerY: other.position.z,
+          width: Math.max(1, other.size_cm.x),
+          depth: Math.max(1, other.size_cm.z),
+          yawDeg: otherYaw,
+        },
+      ]);
+      if (contact.length > 0) {
         return false;
       }
     }
     return true;
   }
 
-  private isCollidableObject(object: SimulatorSceneObject): boolean {
+  private isBaseCollidableType(object: SimulatorSceneObject): boolean {
     return object.type === "obstacle" || object.type === "wall";
   }
 
+  private getContactMode(object: SimulatorSceneObject): SimulatorContactMode {
+    const value = object.metadata?.contact_mode;
+    if (value === "pass_through" || value === "sensor_only" || value === "solid") return value;
+    return "solid";
+  }
+
+  private getSurfaceType(object: SimulatorSceneObject): string {
+    const metadataSurface = object.metadata?.surface_type;
+    if (typeof metadataSurface === "string" && metadataSurface.trim()) return metadataSurface;
+    if (object.metadata?.render_shape === "ramp") return "ramp";
+    return "default";
+  }
+
+  private robotMaxClimbSlopeDeg(): number {
+    const raw = Number(this.robot.max_climb_slope_deg);
+    if (!Number.isFinite(raw)) return ThreeRuntimeSimulator.DEFAULT_MAX_CLIMB_SLOPE_DEG;
+    return clamp(raw, 0, 89);
+  }
+
+  private requiredSlopeToTraverseDeg(object: SimulatorSceneObject): number {
+    const overrideRequired = Number(object.metadata?.max_climb_slope_deg);
+    if (Number.isFinite(overrideRequired)) return clamp(overrideRequired, 0, 89);
+    const rawSlope = Number(object.metadata?.slope_deg);
+    if (Number.isFinite(rawSlope)) return clamp(rawSlope, 0, 89);
+    return 14;
+  }
+
+  private isRampTraversable(object: SimulatorSceneObject): boolean {
+    if (this.getSurfaceType(object) !== "ramp") return false;
+    if (object.metadata?.is_ramp_entry_blocking === true) return false;
+    return this.robotMaxClimbSlopeDeg() + 1e-6 >= this.requiredSlopeToTraverseDeg(object);
+  }
+
+  private shouldObjectBlockRobot(
+    object: SimulatorSceneObject,
+    currentPose?: SimulatorPose2D,
+    candidatePose?: SimulatorPose2D,
+    moveDirX?: number,
+    moveDirY?: number,
+  ): boolean {
+    if (!this.isBaseCollidableType(object)) return false;
+    const contactMode = this.getContactMode(object);
+    if (contactMode === "pass_through" || contactMode === "sensor_only") return false;
+    if (this.getSurfaceType(object) === "ramp") {
+      return !this.canTraverseRampForMotion(object, currentPose, candidatePose, moveDirX, moveDirY);
+    }
+    return true;
+  }
+
+  private isRobotCollisionCandidate(object: SimulatorSceneObject): boolean {
+    if (!this.isBaseCollidableType(object)) return false;
+    const contactMode = this.getContactMode(object);
+    if (contactMode === "pass_through" || contactMode === "sensor_only") return false;
+    return this.isBaseCollidableType(object);
+  }
+
+  private isSolidCollisionObject(object: SimulatorSceneObject): boolean {
+    return this.shouldObjectBlockRobot(object, this.pose, this.pose);
+  }
+
+  private findSceneObjectById(objectId: string): SimulatorSceneObject | null {
+    if (!this.world?.world_scene?.objects) return null;
+    return this.world.world_scene.objects.find((item) => item.id === objectId) || null;
+  }
+
+  private toObjectLocal(
+    pointX: number,
+    pointY: number,
+    object: SimulatorSceneObject,
+  ): { x: number; z: number } {
+    const yawDeg = Number(object.rotation_deg?.y) || 0;
+    const yawRad = toRadians(yawDeg);
+    const cos = Math.cos(-yawRad);
+    const sin = Math.sin(-yawRad);
+    return {
+      x: (pointX - object.position.x) * cos - (pointY - object.position.z) * sin,
+      z: (pointX - object.position.x) * sin + (pointY - object.position.z) * cos,
+    };
+  }
+
+  private rampUphillDirection(object: SimulatorSceneObject): { x: number; y: number } {
+    const yawDeg = Number(object.rotation_deg?.y) || 0;
+    const yawRad = toRadians(yawDeg);
+    const entrySide = object.metadata?.ramp_entry_side === "negative_x" ? -1 : 1;
+    const axisSign = entrySide === 1 ? -1 : 1;
+    return { x: axisSign * Math.cos(yawRad), y: axisSign * Math.sin(yawRad) };
+  }
+
+  private isPoseInsideRampFootprint(pose: SimulatorPose2D, object: SimulatorSceneObject): boolean {
+    const local = this.toObjectLocal(pose.position.x, pose.position.y, object);
+    const radius = this.robotCollisionRadiusCm();
+    const halfW = Math.max(1, Number(object.size_cm?.x) || 0) / 2;
+    const halfD = Math.max(1, Number(object.size_cm?.z) || 0) / 2;
+    return Math.abs(local.x) <= halfW + radius && Math.abs(local.z) <= halfD + radius;
+  }
+
+  private activeRampUnderRobot(): SimulatorSceneObject | null {
+    if (!this.world?.world_scene?.objects) return null;
+    for (const object of this.world.world_scene.objects) {
+      if (!object || object.metadata?.hidden) continue;
+      if (this.getSurfaceType(object) !== "ramp") continue;
+      if (!this.isPoseInsideRampFootprint(this.pose, object)) continue;
+      return object;
+    }
+    return null;
+  }
+
+  private applyRampGradeEffect(targetLinearCmS: number): number {
+    const ramp = this.activeRampUnderRobot();
+    if (!ramp) return targetLinearCmS;
+    const uphill = this.rampUphillDirection(ramp);
+    const headingRad = toRadians(this.pose.heading_deg);
+    const headingX = Math.cos(headingRad);
+    const headingY = Math.sin(headingRad);
+    const headingDot = dot2(headingX, headingY, uphill.x, uphill.y);
+    const slopeRatio = clamp(this.requiredSlopeToTraverseDeg(ramp) / 45, 0, 1);
+    const traction = clamp(this.wheelProfile.tractionLongitudinal, 0.2, 1.2);
+    if (headingDot > 0.12) {
+      // Uphill: reduce effective wheel command by grade and available traction.
+      const uphillPenalty = clamp(slopeRatio * (1.08 - traction) * Math.abs(headingDot), 0, 0.55);
+      return targetLinearCmS * (1 - uphillPenalty);
+    }
+    if (headingDot < -0.12) {
+      // Downhill: mild gravity-assisted gain.
+      const descentAssist = clamp(Number(ramp.metadata?.ramp_descent_assist ?? 0.18), 0, 0.5);
+      const downhillBoost = clamp(slopeRatio * descentAssist * Math.abs(headingDot), 0, 0.35);
+      return targetLinearCmS * (1 + downhillBoost);
+    }
+    // Cross-slope movement loses traction and behaves as edge-slip tendency.
+    const sidePenalty = clamp(slopeRatio * 0.28, 0, 0.25);
+    return targetLinearCmS * (1 - sidePenalty);
+  }
+
+  private canTraverseRampForMotion(
+    object: SimulatorSceneObject,
+    currentPose?: SimulatorPose2D,
+    candidatePose?: SimulatorPose2D,
+    moveDirX?: number,
+    moveDirY?: number,
+  ): boolean {
+    if (!this.isRampTraversable(object)) return false;
+    if (!currentPose || !candidatePose) return true;
+
+    const dx = candidatePose.position.x - currentPose.position.x;
+    const dy = candidatePose.position.y - currentPose.position.y;
+    const magnitude = Math.hypot(dx, dy);
+    if (magnitude <= ThreeRuntimeSimulator.EPS) return true;
+    const dirX = moveDirX ?? dx / magnitude;
+    const dirY = moveDirY ?? dy / magnitude;
+
+    const uphill = this.rampUphillDirection(object);
+    const headingDot = dot2(dirX, dirY, uphill.x, uphill.y);
+    const sideBlocking = object.metadata?.ramp_side_blocking !== false;
+    if (sideBlocking && Math.abs(headingDot) < ThreeRuntimeSimulator.RAMP_ENTRY_ALIGNMENT_MIN) {
+      // Side approach should not ghost through ramp walls.
+      return false;
+    }
+
+    const localCurrent = this.toObjectLocal(currentPose.position.x, currentPose.position.y, object);
+    const localCandidate = this.toObjectLocal(candidatePose.position.x, candidatePose.position.y, object);
+    const halfW = Math.max(1, Number(object.size_cm?.x) || 0) / 2;
+    const halfD = Math.max(1, Number(object.size_cm?.z) || 0) / 2;
+    const radius = this.robotCollisionRadiusCm();
+    const entryBand = Math.max(radius * 1.25, halfW * 0.24);
+    const startsInside = this.isPoseInsideRampFootprint(currentPose, object);
+
+    // Entering climb from low edge only (local +X side).
+    if (headingDot > 0) {
+      const tractionGate = clamp(this.wheelProfile.tractionLongitudinal, 0.25, 1.2);
+      const effectiveCapability = this.robotMaxClimbSlopeDeg() * tractionGate;
+      if (effectiveCapability + 1e-6 < this.requiredSlopeToTraverseDeg(object)) {
+        return false;
+      }
+      if (!startsInside) {
+        const entrySide = object.metadata?.ramp_entry_side === "negative_x" ? -1 : 1;
+        if (entrySide === 1 && localCurrent.x < halfW - entryBand) return false;
+        if (entrySide === -1 && localCurrent.x > -halfW + entryBand) return false;
+      }
+      // Must stay within ramp width while climbing.
+      return Math.abs(localCandidate.z) <= halfD + radius * 0.35;
+    }
+
+    // Descending is allowed from upper side if aligned, but still blocks side-entry.
+    if (!startsInside) {
+      const entrySide = object.metadata?.ramp_entry_side === "negative_x" ? -1 : 1;
+      if (entrySide === 1 && localCurrent.x > -halfW + entryBand) return false;
+      if (entrySide === -1 && localCurrent.x < halfW - entryBand) return false;
+    }
+    return Math.abs(localCandidate.z) <= halfD + radius * 0.35;
+  }
+
   private isDynamicObject(object: SimulatorSceneObject): boolean {
-    if (!this.isCollidableObject(object)) return false;
+    if (!this.isBaseCollidableType(object)) return false;
+    if (this.getContactMode(object) !== "solid") return false;
     if (object.type === "wall") return false;
     const metadata = object.metadata || {};
     if (metadata.physics_body === "dynamic") return true;
@@ -584,6 +927,12 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
         readings[sensor.id] = override;
       }
     }
+    readings.__physics_grounded = this.robotGrounded;
+    readings.__physics_elevation_cm = Number(this.robotElevationCm.toFixed(3));
+    readings.__physics_support = this.supportSurfaceId || "";
+    const tilt = this.computeRobotTiltDiagnosticsDeg();
+    readings.__physics_pitch_deg = Number(tilt.pitchDeg.toFixed(3));
+    readings.__physics_roll_deg = Number(tilt.rollDeg.toFixed(3));
     return readings;
   }
 
@@ -616,7 +965,7 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
       const py = sensorPose.y + Math.sin(headingRad) * d;
       const hit = this.world.world_scene.objects.some((obj) => {
         if (obj?.metadata?.hidden) return false;
-        if (!this.isCollidableObject(obj)) return false;
+        if (!this.isRobotCollisionCandidate(obj)) return false;
         const objectYaw = Number(obj.rotation_deg?.y) || 0;
         return pointInOrientedBox2d(px, py, obj.position.x, obj.position.z, obj.size_cm.x, obj.size_cm.z, objectYaw);
       });

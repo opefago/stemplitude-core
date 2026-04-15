@@ -22,7 +22,33 @@ export interface SimulatorWorldObject {
     width: number;
     height: number;
   };
-  metadata?: Record<string, unknown>;
+  metadata?: SimulatorSceneObjectMetadata;
+}
+
+export type SimulatorContactMode = "solid" | "sensor_only" | "pass_through";
+
+export type SimulatorSurfaceType = "default" | "ramp" | "low_friction" | "high_friction";
+
+export interface SimulatorSceneObjectMetadata extends Record<string, unknown> {
+  physics_body?: "static" | "dynamic" | "kinematic";
+  render_shape?: string;
+  dynamic?: boolean;
+  hidden?: boolean;
+  use_gravity?: boolean;
+  color?: string;
+  contact_mode?: SimulatorContactMode;
+  surface_type?: SimulatorSurfaceType;
+  friction_coefficient?: number;
+  restitution_coefficient?: number;
+  slope_deg?: number;
+  max_climb_slope_deg?: number;
+  is_ramp_entry_blocking?: boolean;
+  ramp_entry_side?: "positive_x" | "negative_x";
+  ramp_side_blocking?: boolean;
+  ramp_descent_assist?: number;
+  linear_damping?: number;
+  impulse_scale?: number;
+  push_resistance?: number;
 }
 
 export interface SimulatorSceneObject {
@@ -41,7 +67,7 @@ export interface SimulatorSceneObject {
   rotation_deg?: {
     y?: number;
   };
-  metadata?: Record<string, unknown>;
+  metadata?: SimulatorSceneObjectMetadata;
 }
 
 export interface SimulatorWorldMap {
@@ -97,6 +123,7 @@ export interface SimulatorRobotModel {
   traction_lateral?: number;
   rolling_resistance?: number;
   max_wheel_accel_cm_s2?: number;
+  max_climb_slope_deg?: number;
   sensors: SimulatorSensor[];
 }
 
