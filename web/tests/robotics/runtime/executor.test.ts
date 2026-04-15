@@ -399,9 +399,9 @@ describe("IRRuntimeExecutor", () => {
     expect(slowSteps).toBeGreaterThan(fastSteps);
     const fastX = fastSimulator.getPose().position.x;
     const slowX = slowSimulator.getPose().position.x;
-    expect(fastX).toBeGreaterThan(60);
-    expect(slowX).toBeGreaterThan(60);
-    expect(Math.abs(fastX - slowX)).toBeLessThan(5);
+    expect(fastX).toBeCloseTo(80, 2);
+    expect(slowX).toBeCloseTo(80, 2);
+    expect(Math.abs(fastX - slowX)).toBeLessThan(0.8);
   });
 
   it("snaps completed turn commands to exact target heading", () => {

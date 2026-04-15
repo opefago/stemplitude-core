@@ -148,8 +148,23 @@ export class RuntimePhysicsEngine {
       });
       const dx = frame.pose.position.x - move.previousPosition.x;
       const dy = frame.pose.position.y - move.previousPosition.y;
-      move.remainingCm = Math.max(0, move.remainingCm - Math.sqrt(dx * dx + dy * dy));
-      move.previousPosition = frame.pose.position;
+      const stepDistance = Math.sqrt(dx * dx + dy * dy);
+      if (stepDistance > 0 && stepDistance > move.remainingCm && frame.collisions.length === 0) {
+        const ratio = move.remainingCm / stepDistance;
+        const correctedPosition = {
+          x: move.previousPosition.x + dx * ratio,
+          y: move.previousPosition.y + dy * ratio,
+        };
+        this.simulator.reset({
+          position: correctedPosition,
+          heading_deg: frame.pose.heading_deg,
+        });
+        move.previousPosition = correctedPosition;
+        move.remainingCm = 0;
+      } else {
+        move.remainingCm = Math.max(0, move.remainingCm - stepDistance);
+        move.previousPosition = frame.pose.position;
+      }
       frame.collisions.forEach((id) => move.collisions.add(id));
       move.elapsedMs += step;
       remainingBudgetMs -= step;
