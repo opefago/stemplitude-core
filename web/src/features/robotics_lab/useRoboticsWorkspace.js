@@ -180,6 +180,7 @@ export function useRoboticsWorkspace() {
   const [overlayState, setOverlayState] = useState(DEFAULT_OVERLAY_STATE);
   const [sensorOverrides, setSensorOverrides] = useState({});
   const [pathTrailResetToken, setPathTrailResetToken] = useState(0);
+  const [measurementResetToken, setMeasurementResetToken] = useState(0);
   const [cameraResetToken, setCameraResetToken] = useState(0);
   const [cameraFocusToken, setCameraFocusToken] = useState(0);
 
@@ -263,6 +264,7 @@ export function useRoboticsWorkspace() {
     setPose(snapshot.pose);
     setSensorValues(snapshot.sensor_values);
     setPathTrailResetToken((prev) => prev + 1);
+    setMeasurementResetToken((prev) => prev + 1);
   }
 
   useEffect(() => {
@@ -346,6 +348,7 @@ export function useRoboticsWorkspace() {
     setPose(snapshot.pose);
     setSensorValues(snapshot.sensor_values);
     setPathTrailResetToken((prev) => prev + 1);
+    setMeasurementResetToken((prev) => prev + 1);
   }, [simulator, startPose]);
 
   useEffect(() => {
@@ -959,6 +962,7 @@ export function useRoboticsWorkspace() {
     setStepSession(null);
     setDebugSession(createInitialDebugSession(mode));
     setPathTrailResetToken((prev) => prev + 1);
+    setMeasurementResetToken((prev) => prev + 1);
     logLine("Simulation reset");
     void saveProjectSnapshot("reset");
   }
@@ -1004,6 +1008,18 @@ export function useRoboticsWorkspace() {
     setOverlayState((prev) => ({
       ...prev,
       [key]: !prev[key],
+      ...(key === "showMeasurements" && !prev.showMeasurements
+        ? {
+            showMeasurementLabels: true,
+          }
+        : {}),
+    }));
+  }
+
+  function setMeasurementLabelSize(size) {
+    setOverlayState((prev) => ({
+      ...prev,
+      measurementLabelSize: size,
     }));
   }
 
@@ -1105,6 +1121,7 @@ export function useRoboticsWorkspace() {
     cameraState,
     overlayState,
     pathTrailResetToken,
+    measurementResetToken,
     cameraResetToken,
     cameraFocusToken,
     setCameraMode,
@@ -1113,6 +1130,7 @@ export function useRoboticsWorkspace() {
     focusCameraOnRobot,
     zoomCamera,
     toggleOverlay,
+    setMeasurementLabelSize,
     saveProjectSnapshot,
     runProgram,
     pauseProgram,

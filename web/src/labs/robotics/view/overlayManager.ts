@@ -6,6 +6,13 @@ export const DEFAULT_OVERLAY_STATE: OverlayState = {
   showPathTrail: true,
   showHeading: true,
   showRobotFootprint: false,
+  showMeasurements: true,
+  showMeasurementLabels: true,
+  showTurnAngles: true,
+  showTurnArcs: true,
+  showMeasurementHeading: false,
+  showMeasurementGuides: true,
+  measurementLabelSize: "large",
 };
 
 export function mergeOverlayState(
@@ -18,12 +25,12 @@ export function mergeOverlayState(
 export function overlayOpacityForMode(mode: CameraMode) {
   switch (mode) {
     case "top":
-      return { sensor: 0.85, heading: 0.9, trail: 0.7 };
+      return { sensor: 0.85, heading: 0.9, trail: 0.7, measurement: 0.86 };
     case "follow":
-      return { sensor: 0.7, heading: 0.75, trail: 0.55 };
+      return { sensor: 0.7, heading: 0.75, trail: 0.55, measurement: 0.8 };
     case "perspective":
-      return { sensor: 0.8, heading: 0.85, trail: 0.65 };
+      return { sensor: 0.8, heading: 0.85, trail: 0.65, measurement: 0.82 };
     default:
-      return { sensor: 0.8, heading: 0.85, trail: 0.65 };
+      return { sensor: 0.8, heading: 0.85, trail: 0.65, measurement: 0.82 };
   }
 }

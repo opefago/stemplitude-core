@@ -967,6 +967,123 @@
   white-space: nowrap;
 }
 
+.robotics-overlay-measure-split {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  border-radius: 8px;
+  overflow: visible;
+}
+
+.robotics-overlay-measure-split .robotics-lab-btn {
+  border-radius: 8px 0 0 8px;
+  margin: 0;
+}
+
+.robotics-overlay-measure-split-toggle.robotics-lab-btn {
+  border-left: 1px solid #536684;
+  border-radius: 0 8px 8px 0;
+  padding: 4px 7px;
+  min-width: 28px;
+  justify-content: center;
+}
+
+.robotics-overlay-measure-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  z-index: 35;
+  min-width: 180px;
+  max-height: min(260px, 45vh);
+  display: grid;
+  gap: 0;
+  overflow: auto;
+  border: 1px solid #3a4a61;
+  border-radius: 8px;
+  background: #121821;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.35);
+}
+
+.robotics-overlay-measure-menu-item {
+  border: 0;
+  border-bottom: 1px solid rgba(58, 74, 97, 0.8);
+  background: transparent;
+  color: #d7e4f4;
+  font-size: 12px;
+  text-align: left;
+  padding: 8px 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.robotics-overlay-measure-menu-item:last-child {
+  border-bottom: 0;
+}
+
+.robotics-overlay-measure-menu-item:hover {
+  background: #1b2533;
+}
+
+.robotics-overlay-measure-menu-item.is-checked {
+  color: #f5fbff;
+}
+
+.robotics-overlay-measure-menu-item__left {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.robotics-overlay-measure-menu-item__empty {
+  width: 13px;
+  height: 13px;
+}
+
+.robotics-overlay-measure-size-row {
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  border-top: 1px solid rgba(58, 74, 97, 0.85);
+  background: rgba(14, 21, 33, 0.8);
+}
+
+.robotics-overlay-measure-size-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #b9cbe1;
+}
+
+.robotics-overlay-measure-size-options {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.robotics-overlay-measure-size-btn {
+  border: 1px solid #3a4a61;
+  border-radius: 6px;
+  background: #172131;
+  color: #d7e4f4;
+  font-size: 11px;
+  font-weight: 700;
+  min-width: 30px;
+  padding: 4px 7px;
+  cursor: pointer;
+}
+
+.robotics-overlay-measure-size-btn:hover {
+  background: #223349;
+}
+
+.robotics-overlay-measure-size-btn.is-active {
+  border-color: #69a1eb;
+  background: #2a4464;
+  color: #ffffff;
+}
+
 .robotics-floating-controls-bottom .robotics-floating-group {
   border: 1px solid rgba(103, 132, 168, 0.3);
   background: linear-gradient(180deg, rgba(23, 33, 49, 0.65), rgba(13, 20, 31, 0.6));
@@ -1639,6 +1756,59 @@
   margin: 0;
   font-size: 11px;
   color: #97adc7;
+}
+
+.robotics-measurement-label {
+  border-radius: 9px;
+  border: 2px solid rgba(12, 34, 61, 0.95);
+  background: rgba(255, 255, 255, 0.98);
+  color: #0f233b;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.2;
+  padding: 6px 12px;
+  white-space: nowrap;
+  letter-spacing: 0.01em;
+  box-shadow: 0 4px 14px rgba(3, 7, 13, 0.32);
+}
+
+.robotics-measurement-label--small {
+  font-size: 12px;
+  padding: 3px 8px;
+}
+
+.robotics-measurement-label--medium {
+  font-size: 15px;
+  padding: 4px 10px;
+}
+
+.robotics-measurement-label--large {
+  font-size: 18px;
+  padding: 5px 11px;
+}
+
+.robotics-measurement-label--xl {
+  font-size: 24px;
+  padding: 7px 14px;
+}
+
+.robotics-measurement-label--segment {
+  color: #5b21b6;
+}
+
+.robotics-measurement-label--active {
+  border-color: rgba(176, 132, 255, 0.92);
+  background: rgba(41, 26, 61, 0.88);
+  color: #e9d5ff;
+}
+
+.robotics-measurement-label--turn {
+  color: #b45309;
+}
+
+.robotics-measurement-label--summary {
+  color: #93c5fd;
+  font-weight: 600;
 }
 
 .robotics-scene-row {

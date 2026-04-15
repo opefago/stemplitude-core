@@ -1,4 +1,5 @@
 export type CameraMode = "top" | "follow" | "perspective";
+export type MeasurementLabelSize = "small" | "medium" | "large" | "xl";
 
 export interface Vector3Like {
   x: number;
@@ -31,6 +32,13 @@ export interface OverlayState {
   showPathTrail: boolean;
   showHeading: boolean;
   showRobotFootprint: boolean;
+  showMeasurements: boolean;
+  showMeasurementLabels: boolean;
+  showTurnAngles: boolean;
+  showTurnArcs: boolean;
+  showMeasurementHeading: boolean;
+  showMeasurementGuides: boolean;
+  measurementLabelSize: MeasurementLabelSize;
 }
 
 export interface RobotPoseForCamera {

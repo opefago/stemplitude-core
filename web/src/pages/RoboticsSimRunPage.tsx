@@ -45,6 +45,7 @@ export default function RoboticsSimRunPage() {
     cameraState,
     overlayState,
     pathTrailResetToken,
+    measurementResetToken,
     cameraResetToken,
     cameraFocusToken,
     setCameraMode,
@@ -52,6 +53,7 @@ export default function RoboticsSimRunPage() {
     focusCameraOnRobot,
     zoomCamera,
     toggleOverlay,
+    setMeasurementLabelSize,
     updateCameraState,
   } = useRoboticsWorkspaceContext();
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -110,6 +112,8 @@ export default function RoboticsSimRunPage() {
           cameraState={cameraState}
           overlayState={overlayState}
           pathTrailResetToken={pathTrailResetToken}
+          measurementResetToken={measurementResetToken}
+          runtimeState={runtimeState}
           cameraResetToken={cameraResetToken}
           cameraFocusToken={cameraFocusToken}
           worldSizeCm={{
@@ -142,7 +146,7 @@ export default function RoboticsSimRunPage() {
             <span>Runtime: {runtimeState}</span>
             <span>World: {worldSummary}</span>
           </div>
-          <OverlayToggles overlays={overlayState} onToggle={toggleOverlay} />
+          <OverlayToggles overlays={overlayState} onToggle={toggleOverlay} onSetMeasurementLabelSize={setMeasurementLabelSize} />
         </div>
       </section>
       <ViewportSettingsDialog

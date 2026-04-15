@@ -10,6 +10,7 @@ import { toonGradientMap } from "../../lib/three/cartoonStyle";
 import { DistanceRayOverlay } from "../../labs/robotics/view/overlays/DistanceRayOverlay";
 import { HeadingOverlay } from "../../labs/robotics/view/overlays/HeadingOverlay";
 import { LineSensorOverlay } from "../../labs/robotics/view/overlays/LineSensorOverlay";
+import { MeasurementOverlay } from "../../labs/robotics/view/overlays/MeasurementOverlay";
 import { PathTrailOverlay } from "../../labs/robotics/view/overlays/PathTrailOverlay";
 import type { CameraPose, CameraState, OverlayState, RobotPoseForCamera, WorldSizeCm } from "../../labs/robotics/view/types";
 import type { RoboticsCameraController } from "../../labs/robotics/view/cameraController";
@@ -71,6 +72,8 @@ interface ThreeSimViewportProps {
   cameraState?: CameraState;
   overlayState?: OverlayState;
   pathTrailResetToken?: number;
+  measurementResetToken?: number;
+  runtimeState?: string;
   cameraResetToken?: number;
   cameraFocusToken?: number;
   editable?: boolean;
@@ -534,6 +537,8 @@ export function ThreeSimViewport({
   cameraState,
   overlayState,
   pathTrailResetToken = 0,
+  measurementResetToken = 0,
+  runtimeState = "idle",
   cameraResetToken = 0,
   cameraFocusToken = 0,
   editable = false,
@@ -586,6 +591,13 @@ export function ThreeSimViewport({
         showPathTrail: true,
         showHeading: true,
         showRobotFootprint: false,
+        showMeasurements: true,
+        showMeasurementLabels: true,
+        showTurnAngles: true,
+        showTurnArcs: true,
+        showMeasurementHeading: false,
+        showMeasurementGuides: true,
+        measurementLabelSize: "large",
       },
     [overlayState],
   );
@@ -697,6 +709,22 @@ export function ThreeSimViewport({
         <group name="overlayLayer">
           {resolvedOverlayState.showPathTrail ? (
             <PathTrailOverlay robot={robotPose} enabled opacity={overlayOpacity.trail} resetKey={pathTrailResetToken} />
+          ) : null}
+          {resolvedOverlayState.showMeasurements ? (
+            <MeasurementOverlay
+              robot={robotPose}
+              runtimeState={runtimeState}
+              resetKey={measurementResetToken}
+              opacity={overlayOpacity.measurement}
+              config={{
+                showSegmentLabels: resolvedOverlayState.showMeasurementLabels,
+                showTurnLabels: resolvedOverlayState.showTurnAngles,
+                showTurnArcs: resolvedOverlayState.showTurnArcs,
+                showHeadingMarker: resolvedOverlayState.showMeasurementHeading,
+                showDimensionGuides: resolvedOverlayState.showMeasurementGuides,
+                labelSize: resolvedOverlayState.measurementLabelSize,
+              }}
+            />
           ) : null}
           {resolvedOverlayState.showSensors ? (
             <>

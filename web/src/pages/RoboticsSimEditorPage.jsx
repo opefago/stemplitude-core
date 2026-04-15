@@ -77,6 +77,7 @@ export default function RoboticsSimEditorPage() {
     cameraState,
     overlayState,
     pathTrailResetToken,
+    measurementResetToken,
     cameraResetToken,
     cameraFocusToken,
     setCameraMode,
@@ -84,6 +85,7 @@ export default function RoboticsSimEditorPage() {
     focusCameraOnRobot,
     zoomCamera,
     toggleOverlay,
+    setMeasurementLabelSize,
     updateCameraState,
     runProgram,
     pauseProgram,
@@ -675,6 +677,8 @@ export default function RoboticsSimEditorPage() {
             cameraState={cameraState}
             overlayState={overlayState}
             pathTrailResetToken={pathTrailResetToken}
+            measurementResetToken={measurementResetToken}
+            runtimeState={runtimeState}
             cameraResetToken={cameraResetToken}
             cameraFocusToken={cameraFocusToken}
             editable
@@ -722,7 +726,11 @@ export default function RoboticsSimEditorPage() {
             <DebuggerStatusPanel debugSession={debugSession} compact />
           </div>
           <div className="robotics-floating-controls-bottom">
-            <OverlayToggles overlays={overlayState} onToggle={toggleOverlay} />
+            <OverlayToggles
+              overlays={overlayState}
+              onToggle={toggleOverlay}
+              onSetMeasurementLabelSize={setMeasurementLabelSize}
+            />
           </div>
         </div>
       </section>
