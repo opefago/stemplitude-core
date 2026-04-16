@@ -59,6 +59,9 @@ describe("object palette catalog", () => {
     expect(sceneObject.metadata?.slope_deg).toBeGreaterThan(0);
     expect(sceneObject.metadata?.ramp_entry_side).toBe("positive_x");
     expect(sceneObject.metadata?.ramp_side_blocking).toBe(true);
+    expect(sceneObject.metadata?.support_surface_mode).toBe("ramp_profile");
+    expect(sceneObject.metadata?.support_priority).toBe(30);
+    expect(sceneObject.metadata?.friction_combine).toBe("average");
   });
 });
 

@@ -74,6 +74,66 @@ function buildEmptyWorld(): SimulatorWorldMap {
   };
 }
 
+function buildMaterialSupportWorld(
+  frictionCoefficient: number,
+  frictionCombine: "average" | "min" | "max" | "multiply" = "average",
+): SimulatorWorldMap {
+  return {
+    id: "material_world",
+    name: "material",
+    grid_cell_cm: 20,
+    width_cells: 40,
+    height_cells: 40,
+    objects: [],
+    world_scene: {
+      version: 1,
+      gravity_m_s2: 9.81,
+      objects: [
+        {
+          id: "support_pad",
+          type: "obstacle",
+          position: { x: 220, y: 0, z: 220 },
+          size_cm: { x: 500, y: 4, z: 500 },
+          rotation_deg: { y: 0 },
+          metadata: {
+            physics_body: "static",
+            contact_mode: "sensor_only",
+            support_surface: true,
+            support_surface_mode: "solid_top",
+            support_priority: 100,
+            friction_coefficient: frictionCoefficient,
+            friction_combine: frictionCombine,
+          },
+        },
+      ],
+    },
+  };
+}
+
+function runDistanceOnMaterial(
+  frictionCoefficient: number,
+  frictionCombine: "average" | "min" | "max" | "multiply",
+): number {
+  const sim = new ThreeRuntimeSimulator(TEST_ROBOT);
+  sim.setWorld(buildMaterialSupportWorld(frictionCoefficient, frictionCombine));
+  sim.reset({ position: { x: 100, y: 100 }, heading_deg: 0 });
+  for (let i = 0; i < 50; i += 1) {
+    sim.tick({ dt_ms: 50, linear_velocity_cm_s: 90, angular_velocity_deg_s: 0 });
+  }
+  return sim.tick({ dt_ms: 0, linear_velocity_cm_s: 0, angular_velocity_deg_s: 0 }).pose.position.x;
+}
+
+function resolveRestitutionCombine(
+  restitutionCoefficient: number,
+  restitutionCombine: "average" | "min" | "max" | "multiply",
+): number {
+  const simulator = new ThreeRuntimeSimulator(TEST_ROBOT) as any;
+  return simulator.resolveCombinedRestitution({
+    restitution_coefficient: restitutionCoefficient,
+    restitution_combine: restitutionCombine,
+  });
+}
+
 describe("ThreeRuntimeSimulator dynamic contacts", () => {
   it("pushes dynamic obstacles when robot contacts them", () => {
     const simulator = new ThreeRuntimeSimulator(TEST_ROBOT);
@@ -177,6 +237,62 @@ describe("ThreeRuntimeSimulator dynamic contacts", () => {
     const fastPose = highTraction.tick({ dt_ms: 0, linear_velocity_cm_s: 0, angular_velocity_deg_s: 0 }).pose;
     const slowPose = lowTraction.tick({ dt_ms: 0, linear_velocity_cm_s: 0, angular_velocity_deg_s: 0 }).pose;
     expect(fastPose.position.x).toBeGreaterThan(slowPose.position.x + 18);
+  });
+
+  it("changes drive response based on support-surface friction material", () => {
+    const highFrictionSim = new ThreeRuntimeSimulator(TEST_ROBOT);
+    const lowFrictionSim = new ThreeRuntimeSimulator(TEST_ROBOT);
+    highFrictionSim.setWorld(buildMaterialSupportWorld(2.5, "average"));
+    lowFrictionSim.setWorld(buildMaterialSupportWorld(0.2, "average"));
+    highFrictionSim.reset({ position: { x: 100, y: 100 }, heading_deg: 0 });
+    lowFrictionSim.reset({ position: { x: 100, y: 100 }, heading_deg: 0 });
+
+    for (let i = 0; i < 50; i += 1) {
+      highFrictionSim.tick({ dt_ms: 50, linear_velocity_cm_s: 90, angular_velocity_deg_s: 0 });
+      lowFrictionSim.tick({ dt_ms: 50, linear_velocity_cm_s: 90, angular_velocity_deg_s: 0 });
+    }
+
+    const highPose = highFrictionSim.tick({ dt_ms: 0, linear_velocity_cm_s: 0, angular_velocity_deg_s: 0 }).pose;
+    const lowPose = lowFrictionSim.tick({ dt_ms: 0, linear_velocity_cm_s: 0, angular_velocity_deg_s: 0 }).pose;
+    expect(highPose.position.x).toBeGreaterThan(lowPose.position.x + 25);
+  });
+
+  it("respects friction combine mode ordering across low/high friction surfaces", () => {
+    const lowMin = runDistanceOnMaterial(0.4, "min");
+    const lowMultiply = runDistanceOnMaterial(0.4, "multiply");
+    const lowAverage = runDistanceOnMaterial(0.4, "average");
+    const lowMax = runDistanceOnMaterial(0.4, "max");
+    expect(Math.abs(lowMin - lowMultiply)).toBeLessThan(0.5);
+    expect(lowAverage).toBeGreaterThan(lowMin + 8);
+    expect(lowMax).toBeGreaterThan(lowAverage + 8);
+
+    const highMin = runDistanceOnMaterial(2, "min");
+    const highAverage = runDistanceOnMaterial(2, "average");
+    const highMax = runDistanceOnMaterial(2, "max");
+    const highMultiply = runDistanceOnMaterial(2, "multiply");
+    expect(highAverage).toBeGreaterThan(highMin + 8);
+    expect(highMax).toBeGreaterThan(highAverage + 8);
+    expect(Math.abs(highMax - highMultiply)).toBeLessThan(0.5);
+  });
+
+  it("respects restitution combine mode ordering", () => {
+    const lowMin = resolveRestitutionCombine(0.4, "min");
+    const lowMultiply = resolveRestitutionCombine(0.4, "multiply");
+    const lowAverage = resolveRestitutionCombine(0.4, "average");
+    const lowMax = resolveRestitutionCombine(0.4, "max");
+    expect(lowMin).toBeCloseTo(0.05, 6);
+    expect(lowMultiply).toBeCloseTo(0.02, 6);
+    expect(lowAverage).toBeCloseTo(0.225, 6);
+    expect(lowMax).toBeCloseTo(0.4, 6);
+
+    const highMin = resolveRestitutionCombine(0.8, "min");
+    const highAverage = resolveRestitutionCombine(0.8, "average");
+    const highMax = resolveRestitutionCombine(0.8, "max");
+    const highMultiply = resolveRestitutionCombine(0.8, "multiply");
+    expect(highMin).toBeCloseTo(0.05, 6);
+    expect(highAverage).toBeCloseTo(0.425, 6);
+    expect(highMax).toBeCloseTo(0.8, 6);
+    expect(highMultiply).toBeCloseTo(0.04, 6);
   });
 
   it("turns less aggressively with wider track width under the same traction", () => {

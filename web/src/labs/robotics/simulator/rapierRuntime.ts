@@ -31,6 +31,17 @@ function dot2(ax: number, ay: number, bx: number, by: number): number {
   return ax * bx + ay * by;
 }
 
+function combineCoefficient(
+  base: number,
+  surface: number,
+  mode: "average" | "min" | "max" | "multiply" = "average",
+): number {
+  if (mode === "min") return Math.min(base, surface);
+  if (mode === "max") return Math.max(base, surface);
+  if (mode === "multiply") return base * surface;
+  return (base + surface) / 2;
+}
+
 function quaternionToYawDeg(rotation: { x: number; y: number; z: number; w: number }): number {
   const sinyCosp = 2 * (rotation.w * rotation.y + rotation.x * rotation.z);
   const cosyCosp = 1 - 2 * (rotation.y * rotation.y + rotation.z * rotation.z);
@@ -76,6 +87,11 @@ export class RapierRuntimeSimulator implements RoboticsSimulatorBridge {
   private worldDirty = true;
   private leftWheelVelocityCmS = 0;
   private rightWheelVelocityCmS = 0;
+  private robotElevationCm = 0;
+  private robotGrounded = true;
+  private supportSurfaceId: string | null = null;
+  private robotPitchDeg = 0;
+  private robotRollDeg = 0;
 
   private static readonly EPS = 0.01;
   private static readonly DEFAULT_MAX_CLIMB_SLOPE_DEG = 16;
@@ -102,6 +118,11 @@ export class RapierRuntimeSimulator implements RoboticsSimulatorBridge {
     this.lastCollisions = [];
     this.leftWheelVelocityCmS = 0;
     this.rightWheelVelocityCmS = 0;
+    this.robotElevationCm = 0;
+    this.robotGrounded = true;
+    this.supportSurfaceId = null;
+    this.robotPitchDeg = 0;
+    this.robotRollDeg = 0;
     this.fallback.reset(pose);
     if (this.ready && this.robotBody) {
       const halfHeight = this.robotHeightCm() / 2;
@@ -137,30 +158,33 @@ export class RapierRuntimeSimulator implements RoboticsSimulatorBridge {
         Math.abs(inputLinear) < this.wheelProfile.wheelRadiusCm * 1.5
           ? this.wheelProfile.wheelRadiusCm * 1.5
           : inputLinear;
+      const material = this.resolveActiveSupportMaterial();
       const trackWidthCm = this.wheelProfile.trackWidthCm;
       const angularRadS = toRadians(angularDeg);
-      const tractionLinear = this.wheelProfile.tractionLongitudinal;
+      const tractionLinear = this.wheelProfile.tractionLongitudinal * material.tractionScale;
+      const tractionLateral = this.wheelProfile.tractionLateral * material.tractionScale;
+      const rollingResistance = this.wheelProfile.rollingResistance * material.rollingResistanceScale;
       const targetLeftWheel = (adjustedLinear - (angularRadS * trackWidthCm) / 2) * tractionLinear;
       const targetRightWheel = (adjustedLinear + (angularRadS * trackWidthCm) / 2) * tractionLinear;
       this.leftWheelVelocityCmS = this.approachVelocity(
         this.leftWheelVelocityCmS,
         targetLeftWheel,
-        this.wheelProfile.maxWheelAccelCmS2 * this.wheelProfile.tractionLongitudinal,
-        this.wheelProfile.rollingResistance,
+        this.wheelProfile.maxWheelAccelCmS2 * this.wheelProfile.tractionLongitudinal * material.tractionScale,
+        rollingResistance,
         dtSeconds,
       );
       this.rightWheelVelocityCmS = this.approachVelocity(
         this.rightWheelVelocityCmS,
         targetRightWheel,
-        this.wheelProfile.maxWheelAccelCmS2 * this.wheelProfile.tractionLongitudinal,
-        this.wheelProfile.rollingResistance,
+        this.wheelProfile.maxWheelAccelCmS2 * this.wheelProfile.tractionLongitudinal * material.tractionScale,
+        rollingResistance,
         dtSeconds,
       );
       const bodyLinear = (this.leftWheelVelocityCmS + this.rightWheelVelocityCmS) / 2;
       const trackGripFactor = clamp(18 / Math.max(8, this.wheelProfile.trackWidthCm), 0.68, 1.08);
       const bodyAngularRadS =
         ((this.rightWheelVelocityCmS - this.leftWheelVelocityCmS) / Math.max(1, trackWidthCm)) *
-        this.wheelProfile.tractionLateral *
+        tractionLateral *
         trackGripFactor;
       this.robotBody.setLinvel(
         { x: Math.cos(headingRad) * bodyLinear, y: 0, z: Math.sin(headingRad) * bodyLinear },
@@ -176,6 +200,7 @@ export class RapierRuntimeSimulator implements RoboticsSimulatorBridge {
       position: { x: t.x, y: t.z },
       heading_deg: quaternionToYawDeg(r),
     };
+    this.updateGroundingState();
     this.syncDynamicObjectTransforms();
     this.lastCollisions = this.computeRobotCollisions(poseBeforeStep, this.pose);
     if (dtSeconds > 0 && this.lastCollisions.length > 0) {
@@ -308,9 +333,17 @@ export class RapierRuntimeSimulator implements RoboticsSimulatorBridge {
     if (Number.isFinite(friction)) {
       colliderDesc.setFriction(clamp(friction, 0, 5));
     }
+    const frictionCombine = this.resolveRapierCombineRule(metadata.friction_combine);
+    if (frictionCombine !== null && typeof colliderDesc.setFrictionCombineRule === "function") {
+      colliderDesc.setFrictionCombineRule(frictionCombine);
+    }
     const restitution = Number(metadata.restitution_coefficient ?? metadata.restitution);
     if (Number.isFinite(restitution)) {
       colliderDesc.setRestitution(clamp(restitution, 0, 1));
+    }
+    const restitutionCombine = this.resolveRapierCombineRule(metadata.restitution_combine);
+    if (restitutionCombine !== null && typeof colliderDesc.setRestitutionCombineRule === "function") {
+      colliderDesc.setRestitutionCombineRule(restitutionCombine);
     }
     if (contactMode === "sensor_only" || this.getSurfaceType(object) === "ramp") {
       colliderDesc.setSensor(true);
@@ -379,6 +412,11 @@ export class RapierRuntimeSimulator implements RoboticsSimulatorBridge {
       const override = byId ?? byKind;
       if (override !== undefined && override !== null) readings[sensor.id] = override;
     }
+    readings.__physics_grounded = this.robotGrounded;
+    readings.__physics_elevation_cm = Number(this.robotElevationCm.toFixed(3));
+    readings.__physics_support = this.supportSurfaceId || "";
+    readings.__physics_pitch_deg = Number(this.robotPitchDeg.toFixed(3));
+    readings.__physics_roll_deg = Number(this.robotRollDeg.toFixed(3));
     return readings;
   }
 
@@ -455,6 +493,216 @@ export class RapierRuntimeSimulator implements RoboticsSimulatorBridge {
     return zone.type === "target_zone" ? "goal" : "zone";
   }
 
+  private supportHeightForPoint(object: SimulatorSceneObject, pointX: number, pointY: number): number {
+    if (this.getSupportSurfaceMode(object) === "ramp_profile") {
+      const local = this.toObjectLocal(pointX, pointY, object);
+      const halfW = Math.max(1, Number(object.size_cm?.x) || 0) / 2;
+      const entrySide = object.metadata?.ramp_entry_side === "negative_x" ? -1 : 1;
+      const normalized =
+        entrySide === 1 ? clamp((halfW - local.x) / (halfW * 2), 0, 1) : clamp((local.x + halfW) / (halfW * 2), 0, 1);
+      return Math.max(0, Number(object.size_cm?.y) || 0) * normalized;
+    }
+    return Number(object.size_cm?.y) || 0;
+  }
+
+  private sampleSupportAtPoint(pointX: number, pointY: number): { height: number; objectId: string | null; priority: number } {
+    let bestHit: { height: number; objectId: string | null; priority: number } = {
+      height: 0,
+      objectId: null,
+      priority: 0,
+    };
+    for (const object of this.world?.world_scene?.objects || []) {
+      if (!object || object.metadata?.hidden) continue;
+      if (!this.isSupportSurface(object)) continue;
+      const local = this.toObjectLocal(pointX, pointY, object);
+      const halfW = Math.max(1, Number(object.size_cm?.x) || 0) / 2;
+      const halfD = Math.max(1, Number(object.size_cm?.z) || 0) / 2;
+      if (Math.abs(local.x) > halfW || Math.abs(local.z) > halfD) continue;
+      const height = this.supportHeightForPoint(object, pointX, pointY);
+      const priority = this.getSupportPriority(object);
+      if (priority > bestHit.priority || (priority === bestHit.priority && height > bestHit.height)) {
+        bestHit = { height, objectId: object.id, priority };
+      }
+    }
+    return bestHit;
+  }
+
+  private getSupportSurfaceMode(object: SimulatorSceneObject): "none" | "solid_top" | "ramp_profile" {
+    const mode = object.metadata?.support_surface_mode;
+    if (mode === "none" || mode === "solid_top" || mode === "ramp_profile") return mode;
+    if (object.metadata?.support_surface === false) return "none";
+    if (this.getSurfaceType(object) === "ramp") return "ramp_profile";
+    if (object.metadata?.support_surface === true || object.type === "wall") return "solid_top";
+    return "none";
+  }
+
+  private isSupportSurface(object: SimulatorSceneObject): boolean {
+    return this.getSupportSurfaceMode(object) !== "none";
+  }
+
+  private getSupportPriority(object: SimulatorSceneObject): number {
+    const explicit = Number(object.metadata?.support_priority);
+    if (Number.isFinite(explicit)) return explicit;
+    const mode = this.getSupportSurfaceMode(object);
+    if (mode === "ramp_profile") return 30;
+    if (mode === "solid_top") return 20;
+    return 0;
+  }
+
+  private buildRobotSupportProbes(pose: SimulatorPose2D): Array<{ x: number; y: number; localX: number; localZ: number }> {
+    const wheelbaseHalf = this.wheelProfile.wheelbaseCm / 2;
+    const trackHalf = this.wheelProfile.trackWidthCm / 2;
+    const headingRad = toRadians(pose.heading_deg);
+    const cos = Math.cos(headingRad);
+    const sin = Math.sin(headingRad);
+    const localProbes = [
+      { localX: wheelbaseHalf, localZ: -trackHalf },
+      { localX: -wheelbaseHalf, localZ: -trackHalf },
+      { localX: wheelbaseHalf, localZ: trackHalf },
+      { localX: -wheelbaseHalf, localZ: trackHalf },
+    ];
+    return localProbes.map((probe) => ({
+      ...probe,
+      x: pose.position.x + probe.localX * cos - probe.localZ * sin,
+      y: pose.position.y + probe.localX * sin + probe.localZ * cos,
+    }));
+  }
+
+  private buildRobotBodyCollisionProbes(pose: SimulatorPose2D): Array<{ x: number; y: number; localX: number; localZ: number }> {
+    const halfLength = Math.max(4, (Number(this.robot.length_cm) || this.wheelProfile.wheelbaseCm) / 2 - 0.8);
+    const halfWidth = Math.max(4, (Number(this.robot.width_cm) || this.wheelProfile.trackWidthCm) / 2 - 0.8);
+    const headingRad = toRadians(pose.heading_deg);
+    const cos = Math.cos(headingRad);
+    const sin = Math.sin(headingRad);
+    const localProbes = [
+      { localX: halfLength, localZ: -halfWidth },
+      { localX: halfLength, localZ: halfWidth },
+      { localX: -halfLength, localZ: -halfWidth },
+      { localX: -halfLength, localZ: halfWidth },
+      { localX: 0, localZ: -halfWidth },
+      { localX: 0, localZ: halfWidth },
+    ];
+    return localProbes.map((probe) => ({
+      ...probe,
+      x: pose.position.x + probe.localX * cos - probe.localZ * sin,
+      y: pose.position.y + probe.localX * sin + probe.localZ * cos,
+    }));
+  }
+
+  private enforceBodyCollisionClearance(
+    pose: SimulatorPose2D,
+    elevationCm: number,
+    pitchDeg: number,
+    rollDeg: number,
+  ): { elevationCm: number; supportId: string | null } {
+    const clearanceCm = Math.max(1, this.wheelProfile.wheelRadiusCm - 0.2);
+    const slopeX = Math.tan(toRadians(pitchDeg));
+    const slopeZ = Math.tan(toRadians(rollDeg));
+    let requiredElevationCm = elevationCm;
+    let supportId: string | null = null;
+    for (const probe of this.buildRobotBodyCollisionProbes(pose)) {
+      const support = this.sampleSupportAtPoint(probe.x, probe.y);
+      if (support.height <= 0) continue;
+      const bodyBottomCm = elevationCm + slopeX * probe.localX + slopeZ * probe.localZ + clearanceCm;
+      if (bodyBottomCm + RapierRuntimeSimulator.EPS >= support.height) continue;
+      const minElevationForProbe = support.height - clearanceCm - slopeX * probe.localX - slopeZ * probe.localZ;
+      if (minElevationForProbe > requiredElevationCm) {
+        requiredElevationCm = minElevationForProbe;
+        supportId = support.objectId || supportId;
+      }
+    }
+    return { elevationCm: Math.max(0, requiredElevationCm), supportId };
+  }
+
+  private findSupportSurface(pose: SimulatorPose2D): {
+    id: string | null;
+    height: number;
+    grounded: boolean;
+    pitchDeg: number;
+    rollDeg: number;
+  } {
+    if (!this.world?.world_scene?.objects) {
+      return { id: null, height: 0, grounded: false, pitchDeg: 0, rollDeg: 0 };
+    }
+    const probes = this.buildRobotSupportProbes(pose);
+    const probeHits: Array<{ height: number; objectId: string | null; localX: number; localZ: number }> = [];
+    for (const probe of probes) {
+      const bestHit = this.sampleSupportAtPoint(probe.x, probe.y);
+      probeHits.push({
+        height: bestHit.height,
+        objectId: bestHit.objectId,
+        localX: probe.localX,
+        localZ: probe.localZ,
+      });
+    }
+    if (probeHits.length === 0) {
+      return { id: null, height: 0, grounded: false, pitchDeg: 0, rollDeg: 0 };
+    }
+    const idCount = new Map<string, number>();
+    for (const hit of probeHits) {
+      if (!hit.objectId) continue;
+      idCount.set(hit.objectId, (idCount.get(hit.objectId) || 0) + 1);
+    }
+    const supportId = Array.from(idCount.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+    const height = probeHits.reduce((sum, hit) => sum + hit.height, 0) / Math.max(1, probeHits.length);
+    const frontHits = probeHits.filter((hit) => hit.localX > 0);
+    const rearHits = probeHits.filter((hit) => hit.localX < 0);
+    const leftHits = probeHits.filter((hit) => hit.localZ < 0);
+    const rightHits = probeHits.filter((hit) => hit.localZ > 0);
+    const avgFront = frontHits.length ? frontHits.reduce((sum, hit) => sum + hit.height, 0) / frontHits.length : height;
+    const avgRear = rearHits.length ? rearHits.reduce((sum, hit) => sum + hit.height, 0) / rearHits.length : height;
+    const avgLeft = leftHits.length ? leftHits.reduce((sum, hit) => sum + hit.height, 0) / leftHits.length : height;
+    const avgRight = rightHits.length ? rightHits.reduce((sum, hit) => sum + hit.height, 0) / rightHits.length : height;
+    const pitchDeg = (Math.atan2(avgFront - avgRear, Math.max(1, this.wheelProfile.wheelbaseCm)) * 180) / Math.PI;
+    const rollDeg = (Math.atan2(avgRight - avgLeft, Math.max(1, this.wheelProfile.trackWidthCm)) * 180) / Math.PI;
+    return {
+      id: supportId,
+      height,
+      grounded: probeHits.length > 0,
+      pitchDeg,
+      rollDeg,
+    };
+  }
+
+  private updateGroundingState(): void {
+    const support = this.findSupportSurface(this.pose);
+    this.supportSurfaceId = support.id;
+    this.robotGrounded = support.grounded;
+    this.robotElevationCm = support.height;
+    this.robotPitchDeg = support.pitchDeg;
+    this.robotRollDeg = support.rollDeg;
+    const bodyClearance = this.enforceBodyCollisionClearance(
+      this.pose,
+      this.robotElevationCm,
+      this.robotPitchDeg,
+      this.robotRollDeg,
+    );
+    this.robotElevationCm = bodyClearance.elevationCm;
+    if (!this.supportSurfaceId && bodyClearance.supportId) {
+      this.supportSurfaceId = bodyClearance.supportId;
+    }
+  }
+
+  private resolveActiveSupportMaterial(): { tractionScale: number; rollingResistanceScale: number } {
+    const support = this.supportSurfaceId ? this.findSceneObjectById(this.supportSurfaceId) : null;
+    if (!support) {
+      return { tractionScale: 1, rollingResistanceScale: 1 };
+    }
+    const surfaceFrictionRaw = Number(support.metadata?.friction_coefficient ?? support.metadata?.friction);
+    const surfaceFriction = Number.isFinite(surfaceFrictionRaw) ? clamp(surfaceFrictionRaw, 0.05, 4) : 1;
+    const combineMode =
+      support.metadata?.friction_combine === "min" ||
+      support.metadata?.friction_combine === "max" ||
+      support.metadata?.friction_combine === "multiply" ||
+      support.metadata?.friction_combine === "average"
+        ? support.metadata.friction_combine
+        : "average";
+    const combined = combineCoefficient(1, surfaceFriction, combineMode);
+    const tractionScale = clamp(Math.sqrt(Math.max(0.05, combined)), 0.35, 1.6);
+    const rollingResistanceScale = clamp(1 / tractionScale, 0.5, 2.2);
+    return { tractionScale, rollingResistanceScale };
+  }
+
   private robotHeightCm(): number {
     return Math.max(8, Math.min(this.robot.width_cm, this.robot.length_cm) * 0.5);
   }
@@ -484,6 +732,16 @@ export class RapierRuntimeSimulator implements RoboticsSimulatorBridge {
     if (typeof surface === "string" && surface.trim()) return surface;
     if (object.metadata?.render_shape === "ramp") return "ramp";
     return "default";
+  }
+
+  private resolveRapierCombineRule(value: unknown): unknown | null {
+    const combineRule = this.rapier?.CoefficientCombineRule;
+    if (!combineRule) return null;
+    if (value === "min") return combineRule.Min;
+    if (value === "max") return combineRule.Max;
+    if (value === "multiply") return combineRule.Multiply;
+    if (value === "average") return combineRule.Average;
+    return null;
   }
 
   private robotMaxClimbSlopeDeg(): number {

@@ -84,6 +84,11 @@ export interface SimulatorObjectContactBehavior {
   rampEntrySide?: "positive_x" | "negative_x";
   rampSideBlocking?: boolean;
   rampDescentAssist?: number;
+  supportSurface?: boolean;
+  supportSurfaceMode?: "none" | "solid_top" | "ramp_profile";
+  supportPriority?: number;
+  frictionCombine?: "average" | "min" | "max" | "multiply";
+  restitutionCombine?: "average" | "min" | "max" | "multiply";
   pushResistance?: number;
 }
 

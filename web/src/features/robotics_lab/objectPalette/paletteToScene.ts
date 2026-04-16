@@ -66,6 +66,21 @@ export function createSceneObjectFromPalette(
     if (definition.contactBehavior.rampDescentAssist !== undefined) {
       metadata.ramp_descent_assist = definition.contactBehavior.rampDescentAssist;
     }
+    if (definition.contactBehavior.supportSurface !== undefined) {
+      metadata.support_surface = definition.contactBehavior.supportSurface;
+    }
+    if (definition.contactBehavior.supportSurfaceMode) {
+      metadata.support_surface_mode = definition.contactBehavior.supportSurfaceMode;
+    }
+    if (definition.contactBehavior.supportPriority !== undefined) {
+      metadata.support_priority = definition.contactBehavior.supportPriority;
+    }
+    if (definition.contactBehavior.frictionCombine) {
+      metadata.friction_combine = definition.contactBehavior.frictionCombine;
+    }
+    if (definition.contactBehavior.restitutionCombine) {
+      metadata.restitution_combine = definition.contactBehavior.restitutionCombine;
+    }
     if (definition.contactBehavior.pushResistance !== undefined) {
       metadata.push_resistance = definition.contactBehavior.pushResistance;
     }

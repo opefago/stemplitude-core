@@ -75,6 +75,17 @@ function dot2(ax: number, ay: number, bx: number, by: number) {
   return ax * bx + ay * by;
 }
 
+function combineCoefficient(
+  base: number,
+  surface: number,
+  mode: "average" | "min" | "max" | "multiply" = "average",
+): number {
+  if (mode === "min") return Math.min(base, surface);
+  if (mode === "max") return Math.max(base, surface);
+  if (mode === "multiply") return base * surface;
+  return (base + surface) / 2;
+}
+
 function deterministicNoise(seed: number, amplitude: number) {
   const normalized = Math.sin(seed) * 43758.5453;
   const fract = normalized - Math.floor(normalized);
@@ -94,6 +105,8 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
   private robotVerticalVelocityCmS = 0;
   private robotGrounded = true;
   private supportSurfaceId: string | null = null;
+  private robotPitchDeg = 0;
+  private robotRollDeg = 0;
 
   private static readonly EPS = 0.01;
   private static readonly MIN_SENSOR_RANGE_CM = 2;
@@ -139,6 +152,8 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
     this.robotVerticalVelocityCmS = 0;
     this.robotGrounded = true;
     this.supportSurfaceId = null;
+    this.robotPitchDeg = 0;
+    this.robotRollDeg = 0;
   }
 
   setSensorOverrides(overrides: Record<string, number | boolean | string | null | undefined>): void {
@@ -177,7 +192,10 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
       const rampAdjustedLinearTarget = this.applyRampGradeEffect(adjustedLinearTarget);
       const trackWidthCm = this.wheelProfile.trackWidthCm;
       const targetAngularRadS = toRadians(targetAngularDegS);
-      const tractionLinear = this.wheelProfile.tractionLongitudinal;
+      const material = this.resolveActiveSupportMaterial();
+      const tractionLinear = this.wheelProfile.tractionLongitudinal * material.tractionScale;
+      const tractionLateral = this.wheelProfile.tractionLateral * material.tractionScale;
+      const rollingResistance = this.wheelProfile.rollingResistance * material.rollingResistanceScale;
       const targetLeftWheelCmS =
         (rampAdjustedLinearTarget - (targetAngularRadS * trackWidthCm) / 2) * tractionLinear;
       const targetRightWheelCmS =
@@ -185,15 +203,15 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
       this.leftWheelVelocityCmS = this.approachVelocity(
         this.leftWheelVelocityCmS,
         targetLeftWheelCmS,
-        this.wheelProfile.maxWheelAccelCmS2 * this.wheelProfile.tractionLongitudinal,
-        this.wheelProfile.rollingResistance,
+        this.wheelProfile.maxWheelAccelCmS2 * this.wheelProfile.tractionLongitudinal * material.tractionScale,
+        rollingResistance,
         subDt,
       );
       this.rightWheelVelocityCmS = this.approachVelocity(
         this.rightWheelVelocityCmS,
         targetRightWheelCmS,
-        this.wheelProfile.maxWheelAccelCmS2 * this.wheelProfile.tractionLongitudinal,
-        this.wheelProfile.rollingResistance,
+        this.wheelProfile.maxWheelAccelCmS2 * this.wheelProfile.tractionLongitudinal * material.tractionScale,
+        rollingResistance,
         subDt,
       );
       const linearVelocityCmS = (this.leftWheelVelocityCmS + this.rightWheelVelocityCmS) / 2;
@@ -202,7 +220,7 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
         toDegrees(
         (this.rightWheelVelocityCmS - this.leftWheelVelocityCmS) / Math.max(1, trackWidthCm),
       ) *
-        this.wheelProfile.tractionLateral *
+        tractionLateral *
         trackGripFactor;
 
       this.integrateDynamicObjectGravity(subDt);
@@ -280,7 +298,7 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
       const nextVy = vy - gravityCmS2 * subDt;
       let nextY = y + nextVy * subDt;
       let resolvedVy = nextVy;
-      const restitution = clamp(Number(metadata.restitution ?? 0.22), 0, 0.95);
+      const restitution = this.resolveCombinedRestitution(metadata);
       if (nextY < 0) {
         nextY = 0;
         resolvedVy = Math.abs(nextVy) > 20 ? -nextVy * restitution : 0;
@@ -332,6 +350,40 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
     const friction = Math.max(0, 1 - frictionCoeff * dtS);
     const withFriction = towardTarget * friction;
     return Math.abs(withFriction) < ThreeRuntimeSimulator.EPS ? 0 : withFriction;
+  }
+
+  private resolveActiveSupportMaterial(): { tractionScale: number; rollingResistanceScale: number } {
+    const support = this.supportSurfaceId ? this.findSceneObjectById(this.supportSurfaceId) : null;
+    if (!support) {
+      return { tractionScale: 1, rollingResistanceScale: 1 };
+    }
+    const surfaceFrictionRaw = Number(support.metadata?.friction_coefficient ?? support.metadata?.friction);
+    const surfaceFriction = Number.isFinite(surfaceFrictionRaw) ? clamp(surfaceFrictionRaw, 0.05, 4) : 1;
+    const combineMode =
+      support.metadata?.friction_combine === "min" ||
+      support.metadata?.friction_combine === "max" ||
+      support.metadata?.friction_combine === "multiply" ||
+      support.metadata?.friction_combine === "average"
+        ? support.metadata.friction_combine
+        : "average";
+    const combined = combineCoefficient(1, surfaceFriction, combineMode);
+    const tractionScale = clamp(Math.sqrt(Math.max(0.05, combined)), 0.35, 1.6);
+    const rollingResistanceScale = clamp(1 / tractionScale, 0.5, 2.2);
+    return { tractionScale, rollingResistanceScale };
+  }
+
+  private resolveCombinedRestitution(metadata: Record<string, unknown> | undefined): number {
+    const objectRestitutionRaw = Number(metadata?.restitution_coefficient ?? metadata?.restitution);
+    const objectRestitution = Number.isFinite(objectRestitutionRaw) ? clamp(objectRestitutionRaw, 0, 0.95) : 0.22;
+    const combineMode =
+      metadata?.restitution_combine === "min" ||
+      metadata?.restitution_combine === "max" ||
+      metadata?.restitution_combine === "multiply" ||
+      metadata?.restitution_combine === "average"
+        ? metadata.restitution_combine
+        : "average";
+    const floorRestitution = 0.05;
+    return clamp(combineCoefficient(objectRestitution, floorRestitution, combineMode), 0, 0.95);
   }
 
   private robotCollisionRadiusCm(): number {
@@ -424,8 +476,34 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
   }
 
   private supportHeightForPose(object: SimulatorSceneObject, pose: SimulatorPose2D): number {
-    if (this.getSurfaceType(object) === "ramp") {
-      const local = this.toObjectLocal(pose.position.x, pose.position.y, object);
+    return this.supportHeightForPoint(object, pose.position.x, pose.position.y);
+  }
+
+  private getSupportSurfaceMode(object: SimulatorSceneObject): "none" | "solid_top" | "ramp_profile" {
+    const mode = object.metadata?.support_surface_mode;
+    if (mode === "none" || mode === "solid_top" || mode === "ramp_profile") return mode;
+    if (object.metadata?.support_surface === false) return "none";
+    if (this.getSurfaceType(object) === "ramp") return "ramp_profile";
+    if (object.metadata?.support_surface === true || object.type === "wall") return "solid_top";
+    return "none";
+  }
+
+  private isSupportSurface(object: SimulatorSceneObject): boolean {
+    return this.getSupportSurfaceMode(object) !== "none";
+  }
+
+  private getSupportPriority(object: SimulatorSceneObject): number {
+    const explicit = Number(object.metadata?.support_priority);
+    if (Number.isFinite(explicit)) return explicit;
+    const mode = this.getSupportSurfaceMode(object);
+    if (mode === "ramp_profile") return 30;
+    if (mode === "solid_top") return 20;
+    return 0;
+  }
+
+  private supportHeightForPoint(object: SimulatorSceneObject, pointX: number, pointY: number): number {
+    if (this.getSupportSurfaceMode(object) === "ramp_profile") {
+      const local = this.toObjectLocal(pointX, pointY, object);
       const halfW = Math.max(1, Number(object.size_cm?.x) || 0) / 2;
       const entrySide = object.metadata?.ramp_entry_side === "negative_x" ? -1 : 1;
       const normalized =
@@ -435,32 +513,154 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
     return Number(object.size_cm?.y) || 0;
   }
 
-  private findSupportSurface(pose: SimulatorPose2D): { id: string; height: number } | null {
-    if (!this.world?.world_scene?.objects) return null;
-    let best: { id: string; height: number } | null = null;
-    for (const object of this.world.world_scene.objects) {
+  private sampleSupportAtPoint(pointX: number, pointY: number): { height: number; objectId: string | null; priority: number } {
+    let bestHit: { height: number; objectId: string | null; priority: number } = {
+      height: 0,
+      objectId: null,
+      priority: 0,
+    };
+    for (const object of this.world?.world_scene?.objects || []) {
       if (!object || object.metadata?.hidden) continue;
-      const isSupport =
-        this.getSurfaceType(object) === "ramp" ||
-        object.metadata?.support_surface === true ||
-        object.type === "wall";
-      if (!isSupport) continue;
-      const local = this.toObjectLocal(pose.position.x, pose.position.y, object);
+      if (!this.isSupportSurface(object)) continue;
+      const local = this.toObjectLocal(pointX, pointY, object);
       const halfW = Math.max(1, Number(object.size_cm?.x) || 0) / 2;
       const halfD = Math.max(1, Number(object.size_cm?.z) || 0) / 2;
       if (Math.abs(local.x) > halfW || Math.abs(local.z) > halfD) continue;
-      const height = this.supportHeightForPose(object, pose);
-      if (!best || height > best.height) {
-        best = { id: object.id, height };
+      const height = this.supportHeightForPoint(object, pointX, pointY);
+      const priority = this.getSupportPriority(object);
+      if (priority > bestHit.priority || (priority === bestHit.priority && height > bestHit.height)) {
+        bestHit = { height, objectId: object.id, priority };
       }
     }
-    return best;
+    return bestHit;
+  }
+
+  private buildRobotSupportProbes(pose: SimulatorPose2D): Array<{ id: string; x: number; y: number; localX: number; localZ: number }> {
+    const wheelbaseHalf = this.wheelProfile.wheelbaseCm / 2;
+    const trackHalf = this.wheelProfile.trackWidthCm / 2;
+    const headingRad = toRadians(pose.heading_deg);
+    const cos = Math.cos(headingRad);
+    const sin = Math.sin(headingRad);
+    const localProbes = [
+      { id: "front_left", localX: wheelbaseHalf, localZ: -trackHalf },
+      { id: "rear_left", localX: -wheelbaseHalf, localZ: -trackHalf },
+      { id: "front_right", localX: wheelbaseHalf, localZ: trackHalf },
+      { id: "rear_right", localX: -wheelbaseHalf, localZ: trackHalf },
+    ];
+    return localProbes.map((probe) => ({
+      ...probe,
+      x: pose.position.x + probe.localX * cos - probe.localZ * sin,
+      y: pose.position.y + probe.localX * sin + probe.localZ * cos,
+    }));
+  }
+
+  private buildRobotBodyCollisionProbes(
+    pose: SimulatorPose2D,
+  ): Array<{ x: number; y: number; localX: number; localZ: number }> {
+    const halfLength = Math.max(4, (Number(this.robot.length_cm) || this.wheelProfile.wheelbaseCm) / 2 - 0.8);
+    const halfWidth = Math.max(4, (Number(this.robot.width_cm) || this.wheelProfile.trackWidthCm) / 2 - 0.8);
+    const headingRad = toRadians(pose.heading_deg);
+    const cos = Math.cos(headingRad);
+    const sin = Math.sin(headingRad);
+    const localProbes = [
+      { localX: halfLength, localZ: -halfWidth },
+      { localX: halfLength, localZ: halfWidth },
+      { localX: -halfLength, localZ: -halfWidth },
+      { localX: -halfLength, localZ: halfWidth },
+      { localX: 0, localZ: -halfWidth },
+      { localX: 0, localZ: halfWidth },
+    ];
+    return localProbes.map((probe) => ({
+      ...probe,
+      x: pose.position.x + probe.localX * cos - probe.localZ * sin,
+      y: pose.position.y + probe.localX * sin + probe.localZ * cos,
+    }));
+  }
+
+  private enforceBodyCollisionClearance(
+    pose: SimulatorPose2D,
+    elevationCm: number,
+    pitchDeg: number,
+    rollDeg: number,
+  ): { elevationCm: number; supportId: string | null } {
+    const clearanceCm = Math.max(1, this.wheelProfile.wheelRadiusCm - 0.2);
+    const slopeX = Math.tan(toRadians(pitchDeg));
+    const slopeZ = Math.tan(toRadians(rollDeg));
+    let requiredElevationCm = elevationCm;
+    let supportId: string | null = null;
+    for (const probe of this.buildRobotBodyCollisionProbes(pose)) {
+      const support = this.sampleSupportAtPoint(probe.x, probe.y);
+      if (support.height <= 0) continue;
+      const bodyBottomCm = elevationCm + slopeX * probe.localX + slopeZ * probe.localZ + clearanceCm;
+      if (bodyBottomCm + ThreeRuntimeSimulator.EPS >= support.height) continue;
+      const minElevationForProbe = support.height - clearanceCm - slopeX * probe.localX - slopeZ * probe.localZ;
+      if (minElevationForProbe > requiredElevationCm) {
+        requiredElevationCm = minElevationForProbe;
+        supportId = support.objectId || supportId;
+      }
+    }
+    return { elevationCm: Math.max(0, requiredElevationCm), supportId };
+  }
+
+  private findSupportSurface(pose: SimulatorPose2D): {
+    id: string | null;
+    height: number;
+    grounded: boolean;
+    pitchDeg: number;
+    rollDeg: number;
+  } | null {
+    if (!this.world?.world_scene?.objects) return null;
+    const probes = this.buildRobotSupportProbes(pose);
+    const probeHits: Array<{ probeId: string; height: number; objectId: string | null; localX: number; localZ: number }> = [];
+    for (const probe of probes) {
+      const bestHit = this.sampleSupportAtPoint(probe.x, probe.y);
+      probeHits.push({
+        probeId: probe.id,
+        height: bestHit.height,
+        objectId: bestHit.objectId,
+        localX: probe.localX,
+        localZ: probe.localZ,
+      });
+    }
+    if (probeHits.length === 0) {
+      return {
+        id: null,
+        height: 0,
+        grounded: false,
+        pitchDeg: 0,
+        rollDeg: 0,
+      };
+    }
+    const idCount = new Map<string, number>();
+    for (const hit of probeHits) {
+      if (!hit.objectId) continue;
+      idCount.set(hit.objectId, (idCount.get(hit.objectId) || 0) + 1);
+    }
+    const supportId = Array.from(idCount.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+    const height = probeHits.reduce((sum, hit) => sum + hit.height, 0) / Math.max(1, probeHits.length);
+    const frontHits = probeHits.filter((hit) => hit.localX > 0);
+    const rearHits = probeHits.filter((hit) => hit.localX < 0);
+    const leftHits = probeHits.filter((hit) => hit.localZ < 0);
+    const rightHits = probeHits.filter((hit) => hit.localZ > 0);
+    const avgFront = frontHits.length ? frontHits.reduce((sum, hit) => sum + hit.height, 0) / frontHits.length : height;
+    const avgRear = rearHits.length ? rearHits.reduce((sum, hit) => sum + hit.height, 0) / rearHits.length : height;
+    const avgLeft = leftHits.length ? leftHits.reduce((sum, hit) => sum + hit.height, 0) / leftHits.length : height;
+    const avgRight = rightHits.length ? rightHits.reduce((sum, hit) => sum + hit.height, 0) / rightHits.length : height;
+    const pitchDeg = (Math.atan2(avgFront - avgRear, Math.max(1, this.wheelProfile.wheelbaseCm)) * 180) / Math.PI;
+    const rollDeg = (Math.atan2(avgRight - avgLeft, Math.max(1, this.wheelProfile.trackWidthCm)) * 180) / Math.PI;
+    return {
+      id: supportId,
+      height,
+      grounded: probeHits.length > 0,
+      pitchDeg,
+      rollDeg,
+    };
   }
 
   private updateGroundingState(subDtS: number): void {
     const support = this.findSupportSurface(this.pose);
     const gravityCmS2 = Math.max(0, Number(this.world?.world_scene?.gravity_m_s2) || 9.81) * 100;
-    if (support) {
+    if (support && support.grounded) {
       this.supportSurfaceId = support.id;
       if (this.robotElevationCm > support.height + 0.1) {
         this.robotGrounded = false;
@@ -476,9 +676,22 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
         this.robotVerticalVelocityCmS = 0;
         this.robotElevationCm = support.height;
       }
+      this.robotPitchDeg = support.pitchDeg;
+      this.robotRollDeg = support.rollDeg;
+      const bodyClearance = this.enforceBodyCollisionClearance(
+        this.pose,
+        this.robotElevationCm,
+        this.robotPitchDeg,
+        this.robotRollDeg,
+      );
+      this.robotElevationCm = bodyClearance.elevationCm;
+      if (!this.supportSurfaceId && bodyClearance.supportId) {
+        this.supportSurfaceId = bodyClearance.supportId;
+      }
+      this.lastCollisions = this.lastCollisions.filter((id) => id !== this.supportSurfaceId);
       return;
     }
-    this.supportSurfaceId = null;
+    this.supportSurfaceId = support?.id || null;
     this.robotGrounded = false;
     this.robotVerticalVelocityCmS -= gravityCmS2 * subDtS;
     this.robotElevationCm += this.robotVerticalVelocityCmS * subDtS;
@@ -487,22 +700,15 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
       this.robotVerticalVelocityCmS = 0;
       this.robotGrounded = true;
     }
+    this.robotPitchDeg *= 0.9;
+    this.robotRollDeg *= 0.9;
   }
 
   private computeRobotTiltDiagnosticsDeg(): { pitchDeg: number; rollDeg: number } {
-    if (!this.robotGrounded || !this.supportSurfaceId) return { pitchDeg: 0, rollDeg: 0 };
-    const support = this.findSceneObjectById(this.supportSurfaceId);
-    if (!support || this.getSurfaceType(support) !== "ramp") return { pitchDeg: 0, rollDeg: 0 };
-    const slopeDeg = this.requiredSlopeToTraverseDeg(support);
-    const uphill = this.rampUphillDirection(support);
-    const headingRad = toRadians(this.pose.heading_deg);
-    const headingX = Math.cos(headingRad);
-    const headingY = Math.sin(headingRad);
-    const forwardAlongSlope = dot2(headingX, headingY, uphill.x, uphill.y);
-    const crossSlope = headingX * uphill.y - headingY * uphill.x;
-    const pitchDeg = clamp(slopeDeg * forwardAlongSlope, -35, 35);
-    const rollDeg = clamp(slopeDeg * crossSlope * 0.35, -15, 15);
-    return { pitchDeg, rollDeg };
+    return {
+      pitchDeg: clamp(this.robotPitchDeg, -35, 35),
+      rollDeg: clamp(this.robotRollDeg, -20, 20),
+    };
   }
 
   private detectContactManifoldsForPose(

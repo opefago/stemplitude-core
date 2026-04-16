@@ -1192,9 +1192,11 @@ function AnimatedRobot({
     rendered.x += (target.x - rendered.x) * smoothing;
     rendered.z += (target.z - rendered.z) * smoothing;
     rendered.heading_deg += normalizeHeadingDelta(target.heading_deg - rendered.heading_deg) * smoothing;
-    rendered.elevation_cm += (target.elevation_cm - rendered.elevation_cm) * smoothing;
-    rendered.pitch_deg += (target.pitch_deg - rendered.pitch_deg) * smoothing;
-    rendered.roll_deg += (target.roll_deg - rendered.roll_deg) * smoothing;
+    // Keep elevation/tilt tightly synced to physics support probes.
+    // Position/heading stay smoothed for camera-friendly motion.
+    rendered.elevation_cm = target.elevation_cm;
+    rendered.pitch_deg = target.pitch_deg;
+    rendered.roll_deg = target.roll_deg;
 
     const headingDeltaRad = (normalizeHeadingDelta(rendered.heading_deg - previousHeadingDeg) * Math.PI) / 180;
     const dx = rendered.x - previousX;

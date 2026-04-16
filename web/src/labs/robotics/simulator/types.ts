@@ -46,6 +46,11 @@ export interface SimulatorSceneObjectMetadata extends Record<string, unknown> {
   ramp_entry_side?: "positive_x" | "negative_x";
   ramp_side_blocking?: boolean;
   ramp_descent_assist?: number;
+  support_surface?: boolean;
+  support_surface_mode?: "none" | "solid_top" | "ramp_profile";
+  support_priority?: number;
+  friction_combine?: "average" | "min" | "max" | "multiply";
+  restitution_combine?: "average" | "min" | "max" | "multiply";
   linear_damping?: number;
   impulse_scale?: number;
   push_resistance?: number;
