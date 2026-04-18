@@ -13,7 +13,7 @@ Multi-tenant STEM learning platform backend built with FastAPI, PostgreSQL, Redi
 - **Auth**: JWT (access + refresh tokens), dual identity (users + students)
 - **Billing**: Stripe subscriptions with webhook integration
 - **Email**: Multi-provider (Postmark, Mailgun, SES) with failover
-- **Feature Flags**: Flagsmith SDK
+- **Feature Flags**: Internal provider (YAML registry + DB targeting + Redis cache + aggregate metrics)
 - **Reverse Proxy**: Nginx with wildcard subdomain routing
 
 ## Quick Start
@@ -83,7 +83,7 @@ backend/
 │   ├── subscriptions/        # Stripe billing
 │   ├── licenses/             # Entitlements & seats
 │   ├── capabilities/         # Central authorization engine
-│   ├── feature_flags/        # Flagsmith integration
+│   ├── feature_flags/        # Internal feature flag provider + admin API
 │   ├── programs/             # Program management
 │   ├── classrooms/           # Classrooms, sessions, attendance
 │   ├── curriculum/           # Courses, modules, lessons, labs
@@ -131,3 +131,10 @@ Plan selection -> Stripe Checkout -> Webhook provisions License -> License contr
 ## Environment Variables
 
 See `.env.example` for all configuration options.
+
+## Feature Flag Notes
+
+- Registry file: `config/feature_flags.yaml` (`name`, `owner`, `status`, `description`, `stage`).
+- Runtime safety default: unknown/missing flags evaluate to `false` (no exception thrown).
+- Evaluation cache: two-layer (`L1` process cache + `L2` Redis cache).
+- Analytics model: aggregate-first counters (`feature_flag_metric_buckets`) with optional sampled debug events.

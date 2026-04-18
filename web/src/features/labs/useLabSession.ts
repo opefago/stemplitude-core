@@ -63,7 +63,7 @@ function getFallbackExitPath(search: string): string {
     return `/app/classrooms/${classroomId}?tab=sessions`;
   }
 
-  return "/playground";
+  return "/app/labs";
 }
 
 /**
@@ -129,16 +129,6 @@ export function useLabSession() {
   }, [classroomContext?.classroomId, classroomContext?.sessionId, classroomContext?.labType, user?.subType]);
 
   const exitLab = useCallback(() => {
-    const idx =
-      typeof window !== "undefined"
-        ? (window.history.state?.idx as number | undefined)
-        : undefined;
-
-    if (typeof idx === "number" && idx > 0) {
-      navigate(-1);
-      return;
-    }
-
     navigate(fallbackExitPath, { replace: true });
   }, [fallbackExitPath, navigate]);
 

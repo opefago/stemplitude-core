@@ -3,10 +3,10 @@
    ============================================== */
 
 .lms-home {
-  --lms-green: #58cc02;
-  --lms-green-dark: #46a302;
-  --lms-blue: #1cb0f6;
-  --lms-blue-dark: #1490cc;
+  --lms-green: var(--tenant-primary, #58cc02);
+  --lms-green-dark: var(--tenant-primary-dark, #46a302);
+  --lms-blue: var(--tenant-accent, #1cb0f6);
+  --lms-blue-dark: var(--tenant-accent-dark, #1490cc);
   --lms-orange: #ff9600;
   --lms-red: #ff4b4b;
   --lms-purple: #ce82ff;
@@ -514,6 +514,13 @@
   color: var(--lms-red);
   margin: 0;
   font-weight: 600;
+}
+
+.lms-login-form__tenant-hint {
+  font-size: 0.85rem;
+  color: var(--lms-text-light);
+  margin: 0;
+  padding: 6px 0;
 }
 
 .lms-login-form__submit {

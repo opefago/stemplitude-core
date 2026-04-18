@@ -59,43 +59,55 @@ const PLATFORM_TOOLS: {
   path: string;
   label: string;
   iconSrc: string;
-  permission: string;
+  permissions: string[];
 }[] = [
   {
     path: "/app/platform/tasks",
     label: "Admin Tasks",
     iconSrc: "/assets/cartoon-icons/portal1.png",
-    permission: "platform.tasks:view",
+    permissions: ["platform.tasks:view"],
+  },
+  {
+    path: "/app/platform/feature-flags",
+    label: "Feature Flags",
+    iconSrc: "/assets/cartoon-icons/gear.png",
+    permissions: ["platform.feature_flags:view", "platform.tasks:view"],
+  },
+  {
+    path: "/app/platform/rate-limits",
+    label: "Rate Limits",
+    iconSrc: "/assets/cartoon-icons/Shield.png",
+    permissions: ["platform.rate_limits:view", "platform.tenants:manage"],
   },
   {
     path: "/app/platform/health",
     label: "Health Check",
     iconSrc: "/assets/cartoon-icons/Heart.png",
-    permission: "platform.health:view",
+    permissions: ["platform.health:view"],
   },
   {
     path: "/app/platform/jobs",
     label: "Job Worker",
     iconSrc: "/assets/cartoon-icons/gear.png",
-    permission: "platform.jobs:view",
+    permissions: ["platform.jobs:view"],
   },
   {
     path: "/app/platform/entities",
     label: "Entity Browser",
     iconSrc: "/assets/cartoon-icons/Chest.png",
-    permission: "platform.entities:view",
+    permissions: ["platform.entities:view"],
   },
   {
     path: "/app/platform/blobs",
     label: "Blob Finder",
-    iconSrc: "/assets/cartoon-icons/Chest2.png",
-    permission: "platform.blobs:view",
+    iconSrc: "/assets/cartoon-icons/Chest.png",
+    permissions: ["platform.blobs:view", "platform.entities:view"],
   },
   {
     path: "/app/platform/growth",
     label: "Growth Ops",
     iconSrc: "/assets/cartoon-icons/Trail.png",
-    permission: "platform.growth:view",
+    permissions: ["platform.growth:view"],
   },
 ];
 
@@ -201,7 +213,7 @@ export function DashboardHeader({ variant = "default" }: DashboardHeaderProps) {
   const canImpersonate = hasGlobalPermission("platform.impersonation:execute");
 
   const platformTools = PLATFORM_TOOLS.filter(
-    (t) => isSuperAdmin || hasGlobalPermission(t.permission),
+    (t) => isSuperAdmin || t.permissions.some((perm) => hasGlobalPermission(perm)),
   );
   const canAccessPlatform = platformTools.length > 0;
 

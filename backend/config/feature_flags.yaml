@@ -1,0 +1,25 @@
+flags:
+  - name: feature_flags_ui_create_locked
+    owner: platform
+    status: active
+    description: When enabled, creating feature flags from UI is disabled and all new flags must be added via YAML.
+    stage: dev
+    default_enabled: true
+  - name: platform_feature_flags
+    owner: platform
+    status: active
+    description: Internal feature flag management UI and APIs.
+    stage: dev
+    default_enabled: true
+  - name: gamification_enabled
+    owner: platform
+    status: active
+    description: Enables the Gamification Studio page and Reward Animations settings tab.
+    stage: all
+    default_enabled: true
+  - name: robotics_sim_v2
+    owner: robotics
+    status: draft
+    description: Robotics simulator incremental rollout.
+    stage: dev
+    default_enabled: false

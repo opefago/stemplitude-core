@@ -101,6 +101,30 @@ async def list_tenants(
     )
 
 
+def _public_tenant_response(tenant: "Tenant") -> PublicTenantByHostResponse:
+    """Build a public tenant bootstrap response with branding from settings."""
+    from .schemas import TenantBranding, HomepageSection
+
+    settings = tenant.settings or {}
+    branding_raw = settings.get("branding")
+    branding = TenantBranding.model_validate(branding_raw) if isinstance(branding_raw, dict) else None
+    sections_raw = settings.get("homepage_sections")
+    sections = (
+        [HomepageSection.model_validate(s) for s in sections_raw]
+        if isinstance(sections_raw, list)
+        else None
+    )
+    return PublicTenantByHostResponse(
+        id=tenant.id,
+        name=tenant.name,
+        slug=tenant.slug,
+        public_host_subdomain=tenant.public_host_subdomain,
+        logo_url=tenant.logo_url,
+        branding=branding,
+        homepage_sections=sections,
+    )
+
+
 @router.get("/public/by-host/{label}", response_model=PublicTenantByHostResponse)
 async def public_tenant_by_host(label: str, db: AsyncSession = Depends(get_db)):
     """Resolve an active tenant by its public DNS label (no auth). Used by SPA on tenant subdomains."""
@@ -108,12 +132,17 @@ async def public_tenant_by_host(label: str, db: AsyncSession = Depends(get_db)):
     tenant = await service.get_public_tenant_by_host_label(label)
     if not tenant:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown host label")
-    return PublicTenantByHostResponse(
-        id=tenant.id,
-        name=tenant.name,
-        slug=tenant.slug,
-        public_host_subdomain=tenant.public_host_subdomain,
-    )
+    return _public_tenant_response(tenant)
+
+
+@router.get("/public/by-domain/{domain:path}", response_model=PublicTenantByHostResponse)
+async def public_tenant_by_domain(domain: str, db: AsyncSession = Depends(get_db)):
+    """Resolve an active tenant by its custom domain (no auth). Used by SPA on custom-domain hosts."""
+    service = TenantService(db)
+    tenant = await service.get_public_tenant_by_custom_domain(domain)
+    if not tenant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown domain")
+    return _public_tenant_response(tenant)
 
 
 @router.post(

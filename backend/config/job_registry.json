@@ -129,6 +129,32 @@
         "tenant_id": { "type": "string", "required": true, "description": "UUID of the tenant" }
       }
     },
+    "feature_flags.flush_metrics": {
+      "task_path": "workers.tasks.feature_flag_tasks.flush_feature_flag_metrics",
+      "queue": "default",
+      "runtime": "python",
+      "max_retries": 0,
+      "retry_delay_seconds": 0,
+      "dedup_ttl_seconds": 60,
+      "description": "Flush Redis feature-flag aggregate counters into database buckets.",
+      "params_schema": {
+        "flag_key": { "type": "string", "required": false, "description": "Optional specific flag key to flush" }
+      },
+      "schedule": { "type": "interval", "every": 5, "period": "minutes" }
+    },
+    "feature_flags.cleanup_debug": {
+      "task_path": "workers.tasks.feature_flag_tasks.cleanup_feature_flag_debug_events",
+      "queue": "default",
+      "runtime": "python",
+      "max_retries": 0,
+      "retry_delay_seconds": 0,
+      "dedup_ttl_seconds": 300,
+      "description": "Delete sampled feature-flag debug events older than retention window.",
+      "params_schema": {
+        "retention_days": { "type": "number", "required": false, "description": "Rows older than this are removed" }
+      },
+      "schedule": { "type": "crontab", "hour": "3", "minute": "20" }
+    },
     "integration.refresh_oauth": {
       "task_path": "workers.tasks.integration_tasks.refresh_oauth_tokens_task",
       "queue": "default",

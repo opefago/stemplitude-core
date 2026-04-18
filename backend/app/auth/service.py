@@ -151,7 +151,12 @@ class AuthService:
     # ------------------------------------------------------------------
 
     async def authenticate_user(self, data: LoginRequest) -> LoginResponse:
-        """Authenticate adult user with email and password."""
+        """Authenticate adult user with email and password.
+
+        When ``data.tenant_slug`` is set (login via tenant subdomain/domain),
+        the user must hold an active membership in that tenant -- unless they
+        are a super admin.
+        """
         user = await self.repo.get_active_user_by_email(data.email)
         if not user:
             logger.warning("Failed login: unknown email=%s", mask_email(data.email))
@@ -166,20 +171,50 @@ class AuthService:
             "first_name": user.first_name or "",
             "last_name": user.last_name or "",
         }
-        membership_row = await self.repo.get_first_user_membership(user.id)
         role_slug = "super_admin" if user.is_super_admin else None
         tenant_id_str = None
         tenant_slug_str = None
-        if membership_row:
-            _membership, role, tenant = membership_row
-            role_slug = role.slug
-            tenant_id_str = str(tenant.id)
-            tenant_slug_str = tenant.slug
-            extra["role"] = role.slug
-            extra["tenant_id"] = tenant_id_str
-            extra["tenant_slug"] = tenant_slug_str
-        elif user.is_super_admin:
-            extra["role"] = "super_admin"
+
+        if data.tenant_slug:
+            scoped_tenant = await self.repo.resolve_tenant(data.tenant_slug)
+            if not scoped_tenant:
+                raise AuthError("Organization not found", status_code=404)
+            membership_row = await self.repo.get_user_membership_for_tenant(user.id, scoped_tenant.id)
+            if not membership_row and not user.is_super_admin:
+                logger.warning(
+                    "Scoped login denied: user_id=%s has no membership in tenant=%s",
+                    user.id, data.tenant_slug,
+                )
+                raise AuthError(
+                    "You don't have access to this organization. "
+                    "Please use your organization's login page or go to the main site."
+                )
+            if membership_row:
+                _membership, role, tenant = membership_row
+                role_slug = role.slug
+                tenant_id_str = str(tenant.id)
+                tenant_slug_str = tenant.slug
+                extra["role"] = role.slug
+                extra["tenant_id"] = tenant_id_str
+                extra["tenant_slug"] = tenant_slug_str
+            elif user.is_super_admin:
+                extra["role"] = "super_admin"
+                tenant_id_str = str(scoped_tenant.id)
+                tenant_slug_str = scoped_tenant.slug
+                extra["tenant_id"] = tenant_id_str
+                extra["tenant_slug"] = tenant_slug_str
+        else:
+            membership_row = await self.repo.get_first_user_membership(user.id)
+            if membership_row:
+                _membership, role, tenant = membership_row
+                role_slug = role.slug
+                tenant_id_str = str(tenant.id)
+                tenant_slug_str = tenant.slug
+                extra["role"] = role.slug
+                extra["tenant_id"] = tenant_id_str
+                extra["tenant_slug"] = tenant_slug_str
+            elif user.is_super_admin:
+                extra["role"] = "super_admin"
 
         global_role_slug, global_role_name, global_perms = await self.repo.get_user_global_permissions(user.id)
         if global_role_slug:
@@ -219,7 +254,11 @@ class AuthService:
         return await self._authenticate_student_tenant_scoped(data)
 
     async def _authenticate_student_global(self, data: StudentLoginRequest) -> TokenResponse:
-        """Global account: email + password."""
+        """Global account: email + password.
+
+        When ``data.tenant_slug`` is set (login via tenant host), verify the
+        student has a membership in that tenant before allowing login.
+        """
         student = await self.repo.get_active_global_student_by_email(data.email or "")
         if not student:
             logger.warning("Failed student global login: unknown email=%s", mask_email(data.email or ""))
@@ -228,8 +267,29 @@ class AuthService:
             logger.warning("Failed student global login: bad password student_id=%s", student.id)
             raise AuthError("Invalid email or password")
 
+        extra_claims: dict | None = None
+        if data.tenant_slug:
+            scoped_tenant = await self.repo.resolve_tenant(data.tenant_slug)
+            if not scoped_tenant:
+                raise AuthError("Organization not found", status_code=404)
+            membership = await self.repo.get_student_membership(student.id, scoped_tenant.id)
+            if not membership:
+                logger.warning(
+                    "Scoped student login denied: student_id=%s no membership in tenant=%s",
+                    student.id, data.tenant_slug,
+                )
+                raise AuthError(
+                    "You don't have access to this organization. "
+                    "Please use your organization's login page or go to the main site."
+                )
+            extra_claims = {
+                "tenant_slug": scoped_tenant.slug,
+                "tenant_name": scoped_tenant.name,
+            }
+
         tokens = await self._issue_tokens(
-            sub=student.id, sub_type="student", global_account=True
+            sub=student.id, sub_type="student", global_account=True,
+            extra_claims=extra_claims,
         )
         logger.info("Student global login student_id=%s", student.id)
         return tokens

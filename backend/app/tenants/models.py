@@ -26,6 +26,10 @@ class Tenant(Base):
     stripe_connect_charges_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     stripe_connect_payouts_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     stripe_connect_details_submitted: Mapped[bool] = mapped_column(Boolean, default=False)
+    member_billing_tax_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    member_billing_tax_behavior_default: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="exclusive"
+    )
     member_billing_application_fee_bps: Mapped[int] = mapped_column(Integer, default=0)
     member_billing_application_fee_use_platform_default: Mapped[bool] = mapped_column(
         Boolean, default=False

@@ -27,3 +27,6 @@ from app.invitations.models import *  # noqa: F401, F403
 from app.trials.models import *  # noqa: F401, F403
 from app.gamification.models import *  # noqa: F401, F403
 from app.platform.models import *  # noqa: F401, F403
+from app.feature_flags.models import *  # noqa: F401, F403
+from app.rate_limits.models import *  # noqa: F401, F403
+from app.homepage_templates.models import *  # noqa: F401, F403

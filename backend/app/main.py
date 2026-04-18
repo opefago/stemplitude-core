@@ -11,6 +11,9 @@ from app.core.redis import close_redis, get_redis
 from app.middleware.calendar_tz_asgi import StreakCalendarTzASGIMiddleware
 from app.middleware.tenant import TenantMiddleware
 from app.middleware.request_context import RequestContextMiddleware
+from app.rate_limits.middleware import ApiRateLimitMiddleware
+from app.feature_flags.registry import sync_registry_startup
+from app.homepage_templates.service import seed_templates as seed_homepage_templates
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -21,6 +24,18 @@ async def lifespan(app: FastAPI):
     logger.info("Starting %s (env=%s)", settings.APP_NAME, settings.APP_ENV)
     await get_redis()
     logger.info("Redis connected")
+    try:
+        sync_result = await sync_registry_startup()
+        logger.info("Feature flag registry synced: %s", sync_result)
+    except Exception:
+        logger.warning("Feature flag registry sync failed", exc_info=True)
+    try:
+        from app.database import async_session_factory
+        async with async_session_factory() as session:
+            tpl_result = await seed_homepage_templates(session)
+            logger.info("Homepage templates seeded: %s", tpl_result)
+    except Exception:
+        logger.warning("Homepage template seeding failed", exc_info=True)
     from app.labs.yjs_router import yjs_server
     async with yjs_server:
         yield
@@ -47,6 +62,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.add_middleware(ApiRateLimitMiddleware)
 app.add_middleware(TenantMiddleware)
 app.add_middleware(RequestContextMiddleware)
 # Pure ASGI: must run before BaseHTTPMiddleware inner tasks so streak code sees X-Calendar-TZ.
@@ -91,6 +107,10 @@ from app.session_content.router import router as session_content_router  # noqa:
 from app.media.router import router as media_router  # noqa: E402
 from app.search.router import router as search_router  # noqa: E402
 from app.robotics.router import router as robotics_router  # noqa: E402
+from app.feature_flags.router import router as feature_flags_router  # noqa: E402
+from app.feature_flags.client_router import router as flags_client_router  # noqa: E402
+from app.rate_limits.router import router as rate_limits_router  # noqa: E402
+from app.homepage_templates.router import router as homepage_templates_router  # noqa: E402
 
 prefix = settings.API_V1_PREFIX
 
@@ -126,6 +146,26 @@ app.include_router(growth_router, prefix=f"{prefix}/growth", tags=["Growth"])
 app.include_router(member_billing_router, prefix=f"{prefix}/member-billing", tags=["Member billing"])
 app.include_router(analytics_router, prefix=f"{prefix}/analytics", tags=["Analytics"])
 app.include_router(robotics_router, prefix=f"{prefix}/robotics", tags=["Robotics"])
+app.include_router(
+    feature_flags_router,
+    prefix=f"{prefix}/platform/feature-flags",
+    tags=["Feature Flags"],
+)
+app.include_router(
+    rate_limits_router,
+    prefix=f"{prefix}/platform/rate-limits",
+    tags=["Rate Limits"],
+)
+app.include_router(
+    homepage_templates_router,
+    prefix=f"{prefix}/homepage-templates",
+    tags=["Homepage Templates"],
+)
+app.include_router(
+    flags_client_router,
+    prefix=f"{prefix}/flags",
+    tags=["Feature Flags (Client)"],
+)
 if settings.TRACK_LESSON_SURFACES_ENABLED:
     app.include_router(admin_content_router, prefix=f"{prefix}/admin", tags=["Admin Content"])
     app.include_router(tenant_content_router, prefix=f"{prefix}/tenant", tags=["Tenant Content"])

@@ -38,9 +38,6 @@ postmarker>=1.0
 requests>=2.32.0
 svix>=1.40.0
 
-# Feature Flags
-flagsmith>=3.7.0
-
 # HTTP Client
 httpx>=0.28.0
 
@@ -62,6 +59,7 @@ typer>=0.15.0
 # Utilities
 python-dotenv>=1.0.1
 python-dateutil>=2.9.0
+PyYAML>=6.0.2
 
 # Yjs collaborative sync
 pycrdt>=0.12.0

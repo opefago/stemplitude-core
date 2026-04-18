@@ -75,6 +75,7 @@ def ensure_stripe_product_price(
     currency: str,
     billing_type: str,
     interval: str | None,
+    tax_behavior: str | None = None,
 ) -> tuple[str | None, str | None]:
     """Create Product + Price on connected account. Returns (product_id, price_id)."""
     if not _configure():
@@ -102,6 +103,8 @@ def ensure_stripe_product_price(
         }
         if recurring:
             price_params["recurring"] = recurring
+        if tax_behavior in ("exclusive", "inclusive"):
+            price_params["tax_behavior"] = tax_behavior
         price = stripe.Price.create(**price_params)
         return prod.id, price.id
     except stripe.StripeError as e:
@@ -120,6 +123,7 @@ def create_member_checkout_session(
     metadata: dict[str, str],
     application_fee_percent: float | None = None,
     application_fee_amount_cents: int | None = None,
+    automatic_tax: bool = False,
 ) -> Any | None:
     if not _configure():
         return None
@@ -139,6 +143,8 @@ def create_member_checkout_session(
     }
     if customer_email:
         params["customer_email"] = customer_email
+    if automatic_tax:
+        params["automatic_tax"] = {"enabled": True}
     if mode == "subscription":
         params["subscription_data"] = {"metadata": metadata}
         if application_fee_percent is not None and application_fee_percent > 0:
@@ -253,6 +259,7 @@ def create_price_on_connected_product(
     currency: str,
     billing_type: str,
     interval: str | None,
+    tax_behavior: str | None = None,
 ) -> str | None:
     """Create a new Price on an existing Product (Stripe prices are immutable)."""
     if not _configure():
@@ -275,6 +282,8 @@ def create_price_on_connected_product(
     }
     if recurring:
         price_params["recurring"] = recurring
+    if tax_behavior in ("exclusive", "inclusive"):
+        price_params["tax_behavior"] = tax_behavior
     try:
         price = stripe.Price.create(**price_params)
         return price.id

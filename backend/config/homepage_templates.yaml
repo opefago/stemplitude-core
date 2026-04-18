@@ -1,0 +1,973 @@
+categories:
+  - id: professional
+    label: Professional
+  - id: creative
+    label: Creative
+  - id: playful
+    label: Fun / Playful
+  - id: minimal
+    label: Minimal
+  - id: cartoon
+    label: Cartoon / Kid-Friendly
+
+templates:
+  # ── Professional ────────────────────────────────────
+
+  - slug: corporate-academy
+    name: Corporate Academy
+    category: professional
+    description: Authoritative dark theme for serious academies and training institutions.
+    gradient: "linear-gradient(135deg, #0f172a, #1e3a5f)"
+    sections:
+      - type: hero
+        visible: true
+        content:
+          title: Empowering the Next Generation of Leaders
+          subtitle: World-class STEM education with industry-aligned curriculum and expert instructors.
+          cta_text: Explore Programs
+          cta_link: /programs
+          _bg:
+            image_url: https://images.unsplash.com/photo-1524178232363-1fb2b075b655?w=1400&h=600&fit=crop
+            overlay: 0.55
+          _styles:
+            cta_btn: { backgroundColor: "#ffffff", color: "#0f172a", borderRadius: "8px", paddingV: "14px", paddingH: "32px" }
+      - type: features
+        visible: true
+        content:
+          heading: Why Choose Our Academy
+          items:
+            - { title: Expert Faculty, description: Learn from industry professionals with decades of real-world experience. }
+            - { title: Hands-On Labs, description: State-of-the-art facilities with equipment used by top tech companies. }
+            - { title: Career Pathways, description: Direct pipelines to internships and job placements at leading firms. }
+            - { title: Certified Programs, description: Nationally recognized certifications that boost your credentials. }
+      - type: stats
+        visible: true
+        content:
+          heading: By the Numbers
+          items:
+            - { value: "2,500+", label: Students Enrolled }
+            - { value: "95%", label: Completion Rate }
+            - { value: "50+", label: Industry Partners }
+            - { value: "12", label: Years of Excellence }
+          _bg: { color: "#f1f5f9" }
+      - type: testimonials
+        visible: true
+        content:
+          heading: What Our Graduates Say
+          items:
+            - { quote: "This program completely transformed my career trajectory. The hands-on approach made all the difference.", author: Sarah Chen, role: Software Engineer }
+            - { quote: "The instructors genuinely care about each student's success. I landed my dream job within two months of graduating.", author: Marcus Rivera, role: Data Scientist }
+      - type: cta
+        visible: true
+        content:
+          heading: Ready to Elevate Your Skills?
+          description: Join thousands of successful graduates. Applications for the next cohort are now open.
+          button_text: Apply Now
+          button_link: /apply
+          _bg:
+            image_url: https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?w=1400&h=500&fit=crop
+            overlay: 0.65
+          _styles:
+            cta_btn: { backgroundColor: "#3b82f6", color: "#ffffff", borderRadius: "8px", paddingV: "14px", paddingH: "36px" }
+
+  - slug: university-hub
+    name: University Hub
+    category: professional
+    description: Clean and trustworthy blue theme for educational institutions. Content-forward with no hard sell.
+    gradient: "linear-gradient(135deg, #1e40af, #3b82f6)"
+    sections:
+      - type: hero
+        visible: true
+        content:
+          title: Where Curiosity Meets Discovery
+          subtitle: A premier learning environment fostering innovation, critical thinking, and academic excellence.
+          _bg:
+            image_url: https://images.unsplash.com/photo-1523050854058-8df90110c9f1?w=1400&h=600&fit=crop
+            overlay: 0.5
+      - type: richText
+        visible: true
+        content:
+          html: "<h2>Our Mission</h2><p>We believe that education is the most powerful force for positive change. Our institution is dedicated to providing accessible, high-quality STEM education that equips learners with the knowledge, skills, and confidence to tackle the challenges of tomorrow.</p><p>Founded on principles of inclusivity and academic rigor, we strive to create an environment where every student can thrive.</p>"
+      - type: stats
+        visible: true
+        content:
+          heading: Our Impact
+          items:
+            - { value: "10,000+", label: Alumni Worldwide }
+            - { value: "98%", label: Satisfaction Rate }
+            - { value: "200+", label: Courses Available }
+            - { value: "35", label: Research Labs }
+          _bg: { color: "#eff6ff" }
+      - type: imageGrid
+        visible: true
+        content:
+          heading: Campus Life
+          columns: 3
+          items:
+            - { image_url: "https://images.unsplash.com/photo-1541339907198-e08756dedf3f?w=400&h=300&fit=crop", alt: Students on campus, caption: Campus Grounds }
+            - { image_url: "https://images.unsplash.com/photo-1562774053-701939374585?w=400&h=300&fit=crop", alt: Library study area, caption: Modern Library }
+            - { image_url: "https://images.unsplash.com/photo-1581092918056-0c4c3acd3789?w=400&h=300&fit=crop", alt: Science laboratory, caption: Research Labs }
+
+  - slug: coding-bootcamp
+    name: Coding Bootcamp
+    category: professional
+    description: High-energy dark theme with stats up front to lead with proof.
+    gradient: "linear-gradient(135deg, #18181b, #3f3f46)"
+    sections:
+      - type: hero
+        visible: true
+        content:
+          title: "Launch Your Tech Career in 12 Weeks"
+          subtitle: "Intensive, project-based training. Learn to code from scratch and graduate job-ready."
+          cta_text: Apply Now — Next Cohort Starts Soon
+          cta_link: /apply
+          _bg:
+            image_url: https://images.unsplash.com/photo-1517694712202-14dd9538aa97?w=1400&h=600&fit=crop
+            overlay: 0.6
+          _styles:
+            cta_btn: { backgroundColor: "#22c55e", color: "#ffffff", borderRadius: "8px", paddingV: "14px", paddingH: "36px" }
+      - type: stats
+        visible: true
+        content:
+          heading: Results That Speak
+          items:
+            - { value: "89%", label: Job Placement Rate }
+            - { value: "$72K", label: Average Starting Salary }
+            - { value: "800+", label: Graduates Hired }
+          _bg: { color: "#18181b" }
+      - type: testimonials
+        visible: true
+        content:
+          heading: Graduate Stories
+          items:
+            - { quote: "I went from barista to backend developer in four months. This bootcamp changed my life.", author: Jamie Okafor, role: Backend Developer at Stripe }
+            - { quote: "The pace was intense but the support was incredible. I've never learned so much so fast.", author: Priya Sharma, role: Frontend Engineer at Shopify }
+            - { quote: "Worth every penny and every late night. I tripled my salary within a year of graduating.", author: Carlos Mendez, role: Full-Stack Developer }
+      - type: features
+        visible: true
+        content:
+          heading: What You'll Master
+          items:
+            - { title: Full-Stack Development, description: HTML, CSS, JavaScript, React, Node.js, and databases — the complete modern stack. }
+            - { title: Real Projects, description: "Build 6+ portfolio projects including a capstone app, deployed and production-ready." }
+            - { title: Career Support, description: Resume workshops, mock interviews, and direct introductions to hiring partners. }
+            - { title: Mentorship, description: One-on-one guidance from senior developers working at top companies. }
+      - type: cta
+        visible: true
+        content:
+          heading: "Your Future Self Will Thank You"
+          description: Applications are reviewed on a rolling basis. Scholarships available for underrepresented groups.
+          button_text: Start Your Application
+          button_link: /apply
+          _bg:
+            image_url: https://images.unsplash.com/photo-1522202176988-66273c2fd55f?w=1400&h=500&fit=crop
+            overlay: 0.7
+          _styles:
+            cta_btn: { backgroundColor: "#22c55e", color: "#ffffff", borderRadius: "8px", paddingV: "14px", paddingH: "36px" }
+
+  - slug: tutoring-center
+    name: Tutoring Center
+    category: professional
+    description: Warm, approachable design that leads with social proof and trust.
+    gradient: "linear-gradient(135deg, #7c3aed, #a78bfa)"
+    sections:
+      - type: hero
+        visible: true
+        content:
+          title: Every Student Deserves to Succeed
+          subtitle: Personalized tutoring in Math, Science, and Reading. Flexible scheduling — in-person or online.
+          cta_text: Book a Free Session
+          cta_link: /book
+          _bg:
+            image_url: https://images.unsplash.com/photo-1427504494785-3a9ca7044f45?w=1400&h=600&fit=crop
+            overlay: 0.45
+          _styles:
+            cta_btn: { backgroundColor: "#7c3aed", color: "#ffffff", borderRadius: "50px", paddingV: "12px", paddingH: "32px" }
+      - type: testimonials
+        visible: true
+        content:
+          heading: Families Trust Us
+          items:
+            - { quote: "My son's math grade went from a C to an A in just two months. The tutors here are patient and genuinely caring.", author: "Lisa & Tom M.", role: Parents }
+            - { quote: "I actually look forward to my sessions now. My tutor makes everything make sense.", author: Aiden, role: "8th Grade Student" }
+      - type: features
+        visible: true
+        content:
+          heading: How We Help
+          items:
+            - { title: 1-on-1 Sessions, description: Dedicated tutors who adapt to each student's learning style and pace. }
+            - { title: Homework Help, description: Drop-in sessions for when students need a quick assist on assignments. }
+            - { title: Test Preparation, description: Focused prep for SAT, ACT, AP exams, and state standardized tests. }
+            - { title: Progress Reports, description: Regular updates so parents can see exactly how their child is improving. }
+      - type: stats
+        visible: true
+        content:
+          heading: Our Track Record
+          items:
+            - { value: "94%", label: Grade Improvement }
+            - { value: "3,200+", label: Students Helped }
+            - { value: "4.9★", label: Parent Rating }
+          _bg: { color: "#f5f3ff" }
+
+  # ── Creative ────────────────────────────────────────
+
+  - slug: creative-studio
+    name: Creative Studio
+    category: creative
+    description: Visual-first layout that showcases student work before describing programs.
+    gradient: "linear-gradient(135deg, #ec4899, #8b5cf6)"
+    sections:
+      - type: hero
+        visible: true
+        content:
+          title: Unleash Your Creative Potential
+          subtitle: "Design. Build. Inspire. Join a community of makers and dreamers pushing boundaries."
+          cta_text: See Our Work
+          cta_link: /gallery
+          _bg:
+            image_url: https://images.unsplash.com/photo-1513364776144-60967b0f800f?w=1400&h=600&fit=crop
+            overlay: 0.5
+          _styles:
+            cta_btn: { backgroundColor: "#ffffff", color: "#8b5cf6", borderRadius: "50px", paddingV: "12px", paddingH: "28px" }
+      - type: imageGrid
+        visible: true
+        content:
+          heading: Student Showcase
+          columns: 3
+          items:
+            - { image_url: "https://images.unsplash.com/photo-1561070791-2526d30994b5?w=400&h=300&fit=crop", alt: Digital Art Project, caption: Digital Art }
+            - { image_url: "https://images.unsplash.com/photo-1558618666-fcd25c85f82e?w=400&h=300&fit=crop", alt: 3D Design, caption: 3D Modeling }
+            - { image_url: "https://images.unsplash.com/photo-1611532736597-de2d4265fba3?w=400&h=300&fit=crop", alt: Animation, caption: Animation }
+            - { image_url: "https://images.unsplash.com/photo-1561070791-36c11767b26a?w=400&h=300&fit=crop", alt: UI Design, caption: UI/UX Design }
+            - { image_url: "https://images.unsplash.com/photo-1513364776144-60967b0f800f?w=400&h=300&fit=crop", alt: Illustration, caption: Illustration }
+            - { image_url: "https://images.unsplash.com/photo-1452587925148-ce544e77e70d?w=400&h=300&fit=crop", alt: Photography, caption: Photography }
+      - type: testimonials
+        visible: true
+        content:
+          heading: Creator Stories
+          items:
+            - { quote: "I went from zero design experience to landing a job at a top creative agency. The mentorship here is unmatched.", author: Zoe Park, role: Product Designer }
+      - type: cta
+        visible: true
+        content:
+          heading: Your Masterpiece Starts Here
+          description: Limited spots available for the upcoming semester. Don't miss your chance.
+          button_text: Apply Now
+          button_link: /apply
+          _bg:
+            image_url: https://images.unsplash.com/photo-1460661419201-fd4cecdf8a8b?w=1400&h=500&fit=crop
+            overlay: 0.6
+          _styles:
+            cta_btn: { backgroundColor: "#ffffff", color: "#8b5cf6", borderRadius: "50px", paddingV: "14px", paddingH: "32px" }
+
+  - slug: innovation-lab
+    name: Innovation Lab
+    category: creative
+    description: Vibrant teal theme with a step-by-step process narrative woven in.
+    gradient: "linear-gradient(135deg, #0d9488, #06b6d4)"
+    sections:
+      - type: hero
+        visible: true
+        content:
+          title: "Build the Future, One Project at a Time"
+          subtitle: "A hands-on innovation lab where young engineers prototype, test, and iterate real solutions."
+          cta_text: Explore Projects
+          cta_link: /projects
+          _bg:
+            image_url: https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=1400&h=600&fit=crop
+            overlay: 0.5
+          _styles:
+            cta_btn: { backgroundColor: "#0f172a", color: "#06b6d4", borderRadius: "8px", paddingV: "12px", paddingH: "28px" }
+      - type: features
+        visible: true
+        content:
+          heading: Our Programs
+          items:
+            - { title: Robotics Workshop, description: Design and program robots that solve real-world challenges using Arduino and ROS. }
+            - { title: App Development, description: Build full-stack applications from concept to launch with modern frameworks. }
+            - { title: Electronics Lab, description: "Solder, wire, and prototype IoT devices with professional-grade components." }
+            - { title: AI & Data Science, description: "Explore machine learning, neural networks, and data visualization techniques." }
+      - type: richText
+        visible: true
+        content:
+          html: "<h2>Our Process</h2><p><strong>Ideate</strong> — Brainstorm solutions to real problems with guided design thinking workshops.</p><p><strong>Prototype</strong> — Turn ideas into working models using our fully-equipped maker spaces.</p><p><strong>Test &amp; Iterate</strong> — Gather feedback, analyze results, and refine your designs.</p><p><strong>Launch</strong> — Present your project at our annual showcase to industry judges and the community.</p>"
+      - type: stats
+        visible: true
+        content:
+          heading: Lab Activity
+          items:
+            - { value: "500+", label: Projects Completed }
+            - { value: "30+", label: Active Mentors }
+            - { value: "100%", label: Hands-On Learning }
+          _bg: { color: "#f0fdfa" }
+      - type: cta
+        visible: true
+        content:
+          heading: Ready to Innovate?
+          description: Spaces are limited. Reserve your spot in the next cohort and start building.
+          button_text: Reserve a Spot
+          button_link: /register
+          _bg:
+            image_url: https://images.unsplash.com/photo-1485827404703-89b55fcc595e?w=1400&h=500&fit=crop
+            overlay: 0.55
+          _styles:
+            cta_btn: { backgroundColor: "#ffffff", color: "#0d9488", borderRadius: "8px", paddingV: "14px", paddingH: "32px" }
+
+  - slug: science-discovery
+    name: Science Discovery
+    category: creative
+    description: Curiosity-driven design that ends with a narrative instead of a hard CTA.
+    gradient: "linear-gradient(135deg, #dc2626, #f97316)"
+    sections:
+      - type: hero
+        visible: true
+        content:
+          title: "Question Everything. Discover More."
+          subtitle: "Hands-on science programs where experiments replace textbooks and curiosity leads the way."
+          cta_text: Explore Programs
+          cta_link: /programs
+          _bg:
+            image_url: https://images.unsplash.com/photo-1532094349884-543bc11b234d?w=1400&h=600&fit=crop
+            overlay: 0.5
+          _styles:
+            cta_btn: { backgroundColor: "#ffffff", color: "#dc2626", borderRadius: "8px", paddingV: "14px", paddingH: "32px" }
+      - type: imageGrid
+        visible: true
+        content:
+          heading: Lab Snapshots
+          columns: 3
+          items:
+            - { image_url: "https://images.unsplash.com/photo-1554475901-4538ddfbccc2?w=400&h=300&fit=crop", alt: Chemistry experiment, caption: Chemistry }
+            - { image_url: "https://images.unsplash.com/photo-1635070041078-e363dbe005cb?w=400&h=300&fit=crop", alt: Physics project, caption: Physics }
+            - { image_url: "https://images.unsplash.com/photo-1530026405186-ed1f139313f8?w=400&h=300&fit=crop", alt: Biology microscopy, caption: Biology }
+      - type: features
+        visible: true
+        content:
+          heading: Lab Programs
+          items:
+            - { title: Chemistry Lab, description: "From molecular modeling to safe chemical reactions — real science, not just reading about it." }
+            - { title: Physics Playground, description: "Build catapults, test circuits, and explore the laws of motion through engineering challenges." }
+            - { title: Biology & Ecology, description: "Field studies, microscopy, and ecosystem projects that connect to the real world." }
+            - { title: Earth & Space, description: "Rocketry, geology, and astronomy — explore everything from soil to the stars." }
+      - type: stats
+        visible: true
+        content:
+          heading: Discovery by the Numbers
+          items:
+            - { value: "5,000+", label: Experiments Run }
+            - { value: "98%", label: Students Say "Fun" }
+            - { value: "40+", label: Lab Modules }
+            - { value: "6", label: Science Disciplines }
+          _bg: { color: "#fef2f2" }
+      - type: richText
+        visible: true
+        content:
+          html: "<h2>The Science of Curiosity</h2><p>Every great discovery started with a simple question. Our programs are designed to nurture that spark — giving students the tools, the freedom, and the confidence to ask <em>\"what if?\"</em> and then go find out.</p><p>We don't teach science from a textbook. We teach it from a lab bench, a field notebook, and a telescope.</p>"
+
+  # ── Fun / Playful ────────────────────────────────────
+
+  - slug: kids-adventure
+    name: Kids Adventure
+    category: playful
+    description: Bright and energetic green theme focused on fun and parent confidence.
+    gradient: "linear-gradient(135deg, #22c55e, #16a34a)"
+    sections:
+      - type: hero
+        visible: true
+        content:
+          title: "Learn, Play & Create Amazing Things!"
+          subtitle: "Fun STEM adventures for curious kids ages 6-14. No experience needed — just bring your imagination!"
+          cta_text: "Join the Fun!"
+          cta_link: /signup
+          _bg:
+            image_url: https://images.unsplash.com/photo-1503676260728-1c00da094a0b?w=1400&h=600&fit=crop
+            overlay: 0.4
+          _styles:
+            cta_btn: { backgroundColor: "#fbbf24", color: "#15803d", borderRadius: "50px", paddingV: "14px", paddingH: "32px" }
+      - type: features
+        visible: true
+        content:
+          heading: What Kids Love About Us
+          items:
+            - { title: Build Cool Robots, description: "Design and program robots that follow commands, avoid obstacles, and even dance!" }
+            - { title: Create Video Games, description: Learn to code by building your very own games that you can share with friends. }
+            - { title: Science Experiments, description: "Hands-on experiments that make science exciting — from volcanoes to circuits!" }
+            - { title: Art Meets Tech, description: "Combine creativity with technology in projects like LED art, digital music, and more." }
+      - type: testimonials
+        visible: true
+        content:
+          heading: Parents Love Us Too!
+          items:
+            - { quote: "My daughter comes home every week buzzing with excitement about what she built. It's been incredible to watch her confidence grow.", author: "David & Michelle K.", role: Parents }
+            - { quote: "Finally a program that makes learning feel like play. My son has learned more here than an entire year of textbooks.", author: Amanda Rodriguez, role: Parent }
+      - type: cta
+        visible: true
+        content:
+          heading: Give Your Child a Head Start!
+          description: Enroll today and watch them discover a lifelong love of learning and creating.
+          button_text: "Sign Up Now!"
+          button_link: /enroll
+          _bg:
+            image_url: https://images.unsplash.com/photo-1588075592446-265fd1e6e76f?w=1400&h=500&fit=crop
+            overlay: 0.4
+          _styles:
+            cta_btn: { backgroundColor: "#ffffff", color: "#16a34a", borderRadius: "50px", paddingV: "14px", paddingH: "36px" }
+
+  - slug: camp-explorer
+    name: Camp Explorer
+    category: playful
+    description: Warm orange photo-forward camp theme with no hard CTA — just vibes and info.
+    gradient: "linear-gradient(135deg, #f97316, #eab308)"
+    sections:
+      - type: hero
+        visible: true
+        content:
+          title: The Coolest STEM Camp on the Planet
+          subtitle: "Summer and holiday camps packed with hands-on projects, team challenges, and unforgettable memories."
+          cta_text: See Camp Dates
+          cta_link: /schedule
+          _bg:
+            image_url: https://images.unsplash.com/photo-1472898965229-f9b06b9c9bbe?w=1400&h=600&fit=crop
+            overlay: 0.4
+          _styles:
+            cta_btn: { backgroundColor: "#ffffff", color: "#c2410c", borderRadius: "50px", paddingV: "14px", paddingH: "28px" }
+      - type: imageGrid
+        visible: true
+        content:
+          heading: Camp Highlights
+          columns: 3
+          items:
+            - { image_url: "https://images.unsplash.com/photo-1529156069898-49953e39b3ac?w=400&h=300&fit=crop", alt: Team building activity, caption: Team Challenges }
+            - { image_url: "https://images.unsplash.com/photo-1485827404703-89b55fcc595e?w=400&h=300&fit=crop", alt: Robotics workshop, caption: Robotics }
+            - { image_url: "https://images.unsplash.com/photo-1544717305-2782549b5136?w=400&h=300&fit=crop", alt: Outdoor coding, caption: Outdoor Sessions }
+      - type: features
+        visible: true
+        content:
+          heading: What Makes Our Camp Special
+          items:
+            - { title: Theme Weeks, description: "Every week is a new adventure — Space Week, Ocean Week, Robotics Week, and more!" }
+            - { title: Team Projects, description: Collaborate with new friends to solve exciting challenges and build amazing things together. }
+            - { title: Outdoor & Indoor, description: The perfect balance of screen time and fresh air with outdoor STEM activities. }
+          _bg: { color: "#fffbeb" }
+      - type: stats
+        visible: true
+        content:
+          heading: Camp Stats
+          items:
+            - { value: "3,000+", label: Campers Served }
+            - { value: "12", label: Theme Weeks }
+            - { value: "50+", label: Activities }
+
+  - slug: coding-club
+    name: Coding Club
+    category: playful
+    description: Compact purple/blue theme — features and a single strong CTA, no filler.
+    gradient: "linear-gradient(135deg, #6366f1, #a855f7)"
+    sections:
+      - type: hero
+        visible: true
+        content:
+          title: "Code, Create & Have a Blast!"
+          subtitle: "Weekly after-school coding club for ages 8-16. From Scratch to Python — learn at your own speed!"
+          cta_text: Join the Club
+          cta_link: /join
+          _bg:
+            image_url: https://images.unsplash.com/photo-1515879218367-8466d910auj7?w=1400&h=600&fit=crop
+            overlay: 0.5
+          _styles:
+            cta_btn: { backgroundColor: "#fbbf24", color: "#4338ca", borderRadius: "50px", paddingV: "14px", paddingH: "32px" }
+      - type: features
+        visible: true
+        content:
+          heading: What We Do
+          items:
+            - { title: Game Development, description: "Build games in Scratch, Roblox Studio, and Unity — then play them with friends!" }
+            - { title: Web Design, description: "Create your own websites with HTML, CSS, and JavaScript." }
+            - { title: Python & AI, description: "For advanced coders: explore Python, data science, and beginner machine learning." }
+            - { title: Hackathons, description: "Monthly coding competitions with prizes, pizza, and bragging rights." }
+      - type: stats
+        visible: true
+        content:
+          heading: Club Stats
+          items:
+            - { value: "600+", label: Club Members }
+            - { value: "1,200+", label: Projects Built }
+          _bg: { color: "#eef2ff" }
+      - type: cta
+        visible: true
+        content:
+          heading: First Session Is Free!
+          description: "Come try it out — no commitment. If your kid loves it, join for the semester."
+          button_text: Try a Free Session
+          button_link: /trial
+          _bg: { color: "#6366f1" }
+          _styles:
+            cta_btn: { backgroundColor: "#ffffff", color: "#6366f1", borderRadius: "50px", paddingV: "14px", paddingH: "32px" }
+
+  # ── Minimal ─────────────────────────────────────────
+
+  - slug: clean-slate
+    name: Clean Slate
+    category: minimal
+    description: Ultra-minimal — just a hero and features. Nothing extra.
+    gradient: "linear-gradient(135deg, #f8fafc, #e2e8f0)"
+    sections:
+      - type: hero
+        visible: true
+        content:
+          title: "Simple. Focused. Effective."
+          subtitle: "Quality education without the noise. Clear pathways to meaningful skills."
+          cta_text: Learn More
+          cta_link: /about
+          _bg: { color: "#f8fafc" }
+          _styles:
+            cta_btn: { backgroundColor: "#0f172a", color: "#ffffff", borderRadius: "4px", paddingV: "12px", paddingH: "28px" }
+      - type: features
+        visible: true
+        content:
+          heading: What We Offer
+          items:
+            - { title: Structured Learning, description: "Clear, sequential curriculum designed by experienced educators." }
+            - { title: Measurable Progress, description: Track every milestone with transparent reporting and assessments. }
+            - { title: Flexible Scheduling, description: Learn at your own pace with sessions that fit your life. }
+
+  - slug: elegance
+    name: Elegance
+    category: minimal
+    description: Sophisticated and quiet — narrative-driven with no buttons, no stats, no pressure.
+    gradient: "linear-gradient(135deg, #6b7280, #374151)"
+    sections:
+      - type: hero
+        visible: true
+        content:
+          title: Excellence in Every Detail
+          subtitle: "A refined learning experience crafted for those who value depth, quality, and precision."
+          _bg:
+            image_url: https://images.unsplash.com/photo-1481627834876-b7833e8f5570?w=1400&h=600&fit=crop
+            overlay: 0.6
+      - type: richText
+        visible: true
+        content:
+          html: "<h2>Our Philosophy</h2><p>We believe that true learning happens when you slow down. In a world obsessed with speed and volume, we offer something different — an education built on patience, curiosity, and the quiet satisfaction of genuine understanding.</p><p>Every program we design begins with a simple question: <em>what does this student truly need to succeed?</em></p>"
+      - type: features
+        visible: true
+        content:
+          heading: The Pillars of Our Program
+          items:
+            - { title: Depth Over Breadth, description: "We go deep into fewer topics so you emerge with genuine mastery, not surface-level familiarity." }
+            - { title: Mentorship Model, description: "One-on-one guidance from practitioners who have walked the path you're on." }
+      - type: richText
+        visible: true
+        content:
+          html: "<h2>Begin Something Meaningful</h2><p>Take the first step toward mastery. We'd love to hear from you — reach out at <strong>hello@example.com</strong> or visit us during open hours.</p>"
+
+  - slug: online-academy
+    name: Online Academy
+    category: minimal
+    description: Modern, clean design for online learning platforms and virtual classrooms.
+    gradient: "linear-gradient(135deg, #0ea5e9, #38bdf8)"
+    sections:
+      - type: hero
+        visible: true
+        content:
+          title: Learn Anywhere. Grow Everywhere.
+          subtitle: "Self-paced online courses with live instructor support. Access world-class education from your living room."
+          cta_text: Browse Courses
+          cta_link: /courses
+          _bg:
+            image_url: https://images.unsplash.com/photo-1501504905252-473c47e087f8?w=1400&h=600&fit=crop
+            overlay: 0.45
+          _styles:
+            cta_btn: { backgroundColor: "#0ea5e9", color: "#ffffff", borderRadius: "8px", paddingV: "12px", paddingH: "28px" }
+      - type: features
+        visible: true
+        content:
+          heading: Platform Features
+          items:
+            - { title: Interactive Lessons, description: "Video lectures, quizzes, and coding exercises — all in one seamless experience." }
+            - { title: Live Office Hours, description: "Get unstuck fast with scheduled live sessions with your instructor." }
+            - { title: Certificates, description: "Earn verifiable certificates for every course you complete." }
+            - { title: Mobile Friendly, description: "Learn on the go — our platform works beautifully on any device." }
+      - type: stats
+        visible: true
+        content:
+          heading: Platform Stats
+          items:
+            - { value: "50+", label: Courses Live }
+            - { value: "15K+", label: Active Learners }
+            - { value: "4.8★", label: Average Rating }
+            - { value: "92%", label: Completion Rate }
+          _bg: { color: "#f0f9ff" }
+      - type: cta
+        visible: true
+        content:
+          heading: Start Learning for Free
+          description: "Your first course is on us. No credit card required."
+          button_text: Create Free Account
+          button_link: /signup
+          _bg: { color: "#0ea5e9" }
+          _styles:
+            cta_btn: { backgroundColor: "#ffffff", color: "#0ea5e9", borderRadius: "8px", paddingV: "14px", paddingH: "36px" }
+
+  # ── Cartoon / Kid-Friendly ─────────────────────────
+
+  - slug: stem-adventure
+    name: STEM Adventure
+    category: cartoon
+    description: "Bold Duolingo-inspired flagship theme — the full experience with every section type."
+    gradient: "linear-gradient(135deg, #235390, #58cc02)"
+    sections:
+      - type: hero
+        visible: true
+        content:
+          title: "The Fun Way to Learn STEM!"
+          subtitle: "Build robots. Code games. Design circuits. Hands-on STEM learning that turns curiosity into real engineering skills."
+          cta_text: "Start Learning — It's Free"
+          cta_link: /signup
+          _bg: { color: "#235390" }
+          _styles:
+            cta_btn: { backgroundColor: "#58cc02", color: "#ffffff", borderRadius: "16px", paddingV: "16px", paddingH: "36px" }
+      - type: features
+        visible: true
+        content:
+          heading: "Learning That Feels Like Play"
+          items:
+            - { title: "Hands-On STEM Labs", description: "Students don't just watch — they build, code, and experiment through interactive labs in robotics, programming, and design." }
+            - { title: "Built for Every Age", description: "Simple tools for younger learners and advanced challenges for future engineers. The platform grows with the student." }
+            - { title: "Real-World Projects", description: "Create projects to demo and showcase — from blinking LEDs to programmable robots and interactive games." }
+            - { title: "Gamified Progress", description: "Earn points, badges, and achievements that make learning feel like a game. Level up and show off!" }
+      - type: stats
+        visible: true
+        content:
+          heading: "By the Numbers"
+          items:
+            - { value: "10K+", label: "Students Learning" }
+            - { value: "500+", label: "Hands-On Labs" }
+            - { value: "50+", label: "STEM Courses" }
+            - { value: "4.9★", label: "Student Rating" }
+          _bg: { color: "#f0fbe6" }
+      - type: testimonials
+        visible: true
+        content:
+          heading: "What Parents & Kids Say"
+          items:
+            - { quote: "My daughter now wants to be an engineer! She builds robots every weekend and can't stop talking about circuits.", author: "Maria G.", role: "Parent" }
+            - { quote: "This is way more fun than regular school. I built my own game and showed it to my whole class!", author: "Jayden, Age 11", role: "Student" }
+      - type: cta
+        visible: true
+        content:
+          heading: "Ready for Your STEM Adventure?"
+          description: "No credit card required. Jump in and start building awesome things today!"
+          button_text: "Get Started Free"
+          button_link: /signup
+          _bg: { color: "#58cc02" }
+          _styles:
+            cta_btn: { backgroundColor: "#ffffff", color: "#58cc02", borderRadius: "16px", paddingV: "16px", paddingH: "40px" }
+
+  - slug: robot-workshop
+    name: Robot Workshop
+    category: cartoon
+    description: "Visual-first robotics theme — leads with a project gallery, no closing CTA."
+    gradient: "linear-gradient(135deg, #1cb0f6, #0077b6)"
+    sections:
+      - type: hero
+        visible: true
+        content:
+          title: "Build. Code. Launch!"
+          subtitle: "Your personal robotics workshop — design bots, program their brains, and watch them come to life."
+          cta_text: "Enter the Workshop"
+          cta_link: /signup
+          _bg:
+            image_url: https://images.unsplash.com/photo-1485827404703-89b55fcc595e?w=1400&h=600&fit=crop
+            overlay: 0.65
+          _styles:
+            cta_btn: { backgroundColor: "#1cb0f6", color: "#ffffff", borderRadius: "50px", paddingV: "16px", paddingH: "40px" }
+      - type: imageGrid
+        visible: true
+        content:
+          heading: "What Students Have Built"
+          columns: 4
+          items:
+            - { image_url: "https://images.unsplash.com/photo-1561557944-6e7860d1a7eb?w=400&h=300&fit=crop", alt: "Line-following robot", caption: "Line Follower" }
+            - { image_url: "https://images.unsplash.com/photo-1535378917042-10a22c95931a?w=400&h=300&fit=crop", alt: "Arduino project", caption: "Arduino Bot" }
+            - { image_url: "https://images.unsplash.com/photo-1581092160607-ee22621dd758?w=400&h=300&fit=crop", alt: "Robot arm", caption: "Robot Arm" }
+            - { image_url: "https://images.unsplash.com/photo-1518770660439-4636190af475?w=400&h=300&fit=crop", alt: "Circuit board close-up", caption: "Custom PCB" }
+      - type: features
+        visible: true
+        content:
+          heading: "What's Inside the Workshop"
+          items:
+            - { title: "Drag-and-Drop Coding", description: "No typing required for beginners — snap blocks together to program your first robot in minutes." }
+            - { title: "3D Robot Builder", description: "Design custom robots with an interactive 3D builder. Pick parts, snap them together, and test your creation." }
+            - { title: "Sensor Playground", description: "Experiment with distance sensors, light detectors, and motion trackers in a virtual sandbox." }
+            - { title: "Battle Arena", description: "Challenge friends in the bot arena! Program your robot's strategy and compete for the leaderboard." }
+      - type: stats
+        visible: true
+        content:
+          heading: "Workshop Stats"
+          items:
+            - { value: "200+", label: "Robot Designs" }
+            - { value: "50+", label: "Coding Challenges" }
+            - { value: "1M+", label: "Lines of Code Written" }
+          _bg: { color: "#eef8ff" }
+
+  - slug: code-quest
+    name: Code Quest
+    category: cartoon
+    description: "RPG-inspired adventure — storytelling-driven with a narrative ending instead of a sales CTA."
+    gradient: "linear-gradient(135deg, #ff9600, #ff4b4b)"
+    sections:
+      - type: hero
+        visible: true
+        content:
+          title: "Your Coding Quest Begins Here"
+          subtitle: "Level up your skills through epic coding quests, unlock achievements, and become a master programmer."
+          cta_text: "Begin Your Quest"
+          cta_link: /signup
+          _bg: { color: "#ff9600" }
+          _styles:
+            cta_btn: { backgroundColor: "#ffffff", color: "#ff9600", borderRadius: "50px", paddingV: "16px", paddingH: "36px" }
+      - type: features
+        visible: true
+        content:
+          heading: "Choose Your Path"
+          items:
+            - { title: "Python Pathfinder", description: "Start with Python basics and work your way through dungeons of logic, loops, and functions." }
+            - { title: "Web Wizard", description: "Learn HTML, CSS, and JavaScript by building magical websites and interactive spells." }
+            - { title: "Game Architect", description: "Design and code your own video games — from platformers to puzzlers and everything in between." }
+            - { title: "Data Alchemist", description: "Turn raw data into gold! Learn to collect, analyze, and visualize information like a pro." }
+            - { title: "Bot Commander", description: "Program AI bots that chat, make decisions, and automate tasks — your digital sidekick awaits." }
+      - type: testimonials
+        visible: true
+        content:
+          heading: "Legendary Reviews"
+          items:
+            - { quote: "I used to think coding was boring. Now I'm on a 30-day streak and just built my first game! This is awesome.", author: "Aiden, Age 13", role: "Code Quester" }
+            - { quote: "My son finally found something that keeps him focused and excited. He talks about his coding quests at dinner every night.", author: "Rachel T.", role: "Parent" }
+      - type: richText
+        visible: true
+        content:
+          html: "<h2>The Quest Never Ends</h2><p>Every quest completed unlocks the next. Every badge earned reveals a new challenge. This isn't a course with an end date — it's an <strong>adventure</strong> that grows with you.</p><p>Thousands of young coders are already on their quest. <em>Where will yours take you?</em></p>"
+
+  - slug: science-lab-kids
+    name: Science Lab Kids
+    category: cartoon
+    description: "Bubbly purple science theme — visual lab showcase with no hero button, discovery-driven."
+    gradient: "linear-gradient(135deg, #ce82ff, #9333ea)"
+    sections:
+      - type: hero
+        visible: true
+        content:
+          title: "Welcome to the Coolest Lab Ever"
+          subtitle: "Mix potions, launch rockets, and discover how the universe works — one experiment at a time."
+          _bg:
+            image_url: https://images.unsplash.com/photo-1532094349884-543bc11b234d?w=1400&h=600&fit=crop
+            overlay: 0.6
+      - type: features
+        visible: true
+        content:
+          heading: "What You'll Discover"
+          items:
+            - { title: "Virtual Experiments", description: "Run chemistry, physics, and biology experiments in a safe virtual lab — no goggles required!" }
+            - { title: "Explainer Videos", description: "Fun animated videos break down complex science concepts into bite-sized, easy-to-understand lessons." }
+            - { title: "Lab Notebooks", description: "Document your experiments, write hypotheses, and track results like a real scientist." }
+      - type: imageGrid
+        visible: true
+        content:
+          heading: "Inside the Lab"
+          columns: 2
+          items:
+            - { image_url: "https://images.unsplash.com/photo-1554475901-4538ddfbccc2?w=400&h=300&fit=crop", alt: "Chemistry experiment", caption: "Chemistry Station" }
+            - { image_url: "https://images.unsplash.com/photo-1635070041078-e363dbe005cb?w=400&h=300&fit=crop", alt: "Physics lab", caption: "Physics Corner" }
+            - { image_url: "https://images.unsplash.com/photo-1530026405186-ed1f139313f8?w=400&h=300&fit=crop", alt: "Microscopy", caption: "Biology Bench" }
+            - { image_url: "https://images.unsplash.com/photo-1507413245164-6160d8298b31?w=400&h=300&fit=crop", alt: "Space science", caption: "Astronomy Deck" }
+      - type: testimonials
+        visible: true
+        content:
+          heading: "Lab Reports from Parents"
+          items:
+            - { quote: "She now wants to be a scientist. The virtual labs are incredible — she's learning concepts I didn't see until high school!", author: "David K.", role: "Parent" }
+            - { quote: "The science fair project builder helped my son win first place at his school. We couldn't believe it!", author: "Linda M.", role: "Parent" }
+            - { quote: "My twins argue about who gets to use the microscope simulator first. That's a problem I'm happy to have.", author: "Jason & Wei L.", role: "Parents" }
+
+  - slug: pixel-arcade
+    name: Pixel Arcade
+    category: cartoon
+    description: "Retro-arcade theme — leads with social proof stats before revealing features."
+    gradient: "linear-gradient(135deg, #ff4b4b, #dc2626)"
+    sections:
+      - type: hero
+        visible: true
+        content:
+          title: "Make Games. Play Games. Be a Game Dev."
+          subtitle: "Design characters, build worlds, and code your own arcade games — then challenge your friends to beat your high score."
+          cta_text: "Press Start"
+          cta_link: /signup
+          _bg: { color: "#1a1a2e" }
+          _styles:
+            cta_btn: { backgroundColor: "#ff4b4b", color: "#ffffff", borderRadius: "12px", paddingV: "16px", paddingH: "36px" }
+      - type: stats
+        visible: true
+        content:
+          heading: "Arcade Leaderboard"
+          items:
+            - { value: "5K+", label: "Games Created" }
+            - { value: "100+", label: "Tutorials" }
+            - { value: "50K+", label: "Players" }
+            - { value: "🕹️", label: "Pure Fun" }
+          _bg: { color: "#fef2f2" }
+      - type: features
+        visible: true
+        content:
+          heading: "Power-Ups Included"
+          items:
+            - { title: "Sprite Designer", description: "Draw your own characters and enemies pixel-by-pixel, then watch them come alive in your game." }
+            - { title: "Level Editor", description: "Build platformer levels, maze worlds, and racing tracks with a drag-and-drop editor." }
+            - { title: "Code Your Logic", description: "Use visual blocks or real code to add gravity, collisions, power-ups, and scorekeeping." }
+            - { title: "Publish & Share", description: "Share your game with a link. Friends and family can play it right in their browser!" }
+      - type: testimonials
+        visible: true
+        content:
+          heading: "Player Reviews"
+          items:
+            - { quote: "I made a platformer game and my whole class played it at school. My teacher couldn't believe I coded it myself!", author: "Sofia, Age 12", role: "Game Creator" }
+      - type: cta
+        visible: true
+        content:
+          heading: "Game On!"
+          description: "Stop playing other people's games. Start building your own. Free to play, free to create."
+          button_text: "Create Your First Game"
+          button_link: /signup
+          _bg: { color: "#ff4b4b" }
+          _styles:
+            cta_btn: { backgroundColor: "#ffffff", color: "#ff4b4b", borderRadius: "12px", paddingV: "16px", paddingH: "40px" }
+
+  - slug: super-circuits
+    name: Super Circuits
+    category: cartoon
+    description: "Electric yellow electronics theme — ends with visuals and a how-it-works narrative, no CTA."
+    gradient: "linear-gradient(135deg, #ffc800, #ff9600)"
+    sections:
+      - type: hero
+        visible: true
+        content:
+          title: "Spark Your Genius!"
+          subtitle: "Wire up circuits, light up LEDs, and build real gadgets that actually work. Electronics has never been this fun."
+          cta_text: "Start Tinkering"
+          cta_link: /signup
+          _bg:
+            image_url: https://images.unsplash.com/photo-1518770660439-4636190af475?w=1400&h=600&fit=crop
+            overlay: 0.6
+          _styles:
+            cta_btn: { backgroundColor: "#ffc800", color: "#1a1a2e", borderRadius: "50px", paddingV: "16px", paddingH: "36px" }
+      - type: features
+        visible: true
+        content:
+          heading: "What's in the Toolkit"
+          items:
+            - { title: "Circuit Simulator", description: "Build and test circuits virtually before wiring them for real. See electricity flow in real time!" }
+            - { title: "Component Library", description: "Learn about resistors, capacitors, LEDs, motors, and sensors through interactive, animated guides." }
+            - { title: "Project Kits", description: "Follow step-by-step kits to build things like alarm systems, music boxes, and smart lights." }
+      - type: richText
+        visible: true
+        content:
+          html: "<h2>How a Tinkerer Grows</h2><p><strong>Level 1: LED Explorer</strong> — Light your first LED. Understand voltage, current, and resistance.</p><p><strong>Level 2: Circuit Builder</strong> — Combine components to build functional circuits like alarms and dimmers.</p><p><strong>Level 3: Gadget Engineer</strong> — Design and wire your own gadgets from scratch. You're the inventor now.</p>"
+      - type: imageGrid
+        visible: true
+        content:
+          heading: "Student Projects"
+          columns: 3
+          items:
+            - { image_url: "https://images.unsplash.com/photo-1518770660439-4636190af475?w=400&h=300&fit=crop", alt: "Circuit board", caption: "Custom Alarm" }
+            - { image_url: "https://images.unsplash.com/photo-1581092160607-ee22621dd758?w=400&h=300&fit=crop", alt: "LED project", caption: "LED Matrix" }
+            - { image_url: "https://images.unsplash.com/photo-1535378917042-10a22c95931a?w=400&h=300&fit=crop", alt: "Arduino", caption: "Smart Sensor" }
+
+  - slug: space-explorers
+    name: Space Explorers
+    category: cartoon
+    description: "Cosmic narrative theme — richText story before features, no CTA section, pure exploration."
+    gradient: "linear-gradient(135deg, #0f172a, #1cb0f6)"
+    sections:
+      - type: hero
+        visible: true
+        content:
+          title: "3… 2… 1… Launch Your Learning!"
+          subtitle: "Explore the cosmos through coding, robotics, and engineering. Every lesson is a mission, every project is a launch."
+          cta_text: "Join the Crew"
+          cta_link: /signup
+          _bg:
+            image_url: https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=1400&h=600&fit=crop
+            overlay: 0.5
+          _styles:
+            cta_btn: { backgroundColor: "#1cb0f6", color: "#ffffff", borderRadius: "50px", paddingV: "16px", paddingH: "40px" }
+      - type: richText
+        visible: true
+        content:
+          html: "<h2>Mission Briefing</h2><p>You are about to embark on a journey through the solar system and beyond. Your training begins on Earth — with coding, physics, and engineering — and takes you all the way to Mars and the outer planets.</p><p>Every cadet starts as a <strong>Recruit</strong> and can rise through the ranks: <em>Navigator → Pilot → Commander → Mission Specialist</em>. Your rank determines the missions available to you.</p>"
+      - type: features
+        visible: true
+        content:
+          heading: "Mission Types"
+          items:
+            - { title: "Rocket Science 101", description: "Learn the physics of space travel through simulations — calculate thrust, orbits, and escape velocity." }
+            - { title: "Mars Rover Challenge", description: "Code a virtual rover to navigate Mars terrain, collect samples, and report back to mission control." }
+            - { title: "Satellite Builder", description: "Design and launch your own satellite — pick sensors, set orbits, and track data from space." }
+      - type: testimonials
+        visible: true
+        content:
+          heading: "Transmissions from the Crew"
+          items:
+            - { quote: "I coded a Mars rover and it actually avoided obstacles! I feel like a real NASA engineer now.", author: "Omar, Age 14", role: "Space Cadet" }
+            - { quote: "My kids fight over who gets to do the space missions next. It's the only screen time I actually encourage.", author: "Patricia W.", role: "Parent" }
+
+  - slug: doodle-design
+    name: Doodle & Design
+    category: cartoon
+    description: "Colorful creative theme — gallery-first with a closing CTA and no stats clutter."
+    gradient: "linear-gradient(135deg, #58cc02, #1cb0f6, #ce82ff)"
+    sections:
+      - type: hero
+        visible: true
+        content:
+          title: "Where Art Meets Technology"
+          subtitle: "Sketch, design, and 3D-print your wildest ideas. From doodles on paper to real objects in your hands."
+          cta_text: "Start Creating"
+          cta_link: /signup
+          _bg: { color: "#58cc02" }
+          _styles:
+            cta_btn: { backgroundColor: "#ffffff", color: "#58cc02", borderRadius: "50px", paddingV: "16px", paddingH: "36px" }
+      - type: imageGrid
+        visible: true
+        content:
+          heading: "Student Creations"
+          columns: 3
+          items:
+            - { image_url: "https://images.unsplash.com/photo-1561070791-2526d30994b5?w=400&h=300&fit=crop", alt: "Digital painting", caption: "Digital Art" }
+            - { image_url: "https://images.unsplash.com/photo-1558618666-fcd25c85f82e?w=400&h=300&fit=crop", alt: "3D model", caption: "3D Prints" }
+            - { image_url: "https://images.unsplash.com/photo-1611532736597-de2d4265fba3?w=400&h=300&fit=crop", alt: "Animation frame", caption: "Animation" }
+      - type: features
+        visible: true
+        content:
+          heading: "Your Creative Toolkit"
+          items:
+            - { title: "3D Modeling Studio", description: "Turn your sketches into 3D models using simple tools anyone can learn in minutes." }
+            - { title: "Digital Art Lab", description: "Create illustrations, animations, and graphic designs with professional-grade tools made for kids." }
+            - { title: "3D Print Shop", description: "Send your designs to a 3D printer and hold your creations in your hands. Pure magic." }
+            - { title: "Design Challenges", description: "Weekly prompts and competitions push your creativity — design a chair, a robot, a whole city!" }
+      - type: testimonials
+        visible: true
+        content:
+          heading: "From the Design Studio"
+          items:
+            - { quote: "I designed a phone stand in 3D and my dad actually printed it. It sits on his desk now. Best. Day. Ever.", author: "Mia, Age 10", role: "Young Designer" }
+            - { quote: "She went from drawing on napkins to modeling in 3D software. The progression has been incredible to watch.", author: "Kevin R.", role: "Parent" }
+      - type: cta
+        visible: true
+        content:
+          heading: "Your Masterpiece Awaits"
+          description: "Every great designer started with a doodle. Turn yours into something real — start for free!"
+          button_text: "Open the Studio"
+          button_link: /signup
+          _bg: { color: "#ce82ff" }
+          _styles:
+            cta_btn: { backgroundColor: "#ffffff", color: "#9333ea", borderRadius: "50px", paddingV: "16px", paddingH: "40px" }

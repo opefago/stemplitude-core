@@ -602,3 +602,433 @@ export async function updateTenantMemberBillingFee(
     }
   );
 }
+
+export interface RateLimitProfile {
+  key: string;
+  limit: number;
+  window_seconds: number;
+  description?: string | null;
+}
+
+export interface RateLimitOverride {
+  id: string;
+  scope_type: "tenant" | "user";
+  scope_id: string;
+  scope_label?: string | null;
+  scope_subtitle?: string | null;
+  mode: "profile_only" | "custom_only" | "profile_plus_custom";
+  profile_key?: string | null;
+  custom_limit?: number | null;
+  custom_window_seconds?: number | null;
+  reason?: string | null;
+  updated_by?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RateLimitOverrideListResponse {
+  items: RateLimitOverride[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
+export interface RateLimitLookupUser {
+  id: string;
+  email: string;
+  full_name: string;
+  is_active: boolean;
+}
+
+export interface RateLimitLookupTenant {
+  id: string;
+  name: string;
+  slug: string;
+  type: string;
+  is_active: boolean;
+}
+
+export interface EffectiveRateLimitResponse {
+  route_path: string;
+  route_class: string;
+  route_profile_key: string;
+  user_profile?: RateLimitProfile | null;
+  tenant_profile?: RateLimitProfile | null;
+  anonymous_profile: RateLimitProfile;
+  failure_mode: "open" | "closed";
+}
+
+export async function listRateLimitProfiles(): Promise<RateLimitProfile[]> {
+  return apiFetch<RateLimitProfile[]>("/platform/rate-limits/profiles");
+}
+
+export async function searchRateLimitUsers(
+  q: string,
+  limit = 10
+): Promise<RateLimitLookupUser[]> {
+  return apiFetch<RateLimitLookupUser[]>(
+    `/platform/rate-limits/lookup/users?q=${encodeURIComponent(q)}&limit=${limit}`
+  );
+}
+
+export async function searchRateLimitTenants(
+  q: string,
+  limit = 10
+): Promise<RateLimitLookupTenant[]> {
+  return apiFetch<RateLimitLookupTenant[]>(
+    `/platform/rate-limits/lookup/tenants?q=${encodeURIComponent(q)}&limit=${limit}`
+  );
+}
+
+export async function listRateLimitOverrides(params: {
+  scope_type?: "tenant" | "user";
+  profile_key?: string;
+  offset?: number;
+  limit?: number;
+} = {}): Promise<RateLimitOverrideListResponse> {
+  const query = new URLSearchParams();
+  query.set("offset", String(params.offset ?? 0));
+  query.set("limit", String(params.limit ?? 50));
+  if (params.scope_type) query.set("scope_type", params.scope_type);
+  if (params.profile_key) query.set("profile_key", params.profile_key);
+  return apiFetch<RateLimitOverrideListResponse>(
+    `/platform/rate-limits/overrides?${query.toString()}`
+  );
+}
+
+export async function upsertRateLimitOverride(payload: {
+  scope_type: "tenant" | "user";
+  scope_id: string;
+  mode: "profile_only" | "custom_only" | "profile_plus_custom";
+  profile_key?: string | null;
+  custom_limit?: number | null;
+  custom_window_seconds?: number | null;
+  reason?: string | null;
+}): Promise<RateLimitOverride> {
+  return apiFetch<RateLimitOverride>("/platform/rate-limits/overrides", {
+    method: "PUT",
+    body: payload,
+  });
+}
+
+export async function deleteRateLimitOverride(
+  scopeType: "tenant" | "user",
+  scopeId: string
+): Promise<{ deleted: boolean }> {
+  return apiFetch<{ deleted: boolean }>(
+    `/platform/rate-limits/overrides/${scopeType}/${encodeURIComponent(scopeId)}`,
+    { method: "DELETE" }
+  );
+}
+
+export async function getEffectiveRateLimit(params: {
+  path: string;
+  user_id?: string;
+  tenant_id?: string;
+}): Promise<EffectiveRateLimitResponse> {
+  const query = new URLSearchParams();
+  query.set("path", params.path);
+  if (params.user_id) query.set("user_id", params.user_id);
+  if (params.tenant_id) query.set("tenant_id", params.tenant_id);
+  return apiFetch<EffectiveRateLimitResponse>(
+    `/platform/rate-limits/effective?${query.toString()}`
+  );
+}
+
+export interface PlatformFeatureFlag {
+  id: string;
+  key: string;
+  owner: string;
+  status: string;
+  description: string;
+  stage: string;
+  default_enabled: boolean;
+  allow_debug_events: boolean;
+  fail_mode: string;
+  archived_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PlatformFeatureFlagRule {
+  id: string;
+  flag_id: string;
+  priority: number;
+  enabled: boolean;
+  rule_type: string;
+  match_operator: string;
+  conditions: Array<{ attribute: string; op: string; value: unknown }>;
+  rollout_percentage: number | null;
+  variant: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PlatformFeatureFlagTarget {
+  id: string;
+  flag_id: string;
+  target_type: "all" | "user" | "tenant";
+  target_key: string;
+  stage: string;
+  enabled: boolean;
+  variant: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PlatformFeatureFlagMetricPoint {
+  bucket_start: string;
+  on_count: number;
+  off_count: number;
+  usage_count: number;
+  variant_counts: Record<string, number>;
+}
+
+export interface PlatformFeatureFlagMetrics {
+  flag_key: string;
+  dimension_key: string;
+  dimension_value: string;
+  granularity: string;
+  points: PlatformFeatureFlagMetricPoint[];
+}
+
+export interface PlatformFeatureEvaluation {
+  key: string;
+  enabled: boolean;
+  variant: string | null;
+  decision_source: string;
+  cache_hit: boolean;
+  reason: string | null;
+}
+
+export interface PlatformFeatureLookupUser {
+  id: string;
+  avatar_url: string | null;
+  email: string;
+  full_name: string;
+  is_active: boolean;
+}
+
+export interface PlatformFeatureLookupTenant {
+  id: string;
+  avatar_url: string | null;
+  name: string;
+  slug: string;
+  type: string;
+  is_active: boolean;
+}
+
+export interface PlatformFeatureFlagListResponse {
+  total: number;
+  offset: number;
+  limit: number;
+  items: PlatformFeatureFlag[];
+}
+
+export async function listPlatformFeatureFlags(
+  includeArchived = false,
+  params: {
+    offset?: number;
+    limit?: number;
+    q?: string;
+    status?: string;
+    stage?: string;
+  } = {}
+): Promise<PlatformFeatureFlagListResponse> {
+  const query = new URLSearchParams();
+  query.set("include_archived", includeArchived ? "true" : "false");
+  query.set("offset", String(params.offset ?? 0));
+  query.set("limit", String(params.limit ?? 25));
+  if (params.q) query.set("q", params.q);
+  if (params.status && params.status !== "all") query.set("status", params.status);
+  if (params.stage && params.stage !== "all") query.set("stage", params.stage);
+  return apiFetch<PlatformFeatureFlagListResponse>(
+    `/platform/feature-flags/?${query.toString()}`
+  );
+}
+
+export async function getPlatformFeatureFlag(
+  flagId: string
+): Promise<PlatformFeatureFlag> {
+  return apiFetch<PlatformFeatureFlag>(
+    `/platform/feature-flags/${encodeURIComponent(flagId)}`
+  );
+}
+
+export async function createPlatformFeatureFlag(payload: {
+  key: string;
+  owner: string;
+  status: string;
+  description: string;
+  stage: string;
+  default_enabled: boolean;
+  allow_debug_events: boolean;
+  fail_mode: "open" | "closed";
+}): Promise<{ id: string; key: string }> {
+  return apiFetch("/platform/feature-flags/", { method: "POST", body: payload });
+}
+
+export async function patchPlatformFeatureFlag(
+  flagId: string,
+  payload: Partial<{
+    owner: string;
+    status: string;
+    description: string;
+    stage: string;
+    default_enabled: boolean;
+    allow_debug_events: boolean;
+    fail_mode: "open" | "closed";
+  }>
+): Promise<{ ok: boolean }> {
+  return apiFetch(`/platform/feature-flags/${encodeURIComponent(flagId)}`, {
+    method: "PATCH",
+    body: payload,
+  });
+}
+
+export async function listPlatformFeatureFlagRules(
+  flagId: string
+): Promise<PlatformFeatureFlagRule[]> {
+  return apiFetch<PlatformFeatureFlagRule[]>(
+    `/platform/feature-flags/${encodeURIComponent(flagId)}/rules`
+  );
+}
+
+export async function createPlatformFeatureFlagRule(
+  flagId: string,
+  payload: {
+    priority: number;
+    enabled: boolean;
+    rule_type: "targeting" | "rollout" | "experiment";
+    match_operator: "all" | "any";
+    conditions: Array<{ attribute: string; op: string; value: unknown }>;
+    rollout_percentage: number | null;
+    variant: string | null;
+  }
+): Promise<PlatformFeatureFlagRule> {
+  return apiFetch(
+    `/platform/feature-flags/${encodeURIComponent(flagId)}/rules`,
+    { method: "POST", body: payload }
+  );
+}
+
+export async function patchPlatformFeatureFlagRule(
+  ruleId: string,
+  payload: Partial<{
+    priority: number;
+    enabled: boolean;
+    rule_type: "targeting" | "rollout" | "experiment";
+    match_operator: "all" | "any";
+    conditions: Array<{ attribute: string; op: string; value: unknown }>;
+    rollout_percentage: number | null;
+    variant: string | null;
+  }>
+): Promise<PlatformFeatureFlagRule> {
+  return apiFetch(
+    `/platform/feature-flags/rules/${encodeURIComponent(ruleId)}`,
+    { method: "PATCH", body: payload }
+  );
+}
+
+export async function listPlatformFeatureFlagTargets(
+  flagId: string
+): Promise<PlatformFeatureFlagTarget[]> {
+  return apiFetch<PlatformFeatureFlagTarget[]>(
+    `/platform/feature-flags/${encodeURIComponent(flagId)}/targets`
+  );
+}
+
+export async function createPlatformFeatureFlagTarget(
+  flagId: string,
+  payload: {
+    target_type: "all" | "user" | "tenant";
+    target_key: string;
+    stage: "any" | "dev" | "production";
+    enabled: boolean;
+    variant?: string | null;
+    metadata?: Record<string, unknown>;
+  }
+): Promise<PlatformFeatureFlagTarget> {
+  return apiFetch(
+    `/platform/feature-flags/${encodeURIComponent(flagId)}/targets`,
+    {
+      method: "POST",
+      body: payload,
+    }
+  );
+}
+
+export async function patchPlatformFeatureFlagTarget(
+  targetId: string,
+  payload: Partial<{
+    target_type: "all" | "user" | "tenant";
+    target_key: string;
+    stage: "any" | "dev" | "production";
+    enabled: boolean;
+    variant?: string | null;
+    metadata?: Record<string, unknown>;
+  }>
+): Promise<PlatformFeatureFlagTarget> {
+  return apiFetch(
+    `/platform/feature-flags/targets/${encodeURIComponent(targetId)}`,
+    {
+      method: "PATCH",
+      body: payload,
+    }
+  );
+}
+
+export async function listPlatformFeatureFlagMetrics(
+  flagId: string,
+  params: {
+    days?: number;
+    dimension_key?: string;
+    dimension_value?: string;
+    granularity?: string;
+  } = {}
+): Promise<PlatformFeatureFlagMetrics> {
+  const query = new URLSearchParams();
+  if (params.days != null) query.set("days", String(params.days));
+  if (params.dimension_key) query.set("dimension_key", params.dimension_key);
+  if (params.dimension_value) query.set("dimension_value", params.dimension_value);
+  if (params.granularity) query.set("granularity", params.granularity);
+  return apiFetch<PlatformFeatureFlagMetrics>(
+    `/platform/feature-flags/${encodeURIComponent(flagId)}/metrics?${query.toString()}`
+  );
+}
+
+export async function syncPlatformFeatureFlagRegistry(): Promise<{
+  ok: boolean;
+  loaded: number;
+  created: number;
+  updated: number;
+}> {
+  return apiFetch("/platform/feature-flags/sync-registry", { method: "POST" });
+}
+
+export async function evaluatePlatformFeatureFlag(
+  flagKey: string
+): Promise<PlatformFeatureEvaluation> {
+  return apiFetch<PlatformFeatureEvaluation>(
+    `/platform/feature-flags/evaluate/${encodeURIComponent(flagKey)}`
+  );
+}
+
+export async function searchPlatformFeatureFlagUsers(
+  q: string,
+  limit = 10
+): Promise<{ items: PlatformFeatureLookupUser[] }> {
+  return apiFetch<{ items: PlatformFeatureLookupUser[] }>(
+    `/platform/feature-flags/lookup/users?q=${encodeURIComponent(q)}&limit=${limit}`
+  );
+}
+
+export async function searchPlatformFeatureFlagTenants(
+  q: string,
+  limit = 10
+): Promise<{ items: PlatformFeatureLookupTenant[] }> {
+  return apiFetch<{ items: PlatformFeatureLookupTenant[] }>(
+    `/platform/feature-flags/lookup/tenants?q=${encodeURIComponent(q)}&limit=${limit}`
+  );
+}

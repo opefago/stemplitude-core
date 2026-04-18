@@ -9,13 +9,13 @@ function LayoutShell() {
     <div className="robotics-lab-page">
       <header className="robotics-lab-topbar">
         <div className="robotics-split-nav">
-          <NavLink to="/playground/robotics/code" className="robotics-split-link">
+          <NavLink to="/playground/robotics/code" replace className="robotics-split-link">
             Code Editor
           </NavLink>
-          <NavLink to="/playground/robotics/run" className="robotics-split-link">
+          <NavLink to="/playground/robotics/run" replace className="robotics-split-link">
             Run Simulator
           </NavLink>
-          <NavLink to="/playground/robotics/sim" className="robotics-split-link">
+          <NavLink to="/playground/robotics/sim" replace className="robotics-split-link">
             Simulation Editor
           </NavLink>
         </div>

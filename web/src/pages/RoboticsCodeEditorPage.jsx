@@ -177,7 +177,7 @@ export default function RoboticsCodeEditorPage() {
 
   function handleRun() {
     runProgram();
-    navigate(`/playground/robotics/run${location.search}`);
+    navigate(`/playground/robotics/run${location.search}`, { replace: true });
   }
 
   return (

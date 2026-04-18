@@ -401,6 +401,47 @@ a.kid-button--ghost:active {
   color: color-mix(in srgb, var(--color-primary) 80%, black);
 }
 
+.searchable-dropdown__option-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.searchable-dropdown__avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid color-mix(in srgb, var(--color-border) 75%, var(--color-secondary) 25%);
+  flex-shrink: 0;
+}
+
+.searchable-dropdown__text {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.searchable-dropdown__label {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--color-text);
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.searchable-dropdown__subtitle,
+.searchable-dropdown__meta {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
 /* Kid switch */
 .kid-switch {
   --kid-switch-width: 64px;

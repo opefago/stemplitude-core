@@ -40,3 +40,8 @@ def tenant_middleware_skip_paths() -> frozenset[str]:
 def request_context_middleware_skip_paths() -> frozenset[str]:
     """Skip optional JWT parsing: same public/email paths as tenant skips except subscription webhook."""
     return _STATIC | _api_paths(*_PUBLIC_EMAIL_ESP_WEBHOOK_SUFFIXES)
+
+
+def rate_limit_middleware_skip_paths() -> frozenset[str]:
+    """Skip rate limiting for non-business/public endpoints and delivery webhooks."""
+    return _STATIC | _api_paths("/subscriptions/webhook", *_PUBLIC_EMAIL_ESP_WEBHOOK_SUFFIXES)

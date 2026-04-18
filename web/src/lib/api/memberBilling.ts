@@ -7,13 +7,19 @@ export interface MemberBillingConnectStatus {
   details_submitted: boolean;
   member_billing_enabled: boolean;
   require_member_billing_for_access: boolean;
+  member_billing_tax_enabled: boolean;
+  member_billing_tax_behavior_default: "exclusive" | "inclusive";
   connect_configured: boolean;
 }
 
 export interface MemberBillingSettingsPatch {
   member_billing_enabled?: boolean;
   require_member_billing_for_access?: boolean;
+  member_billing_tax_enabled?: boolean;
+  member_billing_tax_behavior_default?: "exclusive" | "inclusive";
 }
+
+export type TaxBehavior = "exclusive" | "inclusive" | "none";
 
 export interface MemberProduct {
   id: string;
@@ -25,6 +31,7 @@ export interface MemberProduct {
   billing_type: string;
   interval: string | null;
   active: boolean;
+  tax_behavior: TaxBehavior | null;
   stripe_product_id: string | null;
   stripe_price_id: string | null;
   created_at: string;
@@ -37,6 +44,7 @@ export interface MemberProductCreatePayload {
   currency?: string;
   billing_type: "one_time" | "recurring";
   interval?: "month" | "quarter" | "year" | null;
+  tax_behavior?: TaxBehavior | null;
 }
 
 /** PATCH body: include only fields to change. Pricing requires amount_cents, currency, and billing_type together. */
@@ -48,6 +56,7 @@ export interface MemberProductUpdatePayload {
   currency?: string;
   billing_type?: "one_time" | "recurring";
   interval?: "month" | "quarter" | "year" | null;
+  tax_behavior?: TaxBehavior | null;
 }
 
 export interface MemberSubscription {

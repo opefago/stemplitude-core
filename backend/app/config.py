@@ -173,6 +173,19 @@ class Settings(BaseSettings):
     # Flagsmith
     FLAGSMITH_API_KEY: str = ""
     FLAGSMITH_API_URL: str = "https://edge.api.flagsmith.com/api/v1/"
+    FEATURE_FLAGS_REGISTRY_PATH: str = ""
+    FEATURE_FLAGS_L1_TTL_SECONDS: int = 2
+    FEATURE_FLAGS_L2_TTL_SECONDS: int = 30
+    FEATURE_FLAGS_DEBUG_EVENTS_ENABLED: bool = False
+    FEATURE_FLAGS_EVAL_SAMPLE_PERCENT: int = 5
+
+    # API rate limiting (Redis-backed)
+    RATE_LIMITS_ENABLED: bool = True
+    RATE_LIMITS_CONFIG_PATH: str = ""
+    RATE_LIMITS_L1_TTL_SECONDS: int = 15
+    RATE_LIMITS_REDIS_KEY_PREFIX: str = "rl:v1"
+    RATE_LIMITS_DEFAULT_PROFILE: str = "default"
+    RATE_LIMITS_ANONYMOUS_PROFILE: str = "strict_auth"
 
     # Celery
     CELERY_BROKER_URL: str = "redis://localhost:6379/1"

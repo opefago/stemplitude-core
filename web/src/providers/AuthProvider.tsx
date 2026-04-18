@@ -56,7 +56,7 @@ interface AuthContextValue {
   globalPermissions: string[];
   hasGlobalPermission: (permission: string) => boolean;
   subType: "user" | "student" | null;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string, tenantSlug?: string) => Promise<void>;
   studentLogin: (data: StudentLoginData) => Promise<void>;
   onboard: (data: OnboardData) => Promise<void>;
   logout: () => void;
@@ -166,8 +166,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, []);
 
   const login = useCallback(
-    async (email: string, password: string) => {
-      const res = await apiLogin(email, password);
+    async (email: string, password: string, tenantSlug?: string) => {
+      const res = await apiLogin(email, password, tenantSlug);
       const token = res.access_token;
       const payload = decodeToken(token);
       const identity = res.user

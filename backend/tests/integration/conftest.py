@@ -99,6 +99,7 @@ async def engine(pg_url):
         import app.integrations.models  # noqa: F401
         import app.trials.models  # noqa: F401
         import app.lesson_content.models  # noqa: F401
+        import app.rate_limits.models  # noqa: F401
 
         async with eng.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)

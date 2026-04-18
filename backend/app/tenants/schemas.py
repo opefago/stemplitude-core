@@ -515,16 +515,44 @@ class HierarchyListResponse(BaseModel):
     total: int = Field(..., description="Total number of children")
 
 
+# --- Tenant branding (stored in tenant.settings["branding"]) ---
+
+
+class TenantBranding(BaseModel):
+    """Visual branding overrides for a tenant's public-facing pages."""
+
+    primary_color: str | None = Field(None, max_length=20, description="Primary brand color (hex, e.g. '#1cb0f6')")
+    accent_color: str | None = Field(None, max_length=20, description="Accent color (hex, e.g. '#58cc02')")
+    hero_title: str | None = Field(None, max_length=200, description="Landing page hero headline")
+    hero_subtitle: str | None = Field(None, max_length=500, description="Landing page hero subtitle")
+    tagline: str | None = Field(None, max_length=200, description="Short tagline below logo")
+    favicon_url: str | None = Field(None, max_length=500, description="Custom favicon URL")
+
+
+# --- Homepage sections (stored in tenant.settings["homepage_sections"]) ---
+
+
+class HomepageSection(BaseModel):
+    """One section in a tenant's custom homepage layout."""
+
+    type: str = Field(..., max_length=50, description="Section type: hero, features, cta, testimonials, richText, imageGrid, stats")
+    content: dict = Field(default_factory=dict, description="Type-specific payload")
+    visible: bool = Field(True, description="Whether to render this section")
+
+
 # --- Public host + franchise join requests ---
 
 
 class PublicTenantByHostResponse(BaseModel):
-    """Minimal tenant info for hostname-based SPA bootstrap (no auth)."""
+    """Tenant info for hostname-based SPA bootstrap (no auth). Includes branding for themed login/landing pages."""
 
     id: UUID
     name: str
     slug: str
     public_host_subdomain: str | None = None
+    logo_url: str | None = None
+    branding: TenantBranding | None = None
+    homepage_sections: list[HomepageSection] | None = None
 
 
 class FranchiseJoinRequestCreate(BaseModel):

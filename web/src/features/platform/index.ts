@@ -11,3 +11,6 @@ export { PlatformMemberBillingFeesPage } from "./PlatformMemberBillingFeesPage";
 export { BlobFinderPage } from "./BlobFinderPage";
 export { GrowthOpsPage } from "./GrowthOpsPage";
 export { GrowthOpsHelpPage } from "./GrowthOpsHelpPage";
+export { FeatureFlagsPage } from "./FeatureFlagsPage";
+export { FeatureFlagDetailPage } from "./FeatureFlagDetailPage";
+export { RateLimitsPage } from "./RateLimitsPage";

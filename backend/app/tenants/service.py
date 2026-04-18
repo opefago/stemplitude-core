@@ -701,6 +701,9 @@ class TenantService:
     async def get_public_tenant_by_host_label(self, label: str) -> Tenant | None:
         return await self.repo.get_by_public_host_subdomain(label)
 
+    async def get_public_tenant_by_custom_domain(self, domain: str) -> Tenant | None:
+        return await self.repo.get_by_custom_domain(domain)
+
     async def list_franchise_join_requests(
         self, parent_tenant_id: UUID, status: str | None = "pending"
     ) -> list[TenantHierarchyRequest]:

@@ -164,6 +164,24 @@ class AuthRepository:
         )
         return result.first()
 
+    async def get_user_membership_for_tenant(
+        self, user_id: UUID, tenant_id: UUID
+    ) -> tuple[Membership, Role, Tenant] | None:
+        """Get a user's active membership in a specific tenant, with role and tenant resolved."""
+        result = await self.session.execute(
+            select(Membership, Role, Tenant)
+            .join(Role, Membership.role_id == Role.id)
+            .join(Tenant, Membership.tenant_id == Tenant.id)
+            .where(
+                Membership.user_id == user_id,
+                Membership.tenant_id == tenant_id,
+                Membership.is_active == True,
+                Tenant.is_active == True,
+            )
+            .limit(1)
+        )
+        return result.first()
+
     async def get_student_membership(
         self, student_id: UUID, tenant_id: UUID
     ) -> StudentMembership | None:

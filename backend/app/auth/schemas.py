@@ -10,6 +10,7 @@ class LoginRequest(BaseModel):
         json_schema_extra={
             "examples": [
                 {"email": "jane@example.com", "password": "secureP@ss123"},
+                {"email": "jane@example.com", "password": "secureP@ss123", "tenant_slug": "robotics-academy"},
             ]
         }
     )
@@ -24,12 +25,18 @@ class LoginRequest(BaseModel):
         description="Account password",
         examples=["secureP@ss123"],
     )
+    tenant_slug: str | None = Field(
+        None,
+        description="When login originates from a tenant subdomain/domain, scope authentication to this tenant only.",
+        examples=["robotics-academy"],
+    )
 
 
 class StudentLoginRequest(BaseModel):
-    """Authenticate a student. Two modes:
+    """Authenticate a student. Three modes:
     1. **Tenant-scoped** (young kids): username + password + tenant_slug or tenant_code
     2. **Global** (teens/adults): email + password
+    3. **Scoped global** (via tenant host): email + password + tenant_slug
     """
 
     model_config = ConfigDict(
@@ -41,6 +48,7 @@ class StudentLoginRequest(BaseModel):
                     "tenant_slug": "robotics-academy",
                 },
                 {"email": "alex@school.edu", "password": "student123"},
+                {"email": "alex@school.edu", "password": "student123", "tenant_slug": "robotics-academy"},
             ]
         }
     )
@@ -80,7 +88,7 @@ class StudentLoginRequest(BaseModel):
             raise ValueError(
                 "Either (username + tenant_slug/tenant_code) or email required for student login"
             )
-        if tenant_scoped and global_mode:
+        if self.username and self.email:
             raise ValueError(
                 "Cannot use both tenant-scoped and global login in same request"
             )

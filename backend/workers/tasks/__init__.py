@@ -4,6 +4,7 @@ from workers.tasks import analytics_tasks  # noqa: F401
 from workers.tasks import class_session_reminder_tasks  # noqa: F401
 from workers.tasks import cleanup_tasks  # noqa: F401
 from workers.tasks import email_tasks  # noqa: F401
+from workers.tasks import feature_flag_tasks  # noqa: F401
 from workers.tasks import integration_tasks  # noqa: F401
 from workers.tasks import member_billing_tasks  # noqa: F401
 from workers.tasks import notification_tasks  # noqa: F401

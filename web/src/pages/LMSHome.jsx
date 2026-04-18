@@ -31,6 +31,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { useAuth } from "../providers/AuthProvider";
+import { useHostTenant } from "../providers/HostTenantProvider";
 import "./LMSHome.css";
 
 const fadeUp = {
@@ -221,6 +222,7 @@ const LMSHome = () => {
     user,
     isAuthenticated,
   } = useAuth();
+  const { hostTenant, hostBranding, isTenantHost } = useHostTenant();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
 
@@ -274,6 +276,12 @@ const LMSHome = () => {
     const text = String(raw);
     const lower = text.toLowerCase();
 
+    if (lower.includes("you don't have access to this organization") || lower.includes("you don\u2019t have access")) {
+      const tenantName = hostTenant?.name;
+      return tenantName
+        ? `This account isn't registered with ${tenantName}. Please go to your organization's login page.`
+        : "You don't have access to this organization. Please use your organization's login page.";
+    }
     if (lower.includes("value is not a valid email")) {
       return role === "student"
         ? "Use a valid email address, or sign in with username + class code."
@@ -289,7 +297,7 @@ const LMSHome = () => {
     if (lower.includes("cannot use both tenant-scoped and global login")) {
       return "Use either email login or username + class code.";
     }
-    if (lower.includes("tenant not found")) {
+    if (lower.includes("tenant not found") || lower.includes("organization not found")) {
       return "Class code not found. Please check and try again.";
     }
     if (
@@ -303,7 +311,7 @@ const LMSHome = () => {
       return "We could not sign you in. Please check your details and try again.";
     }
     return text || "Login failed. Please try again.";
-  }, []);
+  }, [hostTenant?.name]);
 
   const handleRoleSelect = useCallback(
     (roleId) => {
@@ -322,6 +330,7 @@ const LMSHome = () => {
     e.preventDefault();
     setLoginError("");
     setLoginLoading(true);
+    const hostSlug = isTenantHost ? hostTenant?.slug : undefined;
     try {
       if (selectedRole === "student") {
         const identifier = loginEmail.trim();
@@ -332,6 +341,13 @@ const LMSHome = () => {
         if (looksLikeEmail) {
           await authStudentLogin({
             email: identifier,
+            password,
+            ...(hostSlug ? { tenant_slug: hostSlug } : {}),
+          });
+        } else if (hostSlug) {
+          await authStudentLogin({
+            username: identifier,
+            tenant_slug: hostSlug,
             password,
           });
         } else {
@@ -347,7 +363,7 @@ const LMSHome = () => {
           });
         }
       } else {
-        await authLogin(loginEmail, loginPassword);
+        await authLogin(loginEmail, loginPassword, hostSlug);
       }
       setDialogMode(null);
       resetLoginForm();
@@ -368,8 +384,12 @@ const LMSHome = () => {
       <header className="lms-header" data-scrolled={scrolled || undefined}>
         <div className="lms-header__inner">
           <Link to="/" className="lms-header__logo">
-            <Zap size={22} className="lms-header__logo-icon" />
-            <span>Stemplitude</span>
+            {hostTenant?.logo_url ? (
+              <img src={hostTenant.logo_url} alt={hostTenant.name} className="lms-header__logo-img" style={{ height: 28, objectFit: "contain" }} />
+            ) : (
+              <Zap size={22} className="lms-header__logo-icon" />
+            )}
+            <span>{hostTenant?.name || "Stemplitude"}</span>
           </Link>
 
           <nav
@@ -608,7 +628,7 @@ const LMSHome = () => {
                       </div>
                     </div>
 
-                    {selectedRole === "student" && (
+                    {selectedRole === "student" && !isTenantHost && (
                       <div className="lms-login-form__field">
                         <label htmlFor="lms-login-code">
                           Class Code{" "}
@@ -624,6 +644,11 @@ const LMSHome = () => {
                           placeholder="Enter class code"
                         />
                       </div>
+                    )}
+                    {selectedRole === "student" && isTenantHost && hostTenant && (
+                      <p className="lms-login-form__tenant-hint">
+                        Signing in to <strong>{hostTenant.name}</strong> &mdash; no class code needed.
+                      </p>
                     )}
 
                     {loginError && (
@@ -675,20 +700,30 @@ const LMSHome = () => {
             variants={fadeUp}
           >
             <h1 className="lms-hero__title">
-              The Fun Way to Learn{" "}
-              <span className="lms-hero__highlight">STEM</span>
+              {hostBranding?.hero_title || (
+                <>The Fun Way to Learn{" "}<span className="lms-hero__highlight">STEM</span></>
+              )}
             </h1>
             <p className="lms-hero__subtitle">
-              Build robots. Code games. Design circuits.
-              <br />
-              Hands-on STEM learning that turns curiosity into real engineering
-              skills.
+              {hostBranding?.hero_subtitle || (
+                <>
+                  Build robots. Code games. Design circuits.
+                  <br />
+                  Hands-on STEM learning that turns curiosity into real engineering
+                  skills.
+                </>
+              )}
             </p>
-            <p className="lms-hero__supporting">
-              Interactive labs, real projects, and gamified learning designed to
-              inspire the next generation of scientists, engineers, and
-              creators.
-            </p>
+            {!isTenantHost && (
+              <p className="lms-hero__supporting">
+                Interactive labs, real projects, and gamified learning designed to
+                inspire the next generation of scientists, engineers, and
+                creators.
+              </p>
+            )}
+            {hostBranding?.tagline && (
+              <p className="lms-hero__supporting">{hostBranding.tagline}</p>
+            )}
             {!isAuthenticated ? (
               <>
                 <div className="lms-hero__ctas">

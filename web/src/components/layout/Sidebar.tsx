@@ -13,6 +13,7 @@ import { useWorkspace } from "../../providers/WorkspaceProvider";
 import { useSidebar } from "../../contexts/SidebarContext";
 import { useChildContextStudentId } from "../../lib/childContext";
 import { useNavInboxSignals } from "../../hooks/useNavInboxSignals";
+import { useFeatureFlag } from "../../providers/FeatureFlagProvider";
 import { useGuardianMemberBillingSummary } from "../../hooks/useGuardianMemberBillingSummary";
 import { TenantSwitcher } from "./TenantSwitcher";
 import { apiFetch } from "../../lib/api/client";
@@ -545,6 +546,7 @@ export function Sidebar() {
   const { tenant } = useTenant();
   const { isPlatformView } = useWorkspace();
   const location = useLocation();
+  const { enabled: gamificationEnabled } = useFeatureFlag("gamification_enabled");
   const navItems = getNavItems(
     role,
     isPlatformView,
@@ -552,7 +554,7 @@ export function Sidebar() {
     location.pathname,
     subType,
     childCtx,
-  );
+  ).filter((item) => gamificationEnabled || item.path !== "/app/gamification");
   const isAdmin = isSuperAdmin || role === "admin" || role === "owner";
   const isParentLike = role === "parent" || role === "homeschool_parent";
   const isInstructor = role === "instructor";

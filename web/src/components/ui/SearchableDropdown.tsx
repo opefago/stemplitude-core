@@ -7,6 +7,9 @@ export interface SearchableDropdownOption {
   label: string;
   disabled?: boolean;
   searchText?: string;
+  subtitle?: string;
+  meta?: string;
+  avatarUrl?: string | null;
 }
 
 interface SearchableDropdownProps {
@@ -19,8 +22,10 @@ interface SearchableDropdownProps {
   emptyLabel?: string;
   emptyActionLabel?: string;
   onEmptyAction?: () => void;
+  onSearchQueryChange?: (query: string) => void;
   disabled?: boolean;
   disableSearch?: boolean;
+  filterOptionsLocally?: boolean;
   fullWidth?: boolean;
   minWidth?: number;
 }
@@ -35,8 +40,10 @@ export function SearchableDropdown({
   emptyLabel = "No results found",
   emptyActionLabel,
   onEmptyAction,
+  onSearchQueryChange,
   disabled = false,
   disableSearch = false,
+  filterOptionsLocally = true,
   fullWidth = false,
   minWidth,
 }: SearchableDropdownProps) {
@@ -54,14 +61,14 @@ export function SearchableDropdown({
   );
 
   const filteredOptions = useMemo(() => {
-    if (disableSearch) return options;
+    if (!filterOptionsLocally || disableSearch) return options;
     const needle = query.trim().toLowerCase();
     if (!needle) return options;
     return options.filter((option) => {
       const haystack = `${option.label} ${option.searchText ?? ""}`.toLowerCase();
       return haystack.includes(needle);
     });
-  }, [disableSearch, options, query]);
+  }, [disableSearch, filterOptionsLocally, options, query]);
 
   useEffect(() => {
     function handleOutsideClick(event: MouseEvent) {
@@ -155,7 +162,10 @@ export function SearchableDropdown({
           if (disabled) return;
           setOpen((prev) => {
             const next = !prev;
-            if (next) setQuery("");
+            if (next) {
+              setQuery("");
+              onSearchQueryChange?.("");
+            }
             return next;
           });
         }}
@@ -186,7 +196,11 @@ export function SearchableDropdown({
               type="search"
               className="searchable-dropdown__search-input"
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={(event) => {
+                const next = event.target.value;
+                setQuery(next);
+                onSearchQueryChange?.(next);
+              }}
               placeholder={disableSearch ? "No instructors available" : searchPlaceholder}
               aria-label={searchPlaceholder}
               disabled={disableSearch}
@@ -226,7 +240,24 @@ export function SearchableDropdown({
                       setOpen(false);
                     }}
                   >
-                    {option.label}
+                    <span className="searchable-dropdown__option-row">
+                      {option.avatarUrl ? (
+                        <img
+                          className="searchable-dropdown__avatar"
+                          src={option.avatarUrl}
+                          alt=""
+                        />
+                      ) : null}
+                      <span className="searchable-dropdown__text">
+                        <span className="searchable-dropdown__label">{option.label}</span>
+                        {option.subtitle ? (
+                          <span className="searchable-dropdown__subtitle">{option.subtitle}</span>
+                        ) : null}
+                        {option.meta ? (
+                          <span className="searchable-dropdown__meta">{option.meta}</span>
+                        ) : null}
+                      </span>
+                    </span>
                   </button>
                 );
               })

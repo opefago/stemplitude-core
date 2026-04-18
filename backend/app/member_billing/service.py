@@ -69,6 +69,23 @@ def _apply_stripe_subscription_to_row(ms: MemberSubscription, stripe_sub: Any) -
         ms.canceled_at = _stripe_ts(ca)
 
 
+def resolve_product_tax_config(
+    tenant, product_tax_behavior: str | None
+) -> tuple[bool, str | None]:
+    """Resolve effective tax settings from product override + tenant defaults.
+
+    Returns (automatic_tax_enabled, stripe_tax_behavior_for_price).
+    Product-level tax_behavior takes precedence over the tenant global default.
+    """
+    if product_tax_behavior == "none":
+        return False, None
+    if product_tax_behavior in ("exclusive", "inclusive"):
+        return True, product_tax_behavior
+    if not tenant.member_billing_tax_enabled:
+        return False, None
+    return True, tenant.member_billing_tax_behavior_default or "exclusive"
+
+
 class MemberBillingService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
@@ -90,6 +107,8 @@ class MemberBillingService:
             details_submitted=t.stripe_connect_details_submitted,
             member_billing_enabled=t.member_billing_enabled,
             require_member_billing_for_access=t.require_member_billing_for_access,
+            member_billing_tax_enabled=t.member_billing_tax_enabled,
+            member_billing_tax_behavior_default=t.member_billing_tax_behavior_default,
             connect_configured=self._connect_configured(),
         )
 
@@ -103,6 +122,10 @@ class MemberBillingService:
             t.member_billing_enabled = data.member_billing_enabled
         if data.require_member_billing_for_access is not None:
             t.require_member_billing_for_access = data.require_member_billing_for_access
+        if data.member_billing_tax_enabled is not None:
+            t.member_billing_tax_enabled = data.member_billing_tax_enabled
+        if data.member_billing_tax_behavior_default is not None:
+            t.member_billing_tax_behavior_default = data.member_billing_tax_behavior_default
         await self.db.commit()
         await self.db.refresh(t)
         return await self.connect_status(tenant)
@@ -163,6 +186,7 @@ class MemberBillingService:
         if data.billing_type == "recurring" and not data.interval:
             raise HTTPException(status_code=400, detail="interval required for recurring products")
         interval_val: str | None = None if data.billing_type == "one_time" else data.interval
+        _, effective_tax_behavior = resolve_product_tax_config(t, data.tax_behavior)
         sp, pr = ensure_stripe_product_price(
             connected_account_id=t.stripe_connect_account_id,
             product_name=data.name,
@@ -170,6 +194,7 @@ class MemberBillingService:
             currency=data.currency,
             billing_type=data.billing_type,
             interval=interval_val,
+            tax_behavior=effective_tax_behavior,
         )
         if not pr:
             raise HTTPException(status_code=502, detail="Could not create Stripe price on connected account")
@@ -181,6 +206,7 @@ class MemberBillingService:
             currency=data.currency.lower(),
             billing_type=data.billing_type,
             interval=interval_val,
+            tax_behavior=data.tax_behavior,
             stripe_product_id=sp,
             stripe_price_id=pr,
         )
@@ -223,36 +249,53 @@ class MemberBillingService:
             ):
                 raise HTTPException(status_code=502, detail="Could not update product in Stripe")
 
-        if "amount_cents" in fs:
-            if data.amount_cents is None or not data.currency or data.billing_type is None:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Pricing update requires amount_cents, currency, and billing_type.",
-                )
-            interval_val: str | None = (
-                None if data.billing_type == "one_time" else data.interval
-            )
+        pricing_changed = "amount_cents" in fs
+        tax_behavior_changed = "tax_behavior" in fs and data.tax_behavior != p.tax_behavior
+        needs_new_price = pricing_changed or tax_behavior_changed
+
+        if needs_new_price:
+            amt = data.amount_cents if "amount_cents" in fs else p.amount_cents
+            cur = data.currency if "currency" in fs and data.currency else p.currency
+            bt = data.billing_type if "billing_type" in fs and data.billing_type else p.billing_type
+            ivl = data.interval if "interval" in fs else p.interval
+
+            if pricing_changed:
+                if data.amount_cents is None or not data.currency or data.billing_type is None:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Pricing update requires amount_cents, currency, and billing_type.",
+                    )
+
+            interval_val: str | None = None if bt == "one_time" else ivl
+            new_tax = data.tax_behavior if "tax_behavior" in fs else p.tax_behavior
+            _, effective_tax = resolve_product_tax_config(t, new_tax)
             new_price_id = create_price_on_connected_product(
                 connected_account_id=t.stripe_connect_account_id,
                 stripe_product_id=p.stripe_product_id,
-                amount_cents=data.amount_cents,
-                currency=data.currency,
-                billing_type=data.billing_type,
+                amount_cents=amt,
+                currency=cur,
+                billing_type=bt,
                 interval=interval_val,
+                tax_behavior=effective_tax,
             )
             if not new_price_id:
                 raise HTTPException(status_code=502, detail="Could not create new price in Stripe")
             old_price = p.stripe_price_id
-            p.amount_cents = data.amount_cents
-            p.currency = data.currency.lower()
-            p.billing_type = data.billing_type
-            p.interval = interval_val
+            if pricing_changed:
+                p.amount_cents = data.amount_cents  # type: ignore[assignment]
+                p.currency = data.currency.lower()  # type: ignore[union-attr]
+                p.billing_type = data.billing_type  # type: ignore[assignment]
+                p.interval = interval_val
+            if "tax_behavior" in fs:
+                p.tax_behavior = data.tax_behavior
             p.stripe_price_id = new_price_id
             if old_price and old_price != new_price_id:
                 archive_connected_price(
                     connected_account_id=t.stripe_connect_account_id,
                     price_id=old_price,
                 )
+        elif "tax_behavior" in fs:
+            p.tax_behavior = data.tax_behavior
 
         if "name" in fs and data.name is not None:
             p.name = data.name
@@ -423,6 +466,7 @@ class MemberBillingService:
         fee_bps = await resolve_effective_member_billing_application_fee_bps(self.db, t)
         fee_percent = fee_bps / 100.0 if fee_bps else None
         fee_amount = (product.amount_cents * fee_bps) // 10000 if mode == "payment" and fee_bps else None
+        auto_tax, _ = resolve_product_tax_config(t, product.tax_behavior)
         base = settings.FRONTEND_URL.rstrip("/")
         session = create_member_checkout_session(
             connected_account_id=t.stripe_connect_account_id,
@@ -434,6 +478,7 @@ class MemberBillingService:
             metadata=meta,
             application_fee_percent=fee_percent,
             application_fee_amount_cents=fee_amount,
+            automatic_tax=auto_tax,
         )
         if not session or not getattr(session, "url", None):
             raise HTTPException(status_code=502, detail="Could not start checkout")

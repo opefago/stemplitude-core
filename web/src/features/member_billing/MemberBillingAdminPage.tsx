@@ -22,6 +22,7 @@ import {
   type MemberProductCreatePayload,
   type MemberProductUpdatePayload,
   type MemberSubscription,
+  type TaxBehavior,
 } from "../../lib/api/memberBilling";
 import {
   listStudentParents,
@@ -120,6 +121,7 @@ export function MemberBillingAdminPage() {
   const [productCurrencyOther, setProductCurrencyOther] = useState("");
   const [billingType, setBillingType] = useState<"one_time" | "recurring">("recurring");
   const [interval, setInterval] = useState<"month" | "quarter" | "year">("month");
+  const [productTaxBehavior, setProductTaxBehavior] = useState<string>("default");
   const [productError, setProductError] = useState<string | null>(null);
 
   const [payStudents, setPayStudents] = useState<StudentProfile[]>([]);
@@ -141,6 +143,7 @@ export function MemberBillingAdminPage() {
   const [eBillingType, setEBillingType] = useState<"one_time" | "recurring">("recurring");
   const [eInterval, setEInterval] = useState<"month" | "quarter" | "year">("month");
   const [eActive, setEActive] = useState(true);
+  const [eTaxBehavior, setETaxBehavior] = useState<string>("default");
   const [eError, setEError] = useState<string | null>(null);
   const [eSaving, setESaving] = useState(false);
 
@@ -294,6 +297,8 @@ export function MemberBillingAdminPage() {
   const patchSetting = async (patch: {
     member_billing_enabled?: boolean;
     require_member_billing_for_access?: boolean;
+    member_billing_tax_enabled?: boolean;
+    member_billing_tax_behavior_default?: "exclusive" | "inclusive";
   }) => {
     if (!canManage) return;
     setBusy(true);
@@ -356,6 +361,7 @@ export function MemberBillingAdminPage() {
       currency: currencyCode,
       billing_type: billingType,
       interval: billingType === "recurring" ? interval : null,
+      tax_behavior: productTaxBehavior === "default" ? null : (productTaxBehavior as TaxBehavior),
     };
     if (!payload.name) {
       setProductError("Name is required.");
@@ -366,6 +372,7 @@ export function MemberBillingAdminPage() {
       await createMemberProduct(payload);
       setProductName("");
       setProductDesc("");
+      setProductTaxBehavior("default");
       await refresh();
     } catch (err) {
       setProductError(err instanceof Error ? err.message : "Could not create product");
@@ -430,6 +437,7 @@ export function MemberBillingAdminPage() {
         : "month",
     );
     setEActive(p.active);
+    setETaxBehavior(p.tax_behavior ?? "default");
     setEError(null);
   };
 
@@ -478,6 +486,10 @@ export function MemberBillingAdminPage() {
         body.currency = currencyCode;
         body.billing_type = eBillingType;
         body.interval = eBillingType === "recurring" ? eInterval : null;
+      }
+      const newTax = eTaxBehavior === "default" ? null : (eTaxBehavior as TaxBehavior);
+      if (newTax !== (editingProduct.tax_behavior ?? null)) {
+        body.tax_behavior = newTax;
       }
       await patchMemberProduct(editingProduct.id, body);
       closeEditProduct();
@@ -671,6 +683,42 @@ export function MemberBillingAdminPage() {
                 Require active membership for certain learner actions (e.g. lab project submit)
               </span>
             </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+              <KidSwitch
+                checked={status.member_billing_tax_enabled}
+                onChange={(v) => void patchSetting({ member_billing_tax_enabled: v })}
+                disabled={busy}
+                ariaLabel="Collect tax on payments"
+              />
+              <span style={{ fontWeight: 700 }}>Collect tax on payments (via Stripe Tax)</span>
+            </div>
+            {status.member_billing_tax_enabled ? (
+              <div style={{ marginLeft: "3rem", display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                <label style={{ fontWeight: 600, whiteSpace: "nowrap" }}>Default tax behavior</label>
+                <KidDropdown
+                  value={status.member_billing_tax_behavior_default}
+                  onChange={(v) => void patchSetting({ member_billing_tax_behavior_default: v as "exclusive" | "inclusive" })}
+                  ariaLabel="Default tax behavior"
+                  minWidth={240}
+                  disabled={busy}
+                  options={[
+                    { value: "exclusive", label: "Exclusive (tax added on top)" },
+                    { value: "inclusive", label: "Inclusive (price includes tax)" },
+                  ]}
+                />
+                <span className="mb-muted" style={{ fontSize: "0.85rem" }}>
+                  Configure tax registrations in your{" "}
+                  <a
+                    href="https://dashboard.stripe.com/settings/tax"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mb-link"
+                  >
+                    Stripe Dashboard
+                  </a>
+                </span>
+              </div>
+            ) : null}
           </div>
         </section>
       ) : null}
@@ -767,6 +815,22 @@ export function MemberBillingAdminPage() {
                   />
                 </label>
               ) : null}
+              <label>
+                Tax
+                <KidDropdown
+                  value={productTaxBehavior}
+                  onChange={(v) => setProductTaxBehavior(v)}
+                  ariaLabel="Tax behavior"
+                  minWidth={220}
+                  disabled={busy}
+                  options={[
+                    { value: "default", label: "Use org default" },
+                    { value: "exclusive", label: "Tax exclusive (added on top)" },
+                    { value: "inclusive", label: "Tax inclusive (in price)" },
+                    { value: "none", label: "No tax" },
+                  ]}
+                />
+              </label>
             </div>
             <label htmlFor="mb-p-desc" style={{ width: "100%" }}>
               Description (optional)
@@ -794,6 +858,7 @@ export function MemberBillingAdminPage() {
                   <th>Name</th>
                   <th>Price</th>
                   <th>Type</th>
+                  <th>Tax</th>
                   <th>Active</th>
                   {canManage ? <th>Actions</th> : null}
                 </tr>
@@ -801,7 +866,7 @@ export function MemberBillingAdminPage() {
               <tbody>
                 {products.length === 0 ? (
                   <tr>
-                    <td colSpan={canManage ? 5 : 4} className="mb-muted">
+                    <td colSpan={canManage ? 6 : 5} className="mb-muted">
                       No products yet.
                     </td>
                   </tr>
@@ -814,6 +879,7 @@ export function MemberBillingAdminPage() {
                         {p.billing_type}
                         {p.interval ? ` · ${p.interval}` : ""}
                       </td>
+                      <td>{p.tax_behavior ?? "Org default"}</td>
                       <td>{p.active ? "Yes" : "No"}</td>
                       {canManage ? (
                         <td>
@@ -1198,6 +1264,22 @@ export function MemberBillingAdminPage() {
                       />
                     </label>
                   ) : null}
+                  <label>
+                    Tax
+                    <KidDropdown
+                      value={eTaxBehavior}
+                      onChange={(v) => setETaxBehavior(v)}
+                      ariaLabel="Edit tax behavior"
+                      minWidth={220}
+                      disabled={eSaving}
+                      options={[
+                        { value: "default", label: "Use org default" },
+                        { value: "exclusive", label: "Tax exclusive (added on top)" },
+                        { value: "inclusive", label: "Tax inclusive (in price)" },
+                        { value: "none", label: "No tax" },
+                      ]}
+                    />
+                  </label>
                 </div>
                 <label htmlFor="mb-e-desc" style={{ width: "100%" }}>
                   Description (optional)

@@ -8,18 +8,12 @@ import {
 } from "react-router-dom";
 import { AnimatePresence } from "framer-motion";
 import { AuthProvider } from "./providers/AuthProvider";
-import { GuardianLearnerProvider } from "./providers/GuardianLearnerProvider";
 import { TenantProvider } from "./providers/TenantProvider";
 import { UIModeProvider } from "./providers/UIModeProvider";
 import { ThemeProvider } from "./providers/ThemeProvider";
-import {
-  AppShell,
-  PlatformShell,
-  RouteGuard,
-  CommandPalette,
-  ColorSchemeInit,
-} from "./components/layout";
-import { GlobalBanner } from "./components/feedback";
+import { RouteGuard } from "./components/layout/RouteGuard";
+import { ColorSchemeInit } from "./components/layout/ColorSchemeInit";
+import { GlobalBanner } from "./components/feedback/GlobalBanner";
 import { GlobalBannerProvider } from "./contexts/GlobalBannerContext";
 import { CommandPaletteProvider } from "./contexts/CommandPaletteContext";
 import { useAuth } from "./providers/AuthProvider";
@@ -27,17 +21,10 @@ import { useTenant } from "./providers/TenantProvider";
 import { useWorkspace } from "./providers/WorkspaceProvider";
 import { WorkspaceProvider } from "./providers/WorkspaceProvider";
 import { useUIMode } from "./providers/UIModeProvider";
-import { resolveUIMode, ageGroupFromDob } from "./lib/modes";
-import Navbar from "./components/Navbar";
-import Footer from "./components/Footer";
 import ScrollToTop from "./components/ScrollToTop";
-import LMSHome from "./pages/LMSHome";
-import Playground from "./pages/Playground";
-import LMSMarketingPage from "./pages/lms/LMSMarketingPage";
-import { OnboardWizard, AcceptInvitePage } from "./features/auth";
+import { HostTenantProvider, useHostTenant } from "./providers/HostTenantProvider";
+import { FeatureFlagProvider, useFeatureFlag } from "./providers/FeatureFlagProvider";
 import { useChildContextStudentId } from "./lib/childContext";
-import { RewardRuntime } from "./rewards";
-import { writeLabLastOpenedAt } from "./lib/learnerLabStorage";
 import "./App.css";
 
 const LAB_ROUTE_PREFIX_TO_ID = [
@@ -52,6 +39,24 @@ const LAB_ROUTE_PREFIX_TO_ID = [
 
 const lazyNamed = (loader, exportName) =>
   lazy(() => loader().then((m) => ({ default: m[exportName] })));
+
+const AppShell = lazyNamed(() => import("./components/layout/AppShell"), "AppShell");
+const PlatformShell = lazyNamed(() => import("./components/layout/PlatformShell"), "PlatformShell");
+const CommandPalette = lazyNamed(() => import("./components/layout/CommandPalette"), "CommandPalette");
+const GuardianLearnerProvider = lazyNamed(
+  () => import("./providers/GuardianLearnerProvider"),
+  "GuardianLearnerProvider",
+);
+const Navbar = lazy(() => import("./components/Navbar"));
+const Footer = lazy(() => import("./components/Footer"));
+
+const LMSHome = lazy(() => import("./pages/LMSHome"));
+const TenantHomepage = lazyNamed(() => import("./components/tenant-homepage/TenantHomepage"), "TenantHomepage");
+const Playground = lazy(() => import("./pages/Playground"));
+const LMSMarketingPage = lazy(() => import("./pages/lms/LMSMarketingPage"));
+const OnboardWizard = lazyNamed(() => import("./features/auth/OnboardWizard"), "OnboardWizard");
+const AcceptInvitePage = lazyNamed(() => import("./features/auth/AcceptInvitePage"), "AcceptInvitePage");
+const RewardRuntime = lazyNamed(() => import("./rewards"), "RewardRuntime");
 
 const LabLauncher = lazyNamed(() => import("./features/labs"), "LabLauncher");
 const AchievementsPage = lazyNamed(() => import("./features/progress"), "AchievementsPage");
@@ -107,6 +112,9 @@ const PlatformMemberBillingFeesPage = lazyNamed(
 const BlobFinderPage = lazyNamed(() => import("./features/platform"), "BlobFinderPage");
 const GrowthOpsPage = lazyNamed(() => import("./features/platform"), "GrowthOpsPage");
 const GrowthOpsHelpPage = lazyNamed(() => import("./features/platform"), "GrowthOpsHelpPage");
+const FeatureFlagsPage = lazyNamed(() => import("./features/platform"), "FeatureFlagsPage");
+const FeatureFlagDetailPage = lazyNamed(() => import("./features/platform"), "FeatureFlagDetailPage");
+const RateLimitsPage = lazyNamed(() => import("./features/platform"), "RateLimitsPage");
 const ProfilePage = lazyNamed(() => import("./features/profile"), "ProfilePage");
 const NotificationsPage = lazyNamed(() => import("./features/notifications"), "NotificationsPage");
 const TenantAnalyticsPage = lazyNamed(() => import("./features/analytics"), "TenantAnalyticsPage");
@@ -188,6 +196,9 @@ function PlatformRouter() {
   return (
     <Routes>
       <Route path="/" element={<SuperAdminDashboard />} />
+      <Route path="/feature-flags" element={<FeatureFlagsPage />} />
+      <Route path="/feature-flags/:flagId" element={<FeatureFlagDetailPage />} />
+      <Route path="/rate-limits" element={<RateLimitsPage />} />
       <Route path="/tasks" element={<AdminTasksPage />} />
       <Route path="/health" element={<HealthCheckPage />} />
       <Route path="/jobs" element={<JobWorkerPage />} />
@@ -248,7 +259,7 @@ function DashboardRouter() {
       <Route path="/settings/billing" element={<BillingPage />} />
       <Route path="/settings/member-billing" element={<MemberBillingAdminPage />} />
       <Route path="/settings" element={<TenantSettings />} />
-      <Route path="/gamification" element={<GamificationStudioPage />} />
+      <Route path="/gamification" element={<GatedGamification />} />
       <Route path="/analytics" element={<TenantAnalyticsPage />} />
       <Route path="/excusals" element={<StaffExcusalRequestsPage />} />
       <Route path="/integrations" element={<IntegrationsPage />} />
@@ -285,6 +296,14 @@ function AppDashboardLayout() {
   );
 }
 
+function HomepageSwitch() {
+  const { hostTenant, hostBranding } = useHostTenant();
+  if (hostTenant?.homepage_sections?.length) {
+    return <TenantHomepage sections={hostTenant.homepage_sections} branding={hostBranding} />;
+  }
+  return <LMSHome />;
+}
+
 function PublicContent() {
   const location = useLocation();
 
@@ -293,7 +312,9 @@ function PublicContent() {
       location.pathname.startsWith(prefix),
     );
     if (!route) return;
-    writeLabLastOpenedAt(route[1]);
+    import("./lib/learnerLabStorage").then(({ writeLabLastOpenedAt }) =>
+      writeLabLastOpenedAt(route[1]),
+    );
   }, [location.pathname]);
 
   const isLabPage =
@@ -329,12 +350,12 @@ function PublicContent() {
 
   return (
     <div className="app">
-      {showChrome && <Navbar />}
+      {showChrome && <Suspense fallback={null}><Navbar /></Suspense>}
       <AnimatePresence mode="wait">
         <Suspense fallback={<div style={{ padding: 16 }}>Loading…</div>}>
           <Routes>
-            {/* New LMS homepage - standalone, no Navbar/Footer */}
-            <Route path="/" element={<LMSHome />} />
+            {/* Homepage: tenant custom page or default LMS home */}
+            <Route path="/" element={<HomepageSwitch />} />
 
           {/* STEM learning pages - with Navbar/Footer */}
           <Route path="/learning" element={<LMSMarketingPage pageKey="learning" />} />
@@ -485,7 +506,7 @@ function PublicContent() {
           </Routes>
         </Suspense>
       </AnimatePresence>
-      {showChrome && <Footer />}
+      {showChrome && <Suspense fallback={null}><Footer /></Suspense>}
     </div>
   );
 }
@@ -542,34 +563,61 @@ function UIModeSyncer({ children }) {
   return children;
 }
 
+function GatedGamification() {
+  const { enabled, loading } = useFeatureFlag("gamification_enabled");
+  if (loading) return null;
+  if (!enabled) return <Navigate to="/app" replace />;
+  return <GamificationStudioPage />;
+}
+
+function GatedRewardRuntime() {
+  const { enabled } = useFeatureFlag("gamification_enabled");
+  if (!enabled) return null;
+  return <RewardRuntime />;
+}
+
+function AuthenticatedExtras() {
+  const { isAuthenticated } = useAuth();
+  if (!isAuthenticated) return null;
+  return (
+    <Suspense fallback={null}>
+      <GatedRewardRuntime />
+      <CommandPalette />
+    </Suspense>
+  );
+}
+
 function App() {
   return (
-    <AuthProvider>
-      <TenantProvider>
-        <AuthTenantProfileSync />
-        <WorkspaceProvider>
-          <UIModeProvider>
-            <UIModeSyncer>
-              <ThemeProvider>
-                <ColorSchemeInit>
-                  <GlobalBannerProvider>
-                    <CommandPaletteProvider>
-                      <Router>
-                        <GlobalBanner />
-                        <ScrollToTop />
-                        <PublicContent />
-                        <RewardRuntime />
-                        <CommandPalette />
-                      </Router>
-                    </CommandPaletteProvider>
-                  </GlobalBannerProvider>
-                </ColorSchemeInit>
-              </ThemeProvider>
-            </UIModeSyncer>
-          </UIModeProvider>
-        </WorkspaceProvider>
-      </TenantProvider>
-    </AuthProvider>
+    <HostTenantProvider>
+      <AuthProvider>
+        <FeatureFlagProvider>
+        <TenantProvider>
+          <AuthTenantProfileSync />
+          <WorkspaceProvider>
+            <UIModeProvider>
+              <UIModeSyncer>
+                <ThemeProvider>
+                  <ColorSchemeInit>
+                    <GlobalBannerProvider>
+                      <CommandPaletteProvider>
+                        <Router>
+                          <GlobalBanner />
+                          <ScrollToTop />
+                          <PublicContent />
+                          <AuthenticatedExtras />
+                        </Router>
+                      </CommandPaletteProvider>
+                    </GlobalBannerProvider>
+                  </ColorSchemeInit>
+                </ThemeProvider>
+              </UIModeSyncer>
+            </UIModeProvider>
+          </WorkspaceProvider>
+        </TenantProvider>
+        </FeatureFlagProvider>
+      </AuthProvider>
+    </HostTenantProvider>
   );
 }
 

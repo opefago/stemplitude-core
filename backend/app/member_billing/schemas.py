@@ -14,6 +14,8 @@ class ConnectStatusResponse(BaseModel):
     details_submitted: bool
     member_billing_enabled: bool
     require_member_billing_for_access: bool
+    member_billing_tax_enabled: bool
+    member_billing_tax_behavior_default: str
     connect_configured: bool
 
 
@@ -53,6 +55,8 @@ class AdminPaymentLinkRequest(BaseModel):
 class MemberBillingSettingsUpdate(BaseModel):
     member_billing_enabled: bool | None = None
     require_member_billing_for_access: bool | None = None
+    member_billing_tax_enabled: bool | None = None
+    member_billing_tax_behavior_default: Literal["exclusive", "inclusive"] | None = None
 
 
 class MemberProductCreate(BaseModel):
@@ -62,6 +66,7 @@ class MemberProductCreate(BaseModel):
     currency: str = Field(default="usd", min_length=3, max_length=3)
     billing_type: Literal["one_time", "recurring"]
     interval: Literal["month", "quarter", "year"] | None = None
+    tax_behavior: Literal["exclusive", "inclusive", "none"] | None = None
 
     @field_validator("currency", mode="before")
     @classmethod
@@ -86,6 +91,7 @@ class MemberProductUpdate(BaseModel):
     currency: str | None = Field(default=None, min_length=3, max_length=3)
     billing_type: Literal["one_time", "recurring"] | None = None
     interval: Literal["month", "quarter", "year"] | None = None
+    tax_behavior: Literal["exclusive", "inclusive", "none"] | None = None
 
     @field_validator("currency", mode="before")
     @classmethod
@@ -123,6 +129,7 @@ class MemberProductOut(BaseModel):
     billing_type: str
     interval: str | None
     active: bool
+    tax_behavior: str | None
     stripe_product_id: str | None
     stripe_price_id: str | None
     created_at: datetime

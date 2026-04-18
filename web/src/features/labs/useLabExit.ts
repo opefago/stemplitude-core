@@ -15,7 +15,7 @@ function getFallbackExitPath(search: string): string {
     return `/app/classrooms/${classroomId}?tab=sessions`;
   }
 
-  return "/playground";
+  return "/app/labs";
 }
 
 export function useLabExit() {

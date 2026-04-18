@@ -10,61 +10,73 @@ const PLATFORM_TOOLS: {
   path: string;
   label: string;
   iconSrc: string;
-  permission: string;
+  permissions: string[];
 }[] = [
   {
     path: "/app",
     label: "Platform Admin",
     iconSrc: "/assets/cartoon-icons/portal1.png",
-    permission: "platform.analytics:view",
+    permissions: ["platform.analytics:view"],
   },
   {
     path: "/app/platform/dashboard",
     label: "Analytics",
     iconSrc: "/assets/cartoon-icons/Trail.png",
-    permission: "platform.analytics:view",
+    permissions: ["platform.analytics:view"],
   },
   {
     path: "/app/platform/roles",
     label: "Role Manager",
     iconSrc: "/assets/cartoon-icons/Players.png",
-    permission: "platform.users:view",
+    permissions: ["platform.users:view"],
   },
   {
     path: "/app/platform/tasks",
     label: "Admin Tasks",
     iconSrc: "/assets/cartoon-icons/portal1.png",
-    permission: "platform.tasks:view",
+    permissions: ["platform.tasks:view"],
+  },
+  {
+    path: "/app/platform/feature-flags",
+    label: "Feature Flags",
+    iconSrc: "/assets/cartoon-icons/gear.png",
+    permissions: ["platform.feature_flags:view", "platform.tasks:view"],
+  },
+  {
+    path: "/app/platform/blobs",
+    label: "Blob Finder",
+    iconSrc: "/assets/cartoon-icons/Chest.png",
+    permissions: ["platform.blobs:view", "platform.entities:view"],
   },
   {
     path: "/app/platform/health",
     label: "Health Check",
     iconSrc: "/assets/cartoon-icons/Heart.png",
-    permission: "platform.health:view",
+    permissions: ["platform.health:view"],
   },
   {
     path: "/app/platform/jobs",
     label: "Job Worker",
     iconSrc: "/assets/cartoon-icons/gear.png",
-    permission: "platform.jobs:view",
+    permissions: ["platform.jobs:view"],
   },
   {
     path: "/app/platform/entities",
     label: "Entity Browser",
     iconSrc: "/assets/cartoon-icons/Chest.png",
-    permission: "platform.entities:view",
+    permissions: ["platform.entities:view"],
   },
   {
     path: "/app/platform/member-billing-fees",
     label: "Member billing fees",
     iconSrc: "/assets/cartoon-icons/coin.png",
-    permission: "platform.entities:view",
+    permissions: ["platform.entities:view"],
   },
   {
     path: "/app/platform/growth",
     label: "Growth Ops",
     iconSrc: "/assets/cartoon-icons/Trail.png",
-    permission: "platform.growth:view",
+    permissions: ["platform.growth:view"],
   },
 ];
 
@@ -101,7 +113,7 @@ export function PlatformToolsDropdown() {
   }, []);
 
   const tools = PLATFORM_TOOLS.filter(
-    (t) => isSuperAdmin || hasGlobalPermission(t.permission),
+    (t) => isSuperAdmin || t.permissions.some((perm) => hasGlobalPermission(perm)),
   );
 
   if ((!isSuperAdmin && tools.length === 0) || !isPlatformView) return null;

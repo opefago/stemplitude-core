@@ -89,14 +89,42 @@ export async function getTenantById(id: string): Promise<TenantInfo> {
   return mapTenant(data);
 }
 
-/** No auth — used on tenant subdomains to discover org slug for student login. */
-export async function getPublicTenantByHostLabel(label: string): Promise<{
+export interface PublicTenantBranding {
+  primary_color?: string | null;
+  accent_color?: string | null;
+  hero_title?: string | null;
+  hero_subtitle?: string | null;
+  tagline?: string | null;
+  favicon_url?: string | null;
+}
+
+export interface PublicHomepageSection {
+  type: string;
+  content: Record<string, unknown>;
+  visible?: boolean;
+}
+
+export interface PublicTenantInfo {
   id: string;
   name: string;
   slug: string;
   public_host_subdomain?: string | null;
-}> {
+  logo_url?: string | null;
+  branding?: PublicTenantBranding | null;
+  homepage_sections?: PublicHomepageSection[] | null;
+}
+
+/** No auth — resolve tenant by public DNS subdomain label. */
+export async function getPublicTenantByHostLabel(label: string): Promise<PublicTenantInfo> {
   return apiFetch(`/tenants/public/by-host/${encodeURIComponent(label)}`, {
+    skipAuth: true,
+    skipTenantHeader: true,
+  });
+}
+
+/** No auth — resolve tenant by custom domain hostname. */
+export async function getPublicTenantByDomain(domain: string): Promise<PublicTenantInfo> {
+  return apiFetch(`/tenants/public/by-domain/${encodeURIComponent(domain)}`, {
     skipAuth: true,
     skipTenantHeader: true,
   });

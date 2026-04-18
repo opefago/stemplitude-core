@@ -22,6 +22,7 @@ class MemberBillingProduct(Base):
     billing_type: Mapped[str] = mapped_column(String(20), nullable=False)
     interval: Mapped[str | None] = mapped_column(String(20), nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    tax_behavior: Mapped[str | None] = mapped_column(String(20), nullable=True)
     stripe_product_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     stripe_price_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
