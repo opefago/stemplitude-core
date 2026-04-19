@@ -166,17 +166,42 @@ export function DebuggerTracePanel({
   );
 }
 
+function TextDebugView({ debugSession }: { debugSession: DebuggerStatusPanelProps["debugSession"] }) {
+  const lineHint = debugSession?.lineHint;
+  const location = debugSession?.locationLabel;
+  return (
+    <div className="robotics-debugger-text-view">
+      {lineHint && (
+        <div className="robotics-debugger-text-line">
+          <span className="robotics-debugger-text-line-label">Line</span>
+          <code>{lineHint}</code>
+        </div>
+      )}
+      {location && (
+        <div className="robotics-debugger-text-line">
+          <span className="robotics-debugger-text-line-label">Location</span>
+          <span>{location}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function DebuggerStatusPanel({ debugSession, compact = false }: DebuggerStatusPanelProps) {
   const activeMode = debugSession?.activeStepPolicy;
   const sourceMode = debugSession?.sourceMode;
   const visibleInDebug =
     activeMode === "step" || activeMode === "step_into" || activeMode === "step_over";
-  if (!visibleInDebug || sourceMode !== "blocks") return null;
+  if (!visibleInDebug) return null;
+
+  const isTextMode = sourceMode === "python" || sourceMode === "cpp";
 
   return (
     <div className={`robotics-debugger-panel${compact ? " robotics-debugger-panel--compact" : ""}`}>
       <DebuggerStatusChips debugSession={debugSession} />
-      {debugSession?.blockWindow ? (
+      {isTextMode ? (
+        <TextDebugView debugSession={debugSession} />
+      ) : debugSession?.blockWindow ? (
         <div className="robotics-debugger-block-window">
           <BlockVisual heading="Previous" block={debugSession.blockWindow.previous} />
           <BlockVisual heading="Current" block={debugSession.blockWindow.current} current />

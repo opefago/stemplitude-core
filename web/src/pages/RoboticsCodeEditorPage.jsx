@@ -5,6 +5,8 @@ import { KidDropdown } from "../components/ui";
 import { useRoboticsWorkspaceContext } from "../features/robotics_lab/RoboticsWorkspaceContext";
 import { describeNode } from "../features/robotics_lab/workspaceDefaults";
 import { RoboticsBlocklyEditor } from "../features/robotics_lab/RoboticsBlocklyEditor";
+import { RoboticsCodeEditor } from "../features/robotics_lab/components/RoboticsCodeEditor";
+import { useKeyboardShortcuts } from "../features/robotics_lab/useKeyboardShortcuts";
 import { resolveKitCapabilities } from "../labs/robotics";
 import { createRoboticsCompileJob } from "../lib/api/robotics";
 
@@ -180,6 +182,13 @@ export default function RoboticsCodeEditorPage() {
     navigate(`/playground/robotics/run${location.search}`, { replace: true });
   }
 
+  const isRunning = runtimeState === "running";
+  useKeyboardShortcuts({
+    onRunPause: () => (isRunning ? pauseProgram() : handleRun()),
+    onReset: resetProgram,
+    onSave: () => void saveProjectSnapshot("manual"),
+  });
+
   return (
     <div className="robotics-code-surface">
       <div className="robotics-code-toolbar">
@@ -257,16 +266,15 @@ export default function RoboticsCodeEditorPage() {
             />
           </>
         ) : (
-          <>
-            <h4>Text Editor</h4>
-            <textarea
-              className="robotics-text-editor"
+          <div className="robotics-code-editor-wrapper">
+            <RoboticsCodeEditor
               value={textCode}
-              onChange={(event) => setTextCode(event.target.value)}
+              onChange={(next) => setTextCode(next)}
               onBlur={() => void saveProjectSnapshot("text_code_changed", { textCode })}
+              language={mode === "cpp" ? "cpp" : "python"}
               placeholder={mode === "cpp" ? "// C++ robotics starter" : "# Python robotics starter"}
             />
-          </>
+          </div>
         )}
         </section>
 

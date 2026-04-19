@@ -27,6 +27,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@lezer/cpp": "^1.1.5",
     "@lezer/python": "^1.1.18",
+    "@monaco-editor/react": "^4.7.0",
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.5.0",
     "@react-three/postprocessing": "^3.0.4",

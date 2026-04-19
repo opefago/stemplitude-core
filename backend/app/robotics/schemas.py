@@ -161,3 +161,83 @@ class RoboticsCompileJobResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+
+WorldVisibility = Literal["private", "tenant", "public"]
+WorldDifficulty = Literal["beginner", "intermediate", "advanced"]
+
+
+class RoboticsWorldCreate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+    description: str | None = Field(None, max_length=2000)
+    world_scene: dict[str, Any] = Field(default_factory=dict)
+    runtime_settings: dict[str, Any] = Field(default_factory=dict)
+    mission: dict[str, Any] | None = None
+    visibility: WorldVisibility = "private"
+    difficulty: WorldDifficulty | None = None
+    tags: list[str] = Field(default_factory=list)
+    width_cells: int = Field(default=40, ge=5, le=200)
+    height_cells: int = Field(default=24, ge=5, le=200)
+
+
+class RoboticsWorldUpdate(BaseModel):
+    title: str | None = Field(None, min_length=1, max_length=200)
+    description: str | None = Field(None, max_length=2000)
+    world_scene: dict[str, Any] | None = None
+    runtime_settings: dict[str, Any] | None = None
+    mission: dict[str, Any] | None = None
+    visibility: WorldVisibility | None = None
+    difficulty: WorldDifficulty | None = None
+    tags: list[str] | None = None
+    width_cells: int | None = Field(None, ge=5, le=200)
+    height_cells: int | None = Field(None, ge=5, le=200)
+
+
+class RoboticsWorldResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    id: UUID
+    tenant_id: UUID
+    creator_id: UUID
+    title: str
+    description: str | None = None
+    world_scene: dict[str, Any] = Field(default_factory=dict)
+    runtime_settings: dict[str, Any] = Field(default_factory=dict)
+    mission: dict[str, Any] | None = None
+    is_template: bool = False
+    share_code: str | None = None
+    visibility: WorldVisibility = "private"
+    difficulty: WorldDifficulty | None = None
+    tags: list[str] = Field(default_factory=list)
+    width_cells: int = 40
+    height_cells: int = 24
+    object_count: int = 0
+    play_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+
+class RoboticsWorldGalleryItem(BaseModel):
+    id: UUID
+    title: str
+    description: str | None = None
+    difficulty: WorldDifficulty | None = None
+    tags: list[str] = Field(default_factory=list)
+    width_cells: int = 40
+    height_cells: int = 24
+    object_count: int = 0
+    play_count: int = 0
+    creator_name: str | None = None
+    share_code: str | None = None
+    created_at: datetime
+
+
+class RoboticsLeaderboardEntry(BaseModel):
+    attempt_id: UUID
+    student_id: UUID
+    student_name: str | None = None
+    score: float
+    time_ms: int | None = None
+    path_length_cm: float | None = None
+    checkpoints_hit: int | None = None
+    created_at: datetime
+

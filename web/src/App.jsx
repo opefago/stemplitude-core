@@ -133,6 +133,7 @@ const RoboticsLabLayout = lazy(() => import("./pages/RoboticsLabLayout"));
 const RoboticsCodeEditorPage = lazy(() => import("./pages/RoboticsCodeEditorPage"));
 const RoboticsSimEditorPage = lazy(() => import("./pages/RoboticsSimEditorPage"));
 const RoboticsSimRunPage = lazy(() => import("./pages/RoboticsSimRunPage"));
+const RoboticsWorldGalleryPage = lazy(() => import("./pages/RoboticsWorldGalleryPage"));
 const GameDevLab = lazy(() => import("./pages/GameDevLab"));
 const PythonGameLab = lazy(() => import("./pages/PythonGameLab"));
 const GameMakerLab = lazy(() => import("./pages/GameMakerLab"));
@@ -375,6 +376,7 @@ function PublicContent() {
             <Route path="code" element={<RoboticsCodeEditorPage />} />
             <Route path="sim" element={<RoboticsSimEditorPage />} />
             <Route path="run" element={<RoboticsSimRunPage />} />
+            <Route path="gallery" element={<RoboticsWorldGalleryPage />} />
             <Route path="*" element={<Navigate to="code" replace />} />
           </Route>
           <Route path="/playground/gamedev" element={<GameDevLab />} />

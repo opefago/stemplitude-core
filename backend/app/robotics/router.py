@@ -22,6 +22,11 @@ from app.robotics.schemas import (
     RoboticsProjectResponse,
     RoboticsProjectUpdate,
     RoboticsTemplateResolveResponse,
+    RoboticsWorldCreate,
+    RoboticsWorldResponse,
+    RoboticsWorldUpdate,
+    RoboticsWorldGalleryItem,
+    RoboticsLeaderboardEntry,
 )
 from app.robotics.service import RoboticsService
 
@@ -44,12 +49,12 @@ async def resolve_template(
     lesson_id: UUID | None = Query(None),
     assignment_id: UUID | None = Query(None),
 ):
-    del assignment_id
     service = RoboticsService(db)
     return await service.resolve_template(
         tenant=tenant,
         curriculum_lab_id=curriculum_lab_id,
         lesson_id=lesson_id,
+        assignment_id=assignment_id,
     )
 
 
@@ -211,4 +216,124 @@ async def ingest_events(
     service = RoboticsService(db)
     accepted = service.ingest_events(tenant=tenant, events=data.events)
     return RoboticsEventsIngestResponse(accepted_count=accepted)
+
+
+# --- World endpoints ---
+
+@router.post(
+    "/worlds",
+    response_model=RoboticsWorldResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[_require_tenant(), require_permission("labs", "create")],
+)
+async def create_world(
+    data: RoboticsWorldCreate,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(get_tenant_context),
+    identity: CurrentIdentity = Depends(get_current_identity),
+):
+    service = RoboticsService(db)
+    return service.create_world(data=data, tenant=tenant, identity=identity)
+
+
+@router.get(
+    "/worlds",
+    response_model=list[RoboticsWorldResponse],
+    dependencies=[_require_tenant(), require_permission("labs", "view")],
+)
+async def list_worlds(
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(get_tenant_context),
+    identity: CurrentIdentity = Depends(get_current_identity),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+):
+    service = RoboticsService(db)
+    return service.list_worlds(tenant=tenant, creator_id=identity.id, skip=skip, limit=limit)
+
+
+@router.get(
+    "/worlds/gallery",
+    response_model=list[RoboticsWorldGalleryItem],
+    dependencies=[_require_tenant(), require_permission("labs", "view")],
+)
+async def list_world_gallery(
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(get_tenant_context),
+    difficulty: str | None = Query(None),
+    search: str | None = Query(None),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+):
+    service = RoboticsService(db)
+    return service.list_world_gallery(
+        tenant=tenant, difficulty=difficulty, search=search, skip=skip, limit=limit,
+    )
+
+
+@router.get(
+    "/worlds/code/{share_code}",
+    response_model=RoboticsWorldResponse,
+    dependencies=[_require_tenant(), require_permission("labs", "view")],
+)
+async def get_world_by_share_code(
+    share_code: str,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(get_tenant_context),
+):
+    service = RoboticsService(db)
+    world = service.get_world_by_share_code(share_code=share_code)
+    if world is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="World not found")
+    return world
+
+
+@router.get(
+    "/worlds/{world_id}",
+    response_model=RoboticsWorldResponse,
+    dependencies=[_require_tenant(), require_permission("labs", "view")],
+)
+async def get_world(
+    world_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(get_tenant_context),
+):
+    service = RoboticsService(db)
+    world = service.get_world(world_id=world_id, tenant=tenant)
+    if world is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="World not found")
+    return world
+
+
+@router.patch(
+    "/worlds/{world_id}",
+    response_model=RoboticsWorldResponse,
+    dependencies=[_require_tenant(), require_permission("labs", "create")],
+)
+async def update_world(
+    world_id: UUID,
+    data: RoboticsWorldUpdate,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(get_tenant_context),
+):
+    service = RoboticsService(db)
+    world = service.update_world(world_id=world_id, data=data, tenant=tenant)
+    if world is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="World not found")
+    return world
+
+
+@router.get(
+    "/worlds/{world_id}/leaderboard",
+    response_model=list[RoboticsLeaderboardEntry],
+    dependencies=[_require_tenant(), require_permission("labs", "view")],
+)
+async def get_world_leaderboard(
+    world_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(get_tenant_context),
+    limit: int = Query(20, ge=1, le=100),
+):
+    service = RoboticsService(db)
+    return service.get_world_leaderboard(world_id=world_id, tenant=tenant, limit=limit)
 

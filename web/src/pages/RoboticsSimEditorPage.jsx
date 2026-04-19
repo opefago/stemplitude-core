@@ -1,5 +1,5 @@
-import { Eye, EyeOff, Pause, Play, RotateCcw, RotateCw, Save, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Copy, Download, Eye, EyeOff, FlipHorizontal, Group, Magnet, Pause, Play, RotateCcw, RotateCw, Redo2, Save, Trash2, Undo2, Ungroup, Upload, LayoutTemplate, Share2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRoboticsWorkspaceContext } from "../features/robotics_lab/RoboticsWorkspaceContext";
 import { GRID_CELL_CM } from "../features/robotics_lab/workspaceDefaults";
 import { ThreeSimViewport } from "../features/robotics_lab/ThreeSimViewport.tsx";
@@ -11,6 +11,10 @@ import { ViewportSettingsDialog } from "../features/robotics_lab/components/View
 import { ObjectPalette } from "../features/robotics_lab/components/object_palette";
 import { createSceneObjectFromPalette, getObjectDefinitionById } from "../features/robotics_lab/objectPalette";
 import { resolveKitCapabilities } from "../labs/robotics";
+import { UndoStack, snapshotScene } from "../features/robotics_lab/undoStack";
+import { useKeyboardShortcuts } from "../features/robotics_lab/useKeyboardShortcuts";
+import { WORLD_PRESETS } from "../features/robotics_lab/worldPresets";
+import { CustomObjectCreator } from "../features/robotics_lab/components/CustomObjectCreator";
 
 let transparentDragImage = null;
 
@@ -101,13 +105,256 @@ export default function RoboticsSimEditorPage() {
   const dropTargetRef = useRef(null);
   const projectClientToWorkplaneRef = useRef(null);
   const [rightTab, setRightTab] = useState("scene");
-  const [selectedObjectId, setSelectedObjectId] = useState(null);
+  const [selectedObjectIds, setSelectedObjectIds] = useState(new Set());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [viewportBackgroundColor, setViewportBackgroundColor] = useState("#f4f6f8");
   const [linePaintMode, setLinePaintMode] = useState(false);
   const [leftPanelCollapsed, setLeftPanelCollapsed] = useState({
     runtime: false,
     workplane: false,
+  });
+  const [objectGroups, setObjectGroups] = useState([]);
+  const [presetDialogOpen, setPresetDialogOpen] = useState(false);
+  const [customObjectOpen, setCustomObjectOpen] = useState(false);
+  const [snapEnabled, setSnapEnabled] = useState(true);
+  const undoStackRef = useRef(new UndoStack(50));
+
+  const selectedObjectId = useMemo(() => {
+    const arr = Array.from(selectedObjectIds);
+    return arr.length === 1 ? arr[0] : arr[0] || null;
+  }, [selectedObjectIds]);
+
+  function selectObject(id, addToSelection = false) {
+    if (addToSelection) {
+      setSelectedObjectIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      });
+    } else {
+      const group = objectGroups.find((g) => g.objectIds.includes(id));
+      if (group) {
+        setSelectedObjectIds(new Set(group.objectIds));
+      } else {
+        setSelectedObjectIds(new Set([id]));
+      }
+    }
+  }
+
+  function pushUndo(label) {
+    const snapshot = snapshotScene(worldScene.objects, objectGroups);
+    return snapshot;
+  }
+
+  function commitUndo(label, beforeSnapshot) {
+    const afterSnapshot = snapshotScene(worldScene.objects, objectGroups);
+    undoStackRef.current.push(label, beforeSnapshot, afterSnapshot);
+  }
+
+  function handleUndo() {
+    const result = undoStackRef.current.undo();
+    if (!result) return;
+    const nextWorld = { ...world, world_scene: { ...worldScene, objects: result.objects } };
+    setWorld(nextWorld);
+    if (result.groups) setObjectGroups(result.groups);
+    void saveProjectSnapshot("undo", { world: nextWorld });
+  }
+
+  function handleRedo() {
+    const result = undoStackRef.current.redo();
+    if (!result) return;
+    const nextWorld = { ...world, world_scene: { ...worldScene, objects: result.objects } };
+    setWorld(nextWorld);
+    if (result.groups) setObjectGroups(result.groups);
+    void saveProjectSnapshot("redo", { world: nextWorld });
+  }
+
+  function cloneSelected() {
+    if (selectedObjectIds.size === 0) return;
+    const before = pushUndo("clone");
+    const clones = [];
+    for (const id of selectedObjectIds) {
+      const obj = worldScene.objects.find((o) => o.id === id);
+      if (!obj) continue;
+      const clone = {
+        ...obj,
+        id: `${obj.type}_${Date.now()}_${Math.floor(Math.random() * 10000)}`,
+        position: { ...obj.position, x: obj.position.x + 20, z: obj.position.z + 20 },
+        size_cm: { ...obj.size_cm },
+        rotation_deg: obj.rotation_deg ? { ...obj.rotation_deg } : undefined,
+        metadata: obj.metadata ? { ...obj.metadata } : undefined,
+      };
+      clones.push(clone);
+    }
+    updateWorldScene([...worldScene.objects, ...clones], "object_cloned");
+    setSelectedObjectIds(new Set(clones.map((c) => c.id)));
+    commitUndo("clone", before);
+  }
+
+  function mirrorSelected(axis = "x") {
+    if (selectedObjectIds.size === 0) return;
+    const before = pushUndo("mirror");
+    const centerX = (world.width_cells * GRID_CELL_CM) / 2;
+    const centerZ = (world.height_cells * GRID_CELL_CM) / 2;
+    const nextObjects = worldScene.objects.map((obj) => {
+      if (!selectedObjectIds.has(obj.id)) return obj;
+      const mirrored = { ...obj, position: { ...obj.position } };
+      if (axis === "x") {
+        mirrored.position.x = 2 * centerX - obj.position.x;
+      } else {
+        mirrored.position.z = 2 * centerZ - obj.position.z;
+      }
+      if (obj.rotation_deg) {
+        mirrored.rotation_deg = { y: (360 - (obj.rotation_deg.y || 0)) % 360 };
+      }
+      return mirrored;
+    });
+    updateWorldScene(nextObjects, "object_mirrored");
+    commitUndo("mirror", before);
+  }
+
+  function groupSelected() {
+    if (selectedObjectIds.size < 2) return;
+    const ids = Array.from(selectedObjectIds);
+    const alreadyGrouped = objectGroups.find((g) => g.objectIds.length === ids.length && ids.every((id) => g.objectIds.includes(id)));
+    if (alreadyGrouped) return;
+    const newGroup = {
+      id: `group_${Date.now()}`,
+      name: `Group ${objectGroups.length + 1}`,
+      objectIds: ids,
+    };
+    setObjectGroups((prev) => [...prev.filter((g) => !ids.some((id) => g.objectIds.includes(id))), newGroup]);
+  }
+
+  function ungroupSelected() {
+    if (selectedObjectIds.size === 0) return;
+    setObjectGroups((prev) => prev.filter((g) => !Array.from(selectedObjectIds).some((id) => g.objectIds.includes(id))));
+  }
+
+  function deleteSelected() {
+    if (selectedObjectIds.size === 0) return;
+    const before = pushUndo("delete");
+    updateWorldScene(
+      worldScene.objects.filter((o) => !selectedObjectIds.has(o.id)),
+      "object_removed",
+    );
+    setSelectedObjectIds(new Set());
+    commitUndo("delete", before);
+  }
+
+  function nudgeSelected(dx, dz) {
+    if (selectedObjectIds.size === 0) return;
+    const nextObjects = worldScene.objects.map((obj) => {
+      if (!selectedObjectIds.has(obj.id)) return obj;
+      return { ...obj, position: { ...obj.position, x: obj.position.x + dx, z: obj.position.z + dz } };
+    });
+    updateWorldScene(nextObjects, "object_nudged", false);
+  }
+
+  function applyWorldPreset(preset) {
+    const before = pushUndo("preset");
+    const nextWorld = {
+      ...world,
+      width_cells: preset.widthCells,
+      height_cells: preset.heightCells,
+      world_scene: { ...worldScene, objects: preset.objects },
+    };
+    setWorld(nextWorld);
+    setSelectedObjectIds(new Set());
+    resetCamera();
+    void saveProjectSnapshot("world_preset_applied", { world: nextWorld });
+    commitUndo("preset", before);
+    setPresetDialogOpen(false);
+  }
+
+  const [consoleLogs, setConsoleLogs] = useState([]);
+  const [showConsole, setShowConsole] = useState(false);
+  const [toast, setToast] = useState(null);
+  const fileInputRef = useRef(null);
+
+  function showToast(message, type = "success") {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
+  }
+
+  function addConsoleLog(message, level = "info") {
+    setConsoleLogs((prev) => [...prev.slice(-200), { id: Date.now(), message, level, time: new Date().toLocaleTimeString() }]);
+  }
+
+  function handleExportWorld() {
+    const exportData = {
+      format: "steamworld",
+      version: 1,
+      world: {
+        width_cells: world.width_cells,
+        height_cells: world.height_cells,
+        world_scene: worldScene,
+        runtime_settings: runtimeSettings,
+        groups: objectGroups,
+      },
+      exported_at: new Date().toISOString(),
+    };
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${world.name || "robotics_world"}.steamworld.json`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+    showToast("World exported successfully");
+    addConsoleLog("World exported", "info");
+  }
+
+  function handleImportWorld(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = JSON.parse(e.target.result);
+        if (data.format !== "steamworld" || !data.world) {
+          showToast("Invalid world file format", "error");
+          return;
+        }
+        const before = pushUndo("import");
+        const imported = data.world;
+        const nextWorld = {
+          ...world,
+          width_cells: imported.width_cells || world.width_cells,
+          height_cells: imported.height_cells || world.height_cells,
+          world_scene: imported.world_scene || worldScene,
+        };
+        setWorld(nextWorld);
+        if (imported.groups) setObjectGroups(imported.groups);
+        resetCamera();
+        void saveProjectSnapshot("world_imported", { world: nextWorld });
+        commitUndo("import", before);
+        showToast("World imported successfully");
+        addConsoleLog("World imported from file", "info");
+      } catch (err) {
+        showToast("Failed to parse world file", "error");
+        addConsoleLog(`Import error: ${err.message}`, "error");
+      }
+    };
+    reader.readAsText(file);
+    event.target.value = "";
+  }
+
+  const cameraModes = ["top", "follow", "perspective"];
+  useKeyboardShortcuts({
+    onRunPause: useCallback(() => (runtimeState === "running" ? pauseProgram() : runProgram()), [runtimeState, pauseProgram, runProgram]),
+    onReset: resetProgram,
+    onSave: useCallback(() => void saveProjectSnapshot("manual"), [saveProjectSnapshot]),
+    onDeleteSelected: deleteSelected,
+    onUndo: handleUndo,
+    onRedo: handleRedo,
+    onDuplicate: cloneSelected,
+    onGroup: groupSelected,
+    onCameraPreset: useCallback((idx) => setCameraMode(cameraModes[idx] || "perspective"), [setCameraMode]),
+    onNudge: nudgeSelected,
   });
 
   useEffect(() => {
@@ -122,7 +369,7 @@ export default function RoboticsSimEditorPage() {
     [world.height_cells, world.width_cells],
   );
   const selectedObject = useMemo(
-    () => worldScene.objects.find((object) => object.id === selectedObjectId) || null,
+    () => (selectedObjectId ? worldScene.objects.find((object) => object.id === selectedObjectId) : null) || null,
     [selectedObjectId, worldScene.objects],
   );
   const selectedManifest = useMemo(
@@ -143,13 +390,18 @@ export default function RoboticsSimEditorPage() {
 
   useEffect(() => {
     if (!worldScene.objects.length) {
-      setSelectedObjectId(null);
+      setSelectedObjectIds(new Set());
       return;
     }
-    if (!selectedObjectId || !worldScene.objects.some((object) => object.id === selectedObjectId)) {
-      setSelectedObjectId(worldScene.objects[0].id);
-    }
-  }, [selectedObjectId, worldScene.objects]);
+    const validIds = new Set(worldScene.objects.map((o) => o.id));
+    setSelectedObjectIds((prev) => {
+      const filtered = new Set([...prev].filter((id) => validIds.has(id)));
+      if (filtered.size === 0 && worldScene.objects.length > 0) {
+        filtered.add(worldScene.objects[0].id);
+      }
+      return filtered;
+    });
+  }, [worldScene.objects]);
 
   function updateWorldScene(nextObjects, reason = "world_scene_changed", persist = true) {
     const nextWorld = { ...world, world_scene: { ...worldScene, objects: nextObjects } };
@@ -198,7 +450,9 @@ export default function RoboticsSimEditorPage() {
   }
 
   function removeObject(id) {
+    const before = pushUndo("remove");
     updateWorldScene(worldScene.objects.filter((object) => object.id !== id), "object_removed");
+    commitUndo("remove", before);
   }
 
   function updateObjectColor(id, color) {
@@ -223,8 +477,8 @@ export default function RoboticsSimEditorPage() {
             ...object,
             position: {
               ...(object.position || {}),
-              x: snapForObjectType(x, object.type),
-              z: snapForObjectType(z, object.type),
+              x: Number(x),
+              z: Number(z),
               y: 0,
             },
           }
@@ -347,22 +601,28 @@ export default function RoboticsSimEditorPage() {
     const definition = getObjectDefinitionById(dragPresetId);
     if (!definition) return;
     const projected = projectClientToWorkplaneRef.current?.(event.clientX, event.clientY) || null;
+    const sizeCm = definition.placement.sizeCm || { x: 20, z: 20 };
+    const halfX = (sizeCm.x || 20) / 2;
+    const halfZ = (sizeCm.z || 20) / 2;
+    const worldW = world.width_cells * GRID_CELL_CM;
+    const worldD = world.height_cells * GRID_CELL_CM;
     let px;
     let pz;
     if (projected) {
-      px = snapForObjectType(projected.x, definition.placement.objectType);
-      pz = snapForObjectType(projected.z, definition.placement.objectType);
+      px = projected.x;
+      pz = projected.z;
     } else {
       const rect = event.currentTarget.getBoundingClientRect();
       const relX = (event.clientX - rect.left) / rect.width;
       const relZ = (event.clientY - rect.top) / rect.height;
-      px = snapForObjectType(relX * world.width_cells * GRID_CELL_CM, definition.placement.objectType);
-      pz = snapForObjectType(relZ * world.height_cells * GRID_CELL_CM, definition.placement.objectType);
+      px = relX * worldW;
+      pz = relZ * worldD;
     }
-    {
-      const half = GRID_CELL_CM / 2;
-      px = Math.max(half, Math.min(world.width_cells * GRID_CELL_CM - half, px));
-      pz = Math.max(half, Math.min(world.height_cells * GRID_CELL_CM - half, pz));
+    px = Math.max(halfX, Math.min(worldW - halfX, px));
+    pz = Math.max(halfZ, Math.min(worldD - halfZ, pz));
+    if (snapEnabled) {
+      px = snapForObjectType(px, definition.placement.objectType);
+      pz = snapForObjectType(pz, definition.placement.objectType);
     }
     const next = createSceneObjectFromPalette(definition, px, pz);
     updateWorldScene([...worldScene.objects, next], "object_dropped");
@@ -472,8 +732,154 @@ export default function RoboticsSimEditorPage() {
     }));
   }
 
+  function updateObjectMetadata(id, key, value) {
+    const nextObjects = worldScene.objects.map((object) =>
+      object.id === id
+        ? { ...object, metadata: { ...(object.metadata || {}), [key]: value } }
+        : object,
+    );
+    updateWorldScene(nextObjects, "object_property_updated");
+  }
+
+  function renderDynamicProperties(obj) {
+    if (!obj?.metadata?.palette_object_id) return null;
+    const definition = getObjectDefinitionById(obj.metadata.palette_object_id);
+    if (!definition?.editableProperties?.length) return null;
+
+    const builtInKeys = new Set(["color"]);
+    const dynamicProps = definition.editableProperties.filter((p) => !builtInKeys.has(p.id));
+    if (dynamicProps.length === 0) return null;
+
+    return dynamicProps.map((prop) => {
+      const currentValue = obj.metadata?.[prop.id];
+      if (prop.control === "number") {
+        return (
+          <div key={prop.id} className="robotics-sensor-card">
+            <span>{prop.label}{prop.unit ? ` (${prop.unit})` : ""}</span>
+            <label>
+              {prop.label}
+              <input
+                type="number"
+                min={prop.min ?? 0}
+                max={prop.max ?? 9999}
+                step={prop.step ?? 1}
+                value={currentValue ?? prop.min ?? 0}
+                onChange={(e) => updateObjectMetadata(obj.id, prop.id, Number(e.target.value))}
+              />
+            </label>
+          </div>
+        );
+      }
+      if (prop.control === "text") {
+        return (
+          <div key={prop.id} className="robotics-sensor-card">
+            <span>{prop.label}</span>
+            <label>
+              {prop.label}
+              <input
+                type="text"
+                value={currentValue ?? ""}
+                onChange={(e) => updateObjectMetadata(obj.id, prop.id, e.target.value)}
+              />
+            </label>
+          </div>
+        );
+      }
+      if (prop.control === "select" && prop.options) {
+        return (
+          <div key={prop.id} className="robotics-sensor-card">
+            <span>{prop.label}</span>
+            <label>
+              {prop.label}
+              <select
+                value={currentValue ?? ""}
+                onChange={(e) => updateObjectMetadata(obj.id, prop.id, e.target.value)}
+              >
+                {prop.options.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+        );
+      }
+      if (prop.control === "color") {
+        return (
+          <div key={prop.id} className="robotics-sensor-card">
+            <span>{prop.label}</span>
+            <label>
+              {prop.label}
+              <input type="color" value={currentValue ?? "#60a5fa"} onChange={(e) => updateObjectMetadata(obj.id, prop.id, e.target.value)} />
+            </label>
+          </div>
+        );
+      }
+      return null;
+    });
+  }
+
   return (
-    <div className="robotics-split-content">
+    <div className="robotics-editor-shell">
+      <header className="robotics-topbar">
+        <div className="robotics-topbar__left">
+          <input
+            className="robotics-topbar__filename"
+            type="text"
+            value={world.name || ""}
+            placeholder="Untitled World"
+            onChange={(e) => setWorld((prev) => ({ ...prev, name: e.target.value }))}
+            onBlur={() => void saveProjectSnapshot("rename")}
+          />
+          <button className="robotics-topbar__btn" onClick={() => { void saveProjectSnapshot("manual"); showToast("Project saved"); }} title="Save (Ctrl+S)">
+            <Save size={15} />
+          </button>
+          <div className="robotics-topbar__sep" />
+          <button className="robotics-topbar__btn" onClick={handleUndo} disabled={!undoStackRef.current.canUndo()} title="Undo (Ctrl+Z)">
+            <Undo2 size={15} />
+          </button>
+          <button className="robotics-topbar__btn" onClick={handleRedo} disabled={!undoStackRef.current.canRedo()} title="Redo (Ctrl+Shift+Z)">
+            <Redo2 size={15} />
+          </button>
+          <div className="robotics-topbar__sep" />
+          <button
+            className={`robotics-topbar__btn${snapEnabled ? " robotics-topbar__btn--active" : ""}`}
+            onClick={() => setSnapEnabled((p) => !p)}
+            title={snapEnabled ? "Snap On (click to disable)" : "Snap Off (click to enable)"}
+          >
+            <Magnet size={15} /> Snap
+          </button>
+        </div>
+
+        <div className="robotics-topbar__center">
+          <button className="robotics-topbar__btn" onClick={runProgram} title="Run">
+            <Play size={15} /> Run
+          </button>
+          <button className="robotics-topbar__btn" onClick={pauseProgram} title="Pause">
+            <Pause size={15} /> Pause
+          </button>
+          <StepSplitButton onStep={stepProgram} onStepInto={stepIntoProgram} onStepOver={stepOverProgram} />
+          <button className="robotics-topbar__btn" onClick={resetProgram} title="Reset">
+            <RotateCcw size={15} /> Reset
+          </button>
+        </div>
+
+        <div className="robotics-topbar__right">
+          <span className="robotics-topbar__pill">{runtimeState}</span>
+          <span className="robotics-topbar__pill">{worldSummary}</span>
+          <div className="robotics-topbar__sep" />
+          <button className="robotics-topbar__btn" onClick={handleExportWorld} title="Export World">
+            <Download size={15} />
+          </button>
+          <button className="robotics-topbar__btn" onClick={() => fileInputRef.current?.click()} title="Import World">
+            <Upload size={15} />
+          </button>
+          <button className="robotics-topbar__btn" onClick={() => setShowConsole((p) => !p)} title="Toggle Console">
+            {showConsole ? "Hide Log" : "Log"}
+          </button>
+        </div>
+      </header>
+
+      <div className="robotics-split-content">
       <aside className="robotics-lab-left">
         <section className="robotics-left-card">
           <button
@@ -482,24 +888,13 @@ export default function RoboticsSimEditorPage() {
             onClick={() => toggleLeftPanelSection("runtime")}
             aria-expanded={!leftPanelCollapsed.runtime}
           >
-            <h3>Simulation Runtime</h3>
+            <h3>Simulation Settings</h3>
             <span className="robotics-left-card-toggle__hint">
               {leftPanelCollapsed.runtime ? "Expand" : "Collapse"}
             </span>
           </button>
           {!leftPanelCollapsed.runtime ? (
             <>
-              <div className="robotics-runtime-stats">
-                <span className="robotics-runtime-pill"><strong>Runtime</strong> {runtimeState}</span>
-                <span className="robotics-runtime-pill"><strong>World</strong> {worldSummary}</span>
-              </div>
-              <div className="robotics-lab-controls robotics-lab-controls--compact">
-                <button className="robotics-lab-btn robotics-lab-btn--icon" onClick={runProgram}><Play size={16} /> Run</button>
-                <button className="robotics-lab-btn robotics-lab-btn--icon" onClick={pauseProgram}><Pause size={16} /> Pause</button>
-                <StepSplitButton onStep={stepProgram} onStepInto={stepIntoProgram} onStepOver={stepOverProgram} />
-                <button className="robotics-lab-btn robotics-lab-btn--icon" onClick={resetProgram}><RotateCcw size={16} /> Reset</button>
-                <button className="robotics-lab-btn robotics-lab-btn--icon" onClick={() => void saveProjectSnapshot("manual")}><Save size={16} /> Save</button>
-              </div>
               <div className="robotics-config-grid">
                 <label className="robotics-form-field">
                   <span>Tick (ms)</span>
@@ -534,12 +929,7 @@ export default function RoboticsSimEditorPage() {
                 </button>
               </div>
             </>
-          ) : (
-            <div className="robotics-runtime-stats">
-              <span className="robotics-runtime-pill"><strong>Runtime</strong> {runtimeState}</span>
-              <span className="robotics-runtime-pill"><strong>World</strong> {worldSummary}</span>
-            </div>
-          )}
+          ) : null}
         </section>
 
         <section className="robotics-left-card">
@@ -615,7 +1005,48 @@ export default function RoboticsSimEditorPage() {
         </section>
 
         <section className="robotics-left-card">
-          <h4>Object Library</h4>
+          <button
+            className="robotics-lab-btn robotics-lab-btn--icon robotics-preset-btn"
+            onClick={() => setPresetDialogOpen(true)}
+          >
+            <LayoutTemplate size={16} /> World Templates
+          </button>
+          {presetDialogOpen && (
+            <div className="robotics-preset-dialog">
+              <div className="robotics-preset-dialog-header">
+                <h4>World Templates</h4>
+                <button className="robotics-lab-btn" onClick={() => setPresetDialogOpen(false)}>Close</button>
+              </div>
+              <div className="robotics-preset-grid">
+                {WORLD_PRESETS.map((preset) => (
+                  <button
+                    key={preset.id}
+                    className="robotics-preset-card"
+                    onClick={() => applyWorldPreset(preset)}
+                  >
+                    <div className="robotics-preset-card-header">
+                      <strong>{preset.name}</strong>
+                      <span className={`robotics-difficulty-badge robotics-difficulty-badge--${preset.difficulty}`}>
+                        {preset.difficulty}
+                      </span>
+                    </div>
+                    <p>{preset.description}</p>
+                    <span className="robotics-preset-meta">
+                      {preset.widthCells * GRID_CELL_CM}x{preset.heightCells * GRID_CELL_CM} cm
+                      {preset.objects.length > 0 ? ` • ${preset.objects.length} objects` : ""}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
+
+        <section className="robotics-left-card">
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+            <h4 style={{ margin: 0 }}>Object Library</h4>
+            <button className="robotics-lab-btn" style={{ fontSize: 11, padding: "3px 8px" }} onClick={() => setCustomObjectOpen(true)}>+ Custom</button>
+          </div>
           {linePaintMode ? (
             <div className="robotics-line-paint-mode">
               <span>Line paint mode active: click workplane squares to draw/erase.</span>
@@ -687,10 +1118,11 @@ export default function RoboticsSimEditorPage() {
               depth: world.height_cells * GRID_CELL_CM,
             }}
             backgroundColor={viewportBackgroundColor}
+            snapEnabled={snapEnabled}
             onObjectMove={updateObjectPosition}
             onObjectDragEnd={commitObjectMove}
-            onObjectSelect={(id) => {
-              setSelectedObjectId(id);
+            onObjectSelect={(id, event) => {
+              selectObject(id, event?.shiftKey);
               setRightTab("properties");
             }}
             selectedObjectId={selectedObjectId}
@@ -702,10 +1134,34 @@ export default function RoboticsSimEditorPage() {
               projectClientToWorkplaneRef.current = project;
             }}
             onWorkplaneClick={(x, z) => {
+              setSelectedObjectIds(new Set());
               if (!linePaintMode) return;
               paintLineTrackAt(x, z);
             }}
           />
+          {selectedObjectIds.size > 0 && (
+            <div className="robotics-floating-object-ops">
+              <button className="robotics-lab-btn robotics-lab-btn--icon" onClick={cloneSelected} title="Clone (Ctrl+D)">
+                <Copy size={14} /> Clone
+              </button>
+              <button className="robotics-lab-btn robotics-lab-btn--icon" onClick={() => mirrorSelected("x")} title="Mirror X">
+                <FlipHorizontal size={14} /> Mirror
+              </button>
+              {selectedObjectIds.size >= 2 && (
+                <button className="robotics-lab-btn robotics-lab-btn--icon" onClick={groupSelected} title="Group (Ctrl+G)">
+                  <Group size={14} /> Group
+                </button>
+              )}
+              {objectGroups.some((g) => Array.from(selectedObjectIds).some((id) => g.objectIds.includes(id))) && (
+                <button className="robotics-lab-btn robotics-lab-btn--icon" onClick={ungroupSelected} title="Ungroup">
+                  <Ungroup size={14} /> Ungroup
+                </button>
+              )}
+              <button className="robotics-lab-btn robotics-lab-btn--icon" onClick={deleteSelected} title="Delete">
+                <Trash2 size={14} />
+              </button>
+            </div>
+          )}
           <div className="robotics-floating-controls-right">
             <CameraToolbar
               mode={cameraState.mode}
@@ -794,13 +1250,14 @@ export default function RoboticsSimEditorPage() {
               <div className="robotics-log--scene-objects">
                 {worldScene.objects.map((object) => {
                   const hidden = Boolean(object?.metadata?.hidden);
+                  const isSelected = selectedObjectIds.has(object.id);
                   return (
                     <div
                       key={object.id}
-                      className={`robotics-scene-row${selectedObjectId === object.id ? " robotics-scene-row--selected" : ""}`}
-                      onClick={() => setSelectedObjectId(object.id)}
+                      className={`robotics-scene-row${isSelected ? " robotics-scene-row--selected" : ""}`}
+                      onClick={(e) => selectObject(object.id, e.shiftKey)}
                     >
-                      <span className="robotics-scene-name">{object.type}</span>
+                      <span className="robotics-scene-name">{object.metadata?.palette_object_id ? (getObjectDefinitionById(object.metadata.palette_object_id)?.displayName || object.type) : object.type}</span>
                       <span className="robotics-scene-pos" title="Position in centimeters">
                         {Math.round(object.position?.x ?? 0)}, {Math.round(object.position?.z ?? 0)}
                       </span>
@@ -835,7 +1292,7 @@ export default function RoboticsSimEditorPage() {
                 <div className="robotics-sensor-cards">
                   <div className="robotics-sensor-card">
                     <span>Type</span>
-                    <strong>{selectedObject.type}</strong>
+                    <strong>{selectedObject.metadata?.palette_object_id ? (getObjectDefinitionById(selectedObject.metadata.palette_object_id)?.displayName || selectedObject.type) : selectedObject.type}</strong>
                   </div>
                   {(selectedObject.type === "obstacle" || selectedObject.type === "wall") && (
                     <div className="robotics-sensor-card">
@@ -940,6 +1397,7 @@ export default function RoboticsSimEditorPage() {
                       />
                     </label>
                   </div>
+                  {renderDynamicProperties(selectedObject)}
                 </div>
               ) : (
                 <div className="robotics-stack-empty">Select a scene object to edit properties.</div>
@@ -1022,7 +1480,45 @@ export default function RoboticsSimEditorPage() {
           </div>
         </section>
       </aside>
+      {showConsole && (
+        <div className="robotics-console-panel">
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+            <strong style={{ fontSize: 11, color: "#9aa5b4" }}>Console</strong>
+            <button className="robotics-lab-btn" style={{ fontSize: 10, padding: "2px 6px" }} onClick={() => setConsoleLogs([])}>
+              Clear
+            </button>
+          </div>
+          {consoleLogs.length === 0 ? (
+            <div style={{ color: "#6b7b8d", fontSize: 11 }}>No log messages.</div>
+          ) : (
+            consoleLogs.map((log) => (
+              <div key={log.id} className={`console-${log.level}`} style={{ fontSize: 11, lineHeight: 1.6 }}>
+                <span style={{ color: "#6b7b8d", marginRight: 6 }}>{log.time}</span>
+                {log.message}
+              </div>
+            ))
+          )}
+        </div>
+      )}
+      {toast && <div className={`robotics-toast robotics-toast--${toast.type}`}>{toast.message}</div>}
+      <input ref={fileInputRef} type="file" accept=".json,.steamworld.json" style={{ display: "none" }} onChange={handleImportWorld} />
+      <CustomObjectCreator
+        open={customObjectOpen}
+        onClose={() => setCustomObjectOpen(false)}
+        onCreateObject={(customObj) => {
+          const before = pushUndo("custom_object");
+          const placed = {
+            ...customObj,
+            position: { x: (world.width_cells * GRID_CELL_CM) / 2, y: 0, z: (world.height_cells * GRID_CELL_CM) / 2 },
+          };
+          updateWorldScene([...worldScene.objects, placed], "custom_object_created");
+          selectObject(placed.id);
+          commitUndo("custom_object", before);
+          addConsoleLog(`Custom object "${customObj.metadata?.custom_name || "object"}" created`, "info");
+        }}
+      />
       {panel}
+    </div>
     </div>
   );
 }

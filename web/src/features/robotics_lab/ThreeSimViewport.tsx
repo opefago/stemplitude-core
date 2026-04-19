@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { OrbitControls } from "@react-three/drei";
+import { OrbitControls, ContactShadows } from "@react-three/drei";
+import { EffectComposer, SSAO, Bloom } from "@react-three/postprocessing";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import * as THREE from "three";
 import { useCameraController } from "../../labs/robotics/view/useCameraController";
@@ -92,6 +93,7 @@ interface ThreeSimViewportProps {
   ghostObject?: WorldObjectData | null;
   onProjectClientToWorkplaneReady?: ((project: (clientX: number, clientY: number) => { x: number; z: number } | null) => void) | null;
   onWorkplaneClick?: ((x: number, z: number) => void) | null;
+  snapEnabled?: boolean;
 }
 
 interface WorldObjectProps {
@@ -108,6 +110,7 @@ interface EditableObjectsLayerProps {
   objects: WorldObjectData[];
   selectedObjectId?: string | null;
   worldSizeCm: WorldSizeCm;
+  snapEnabled?: boolean;
   onObjectMove?: (objectId: string, x: number, z: number) => void;
   onObjectDragStart?: (objectId: string) => void;
   onObjectDragEnd?: (objectId: string) => void;
@@ -169,12 +172,73 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-function snapToGrid(value: number, step = GRID_CELL_CM, mode: "center" | "edge" = "center"): number {
-  if (mode === "edge") {
-    return Math.round(value / step) * step;
+const SNAP_WORLD_EDGE = 14;
+const SNAP_OBJECT_EDGE = 10;
+const SNAP_GRID = 8;
+
+function computeSnappedPosition(
+  rawCenter: number,
+  halfSize: number,
+  worldMin: number,
+  worldMax: number,
+  otherEdges: number[],
+  gridStep: number,
+): number {
+  const objMin = rawCenter - halfSize;
+  const objMax = rawCenter + halfSize;
+
+  // Priority 1 — world boundary (object edge flush to world edge)
+  if (Math.abs(objMin - worldMin) <= SNAP_WORLD_EDGE) return worldMin + halfSize;
+  if (Math.abs(objMax - worldMax) <= SNAP_WORLD_EDGE) return worldMax - halfSize;
+
+  // Priority 2 — object-to-object edge alignment
+  let bestObj: number | null = null;
+  let bestObjDist = SNAP_OBJECT_EDGE + 1;
+  for (const edge of otherEdges) {
+    const dMin = Math.abs(objMin - edge);
+    const dMax = Math.abs(objMax - edge);
+    if (dMin <= SNAP_OBJECT_EDGE && dMin < bestObjDist) {
+      bestObj = edge + halfSize;
+      bestObjDist = dMin;
+    }
+    if (dMax <= SNAP_OBJECT_EDGE && dMax < bestObjDist) {
+      bestObj = edge - halfSize;
+      bestObjDist = dMax;
+    }
   }
-  const half = step / 2;
-  return Math.round((value - half) / step) * step + half;
+  if (bestObj !== null) return clamp(bestObj, worldMin + halfSize, worldMax - halfSize);
+
+  // Priority 3 — grid snapping (edge-align then center-align, pick closest)
+  let bestGrid: number | null = null;
+  let bestGridDist = SNAP_GRID + 1;
+
+  const nearGridMin = Math.round(objMin / gridStep) * gridStep;
+  const dGridMin = Math.abs(objMin - nearGridMin);
+  if (dGridMin < bestGridDist) { bestGrid = nearGridMin + halfSize; bestGridDist = dGridMin; }
+
+  const nearGridMax = Math.round(objMax / gridStep) * gridStep;
+  const dGridMax = Math.abs(objMax - nearGridMax);
+  if (dGridMax < bestGridDist) { bestGrid = nearGridMax - halfSize; bestGridDist = dGridMax; }
+
+  const gridHalf = gridStep / 2;
+  const nearCenter = Math.round((rawCenter - gridHalf) / gridStep) * gridStep + gridHalf;
+  const dCenter = Math.abs(rawCenter - nearCenter);
+  if (dCenter < bestGridDist) { bestGrid = nearCenter; bestGridDist = dCenter; }
+
+  if (bestGrid !== null) return clamp(bestGrid, worldMin + halfSize, worldMax - halfSize);
+
+  return clamp(rawCenter, worldMin + halfSize, worldMax - halfSize);
+}
+
+function collectOtherEdges(objects: WorldObjectData[], dragId: string, axis: "x" | "z"): number[] {
+  const edges: number[] = [];
+  for (const obj of objects) {
+    if (obj.id === dragId) continue;
+    const pos = axis === "x" ? (obj.position?.x ?? 0) : (obj.position?.z ?? 0);
+    const size = axis === "x" ? Math.max(4, obj.size_cm?.x ?? 20) : Math.max(4, obj.size_cm?.z ?? 20);
+    edges.push(pos - size / 2, pos + size / 2);
+  }
+  return edges;
 }
 
 function buildGridLines(width: number, depth: number, step: number, y: number): THREE.BufferGeometry {
@@ -191,16 +255,16 @@ function buildGridLines(width: number, depth: number, step: number, y: number): 
 }
 
 function WorkspaceGrid({ width, depth }: { width: number; depth: number }) {
-  const cellGeo = useMemo(() => buildGridLines(width, depth, 20, 0.08), [width, depth]);
-  const sectionGeo = useMemo(() => buildGridLines(width, depth, 100, 0.1), [width, depth]);
+  const cellGeo = useMemo(() => buildGridLines(width, depth, 20, 0.02), [width, depth]);
+  const sectionGeo = useMemo(() => buildGridLines(width, depth, 100, 0.02), [width, depth]);
 
   return (
     <group>
       <lineSegments geometry={cellGeo}>
-        <lineBasicMaterial color="#5f7f9f" transparent opacity={0.9} depthWrite={false} />
+        <lineBasicMaterial color="#5f7f9f" transparent opacity={0.35} depthWrite={false} polygonOffset polygonOffsetFactor={-1} polygonOffsetUnits={-1} />
       </lineSegments>
       <lineSegments geometry={sectionGeo}>
-        <lineBasicMaterial color="#3f6488" transparent opacity={0.98} depthWrite={false} />
+        <lineBasicMaterial color="#3f6488" transparent opacity={0.55} depthWrite={false} polygonOffset polygonOffsetFactor={-2} polygonOffsetUnits={-2} />
       </lineSegments>
     </group>
   );
@@ -429,9 +493,11 @@ function WorldObject({
     );
   }
 
+  const rotationGizmoRadius = Math.max(sx, sz) * 0.65;
+
   return (
     <group position={[x, y, z]} rotation={[0, yawRad, 0]} {...commonProps}>
-      <mesh>
+      <mesh castShadow>
         <boxGeometry args={[sx, sy, sz]} />
         <meshToonMaterial {...toonMaterialProps} />
       </mesh>
@@ -440,10 +506,18 @@ function WorldObject({
         <meshBasicMaterial color="#0d0d0d" side={THREE.BackSide} />
       </mesh>
       {selected ? (
-        <mesh scale={[1.055, 1.055, 1.055]} raycast={() => null}>
-          <boxGeometry args={[sx, sy, sz]} />
-          <meshBasicMaterial color="#00d4ff" transparent opacity={0.22} side={THREE.BackSide} />
-        </mesh>
+        <>
+          <mesh scale={[1.055, 1.055, 1.055]} raycast={() => null}>
+            <boxGeometry args={[sx, sy, sz]} />
+            <meshBasicMaterial color="#00d4ff" transparent opacity={0.22} side={THREE.BackSide} />
+          </mesh>
+          {editable && (
+            <mesh position={[0, -sy / 2 + 0.2, 0]} rotation={[-Math.PI / 2, 0, 0]} raycast={() => null}>
+              <ringGeometry args={[rotationGizmoRadius - 1.5, rotationGizmoRadius + 1.5, 48]} />
+              <meshBasicMaterial color="#f59e0b" transparent opacity={0.55} side={THREE.DoubleSide} />
+            </mesh>
+          )}
+        </>
       ) : null}
     </group>
   );
@@ -453,6 +527,7 @@ function EditableObjectsLayer({
   objects,
   selectedObjectId,
   worldSizeCm,
+  snapEnabled = true,
   onObjectMove,
   onObjectDragStart,
   onObjectDragEnd,
@@ -490,14 +565,22 @@ function EditableObjectsLayer({
       if (!event.ray.intersectPlane(dragPlane, dragHit)) return;
       const sizeX = Math.max(4, object.size_cm?.x ?? 20);
       const sizeZ = Math.max(4, object.size_cm?.z ?? 20);
-      const rawX = clamp(dragHit.x - dragState.offsetX, sizeX / 2, worldSizeCm.width - sizeX / 2);
-      const rawZ = clamp(dragHit.z - dragState.offsetZ, sizeZ / 2, worldSizeCm.depth - sizeZ / 2);
-      const snapMode = object.type === "wall" ? "edge" : "center";
-      const nextX = clamp(snapToGrid(rawX, GRID_CELL_CM, snapMode), sizeX / 2, worldSizeCm.width - sizeX / 2);
-      const nextZ = clamp(snapToGrid(rawZ, GRID_CELL_CM, snapMode), sizeZ / 2, worldSizeCm.depth - sizeZ / 2);
+      const rawX = dragHit.x - dragState.offsetX;
+      const rawZ = dragHit.z - dragState.offsetZ;
+      let nextX: number;
+      let nextZ: number;
+      if (snapEnabled) {
+        const otherEdgesX = collectOtherEdges(objects, object.id, "x");
+        const otherEdgesZ = collectOtherEdges(objects, object.id, "z");
+        nextX = computeSnappedPosition(rawX, sizeX / 2, 0, worldSizeCm.width, otherEdgesX, GRID_CELL_CM);
+        nextZ = computeSnappedPosition(rawZ, sizeZ / 2, 0, worldSizeCm.depth, otherEdgesZ, GRID_CELL_CM);
+      } else {
+        nextX = clamp(rawX, sizeX / 2, worldSizeCm.width - sizeX / 2);
+        nextZ = clamp(rawZ, sizeZ / 2, worldSizeCm.depth - sizeZ / 2);
+      }
       onObjectMove?.(object.id, nextX, nextZ);
     },
-    [dragHit, dragPlane, dragState, onObjectMove, worldSizeCm.depth, worldSizeCm.width],
+    [dragHit, dragPlane, dragState, objects, onObjectMove, snapEnabled, worldSizeCm.depth, worldSizeCm.width],
   );
 
   const handlePointerUp = useCallback(
@@ -560,6 +643,7 @@ export function ThreeSimViewport({
   ghostObject = null,
   onProjectClientToWorkplaneReady = null,
   onWorkplaneClick = null,
+  snapEnabled = true,
 }: ThreeSimViewportProps) {
   const orbitRef = useRef<OrbitControlsImpl | null>(null);
   const worldWidth = Math.max(200, worldSizeCm?.width ?? 1000);
@@ -658,6 +742,7 @@ export function ThreeSimViewport({
           far: 7000,
         }}
         dpr={[1, 1.5]}
+        shadows
         gl={{ antialias: true, powerPreference: "high-performance" }}
       >
         <color attach="background" args={[backgroundColor]} />
@@ -674,7 +759,20 @@ export function ThreeSimViewport({
         />
         <WorkplaneProjectorBridge onReady={onProjectClientToWorkplaneReady} />
         <ambientLight intensity={0.62} />
-        <directionalLight position={[180, 260, 160]} intensity={0.88} />
+        <directionalLight
+          position={[180, 260, 160]}
+          intensity={0.88}
+          castShadow
+          shadow-mapSize-width={1024}
+          shadow-mapSize-height={1024}
+          shadow-camera-left={-500}
+          shadow-camera-right={500}
+          shadow-camera-top={500}
+          shadow-camera-bottom={-500}
+          shadow-camera-near={1}
+          shadow-camera-far={800}
+          shadow-bias={-0.002}
+        />
         <pointLight position={[0, 140, 0]} intensity={0.28} />
         <group name="worldRoot">
           <group name="floorLayer">
@@ -682,6 +780,7 @@ export function ThreeSimViewport({
             <mesh
               position={[worldCenter.x, 0, worldCenter.z]}
               rotation={[-Math.PI / 2, 0, 0]}
+              receiveShadow
               onPointerDown={
                 editable && onWorkplaneClick
                   ? (event: PointerEvent3D) => {
@@ -692,7 +791,7 @@ export function ThreeSimViewport({
               }
             >
               <planeGeometry args={[worldWidth, worldDepth]} />
-              <meshStandardMaterial color="#e8edf5" />
+              <meshStandardMaterial color="#e8edf5" polygonOffset polygonOffsetFactor={1} polygonOffsetUnits={1} />
             </mesh>
           </group>
           <group name="objectLayer">
@@ -702,6 +801,7 @@ export function ThreeSimViewport({
                   objects={(worldScene?.objects ?? []).filter((object) => !object?.metadata?.hidden)}
                   selectedObjectId={selectedObjectId}
                   worldSizeCm={worldSizeCm || { width: worldWidth, depth: worldDepth }}
+                  snapEnabled={snapEnabled}
                   onObjectMove={onObjectMove}
                   onObjectDragStart={onObjectDragStart}
                   onObjectDragEnd={onObjectDragEnd}
@@ -771,6 +871,17 @@ export function ThreeSimViewport({
             </mesh>
           ) : null}
         </group>
+        <ContactShadows
+          position={[worldCenter.x, 0.01, worldCenter.z]}
+          opacity={0.35}
+          scale={Math.max(worldWidth, worldDepth) * 1.2}
+          blur={2}
+          far={50}
+          resolution={512}
+        />
+        <EffectComposer multisampling={0}>
+          <SSAO radius={0.08} intensity={12} luminanceInfluence={0.4} />
+        </EffectComposer>
         <OrbitControls ref={orbitRef} makeDefault enableDamping dampingFactor={0.08} />
       </Canvas>
       {IS_DEV_MODE && debugPose ? (

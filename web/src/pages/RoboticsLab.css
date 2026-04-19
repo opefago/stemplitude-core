@@ -696,6 +696,136 @@
   color: #8b949e;
 }
 
+/* Editor shell — vertical flex container holding topbar + split content */
+.robotics-editor-shell {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ─── Top toolbar ─── */
+.robotics-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 42px;
+  min-height: 42px;
+  padding: 0 12px;
+  background: #161b22;
+  border-bottom: 1px solid #30363d;
+  z-index: 40;
+}
+
+.robotics-topbar__left,
+.robotics-topbar__center,
+.robotics-topbar__right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.robotics-topbar__left {
+  flex: 1;
+  min-width: 0;
+}
+
+.robotics-topbar__center {
+  flex: 0 0 auto;
+}
+
+.robotics-topbar__right {
+  flex: 1;
+  min-width: 0;
+  justify-content: flex-end;
+}
+
+.robotics-topbar__filename {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: #e6edf3;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 4px 8px;
+  min-width: 120px;
+  max-width: 240px;
+  outline: none;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.robotics-topbar__filename:hover {
+  border-color: #30363d;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.robotics-topbar__filename:focus {
+  border-color: #58a6ff;
+  background: rgba(88, 166, 255, 0.06);
+}
+
+.robotics-topbar__filename::placeholder {
+  color: #484f58;
+  font-weight: 400;
+}
+
+.robotics-topbar__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: #c9d1d9;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s, color 0.12s;
+}
+
+.robotics-topbar__btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #e6edf3;
+}
+
+.robotics-topbar__btn:active {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.robotics-topbar__btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+  pointer-events: none;
+}
+
+.robotics-topbar__btn--active {
+  background: rgba(88, 166, 255, 0.15);
+  color: #58a6ff;
+}
+
+.robotics-topbar__btn--active:hover {
+  background: rgba(88, 166, 255, 0.22);
+}
+
+.robotics-topbar__sep {
+  width: 1px;
+  height: 20px;
+  background: #30363d;
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+
+.robotics-topbar__pill {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #8b949e;
+  text-transform: capitalize;
+}
+
 .robotics-split-content {
   flex: 1;
   min-height: 0;
@@ -2099,6 +2229,468 @@
   font-size: 12px;
 }
 
+/* Floating object ops toolbar — centered over viewport */
+.robotics-floating-object-ops {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  display: flex;
+  gap: 4px;
+  padding: 6px 10px;
+  background: rgba(22, 27, 34, 0.92);
+  border: 1px solid #30363d;
+  border-radius: 10px;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  pointer-events: auto;
+}
+
+.robotics-floating-object-ops .robotics-lab-btn {
+  font-size: 12px;
+  padding: 5px 10px;
+  white-space: nowrap;
+}
+
+/* World preset dialog */
+.robotics-preset-btn {
+  width: 100%;
+  justify-content: center;
+  margin-bottom: 6px;
+}
+
+.robotics-preset-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.robotics-preset-dialog-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  max-width: 720px;
+  margin-bottom: 12px;
+}
+
+.robotics-preset-dialog-header h4 {
+  margin: 0;
+  color: #e6eefb;
+  font-size: 18px;
+}
+
+.robotics-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+  max-width: 720px;
+  width: 100%;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.robotics-preset-card {
+  background: #1a2332;
+  border: 1px solid #30363d;
+  border-radius: 10px;
+  padding: 14px;
+  cursor: pointer;
+  text-align: left;
+  color: #c8d1dc;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.robotics-preset-card:hover {
+  border-color: #58a6ff;
+  background: #1e293b;
+}
+
+.robotics-preset-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.robotics-preset-card-header strong {
+  color: #e6eefb;
+  font-size: 14px;
+}
+
+.robotics-preset-card p {
+  margin: 0 0 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #9aa5b4;
+}
+
+.robotics-preset-meta {
+  font-size: 11px;
+  color: #6b7b8d;
+}
+
+.robotics-difficulty-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.robotics-difficulty-badge--beginner {
+  background: rgba(34, 197, 94, 0.2);
+  color: #22c55e;
+}
+
+.robotics-difficulty-badge--intermediate {
+  background: rgba(251, 191, 36, 0.2);
+  color: #fbbf24;
+}
+
+.robotics-difficulty-badge--advanced {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+}
+
+/* Code editor wrapper */
+.robotics-code-editor-wrapper {
+  flex: 1;
+  min-height: 300px;
+  display: flex;
+  flex-direction: column;
+}
+
+.robotics-code-editor-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 300px;
+  color: #9aa5b4;
+  font-size: 14px;
+}
+
+.robotics-mobile-code-editor {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.robotics-text-editor--mobile {
+  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #e6eefb;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 12px;
+  flex: 1;
+  resize: none;
+  tab-size: 4;
+}
+
+.robotics-mobile-code-lang-badge {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  font-size: 10px;
+  padding: 2px 8px;
+  background: rgba(88, 166, 255, 0.2);
+  color: #58a6ff;
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+/* Active line highlight in Monaco */
+.robotics-active-line-highlight {
+  background: rgba(88, 166, 255, 0.12) !important;
+}
+
+.robotics-active-line-glyph {
+  background: #58a6ff;
+  width: 3px !important;
+  margin-left: 3px;
+  border-radius: 1px;
+}
+
+/* Console panel */
+.robotics-console-panel {
+  border-top: 1px solid #30363d;
+  background: #0d1117;
+  max-height: 180px;
+  overflow-y: auto;
+  padding: 8px 12px;
+  font-family: "SF Mono", monospace;
+  font-size: 12px;
+  color: #9aa5b4;
+}
+
+.robotics-console-panel .console-error {
+  color: #f87171;
+}
+
+.robotics-console-panel .console-warn {
+  color: #fbbf24;
+}
+
+/* Skeleton loading */
+.robotics-skeleton {
+  background: linear-gradient(90deg, #1a2332 25%, #243044 50%, #1a2332 75%);
+  background-size: 200% 100%;
+  animation: robotics-skeleton-pulse 1.5s ease-in-out infinite;
+  border-radius: 8px;
+}
+
+@keyframes robotics-skeleton-pulse {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.robotics-skeleton-viewport {
+  height: 100%;
+  min-height: 300px;
+}
+
+.robotics-skeleton-card {
+  height: 48px;
+  margin-bottom: 8px;
+}
+
+/* Toast notification */
+.robotics-toast {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1e293b;
+  border: 1px solid #30363d;
+  color: #e6eefb;
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 13px;
+  z-index: 1000;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  animation: robotics-toast-in 0.25s ease-out;
+}
+
+.robotics-toast--success {
+  border-color: #22c55e;
+}
+
+.robotics-toast--error {
+  border-color: #ef4444;
+}
+
+@keyframes robotics-toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(10px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* World export/import */
+.robotics-world-io-toolbar {
+  display: flex;
+  gap: 6px;
+  padding: 4px 0;
+}
+
+/* World Gallery Page */
+.robotics-gallery-page {
+  padding: 24px;
+  max-width: 1200px;
+  margin: 0 auto;
+  color: #e6eefb;
+}
+
+.robotics-gallery-header {
+  margin-bottom: 20px;
+}
+
+.robotics-gallery-header h2 {
+  font-size: 22px;
+  margin: 0 0 6px;
+}
+
+.robotics-gallery-header p {
+  color: #9aa5b4;
+  font-size: 14px;
+  margin: 0;
+}
+
+.robotics-gallery-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 20px;
+  align-items: center;
+}
+
+.robotics-gallery-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #1a2332;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 6px 12px;
+  flex: 1;
+  min-width: 200px;
+}
+
+.robotics-gallery-search input {
+  background: transparent;
+  border: none;
+  color: #e6eefb;
+  font-size: 14px;
+  width: 100%;
+  outline: none;
+}
+
+.robotics-gallery-filters {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  color: #9aa5b4;
+}
+
+.robotics-gallery-share-code {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.robotics-gallery-share-code input {
+  background: #1a2332;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  color: #e6eefb;
+  padding: 6px 10px;
+  font-size: 13px;
+  width: 130px;
+  letter-spacing: 1px;
+  font-family: "SF Mono", monospace;
+}
+
+.robotics-gallery-error {
+  color: #f87171;
+  font-size: 12px;
+}
+
+.robotics-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.robotics-gallery-card {
+  background: #1a2332;
+  border: 1px solid #30363d;
+  border-radius: 10px;
+  padding: 16px;
+  transition: border-color 0.15s;
+}
+
+.robotics-gallery-card:hover {
+  border-color: #58a6ff;
+}
+
+.robotics-gallery-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.robotics-gallery-card-header strong {
+  font-size: 15px;
+  color: #e6eefb;
+}
+
+.robotics-gallery-card-desc {
+  font-size: 12px;
+  color: #9aa5b4;
+  line-height: 1.4;
+  margin: 0 0 8px;
+}
+
+.robotics-gallery-card-meta {
+  display: flex;
+  gap: 10px;
+  font-size: 11px;
+  color: #6b7b8d;
+  margin-bottom: 8px;
+}
+
+.robotics-gallery-card-meta span {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.robotics-gallery-card-tags {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.robotics-gallery-tag {
+  font-size: 10px;
+  padding: 2px 6px;
+  background: rgba(88, 166, 255, 0.1);
+  color: #58a6ff;
+  border-radius: 3px;
+}
+
+.robotics-gallery-card-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.robotics-gallery-empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 40px;
+  color: #6b7b8d;
+}
+
+/* Debugger text view */
+.robotics-debugger-text-view {
+  padding: 6px 8px;
+  font-size: 12px;
+  color: #c8d1dc;
+}
+
+.robotics-debugger-text-line {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.robotics-debugger-text-line-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: #6b7b8d;
+  min-width: 52px;
+}
+
+.robotics-debugger-text-line code {
+  font-family: "SF Mono", monospace;
+  background: rgba(88, 166, 255, 0.1);
+  padding: 1px 6px;
+  border-radius: 3px;
+  color: #58a6ff;
+}
+
 @media (max-width: 1260px) {
   .robotics-lab-main,
   .robotics-split-content {
@@ -2120,6 +2712,137 @@
 
   .robotics-side-sensors-panel {
     height: clamp(220px, 30vh, 280px);
+  }
+}
+
+/* Mobile viewer layout */
+@media (max-width: 768px) {
+  .robotics-topbar {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 38px;
+    padding: 6px 8px;
+    gap: 4px;
+  }
+
+  .robotics-topbar__left {
+    order: 1;
+    flex: 1 1 100%;
+  }
+
+  .robotics-topbar__center {
+    order: 2;
+    flex: 1 1 auto;
+  }
+
+  .robotics-topbar__right {
+    order: 3;
+    flex: 0 1 auto;
+  }
+
+  .robotics-topbar__filename {
+    min-width: 80px;
+    max-width: 160px;
+    font-size: 12px;
+  }
+
+  .robotics-topbar__pill {
+    display: none;
+  }
+
+  .robotics-lab-main,
+  .robotics-split-content {
+    display: flex;
+    flex-direction: column;
+    height: auto;
+  }
+
+  .robotics-lab-left {
+    display: none;
+  }
+
+  .robotics-sim-pane {
+    height: 60vh;
+    min-height: 280px;
+  }
+
+  .robotics-lab-right {
+    border-left: 0;
+    border-top: 1px solid #30363d;
+    max-height: 40vh;
+    overflow-y: auto;
+  }
+
+  .robotics-lab-right--editor {
+    display: none;
+  }
+
+  .robotics-floating-controls-bottom {
+    bottom: 4px;
+  }
+
+  .robotics-floating-controls-right {
+    top: 4px;
+    right: 4px;
+  }
+
+  .robotics-lab-controls {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  /* Mobile sim: show floating run bar at bottom */
+  .robotics-mobile-run-bar {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: #161b22;
+    border-top: 1px solid #30363d;
+    padding: 8px 12px;
+    gap: 8px;
+    z-index: 100;
+    justify-content: center;
+  }
+
+  /* Mobile code page */
+  .robotics-code-surface {
+    display: flex;
+    flex-direction: column;
+    height: auto;
+  }
+
+  .robotics-code-toolbar {
+    flex-direction: column;
+    gap: 6px;
+    padding: 6px;
+  }
+
+  .robotics-code-grid {
+    flex-direction: column;
+  }
+
+  .robotics-code-editor-pane {
+    min-height: 50vh;
+  }
+
+  .robotics-preview-pane {
+    max-height: 30vh;
+    overflow-y: auto;
+  }
+
+  .robotics-lab-selectors {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .robotics-preset-dialog {
+    padding: 12px;
+  }
+
+  .robotics-preset-grid {
+    grid-template-columns: 1fr;
   }
 }
 

@@ -26,17 +26,29 @@ from app.robotics.schemas import (
     RoboticsCompileJobResponse,
     RoboticsCompileRequest,
     RoboticsEventRecord,
+    RoboticsLeaderboardEntry,
     RoboticsProjectCreate,
     RoboticsProjectResponse,
     RoboticsProjectUpdate,
     RoboticsProjectSource,
     RoboticsTemplateResolveResponse,
+    RoboticsWorldCreate,
+    RoboticsWorldGalleryItem,
+    RoboticsWorldResponse,
+    RoboticsWorldUpdate,
 )
 
 
 def _coerce_mode(value: object) -> str:
     as_text = str(value or "blocks")
     return as_text if as_text in {"blocks", "hybrid", "python", "cpp"} else "blocks"
+
+
+def _generate_share_code(length: int = 8) -> str:
+    import secrets
+    import string
+    alphabet = string.ascii_uppercase + string.digits
+    return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
 class RoboticsService:
@@ -46,6 +58,8 @@ class RoboticsService:
     _attempts: dict[UUID, list[RoboticsAttemptResponse]] = {}
     _events: list[RoboticsEventRecord] = []
     _compile_jobs: dict[UUID, RoboticsCompileJobResponse] = {}
+    _worlds: dict[UUID, RoboticsWorldResponse] = {}
+    _worlds_by_code: dict[str, UUID] = {}
 
     def __init__(self, _session):
         self._session = _session
@@ -413,13 +427,203 @@ class RoboticsService:
             env["PATH"] = f"{arm_bin}:{env.get('PATH', '')}"
         return env
 
+    def create_world(
+        self,
+        *,
+        data: RoboticsWorldCreate,
+        tenant: TenantContext,
+        identity: CurrentIdentity,
+    ) -> RoboticsWorldResponse:
+        now = datetime.now(timezone.utc)
+        share_code = _generate_share_code()
+        while share_code in self._worlds_by_code:
+            share_code = _generate_share_code()
+        objects_list = (data.world_scene or {}).get("objects", [])
+        world = RoboticsWorldResponse(
+            id=uuid4(),
+            tenant_id=tenant.tenant_id,
+            creator_id=identity.id,
+            title=data.title,
+            description=data.description,
+            world_scene=data.world_scene,
+            runtime_settings=data.runtime_settings,
+            mission=data.mission,
+            is_template=False,
+            share_code=share_code,
+            visibility=data.visibility,
+            difficulty=data.difficulty,
+            tags=data.tags,
+            width_cells=data.width_cells,
+            height_cells=data.height_cells,
+            object_count=len(objects_list) if isinstance(objects_list, list) else 0,
+            play_count=0,
+            created_at=now,
+            updated_at=now,
+        )
+        self._worlds[world.id] = world
+        self._worlds_by_code[share_code] = world.id
+        return world
+
+    def list_worlds(
+        self,
+        *,
+        tenant: TenantContext,
+        creator_id: UUID | None = None,
+        skip: int = 0,
+        limit: int = 50,
+    ) -> list[RoboticsWorldResponse]:
+        rows = [
+            w for w in self._worlds.values()
+            if w.tenant_id == tenant.tenant_id
+            and (creator_id is None or w.creator_id == creator_id)
+        ]
+        rows.sort(key=lambda w: w.updated_at, reverse=True)
+        return rows[skip : skip + limit]
+
+    def get_world(self, *, world_id: UUID, tenant: TenantContext) -> RoboticsWorldResponse | None:
+        world = self._worlds.get(world_id)
+        if world is None or world.tenant_id != tenant.tenant_id:
+            return None
+        return world
+
+    def get_world_by_share_code(self, *, share_code: str) -> RoboticsWorldResponse | None:
+        world_id = self._worlds_by_code.get(share_code.upper())
+        if world_id is None:
+            return None
+        return self._worlds.get(world_id)
+
+    def update_world(
+        self,
+        *,
+        world_id: UUID,
+        data: RoboticsWorldUpdate,
+        tenant: TenantContext,
+    ) -> RoboticsWorldResponse | None:
+        world = self.get_world(world_id=world_id, tenant=tenant)
+        if world is None:
+            return None
+        patch = data.model_dump(exclude_unset=True)
+        merged = world.model_dump()
+        merged.update(patch)
+        merged["updated_at"] = datetime.now(timezone.utc)
+        if "world_scene" in patch:
+            objects_list = (patch["world_scene"] or {}).get("objects", [])
+            merged["object_count"] = len(objects_list) if isinstance(objects_list, list) else 0
+        next_world = RoboticsWorldResponse.model_validate(merged)
+        self._worlds[world_id] = next_world
+        return next_world
+
+    def list_world_gallery(
+        self,
+        *,
+        tenant: TenantContext,
+        difficulty: str | None = None,
+        search: str | None = None,
+        skip: int = 0,
+        limit: int = 50,
+    ) -> list[RoboticsWorldGalleryItem]:
+        rows = [
+            w for w in self._worlds.values()
+            if w.tenant_id == tenant.tenant_id
+            and w.visibility in ("tenant", "public")
+        ]
+        if difficulty:
+            rows = [w for w in rows if w.difficulty == difficulty]
+        if search:
+            search_lower = search.lower()
+            rows = [
+                w for w in rows
+                if search_lower in w.title.lower()
+                or (w.description and search_lower in w.description.lower())
+                or any(search_lower in t.lower() for t in (w.tags or []))
+            ]
+        rows.sort(key=lambda w: w.play_count, reverse=True)
+        return [
+            RoboticsWorldGalleryItem(
+                id=w.id,
+                title=w.title,
+                description=w.description,
+                difficulty=w.difficulty,
+                tags=w.tags or [],
+                width_cells=w.width_cells,
+                height_cells=w.height_cells,
+                object_count=w.object_count,
+                play_count=w.play_count,
+                creator_name=None,
+                share_code=w.share_code,
+                created_at=w.created_at,
+            )
+            for w in rows[skip : skip + limit]
+        ]
+
+    def get_world_leaderboard(
+        self,
+        *,
+        world_id: UUID,
+        tenant: TenantContext,
+        limit: int = 20,
+    ) -> list[RoboticsLeaderboardEntry]:
+        all_attempts: list[RoboticsAttemptResponse] = []
+        for attempts in self._attempts.values():
+            all_attempts.extend(
+                a for a in attempts
+                if a.tenant_id == tenant.tenant_id
+                and a.telemetry.get("world_id") == str(world_id)
+                and a.score is not None
+            )
+        all_attempts.sort(key=lambda a: (-(a.score or 0), a.telemetry.get("time_ms", 999999999)))
+        return [
+            RoboticsLeaderboardEntry(
+                attempt_id=a.id,
+                student_id=UUID(str(a.telemetry.get("student_id", "00000000-0000-0000-0000-000000000000"))),
+                student_name=None,
+                score=a.score or 0,
+                time_ms=int(a.telemetry.get("time_ms", 0)) if "time_ms" in a.telemetry else None,
+                path_length_cm=float(a.telemetry.get("path_length_cm", 0)) if "path_length_cm" in a.telemetry else None,
+                checkpoints_hit=int(a.telemetry.get("checkpoints_hit", 0)) if "checkpoints_hit" in a.telemetry else None,
+                created_at=a.created_at,
+            )
+            for a in all_attempts[:limit]
+        ]
+
     async def resolve_template(
         self,
         *,
         tenant: TenantContext,
         curriculum_lab_id: UUID | None = None,
         lesson_id: UUID | None = None,
+        assignment_id: UUID | None = None,
     ) -> RoboticsTemplateResolveResponse:
+        if assignment_id is not None:
+            from app.curriculum.models import AssignmentTemplate
+            assignment = (
+                await self._session.execute(
+                    select(AssignmentTemplate).where(
+                        AssignmentTemplate.id == assignment_id,
+                        AssignmentTemplate.tenant_id == tenant.tenant_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if assignment is not None and assignment.world_id is not None:
+                world = self._worlds.get(assignment.world_id)
+                if world is not None:
+                    return RoboticsTemplateResolveResponse(
+                        source="curriculum_lab",
+                        source_id=assignment.id,
+                        title=assignment.title,
+                        robot_vendor="vex",
+                        robot_type="vex_vr",
+                        mode="blocks",
+                        source_payload=RoboticsProjectSource(),
+                        world_scene=world.world_scene,
+                        runtime_settings=world.runtime_settings or {},
+                        metadata={
+                            "template_priority": "assignment_world",
+                            "tenant_id": str(tenant.tenant_id),
+                            "assignment_id": str(assignment_id),
+                            "world_id": str(assignment.world_id),
+                        },
+                    )
         if curriculum_lab_id is not None:
             row = (
                 await self._session.execute(

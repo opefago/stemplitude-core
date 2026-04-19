@@ -189,3 +189,125 @@ export async function getRoboticsCompileJob(jobId: string): Promise<RoboticsComp
   return apiFetch<RoboticsCompileJobRecord>(`/robotics/compile/jobs/${jobId}`);
 }
 
+// --- World API ---
+
+export interface RoboticsWorldRecord {
+  id: string;
+  tenant_id: string;
+  creator_id: string;
+  title: string;
+  description?: string | null;
+  world_scene: Record<string, unknown>;
+  runtime_settings: Record<string, unknown>;
+  mission?: Record<string, unknown> | null;
+  is_template: boolean;
+  share_code?: string | null;
+  visibility: "private" | "tenant" | "public";
+  difficulty?: "beginner" | "intermediate" | "advanced" | null;
+  tags: string[];
+  width_cells: number;
+  height_cells: number;
+  object_count: number;
+  play_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateRoboticsWorldInput {
+  title: string;
+  description?: string;
+  world_scene: Record<string, unknown>;
+  runtime_settings?: Record<string, unknown>;
+  mission?: Record<string, unknown>;
+  visibility?: "private" | "tenant" | "public";
+  difficulty?: "beginner" | "intermediate" | "advanced";
+  tags?: string[];
+  width_cells?: number;
+  height_cells?: number;
+}
+
+export interface UpdateRoboticsWorldInput {
+  title?: string;
+  description?: string;
+  world_scene?: Record<string, unknown>;
+  runtime_settings?: Record<string, unknown>;
+  mission?: Record<string, unknown>;
+  visibility?: "private" | "tenant" | "public";
+  difficulty?: "beginner" | "intermediate" | "advanced";
+  tags?: string[];
+  width_cells?: number;
+  height_cells?: number;
+}
+
+export interface RoboticsWorldGalleryItem {
+  id: string;
+  title: string;
+  description?: string | null;
+  difficulty?: string | null;
+  tags: string[];
+  width_cells: number;
+  height_cells: number;
+  object_count: number;
+  play_count: number;
+  creator_name?: string | null;
+  share_code?: string | null;
+  created_at: string;
+}
+
+export interface RoboticsLeaderboardEntry {
+  attempt_id: string;
+  student_id: string;
+  student_name?: string | null;
+  score: number;
+  time_ms?: number | null;
+  path_length_cm?: number | null;
+  checkpoints_hit?: number | null;
+  created_at: string;
+}
+
+export async function createRoboticsWorld(input: CreateRoboticsWorldInput): Promise<RoboticsWorldRecord> {
+  return apiFetch<RoboticsWorldRecord>("/robotics/worlds", { method: "POST", body: input });
+}
+
+export async function listRoboticsWorlds(opts?: { skip?: number; limit?: number }): Promise<RoboticsWorldRecord[]> {
+  const q = new URLSearchParams();
+  if (opts?.skip != null) q.set("skip", String(opts.skip));
+  if (opts?.limit != null) q.set("limit", String(opts.limit));
+  const qs = q.toString();
+  return apiFetch<RoboticsWorldRecord[]>(`/robotics/worlds${qs ? `?${qs}` : ""}`);
+}
+
+export async function getRoboticsWorld(worldId: string): Promise<RoboticsWorldRecord> {
+  return apiFetch<RoboticsWorldRecord>(`/robotics/worlds/${worldId}`);
+}
+
+export async function getRoboticsWorldByShareCode(shareCode: string): Promise<RoboticsWorldRecord> {
+  return apiFetch<RoboticsWorldRecord>(`/robotics/worlds/code/${shareCode}`);
+}
+
+export async function updateRoboticsWorld(worldId: string, input: UpdateRoboticsWorldInput): Promise<RoboticsWorldRecord> {
+  return apiFetch<RoboticsWorldRecord>(`/robotics/worlds/${worldId}`, { method: "PATCH", body: input });
+}
+
+export async function listRoboticsWorldGallery(opts?: {
+  difficulty?: string;
+  search?: string;
+  skip?: number;
+  limit?: number;
+}): Promise<RoboticsWorldGalleryItem[]> {
+  const q = new URLSearchParams();
+  if (opts?.difficulty) q.set("difficulty", opts.difficulty);
+  if (opts?.search) q.set("search", opts.search);
+  if (opts?.skip != null) q.set("skip", String(opts.skip));
+  if (opts?.limit != null) q.set("limit", String(opts.limit));
+  const qs = q.toString();
+  return apiFetch<RoboticsWorldGalleryItem[]>(`/robotics/worlds/gallery${qs ? `?${qs}` : ""}`);
+}
+
+export async function getRoboticsWorldLeaderboard(worldId: string, opts?: { limit?: number }): Promise<RoboticsLeaderboardEntry[]> {
+  const q = new URLSearchParams();
+  if (opts?.limit != null) q.set("limit", String(opts.limit));
+  const qs = q.toString();
+  return apiFetch<RoboticsLeaderboardEntry[]>(`/robotics/worlds/${worldId}/leaderboard${qs ? `?${qs}` : ""}`);
+}
+

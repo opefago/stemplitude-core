@@ -112,6 +112,9 @@ class AssignmentTemplate(Base):
     lab_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("labs.id", ondelete="SET NULL")
     )
+    world_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("robotics_worlds.id", ondelete="SET NULL"), nullable=True
+    )
     rubric_template_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("rubric_templates.id", ondelete="SET NULL")
     )

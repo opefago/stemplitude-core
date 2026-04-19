@@ -227,10 +227,16 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
       this.integrateDynamicObjectMomentum(subDt);
 
       const headingRad = toRadians(this.pose.heading_deg);
+      let conveyorDx = 0;
+      let conveyorDy = 0;
+      if (material.conveyorVelocity) {
+        conveyorDx = material.conveyorVelocity.x * subDt;
+        conveyorDy = material.conveyorVelocity.z * subDt;
+      }
       const nextPose: SimulatorPose2D = {
         position: {
-          x: this.pose.position.x + Math.cos(headingRad) * linearVelocityCmS * subDt,
-          y: this.pose.position.y + Math.sin(headingRad) * linearVelocityCmS * subDt,
+          x: this.pose.position.x + Math.cos(headingRad) * linearVelocityCmS * subDt + conveyorDx,
+          y: this.pose.position.y + Math.sin(headingRad) * linearVelocityCmS * subDt + conveyorDy,
         },
         heading_deg: normalizeHeading(this.pose.heading_deg + angularVelocityDegS * subDt),
       };
@@ -352,24 +358,66 @@ export class ThreeRuntimeSimulator implements RoboticsSimulatorBridge {
     return Math.abs(withFriction) < ThreeRuntimeSimulator.EPS ? 0 : withFriction;
   }
 
-  private resolveActiveSupportMaterial(): { tractionScale: number; rollingResistanceScale: number } {
+  private resolveActiveSupportMaterial(): { tractionScale: number; rollingResistanceScale: number; conveyorVelocity?: { x: number; z: number } } {
+    let tractionScale = 1;
+    let rollingResistanceScale = 1;
+    let conveyorVelocity: { x: number; z: number } | undefined;
+
     const support = this.supportSurfaceId ? this.findSceneObjectById(this.supportSurfaceId) : null;
-    if (!support) {
-      return { tractionScale: 1, rollingResistanceScale: 1 };
+    if (support) {
+      const surfaceFrictionRaw = Number(support.metadata?.friction_coefficient ?? support.metadata?.friction);
+      const surfaceFriction = Number.isFinite(surfaceFrictionRaw) ? clamp(surfaceFrictionRaw, 0.05, 4) : 1;
+      const combineMode =
+        support.metadata?.friction_combine === "min" ||
+        support.metadata?.friction_combine === "max" ||
+        support.metadata?.friction_combine === "multiply" ||
+        support.metadata?.friction_combine === "average"
+          ? support.metadata.friction_combine
+          : "average";
+      const combined = combineCoefficient(1, surfaceFriction, combineMode);
+      tractionScale = clamp(Math.sqrt(Math.max(0.05, combined)), 0.35, 1.6);
+      rollingResistanceScale = clamp(1 / tractionScale, 0.5, 2.2);
     }
-    const surfaceFrictionRaw = Number(support.metadata?.friction_coefficient ?? support.metadata?.friction);
-    const surfaceFriction = Number.isFinite(surfaceFrictionRaw) ? clamp(surfaceFrictionRaw, 0.05, 4) : 1;
-    const combineMode =
-      support.metadata?.friction_combine === "min" ||
-      support.metadata?.friction_combine === "max" ||
-      support.metadata?.friction_combine === "multiply" ||
-      support.metadata?.friction_combine === "average"
-        ? support.metadata.friction_combine
-        : "average";
-    const combined = combineCoefficient(1, surfaceFriction, combineMode);
-    const tractionScale = clamp(Math.sqrt(Math.max(0.05, combined)), 0.35, 1.6);
-    const rollingResistanceScale = clamp(1 / tractionScale, 0.5, 2.2);
-    return { tractionScale, rollingResistanceScale };
+
+    const scene = this.world?.world_scene;
+    if (scene?.objects) {
+      const rx = this.pose.position.x;
+      const ry = this.pose.position.y;
+      for (const obj of scene.objects) {
+        if (obj.type !== "color_zone" && obj.type !== "target_zone") continue;
+        const halfX = (obj.size_cm?.x ?? 0) / 2;
+        const halfZ = (obj.size_cm?.z ?? 0) / 2;
+        const ox = obj.position?.x ?? 0;
+        const oz = obj.position?.z ?? 0;
+        if (rx < ox - halfX || rx > ox + halfX || ry < oz - halfZ || ry > oz + halfZ) continue;
+
+        const st = obj.metadata?.surface_type as string | undefined;
+        if (st === "low_friction") {
+          const scale = Number(obj.metadata?.friction_scale);
+          if (Number.isFinite(scale) && scale > 0) {
+            tractionScale *= clamp(scale, 0.1, 1);
+            rollingResistanceScale = clamp(1 / tractionScale, 0.5, 3);
+          }
+        } else if (st === "high_friction") {
+          const scale = Number(obj.metadata?.friction_scale);
+          if (Number.isFinite(scale) && scale > 0) {
+            tractionScale *= clamp(scale, 1, 3);
+            rollingResistanceScale = clamp(1 / tractionScale, 0.3, 2.2);
+          }
+        }
+
+        const beltSpeed = Number(obj.metadata?.belt_speed_cm_s);
+        if (Number.isFinite(beltSpeed) && Math.abs(beltSpeed) > 0.1) {
+          const beltRad = toRadians(obj.rotation_deg?.y ?? 0);
+          conveyorVelocity = {
+            x: Math.cos(beltRad) * beltSpeed,
+            z: Math.sin(beltRad) * beltSpeed,
+          };
+        }
+      }
+    }
+
+    return { tractionScale, rollingResistanceScale, conveyorVelocity };
   }
 
   private resolveCombinedRestitution(metadata: Record<string, unknown> | undefined): number {
