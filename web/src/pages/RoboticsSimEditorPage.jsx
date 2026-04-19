@@ -11,7 +11,7 @@ import { ViewportSettingsDialog } from "../features/robotics_lab/components/View
 import { ObjectPalette } from "../features/robotics_lab/components/object_palette";
 import { createSceneObjectFromPalette, getObjectDefinitionById } from "../features/robotics_lab/objectPalette";
 import { resolveKitCapabilities } from "../labs/robotics";
-import { UndoStack, snapshotScene } from "../features/robotics_lab/undoStack";
+import { useUndoStack } from "../features/robotics_lab/undoStack";
 import { useKeyboardShortcuts } from "../features/robotics_lab/useKeyboardShortcuts";
 import { WORLD_PRESETS } from "../features/robotics_lab/worldPresets";
 import { CustomObjectCreator } from "../features/robotics_lab/components/CustomObjectCreator";
@@ -117,7 +117,22 @@ export default function RoboticsSimEditorPage() {
   const [presetDialogOpen, setPresetDialogOpen] = useState(false);
   const [customObjectOpen, setCustomObjectOpen] = useState(false);
   const [snapEnabled, setSnapEnabled] = useState(true);
-  const undoStackRef = useRef(new UndoStack(50));
+
+  const worldSceneRef = useRef(world.world_scene || { version: 1, gravity_m_s2: 9.81, objects: [] });
+  const objectGroupsRef = useRef(objectGroups);
+  const worldRef = useRef(world);
+  useEffect(() => { worldSceneRef.current = world.world_scene || { version: 1, gravity_m_s2: 9.81, objects: [] }; }, [world.world_scene]);
+  useEffect(() => { objectGroupsRef.current = objectGroups; }, [objectGroups]);
+  useEffect(() => { worldRef.current = world; }, [world]);
+
+  const undoOpts = useMemo(() => ({
+    getObjects: () => (worldSceneRef.current?.objects ?? []),
+    getGroups: () => objectGroupsRef.current,
+    getWidthCells: () => worldRef.current.width_cells,
+    getHeightCells: () => worldRef.current.height_cells,
+  }), []);
+  const undo = useUndoStack(undoOpts);
+  const nudgeTimerRef = useRef(null);
 
   const selectedObjectId = useMemo(() => {
     const arr = Array.from(selectedObjectIds);
@@ -142,29 +157,29 @@ export default function RoboticsSimEditorPage() {
     }
   }
 
-  function pushUndo(label) {
-    const snapshot = snapshotScene(worldScene.objects, objectGroups);
-    return snapshot;
-  }
-
-  function commitUndo(label, beforeSnapshot) {
-    const afterSnapshot = snapshotScene(worldScene.objects, objectGroups);
-    undoStackRef.current.push(label, beforeSnapshot, afterSnapshot);
-  }
-
   function handleUndo() {
-    const result = undoStackRef.current.undo();
+    const result = undo.undo();
     if (!result) return;
-    const nextWorld = { ...world, world_scene: { ...worldScene, objects: result.objects } };
+    const nextWorld = {
+      ...world,
+      width_cells: result.width_cells ?? world.width_cells,
+      height_cells: result.height_cells ?? world.height_cells,
+      world_scene: { ...worldScene, objects: result.objects },
+    };
     setWorld(nextWorld);
     if (result.groups) setObjectGroups(result.groups);
     void saveProjectSnapshot("undo", { world: nextWorld });
   }
 
   function handleRedo() {
-    const result = undoStackRef.current.redo();
+    const result = undo.redo();
     if (!result) return;
-    const nextWorld = { ...world, world_scene: { ...worldScene, objects: result.objects } };
+    const nextWorld = {
+      ...world,
+      width_cells: result.width_cells ?? world.width_cells,
+      height_cells: result.height_cells ?? world.height_cells,
+      world_scene: { ...worldScene, objects: result.objects },
+    };
     setWorld(nextWorld);
     if (result.groups) setObjectGroups(result.groups);
     void saveProjectSnapshot("redo", { world: nextWorld });
@@ -172,7 +187,7 @@ export default function RoboticsSimEditorPage() {
 
   function cloneSelected() {
     if (selectedObjectIds.size === 0) return;
-    const before = pushUndo("clone");
+    undo.beginAction("Clone");
     const clones = [];
     for (const id of selectedObjectIds) {
       const obj = worldScene.objects.find((o) => o.id === id);
@@ -189,12 +204,12 @@ export default function RoboticsSimEditorPage() {
     }
     updateWorldScene([...worldScene.objects, ...clones], "object_cloned");
     setSelectedObjectIds(new Set(clones.map((c) => c.id)));
-    commitUndo("clone", before);
+    undo.commitAction();
   }
 
   function mirrorSelected(axis = "x") {
     if (selectedObjectIds.size === 0) return;
-    const before = pushUndo("mirror");
+    undo.beginAction("Mirror");
     const centerX = (world.width_cells * GRID_CELL_CM) / 2;
     const centerZ = (world.height_cells * GRID_CELL_CM) / 2;
     const nextObjects = worldScene.objects.map((obj) => {
@@ -211,7 +226,7 @@ export default function RoboticsSimEditorPage() {
       return mirrored;
     });
     updateWorldScene(nextObjects, "object_mirrored");
-    commitUndo("mirror", before);
+    undo.commitAction();
   }
 
   function groupSelected() {
@@ -219,32 +234,39 @@ export default function RoboticsSimEditorPage() {
     const ids = Array.from(selectedObjectIds);
     const alreadyGrouped = objectGroups.find((g) => g.objectIds.length === ids.length && ids.every((id) => g.objectIds.includes(id)));
     if (alreadyGrouped) return;
+    undo.beginAction("Group");
     const newGroup = {
       id: `group_${Date.now()}`,
       name: `Group ${objectGroups.length + 1}`,
       objectIds: ids,
     };
     setObjectGroups((prev) => [...prev.filter((g) => !ids.some((id) => g.objectIds.includes(id))), newGroup]);
+    undo.commitAction();
   }
 
   function ungroupSelected() {
     if (selectedObjectIds.size === 0) return;
+    undo.beginAction("Ungroup");
     setObjectGroups((prev) => prev.filter((g) => !Array.from(selectedObjectIds).some((id) => g.objectIds.includes(id))));
+    undo.commitAction();
   }
 
   function deleteSelected() {
     if (selectedObjectIds.size === 0) return;
-    const before = pushUndo("delete");
+    undo.beginAction("Delete");
     updateWorldScene(
       worldScene.objects.filter((o) => !selectedObjectIds.has(o.id)),
       "object_removed",
     );
     setSelectedObjectIds(new Set());
-    commitUndo("delete", before);
+    undo.commitAction();
   }
 
   function nudgeSelected(dx, dz) {
     if (selectedObjectIds.size === 0) return;
+    if (!undo.pendingLabel) undo.beginAction("Nudge");
+    if (nudgeTimerRef.current) clearTimeout(nudgeTimerRef.current);
+    nudgeTimerRef.current = setTimeout(() => { undo.commitAction(); nudgeTimerRef.current = null; }, 500);
     const nextObjects = worldScene.objects.map((obj) => {
       if (!selectedObjectIds.has(obj.id)) return obj;
       return { ...obj, position: { ...obj.position, x: obj.position.x + dx, z: obj.position.z + dz } };
@@ -253,7 +275,7 @@ export default function RoboticsSimEditorPage() {
   }
 
   function applyWorldPreset(preset) {
-    const before = pushUndo("preset");
+    undo.beginAction("Apply preset");
     const nextWorld = {
       ...world,
       width_cells: preset.widthCells,
@@ -264,7 +286,7 @@ export default function RoboticsSimEditorPage() {
     setSelectedObjectIds(new Set());
     resetCamera();
     void saveProjectSnapshot("world_preset_applied", { world: nextWorld });
-    commitUndo("preset", before);
+    undo.commitAction();
     setPresetDialogOpen(false);
   }
 
@@ -319,7 +341,7 @@ export default function RoboticsSimEditorPage() {
           showToast("Invalid world file format", "error");
           return;
         }
-        const before = pushUndo("import");
+        undo.beginAction("Import world");
         const imported = data.world;
         const nextWorld = {
           ...world,
@@ -331,7 +353,7 @@ export default function RoboticsSimEditorPage() {
         if (imported.groups) setObjectGroups(imported.groups);
         resetCamera();
         void saveProjectSnapshot("world_imported", { world: nextWorld });
-        commitUndo("import", before);
+        undo.commitAction();
         showToast("World imported successfully");
         addConsoleLog("World imported from file", "info");
       } catch (err) {
@@ -412,6 +434,7 @@ export default function RoboticsSimEditorPage() {
   }
 
   function addObjectNearRobot(definition) {
+    undo.beginAction("Place object");
     const objectType = definition?.placement?.objectType;
     const next = createSceneObjectFromPalette(
       definition,
@@ -419,6 +442,7 @@ export default function RoboticsSimEditorPage() {
       snapForObjectType(pose.position.y, objectType),
     );
     updateWorldScene([...worldScene.objects, next], "object_placed");
+    undo.commitAction();
   }
 
   function paintLineTrackAt(x, z) {
@@ -434,12 +458,15 @@ export default function RoboticsSimEditorPage() {
         snapToGridCenter(object.position?.z ?? 0) === pz,
     );
     if (existing) {
+      undo.beginAction("Erase line");
       updateWorldScene(
         worldScene.objects.filter((object) => object.id !== existing.id),
         "line_track_erased",
       );
+      undo.commitAction();
       return;
     }
+    undo.beginAction("Paint line");
     const next = createSceneObjectFromPalette(definition, px, pz);
     next.size_cm = {
       x: GRID_CELL_CM - 2,
@@ -447,15 +474,17 @@ export default function RoboticsSimEditorPage() {
       z: GRID_CELL_CM - 2,
     };
     updateWorldScene([...worldScene.objects, next], "line_track_painted");
+    undo.commitAction();
   }
 
   function removeObject(id) {
-    const before = pushUndo("remove");
+    undo.beginAction("Delete");
     updateWorldScene(worldScene.objects.filter((object) => object.id !== id), "object_removed");
-    commitUndo("remove", before);
+    undo.commitAction();
   }
 
   function updateObjectColor(id, color) {
+    undo.beginAction("Recolor");
     const nextObjects = worldScene.objects.map((object) =>
       object.id === id
         ? {
@@ -468,6 +497,7 @@ export default function RoboticsSimEditorPage() {
         : object,
     );
     updateWorldScene(nextObjects, "object_recolored");
+    undo.commitAction();
   }
 
   function updateObjectPosition(id, x, z) {
@@ -488,6 +518,7 @@ export default function RoboticsSimEditorPage() {
   }
 
   function updateObjectSize(id, nextSizeCm) {
+    undo.beginAction("Resize");
     const nextObjects = worldScene.objects.map((object) =>
       object.id === id
         ? {
@@ -499,10 +530,12 @@ export default function RoboticsSimEditorPage() {
           }
         : object,
     );
-    updateWorldScene(nextObjects, "object_resized", false);
+    updateWorldScene(nextObjects, "object_resized");
+    undo.commitAction();
   }
 
   function updateObjectHidden(id, hidden) {
+    undo.beginAction(hidden ? "Hide" : "Show");
     const nextObjects = worldScene.objects.map((object) =>
       object.id === id
         ? {
@@ -515,9 +548,11 @@ export default function RoboticsSimEditorPage() {
         : object,
     );
     updateWorldScene(nextObjects, hidden ? "object_hidden" : "object_shown");
+    undo.commitAction();
   }
 
   function updateObjectPhysicsBody(id, physicsBody) {
+    undo.beginAction("Physics update");
     const nextObjects = worldScene.objects.map((object) =>
       object.id === id
         ? {
@@ -530,9 +565,11 @@ export default function RoboticsSimEditorPage() {
         : object,
     );
     updateWorldScene(nextObjects, "object_physics_updated");
+    undo.commitAction();
   }
 
   function updateObjectRotation(id, headingDeg) {
+    if (!undo.pendingLabel) undo.beginAction("Rotate");
     const normalized = ((Number(headingDeg) % 360) + 360) % 360;
     const nextObjects = worldScene.objects.map((object) =>
       object.id === id
@@ -549,6 +586,7 @@ export default function RoboticsSimEditorPage() {
   }
 
   function rotateObjectBy(id, deltaDeg) {
+    undo.beginAction("Rotate");
     const current = worldScene.objects.find((object) => object.id === id);
     const currentHeading = Number(current?.rotation_deg?.y) || 0;
     updateObjectRotation(id, currentHeading + deltaDeg);
@@ -570,16 +608,23 @@ export default function RoboticsSimEditorPage() {
       },
     };
     void saveProjectSnapshot("object_rotated", { world: nextWorld });
+    undo.commitAction();
+  }
+
+  function handleObjectDragStart() {
+    undo.beginAction("Move");
   }
 
   function commitObjectMove() {
     const nextWorld = { ...world, world_scene: { ...worldScene, objects: worldScene.objects } };
     void saveProjectSnapshot("object_dragged", { world: nextWorld });
+    undo.commitAction();
   }
 
   function commitObjectRotate() {
     const nextWorld = { ...world, world_scene: { ...worldScene, objects: worldScene.objects } };
     void saveProjectSnapshot("object_rotated", { world: nextWorld });
+    undo.commitAction();
   }
 
   function handleRobotStartMove(nextX, nextY) {
@@ -629,8 +674,10 @@ export default function RoboticsSimEditorPage() {
       px = snapForObjectType(px, definition.placement.objectType);
       pz = snapForObjectType(pz, definition.placement.objectType);
     }
+    undo.beginAction("Add object");
     const next = createSceneObjectFromPalette(definition, px, pz);
     updateWorldScene([...worldScene.objects, next], "object_dropped");
+    undo.commitAction();
     setDragPresetId(null);
     setDragPreview(null);
   }
@@ -738,12 +785,14 @@ export default function RoboticsSimEditorPage() {
   }
 
   function updateObjectMetadata(id, key, value) {
+    undo.beginAction("Edit property");
     const nextObjects = worldScene.objects.map((object) =>
       object.id === id
         ? { ...object, metadata: { ...(object.metadata || {}), [key]: value } }
         : object,
     );
     updateWorldScene(nextObjects, "object_property_updated");
+    undo.commitAction();
   }
 
   function renderDynamicProperties(obj) {
@@ -839,10 +888,10 @@ export default function RoboticsSimEditorPage() {
             <Save size={15} />
           </button>
           <div className="robotics-topbar__sep" />
-          <button className="robotics-topbar__btn" onClick={handleUndo} disabled={!undoStackRef.current.canUndo()} title="Undo (Ctrl+Z)">
+          <button className="robotics-topbar__btn" onClick={handleUndo} disabled={!undo.canUndo} title="Undo (Ctrl+Z)">
             <Undo2 size={15} />
           </button>
-          <button className="robotics-topbar__btn" onClick={handleRedo} disabled={!undoStackRef.current.canRedo()} title="Redo (Ctrl+Shift+Z)">
+          <button className="robotics-topbar__btn" onClick={handleRedo} disabled={!undo.canRedo} title="Redo (Ctrl+Shift+Z)">
             <Redo2 size={15} />
           </button>
           <div className="robotics-topbar__sep" />
@@ -1077,6 +1126,7 @@ export default function RoboticsSimEditorPage() {
             }}
             backgroundColor={viewportBackgroundColor}
             snapEnabled={snapEnabled}
+            onObjectDragStart={handleObjectDragStart}
             onObjectMove={updateObjectPosition}
             onObjectDragEnd={commitObjectMove}
             onObjectRotate={updateObjectRotation}
@@ -1466,14 +1516,14 @@ export default function RoboticsSimEditorPage() {
         open={customObjectOpen}
         onClose={() => setCustomObjectOpen(false)}
         onCreateObject={(customObj) => {
-          const before = pushUndo("custom_object");
+          undo.beginAction("Add object");
           const placed = {
             ...customObj,
             position: { x: (world.width_cells * GRID_CELL_CM) / 2, y: 0, z: (world.height_cells * GRID_CELL_CM) / 2 },
           };
           updateWorldScene([...worldScene.objects, placed], "custom_object_created");
           selectObject(placed.id);
-          commitUndo("custom_object", before);
+          undo.commitAction();
           addConsoleLog(`Custom object "${customObj.metadata?.custom_name || "object"}" created`, "info");
         }}
       />
