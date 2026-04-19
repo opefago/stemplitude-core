@@ -10,7 +10,6 @@ import React, {
 import { Canvas, useThree, useFrame } from "@react-three/fiber";
 import {
   OrbitControls,
-  Grid,
   Hud,
   GizmoHelper,
   GizmoViewcube,
@@ -39,6 +38,7 @@ import {
   FLAT_TYPES,
   FLAT_ROTATION,
   DEFAULT_SHAPE_ROTATIONS,
+  WORKPLANE_PRESETS,
   dragCursor,
   sceneCamera,
   sceneOrbitControls,
@@ -273,9 +273,85 @@ export const FONT_LABELS = {
   "droid-mono": "Droid Mono",
 };
 
-// Fix #5: Hoist axis line geometry data to module-level constants
-const X_AXIS_POSITIONS = new Float32Array([-200, 0, 0, 200, 0, 0]);
-const Z_AXIS_POSITIONS = new Float32Array([0, 0, -200, 0, 0, 200]);
+function buildDesignGridLines(width, depth, step, y) {
+  const hw = width / 2;
+  const hd = depth / 2;
+  const pts = [];
+  for (let x = -hw; x <= hw; x += step) {
+    pts.push(x, y, -hd, x, y, hd);
+  }
+  for (let z = -hd; z <= hd; z += step) {
+    pts.push(-hw, y, z, hw, y, z);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
+  return geo;
+}
+
+function WorkplaneGrid({ width, depth, cellSize, sectionSize }) {
+  const cellGeo = useMemo(
+    () => buildDesignGridLines(width, depth, cellSize, 0.01),
+    [width, depth, cellSize],
+  );
+  const sectionGeo = useMemo(
+    () => buildDesignGridLines(width, depth, sectionSize, 0.01),
+    [width, depth, sectionSize],
+  );
+  const borderGeo = useMemo(() => {
+    const hw = width / 2;
+    const hd = depth / 2;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute([
+        -hw, 0.02, -hd, hw, 0.02, -hd,
+        hw, 0.02, -hd, hw, 0.02, hd,
+        hw, 0.02, hd, -hw, 0.02, hd,
+        -hw, 0.02, hd, -hw, 0.02, -hd,
+      ], 3),
+    );
+    return geo;
+  }, [width, depth]);
+  return (
+    <group>
+      <lineSegments geometry={cellGeo}>
+        <lineBasicMaterial
+          color="#a8c8e8"
+          transparent
+          opacity={0.35}
+          depthWrite={false}
+          polygonOffset
+          polygonOffsetFactor={-1}
+          polygonOffsetUnits={-1}
+        />
+      </lineSegments>
+      <lineSegments geometry={sectionGeo}>
+        <lineBasicMaterial
+          color="#6a9fd8"
+          transparent
+          opacity={0.55}
+          depthWrite={false}
+          polygonOffset
+          polygonOffsetFactor={-2}
+          polygonOffsetUnits={-2}
+        />
+      </lineSegments>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]} receiveShadow>
+        <planeGeometry args={[width, depth]} />
+        <meshStandardMaterial
+          color="#f0f4f8"
+          polygonOffset
+          polygonOffsetFactor={1}
+          polygonOffsetUnits={1}
+        />
+      </mesh>
+      <lineSegments geometry={borderGeo}>
+        <lineBasicMaterial color="#94a3b8" transparent opacity={0.6} />
+      </lineSegments>
+    </group>
+  );
+}
+
 
 const holeCheckerTex = (() => {
   const sz = 4;
@@ -3711,6 +3787,11 @@ function SceneContent() {
   const gridVisible = useDesignStore((s) => s.gridVisible);
   const wireframe = useDesignStore((s) => s.wireframe);
   const snapIncrement = useDesignStore((s) => s.snapIncrement);
+  const workplanePreset = useDesignStore((s) => s.workplanePreset);
+  const activePreset = useMemo(
+    () => WORKPLANE_PRESETS.find((p) => p.id === workplanePreset) || WORKPLANE_PRESETS[0],
+    [workplanePreset],
+  );
   const shadowsEnabled = useDesignStore((s) => s.shadowsEnabled);
   const mirrorMode = useDesignStore((s) => s.mirrorMode);
   const clearSelection = useDesignStore((s) => s.clearSelection);
@@ -3958,30 +4039,20 @@ function SceneContent() {
       <Environment preset="city" environmentIntensity={0.3} />
 
       {gridVisible && (
-        <Grid
-          position={[0, 0, 0]}
-          args={[200, 200]}
+        <WorkplaneGrid
+          width={activePreset.width}
+          depth={activePreset.depth}
           cellSize={snapIncrement || 1}
           sectionSize={(snapIncrement || 1) * 10}
-          fadeDistance={300}
-          fadeStrength={1.5}
-          cellColor="#a8c8e8"
-          sectionColor="#6a9fd8"
-          cellThickness={0.6}
-          sectionThickness={1.2}
-          followCamera
-          infiniteGrid
-          side={THREE.DoubleSide}
         />
       )}
 
-      {/* Fix #5: Use module-level constants for axis line positions */}
       <line>
         <bufferGeometry>
           <bufferAttribute
             attach="attributes-position"
             count={2}
-            array={X_AXIS_POSITIONS}
+            array={new Float32Array([-activePreset.width / 2, 0.02, 0, activePreset.width / 2, 0.02, 0])}
             itemSize={3}
           />
         </bufferGeometry>
@@ -3992,7 +4063,7 @@ function SceneContent() {
           <bufferAttribute
             attach="attributes-position"
             count={2}
-            array={Z_AXIS_POSITIONS}
+            array={new Float32Array([0, 0.02, -activePreset.depth / 2, 0, 0.02, activePreset.depth / 2])}
             itemSize={3}
           />
         </bufferGeometry>
@@ -4065,7 +4136,7 @@ function SceneContent() {
           position={[0, -0.5, 0]}
           receiveShadow
         >
-          <planeGeometry args={[500, 500]} />
+          <planeGeometry args={[activePreset.width + 40, activePreset.depth + 40]} />
           <shadowMaterial transparent opacity={0.15} />
         </mesh>
       )}

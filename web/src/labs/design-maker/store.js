@@ -462,6 +462,16 @@ async function migrateLegacyProjectsIfNeeded() {
   }
 }
 
+export const WORKPLANE_PRESETS = [
+  { id: "ender3", label: "Ender 3 (220 × 220)", width: 220, depth: 220 },
+  { id: "prusa_mk3s", label: "Prusa MK3S (250 × 210)", width: 250, depth: 210 },
+  { id: "bambu_a1", label: "Bambu Lab A1 (256 × 256)", width: 256, depth: 256 },
+  { id: "ender3_max", label: "Ender 3 Max (300 × 300)", width: 300, depth: 300 },
+  { id: "voron_350", label: "Voron 2.4 (350 × 350)", width: 350, depth: 350 },
+  { id: "prusa_xl", label: "Prusa XL (360 × 360)", width: 360, depth: 360 },
+  { id: "custom_200", label: "200 × 200", width: 200, depth: 200 },
+];
+
 export const useDesignStore = create((set, get) => ({
   objects: [],
   groups: [],
@@ -473,6 +483,7 @@ export const useDesignStore = create((set, get) => ({
   cameraMode: "perspective",
   gridVisible: true,
   snapIncrement: 1,
+  workplanePreset: "ender3",
   wireframe: false,
   faceSnap: true,
   rulerVisible: true,
@@ -819,6 +830,7 @@ export const useDesignStore = create((set, get) => ({
   setCameraMode: (mode) => set({ cameraMode: mode }),
   toggleGrid: () => set((state) => ({ gridVisible: !state.gridVisible })),
   setSnapIncrement: (snap) => set({ snapIncrement: snap }),
+  setWorkplanePreset: (id) => set({ workplanePreset: id }),
   toggleWireframe: () => set((state) => ({ wireframe: !state.wireframe })),
   toggleFaceSnap: () => set((state) => ({ faceSnap: !state.faceSnap })),
   toggleRuler: () => set((state) => ({ rulerVisible: !state.rulerVisible })),

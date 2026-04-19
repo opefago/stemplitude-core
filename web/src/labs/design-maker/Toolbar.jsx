@@ -7,7 +7,7 @@ import {
   AlignCenterHorizontal, AlignCenterVertical,
   Undo2, Redo2, LayoutGrid, Magnet, ArrowDownToLine,
 } from 'lucide-react';
-import { useDesignStore, getEffectiveSelectionIdsFromState } from './store';
+import { useDesignStore, getEffectiveSelectionIdsFromState, WORKPLANE_PRESETS } from './store';
 import TC from './tooltipContent';
 
 export default function Toolbar() {
@@ -27,6 +27,8 @@ export default function Toolbar() {
   const workplaneMode = useDesignStore(s => s.workplaneMode);
   const toggleWorkplaneMode = useDesignStore(s => s.toggleWorkplaneMode);
   const setSnapIncrement = useDesignStore(s => s.setSnapIncrement);
+  const workplanePreset = useDesignStore(s => s.workplanePreset);
+  const setWorkplanePreset = useDesignStore(s => s.setWorkplanePreset);
   const removeSelected = useDesignStore(s => s.removeSelected);
   const duplicateSelected = useDesignStore(s => s.duplicateSelected);
   const dropToFloor = useDesignStore(s => s.dropToFloor);
@@ -176,6 +178,16 @@ export default function Toolbar() {
             { value: 5, label: '5mm' },
             { value: 10, label: '10mm' },
           ]}
+        />
+      </div>
+
+      <div className="dml-toolbar-group">
+        <span className="dml-toolbar-label">Bed</span>
+        <CustomSelect
+          className="dml-snap-select"
+          value={workplanePreset}
+          onChange={(v) => setWorkplanePreset(v)}
+          options={WORKPLANE_PRESETS.map((p) => ({ value: p.id, label: p.label }))}
         />
       </div>
 
