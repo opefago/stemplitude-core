@@ -1,4 +1,4 @@
-import { Copy, Download, Eye, EyeOff, FlipHorizontal, Group, Magnet, Pause, Play, RotateCcw, RotateCw, Redo2, Save, Trash2, Undo2, Ungroup, Upload, LayoutTemplate, Share2 } from "lucide-react";
+import { Copy, Download, Eye, EyeOff, FlipHorizontal, Group, Magnet, Pause, Play, RotateCcw, RotateCw, Redo2, Save, Settings, Trash2, Undo2, Ungroup, Upload, LayoutTemplate, Share2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRoboticsWorkspaceContext } from "../features/robotics_lab/RoboticsWorkspaceContext";
 import { GRID_CELL_CM } from "../features/robotics_lab/workspaceDefaults";
@@ -577,6 +577,11 @@ export default function RoboticsSimEditorPage() {
     void saveProjectSnapshot("object_dragged", { world: nextWorld });
   }
 
+  function commitObjectRotate() {
+    const nextWorld = { ...world, world_scene: { ...worldScene, objects: worldScene.objects } };
+    void saveProjectSnapshot("object_rotated", { world: nextWorld });
+  }
+
   function handleRobotStartMove(nextX, nextY) {
     setStartPosition(nextX, nextY);
   }
@@ -876,62 +881,15 @@ export default function RoboticsSimEditorPage() {
           <button className="robotics-topbar__btn" onClick={() => setShowConsole((p) => !p)} title="Toggle Console">
             {showConsole ? "Hide Log" : "Log"}
           </button>
+          <div className="robotics-topbar__sep" />
+          <button className="robotics-topbar__btn" onClick={() => setSettingsOpen(true)} title="Simulator Settings" aria-label="Simulator Settings">
+            <Settings size={16} />
+          </button>
         </div>
       </header>
 
       <div className="robotics-split-content">
       <aside className="robotics-lab-left">
-        <section className="robotics-left-card">
-          <button
-            type="button"
-            className="robotics-left-card-toggle"
-            onClick={() => toggleLeftPanelSection("runtime")}
-            aria-expanded={!leftPanelCollapsed.runtime}
-          >
-            <h3>Simulation Settings</h3>
-            <span className="robotics-left-card-toggle__hint">
-              {leftPanelCollapsed.runtime ? "Expand" : "Collapse"}
-            </span>
-          </button>
-          {!leftPanelCollapsed.runtime ? (
-            <>
-              <div className="robotics-config-grid">
-                <label className="robotics-form-field">
-                  <span>Tick (ms)</span>
-                  <input
-                    type="number"
-                    min={50}
-                    max={1000}
-                    value={runtimeSettings.tick_ms ?? 200}
-                    onChange={(event) =>
-                      setRuntimeSettings((prev) => ({ ...prev, tick_ms: Number(event.target.value) || 200 }))
-                    }
-                    onBlur={() => void saveProjectSnapshot("runtime_settings_changed")}
-                  />
-                </label>
-                <label className="robotics-form-field">
-                  <span>Robot start heading (deg)</span>
-                  <input
-                    type="number"
-                    min={0}
-                    max={359}
-                    value={Math.round(startPose.heading_deg ?? 0)}
-                    onChange={(event) => setStartHeading(Number(event.target.value))}
-                  />
-                </label>
-              </div>
-              <div className="robotics-lab-controls robotics-lab-controls--compact">
-                <button className="robotics-lab-btn robotics-lab-btn--icon" onClick={() => rotateStartHeading(-15)}>
-                  <RotateCcw size={14} /> Robot -15°
-                </button>
-                <button className="robotics-lab-btn robotics-lab-btn--icon" onClick={() => rotateStartHeading(15)}>
-                  <RotateCw size={14} /> Robot +15°
-                </button>
-              </div>
-            </>
-          ) : null}
-        </section>
-
         <section className="robotics-left-card">
           <button
             type="button"
@@ -1121,6 +1079,8 @@ export default function RoboticsSimEditorPage() {
             snapEnabled={snapEnabled}
             onObjectMove={updateObjectPosition}
             onObjectDragEnd={commitObjectMove}
+            onObjectRotate={updateObjectRotation}
+            onObjectRotateEnd={commitObjectRotate}
             onObjectSelect={(id, event) => {
               selectObject(id, event?.shiftKey);
               setRightTab("properties");

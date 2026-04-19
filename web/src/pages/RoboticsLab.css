@@ -1524,6 +1524,191 @@
   gap: 6px;
 }
 
+/* ─── Settings dialog (kid-themed) ─── */
+.robotics-settings-dialog {
+  width: min(440px, calc(100vw - 24px));
+  border: 2px solid #3a5068;
+  border-radius: 16px;
+  background: linear-gradient(170deg, #1c2a3a 0%, #111922 100%);
+  box-shadow:
+    0 24px 48px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  overflow: hidden;
+}
+
+.robotics-settings-dialog__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: linear-gradient(180deg, #263548, #1e2c3d);
+  border-bottom: 2px solid #2e4058;
+}
+
+.robotics-settings-dialog__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #e6edf3;
+}
+
+.robotics-settings-dialog__title h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.robotics-settings-dialog__body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-height: 65vh;
+  overflow-y: auto;
+}
+
+.robotics-settings-dialog__section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #2a3a4e;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.robotics-settings-dialog__section-title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #58a6ff;
+}
+
+.robotics-settings-dialog__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.robotics-settings-dialog .robotics-form-field {
+  gap: 5px;
+}
+
+.robotics-settings-dialog .robotics-form-field span {
+  font-size: 12px;
+  font-weight: 700;
+  color: #a9bbd0;
+}
+
+.robotics-settings-dialog .robotics-form-field input,
+.robotics-settings-dialog .robotics-form-field select {
+  border: 2px solid #2e4058;
+  background: #0d1117;
+  color: #e6edf3;
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.robotics-settings-dialog .robotics-form-field input:focus,
+.robotics-settings-dialog .robotics-form-field select:focus {
+  outline: none;
+  border-color: #58a6ff;
+  box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.15);
+}
+
+.robotics-settings-dialog .robotics-form-field input:hover,
+.robotics-settings-dialog .robotics-form-field select:hover {
+  border-color: #3d5570;
+}
+
+.robotics-settings-dialog__color-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.robotics-settings-dialog__color-row input[type="color"] {
+  width: 36px;
+  height: 36px;
+  border: 2px solid #2e4058;
+  border-radius: 10px;
+  padding: 2px;
+  cursor: pointer;
+  background: #0d1117;
+}
+
+.robotics-settings-dialog__color-hex {
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 12px;
+  color: #8b949e;
+}
+
+.robotics-settings-dialog .robotics-bg-presets {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.robotics-settings-dialog .robotics-bg-chip {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 2px solid #2e4058;
+  cursor: pointer;
+  transition: transform 0.12s, box-shadow 0.12s;
+}
+
+.robotics-settings-dialog .robotics-bg-chip:hover {
+  transform: scale(1.12);
+}
+
+.robotics-settings-dialog .robotics-bg-chip.active {
+  border-color: #58a6ff;
+  box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.25);
+  transform: scale(1.1);
+}
+
+.robotics-settings-dialog .kid-dropdown {
+  width: 100%;
+}
+
+.robotics-settings-dialog .kid-dropdown__trigger {
+  min-height: 38px;
+  border: 2px solid #2e4058;
+  border-radius: 10px;
+  background: #0d1117;
+  color: #e6edf3;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 10px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.robotics-settings-dialog .kid-dropdown__trigger:hover {
+  border-color: #3d5570;
+  background: #0d1117;
+}
+
+.robotics-settings-dialog .kid-dropdown__trigger:focus-visible {
+  outline: none;
+  border-color: #58a6ff;
+  box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.15);
+}
+
+.robotics-settings-dialog .kid-dropdown__chevron {
+  color: #58a6ff;
+}
+
+.robotics-settings-dialog .kid-dropdown__value {
+  color: #e6edf3;
+}
+
 .robotics-floating-controls-bottom {
   position: absolute;
   left: 50%;

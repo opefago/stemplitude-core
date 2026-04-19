@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { OrbitControls, ContactShadows } from "@react-three/drei";
+import { OrbitControls, ContactShadows, Html } from "@react-three/drei";
 import { EffectComposer, SSAO, Bloom } from "@react-three/postprocessing";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import * as THREE from "three";
@@ -84,6 +84,8 @@ interface ThreeSimViewportProps {
   onObjectMove?: (objectId: string, x: number, z: number) => void;
   onObjectDragStart?: (objectId: string) => void;
   onObjectDragEnd?: (objectId: string) => void;
+  onObjectRotate?: (objectId: string, yawDeg: number) => void;
+  onObjectRotateEnd?: (objectId: string) => void;
   onObjectSelect?: (objectId: string) => void;
   selectedObjectId?: string | null;
   robotStartPose?: SimulatorPose;
@@ -114,6 +116,8 @@ interface EditableObjectsLayerProps {
   onObjectMove?: (objectId: string, x: number, z: number) => void;
   onObjectDragStart?: (objectId: string) => void;
   onObjectDragEnd?: (objectId: string) => void;
+  onObjectRotate?: (objectId: string, yawDeg: number) => void;
+  onObjectRotateEnd?: (objectId: string) => void;
   onDragStateChange?: (isDragging: boolean) => void;
   onObjectSelect?: (objectId: string) => void;
 }
@@ -138,12 +142,23 @@ interface SceneCameraRigProps {
   onDebugPose?: (pose: CameraPose) => void;
 }
 
+interface PendingDrag {
+  id: string;
+  pointerId: number;
+  offsetX: number;
+  offsetZ: number;
+  startHitX: number;
+  startHitZ: number;
+}
+
 interface DragState {
   id: string;
   pointerId: number;
   offsetX: number;
   offsetZ: number;
 }
+
+const DRAG_THRESHOLD_CM = 3;
 
 interface RobotDragState {
   pointerId: number;
@@ -235,8 +250,15 @@ function collectOtherEdges(objects: WorldObjectData[], dragId: string, axis: "x"
   for (const obj of objects) {
     if (obj.id === dragId) continue;
     const pos = axis === "x" ? (obj.position?.x ?? 0) : (obj.position?.z ?? 0);
-    const size = axis === "x" ? Math.max(4, obj.size_cm?.x ?? 20) : Math.max(4, obj.size_cm?.z ?? 20);
-    edges.push(pos - size / 2, pos + size / 2);
+    const sizeX = Math.max(4, obj.size_cm?.x ?? 20);
+    const sizeZ = Math.max(4, obj.size_cm?.z ?? 20);
+    const yawRad = ((Number(obj.rotation_deg?.y) || 0) * Math.PI) / 180;
+    const cosA = Math.abs(Math.cos(yawRad));
+    const sinA = Math.abs(Math.sin(yawRad));
+    const halfExtent = axis === "x"
+      ? (sizeX * cosA + sizeZ * sinA) / 2
+      : (sizeX * sinA + sizeZ * cosA) / 2;
+    edges.push(pos - halfExtent, pos + halfExtent);
   }
   return edges;
 }
@@ -360,6 +382,12 @@ function WorldObject({
           <sphereGeometry args={[Math.max(2.8, baseRadius * 0.28), 16, 16]} />
           <meshToonMaterial {...toonMaterialProps} />
         </mesh>
+        {selected ? (
+          <mesh position={[0, 0.3, 0]} rotation={[-Math.PI / 2, 0, 0]} raycast={() => null}>
+            <ringGeometry args={[baseRadius + 2, baseRadius + 4, 48]} />
+            <meshBasicMaterial color="#00d4ff" transparent opacity={0.5} side={THREE.DoubleSide} depthTest={false} />
+          </mesh>
+        ) : null}
       </group>
     );
   }
@@ -374,8 +402,8 @@ function WorldObject({
           <meshBasicMaterial color="#0d0d0d" side={THREE.BackSide} />
         </mesh>
         {selected ? (
-          <mesh geometry={rampGeometry} scale={[1.05, 1.05, 1.05]} raycast={() => null}>
-            <meshBasicMaterial color="#00d4ff" transparent opacity={0.2} side={THREE.BackSide} />
+          <mesh geometry={rampGeometry} scale={[1.06, 1.06, 1.06]} raycast={() => null}>
+            <meshBasicMaterial color="#00d4ff" transparent opacity={0.35} side={THREE.BackSide} depthTest={false} />
           </mesh>
         ) : null}
       </group>
@@ -394,9 +422,9 @@ function WorldObject({
           <meshBasicMaterial color="#0d0d0d" side={THREE.BackSide} />
         </mesh>
         {selected ? (
-          <mesh scale={[1.05, 1.2, 1.05]} raycast={() => null}>
+          <mesh scale={[1.06, 1.2, 1.06]} raycast={() => null}>
             <boxGeometry args={[sx, sy, sz]} />
-            <meshBasicMaterial color="#00d4ff" transparent opacity={0.18} side={THREE.BackSide} />
+            <meshBasicMaterial color="#00d4ff" transparent opacity={0.35} side={THREE.BackSide} depthTest={false} />
           </mesh>
         ) : null}
       </group>
@@ -416,6 +444,12 @@ function WorldObject({
           <torusGeometry args={[ringRadius, tubeRadius, 18, 36]} />
           <meshBasicMaterial color="#0d0d0d" side={THREE.BackSide} />
         </mesh>
+        {selected ? (
+          <mesh scale={[1.08, 1.08, 1.08]} raycast={() => null}>
+            <torusGeometry args={[ringRadius, tubeRadius, 18, 36]} />
+            <meshBasicMaterial color="#00d4ff" transparent opacity={0.35} side={THREE.BackSide} depthTest={false} />
+          </mesh>
+        ) : null}
       </group>
     );
   }
@@ -436,7 +470,7 @@ function WorldObject({
           {selected ? (
             <mesh rotation={[rollXRad, 0, rollZRad]} scale={[1.06, 1.06, 1.06]} raycast={() => null}>
               <sphereGeometry args={[radius, 24, 24]} />
-              <meshBasicMaterial color="#00d4ff" transparent opacity={0.22} side={THREE.BackSide} />
+              <meshBasicMaterial color="#00d4ff" transparent opacity={0.35} side={THREE.BackSide} depthTest={false} />
             </mesh>
           ) : null}
         </group>
@@ -454,6 +488,12 @@ function WorldObject({
             <cylinderGeometry args={[radius, radius * 0.94, Math.max(1.6, sy), 24]} />
             <meshBasicMaterial color="#0d0d0d" side={THREE.BackSide} />
           </mesh>
+          {selected ? (
+            <mesh scale={[1.06, 1.06, 1.06]} raycast={() => null}>
+              <cylinderGeometry args={[radius, radius * 0.94, Math.max(1.6, sy), 24]} />
+              <meshBasicMaterial color="#00d4ff" transparent opacity={0.35} side={THREE.BackSide} depthTest={false} />
+            </mesh>
+          ) : null}
         </group>
       );
     }
@@ -476,19 +516,31 @@ function WorldObject({
             <ringGeometry args={[Math.min(sx, sz) * 0.18, Math.min(sx, sz) * 0.34, 36]} />
             <meshBasicMaterial color="#f8fafc" transparent opacity={0.7} />
           </mesh>
+          {selected ? (
+            <mesh scale={[1.06, 1.1, 1.06]} raycast={() => null}>
+              <boxGeometry args={[sx, sy, sz]} />
+              <meshBasicMaterial color="#00d4ff" transparent opacity={0.35} side={THREE.BackSide} depthTest={false} />
+            </mesh>
+          ) : null}
         </group>
       );
     }
     return (
-      <group rotation={[0, yawRad, 0]} {...commonProps}>
-        <mesh position={[x, y, z]}>
+      <group position={[x, y, z]} rotation={[0, yawRad, 0]} {...commonProps}>
+        <mesh>
           <cylinderGeometry args={[Math.max(sx, sz) / 2, Math.max(sx, sz) / 2, sy, 28]} />
           <meshToonMaterial {...toonMaterialProps} transparent opacity={0.82} />
         </mesh>
-        <mesh position={[x, y, z]} scale={[1.015, 1.015, 1.015]} raycast={() => null}>
+        <mesh scale={[1.015, 1.015, 1.015]} raycast={() => null}>
           <cylinderGeometry args={[Math.max(sx, sz) / 2, Math.max(sx, sz) / 2, sy, 28]} />
           <meshBasicMaterial color="#0d0d0d" side={THREE.BackSide} />
         </mesh>
+        {selected ? (
+          <mesh scale={[1.06, 1.06, 1.06]} raycast={() => null}>
+            <cylinderGeometry args={[Math.max(sx, sz) / 2, Math.max(sx, sz) / 2, sy, 28]} />
+            <meshBasicMaterial color="#00d4ff" transparent opacity={0.35} side={THREE.BackSide} depthTest={false} />
+          </mesh>
+        ) : null}
       </group>
     );
   }
@@ -507,18 +559,200 @@ function WorldObject({
       </mesh>
       {selected ? (
         <>
-          <mesh scale={[1.055, 1.055, 1.055]} raycast={() => null}>
+          <mesh scale={[1.06, 1.06, 1.06]} raycast={() => null}>
             <boxGeometry args={[sx, sy, sz]} />
-            <meshBasicMaterial color="#00d4ff" transparent opacity={0.22} side={THREE.BackSide} />
+            <meshBasicMaterial color="#00d4ff" transparent opacity={0.35} side={THREE.BackSide} depthTest={false} />
           </mesh>
-          {editable && (
-            <mesh position={[0, -sy / 2 + 0.2, 0]} rotation={[-Math.PI / 2, 0, 0]} raycast={() => null}>
-              <ringGeometry args={[rotationGizmoRadius - 1.5, rotationGizmoRadius + 1.5, 48]} />
-              <meshBasicMaterial color="#f59e0b" transparent opacity={0.55} side={THREE.DoubleSide} />
-            </mesh>
-          )}
+          <mesh position={[0, -sy / 2 + 0.3, 0]} rotation={[-Math.PI / 2, 0, 0]} raycast={() => null}>
+            <ringGeometry args={[rotationGizmoRadius - 0.8, rotationGizmoRadius + 0.8, 64]} />
+            <meshBasicMaterial color="#00d4ff" transparent opacity={0.5} side={THREE.DoubleSide} depthTest={false} />
+          </mesh>
         </>
       ) : null}
+    </group>
+  );
+}
+
+const ROTATION_HANDLE_COLOR = "#22c55e";
+const ROTATION_SNAP_DEG = 15;
+const HANDLE_BAND = 3.5;
+
+interface RotationHandleProps {
+  object: WorldObjectData;
+  onRotate: (objectId: string, yawDeg: number) => void;
+  onRotateEnd: (objectId: string) => void;
+  onDragStateChange?: (isDragging: boolean) => void;
+}
+
+function RotationHandle({ object, onRotate, onRotateEnd, onDragStateChange }: RotationHandleProps) {
+  const { camera, gl } = useThree();
+  const [hovered, setHovered] = useState(false);
+  const [angleDelta, setAngleDelta] = useState<number | null>(null);
+  const dragRef = useRef<{
+    screenCx: number;
+    screenCy: number;
+    sign: number;
+    startYawDeg: number;
+    prevAngle: number;
+    accumDelta: number;
+  } | null>(null);
+
+  const sx = Math.max(4, object.size_cm?.x ?? 20);
+  const sz = Math.max(4, object.size_cm?.z ?? 20);
+  const sy = Math.max(2, object.size_cm?.y ?? 20);
+  const objX = object.position?.x ?? 0;
+  const objZ = object.position?.z ?? 0;
+  const yawDeg = Number(object.rotation_deg?.y) || 0;
+  const radius = Math.max(sx, sz) * 0.65;
+  const innerRadius = radius - HANDLE_BAND;
+  const outerRadius = radius + HANDLE_BAND;
+  const objY = (Number(object.position?.y) || 0) + sy / 2;
+
+  const progressArcGeo = useMemo(() => {
+    if (angleDelta == null || Math.abs(angleDelta) < 0.5) return null;
+    const rad = (angleDelta * Math.PI) / 180;
+    const start = rad >= 0 ? 0 : rad;
+    const len = Math.abs(rad);
+    return new THREE.RingGeometry(0, outerRadius, 48, 1, start, len);
+  }, [angleDelta, outerRadius]);
+
+  useEffect(() => {
+    const handleDomMove = (e: PointerEvent) => {
+      if (!dragRef.current) return;
+      const rect = gl.domElement.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const cur = Math.atan2(my - dragRef.current.screenCy, mx - dragRef.current.screenCx);
+      let step = cur - dragRef.current.prevAngle;
+      while (step > Math.PI) step -= 2 * Math.PI;
+      while (step < -Math.PI) step += 2 * Math.PI;
+      step *= dragRef.current.sign;
+      dragRef.current.accumDelta += step;
+      dragRef.current.prevAngle = cur;
+      let totalRad = dragRef.current.accumDelta;
+      if (e.shiftKey) {
+        const snap = THREE.MathUtils.degToRad(ROTATION_SNAP_DEG);
+        totalRad = Math.round(totalRad / snap) * snap;
+      }
+      const totalDeg = THREE.MathUtils.radToDeg(totalRad);
+      const newYaw = ((dragRef.current.startYawDeg + totalDeg) % 360 + 360) % 360;
+      setAngleDelta(Math.round(totalDeg));
+      onRotate(object.id, newYaw);
+    };
+    const handleDomUp = () => {
+      if (!dragRef.current) return;
+      dragRef.current = null;
+      setAngleDelta(null);
+      setHovered(false);
+      onDragStateChange?.(false);
+      onRotateEnd(object.id);
+      document.removeEventListener("pointermove", handleDomMove);
+      document.removeEventListener("pointerup", handleDomUp);
+    };
+    if (dragRef.current) {
+      document.addEventListener("pointermove", handleDomMove);
+      document.addEventListener("pointerup", handleDomUp);
+    }
+    return () => {
+      document.removeEventListener("pointermove", handleDomMove);
+      document.removeEventListener("pointerup", handleDomUp);
+    };
+  });
+
+  const onPointerDown = useCallback(
+    (e: PointerEvent3D) => {
+      e.stopPropagation();
+      onDragStateChange?.(true);
+      const centerPt = new THREE.Vector3(objX, objY, objZ);
+      const projected = centerPt.clone().project(camera);
+      const rect = gl.domElement.getBoundingClientRect();
+      const cx = ((projected.x + 1) / 2) * rect.width;
+      const cy = ((1 - projected.y) / 2) * rect.height;
+      const ne = e.nativeEvent || e;
+      const initAngle = Math.atan2(ne.clientY - rect.top - cy, ne.clientX - rect.left - cx);
+      const camDir = new THREE.Vector3();
+      camera.getWorldDirection(camDir);
+      const yAxis = new THREE.Vector3(0, 1, 0);
+      const sign = yAxis.dot(camDir) >= 0 ? 1 : -1;
+      dragRef.current = {
+        screenCx: cx,
+        screenCy: cy,
+        sign,
+        startYawDeg: yawDeg,
+        prevAngle: initAngle,
+        accumDelta: 0,
+      };
+    },
+    [camera, gl, objX, objY, objZ, yawDeg, onDragStateChange],
+  );
+
+  const isRotating = angleDelta !== null;
+
+  return (
+    <group position={[objX, (Number(object.position?.y) || 0) + 0.5, objZ]}>
+      {/* Hover: full ring highlight */}
+      {(hovered || isRotating) && (
+        <mesh rotation={[-Math.PI / 2, 0, 0]} renderOrder={998} raycast={() => null}>
+          <ringGeometry args={[innerRadius, outerRadius, 64]} />
+          <meshBasicMaterial
+            color={ROTATION_HANDLE_COLOR}
+            transparent
+            opacity={isRotating ? 0.5 : 0.25}
+            depthTest={false}
+            depthWrite={false}
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+      )}
+      {/* Progress arc — filled pie-slice dial from center to outer edge */}
+      {isRotating && progressArcGeo && (
+        <mesh geometry={progressArcGeo} rotation={[-Math.PI / 2, 0, 0]} renderOrder={997} raycast={() => null}>
+          <meshBasicMaterial
+            color={ROTATION_HANDLE_COLOR}
+            transparent
+            opacity={0.3}
+            depthTest={false}
+            depthWrite={false}
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+      )}
+      {/* Interactive ring — thick band for easy grabbing */}
+      <mesh
+        rotation={[-Math.PI / 2, 0, 0]}
+        renderOrder={1000}
+        onPointerEnter={() => { if (!dragRef.current) setHovered(true); }}
+        onPointerLeave={() => { if (!dragRef.current) setHovered(false); }}
+        onPointerDown={onPointerDown}
+        userData={{ isTransformHandle: true }}
+      >
+        <ringGeometry args={[innerRadius, outerRadius, 64]} />
+        <meshBasicMaterial
+          color={ROTATION_HANDLE_COLOR}
+          transparent
+          opacity={hovered || isRotating ? 0.65 : 0.4}
+          depthTest={false}
+          depthWrite={false}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+      {/* Angle label */}
+      {isRotating && (
+        <Html center style={{ pointerEvents: "none" }} position={[0, sy + 8, 0]}>
+          <div style={{
+            background: "rgba(34,197,94,0.92)",
+            color: "#fff",
+            padding: "3px 10px",
+            borderRadius: 6,
+            fontSize: 14,
+            fontWeight: 700,
+            whiteSpace: "nowrap",
+            boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
+          }}>
+            {angleDelta >= 0 ? "+" : ""}{angleDelta}°
+          </div>
+        </Html>
+      )}
     </group>
   );
 }
@@ -531,6 +765,8 @@ function EditableObjectsLayer({
   onObjectMove,
   onObjectDragStart,
   onObjectDragEnd,
+  onObjectRotate,
+  onObjectRotateEnd,
   onDragStateChange,
   onObjectSelect,
 }: EditableObjectsLayerProps) {
@@ -538,6 +774,7 @@ function EditableObjectsLayer({
   const dragPlane = useMemo(() => new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), []);
   const dragHit = useMemo(() => new THREE.Vector3(), []);
   const [dragState, setDragState] = useState<DragState | null>(null);
+  const pendingDragRef = useRef<PendingDrag | null>(null);
 
   const handlePointerDown = useCallback(
     (event: PointerEvent3D, object: WorldObjectData) => {
@@ -546,25 +783,47 @@ function EditableObjectsLayer({
       if (!onObjectMove) return;
       event.target.setPointerCapture?.(event.pointerId);
       if (!event.ray.intersectPlane(dragPlane, dragHit)) return;
-      setDragState({
+      pendingDragRef.current = {
         id: object.id,
         pointerId: event.pointerId,
         offsetX: dragHit.x - (object.position?.x ?? 0),
         offsetZ: dragHit.z - (object.position?.z ?? 0),
-      });
-      onObjectDragStart?.(object.id);
-      onDragStateChange?.(true);
+        startHitX: dragHit.x,
+        startHitZ: dragHit.z,
+      };
     },
-    [dragHit, dragPlane, onDragStateChange, onObjectDragStart, onObjectMove, onObjectSelect],
+    [dragHit, dragPlane, onObjectMove, onObjectSelect],
   );
 
   const handlePointerMove = useCallback(
     (event: PointerEvent3D, object: WorldObjectData) => {
+      if (!event.ray.intersectPlane(dragPlane, dragHit)) return;
+
+      const pending = pendingDragRef.current;
+      if (pending && pending.id === object.id && !dragState) {
+        const dx = dragHit.x - pending.startHitX;
+        const dz = dragHit.z - pending.startHitZ;
+        if (dx * dx + dz * dz < DRAG_THRESHOLD_CM * DRAG_THRESHOLD_CM) return;
+        pendingDragRef.current = null;
+        setDragState({
+          id: pending.id,
+          pointerId: pending.pointerId,
+          offsetX: pending.offsetX,
+          offsetZ: pending.offsetZ,
+        });
+        onObjectDragStart?.(pending.id);
+        onDragStateChange?.(true);
+      }
+
       if (!dragState || dragState.id !== object.id) return;
       event.stopPropagation();
-      if (!event.ray.intersectPlane(dragPlane, dragHit)) return;
       const sizeX = Math.max(4, object.size_cm?.x ?? 20);
       const sizeZ = Math.max(4, object.size_cm?.z ?? 20);
+      const yawRad = ((Number(object.rotation_deg?.y) || 0) * Math.PI) / 180;
+      const cosA = Math.abs(Math.cos(yawRad));
+      const sinA = Math.abs(Math.sin(yawRad));
+      const halfExtentX = (sizeX * cosA + sizeZ * sinA) / 2;
+      const halfExtentZ = (sizeX * sinA + sizeZ * cosA) / 2;
       const rawX = dragHit.x - dragState.offsetX;
       const rawZ = dragHit.z - dragState.offsetZ;
       let nextX: number;
@@ -572,19 +831,24 @@ function EditableObjectsLayer({
       if (snapEnabled) {
         const otherEdgesX = collectOtherEdges(objects, object.id, "x");
         const otherEdgesZ = collectOtherEdges(objects, object.id, "z");
-        nextX = computeSnappedPosition(rawX, sizeX / 2, 0, worldSizeCm.width, otherEdgesX, GRID_CELL_CM);
-        nextZ = computeSnappedPosition(rawZ, sizeZ / 2, 0, worldSizeCm.depth, otherEdgesZ, GRID_CELL_CM);
+        nextX = computeSnappedPosition(rawX, halfExtentX, 0, worldSizeCm.width, otherEdgesX, GRID_CELL_CM);
+        nextZ = computeSnappedPosition(rawZ, halfExtentZ, 0, worldSizeCm.depth, otherEdgesZ, GRID_CELL_CM);
       } else {
-        nextX = clamp(rawX, sizeX / 2, worldSizeCm.width - sizeX / 2);
-        nextZ = clamp(rawZ, sizeZ / 2, worldSizeCm.depth - sizeZ / 2);
+        nextX = clamp(rawX, 0, worldSizeCm.width);
+        nextZ = clamp(rawZ, 0, worldSizeCm.depth);
       }
       onObjectMove?.(object.id, nextX, nextZ);
     },
-    [dragHit, dragPlane, dragState, objects, onObjectMove, snapEnabled, worldSizeCm.depth, worldSizeCm.width],
+    [dragHit, dragPlane, dragState, objects, onDragStateChange, onObjectDragStart, onObjectMove, snapEnabled, worldSizeCm.depth, worldSizeCm.width],
   );
 
   const handlePointerUp = useCallback(
     (event: PointerEvent3D, object: WorldObjectData) => {
+      if (pendingDragRef.current?.id === object.id) {
+        pendingDragRef.current = null;
+        event.target.releasePointerCapture?.(event.pointerId);
+        return;
+      }
       if (!dragState || dragState.id !== object.id) return;
       event.stopPropagation();
       if (dragState.pointerId !== event.pointerId) return;
@@ -600,6 +864,8 @@ function EditableObjectsLayer({
     camera.updateProjectionMatrix();
   }, [camera]);
 
+  const selectedObject = selectedObjectId ? objects.find((o) => o.id === selectedObjectId) : null;
+
   return (
     <>
       {objects.map((object) => (
@@ -613,6 +879,14 @@ function EditableObjectsLayer({
           onPointerUp={handlePointerUp}
         />
       ))}
+      {selectedObject && onObjectRotate && onObjectRotateEnd && (
+        <RotationHandle
+          object={selectedObject}
+          onRotate={onObjectRotate}
+          onRotateEnd={onObjectRotateEnd}
+          onDragStateChange={onDragStateChange}
+        />
+      )}
     </>
   );
 }
@@ -634,6 +908,8 @@ export function ThreeSimViewport({
   onObjectMove,
   onObjectDragStart,
   onObjectDragEnd,
+  onObjectRotate,
+  onObjectRotateEnd,
   onObjectSelect,
   selectedObjectId,
   robotStartPose,
@@ -805,6 +1081,8 @@ export function ThreeSimViewport({
                   onObjectMove={onObjectMove}
                   onObjectDragStart={onObjectDragStart}
                   onObjectDragEnd={onObjectDragEnd}
+                  onObjectRotate={onObjectRotate}
+                  onObjectRotateEnd={onObjectRotateEnd}
                   onDragStateChange={handleDragStateChange}
                   onObjectSelect={onObjectSelect}
                 />

@@ -1,4 +1,5 @@
-import { X } from "lucide-react";
+import { Settings, X } from "lucide-react";
+import { KidDropdown } from "../../../components/ui/KidDropdown";
 
 interface ViewportSettingsDialogProps {
   open: boolean;
@@ -43,115 +44,138 @@ export function ViewportSettingsDialog({
 
   return (
     <div className="robotics-modal-overlay" onClick={onClose}>
-      <div className="robotics-modal" onClick={(event) => event.stopPropagation()}>
-        <div className="robotics-modal-header">
-          <h3>Viewport Settings</h3>
-          <button className="robotics-modal-close" onClick={onClose} aria-label="Close settings">
-            <X size={16} />
+      <div className="robotics-settings-dialog" onClick={(event) => event.stopPropagation()}>
+        <div className="robotics-settings-dialog__header">
+          <div className="robotics-settings-dialog__title">
+            <Settings size={18} />
+            <h3>Simulator Settings</h3>
+          </div>
+          <button className="robotics-lab-btn robotics-lab-btn--icon" onClick={onClose} aria-label="Close settings">
+            <X size={14} />
           </button>
         </div>
-        <div className="robotics-modal-body">
-          <div className="robotics-modal-row">
-            <label>Background color</label>
-            <div className="robotics-bg-picker">
-              <input type="color" value={backgroundColor} onChange={(event) => onBackgroundColorChange(event.target.value)} />
-              <span>{backgroundColor}</span>
+
+        <div className="robotics-settings-dialog__body">
+          <section className="robotics-settings-dialog__section">
+            <h4 className="robotics-settings-dialog__section-title">Appearance</h4>
+            <label className="robotics-form-field">
+              <span>Background color</span>
+              <div className="robotics-settings-dialog__color-row">
+                <input type="color" value={backgroundColor} onChange={(event) => onBackgroundColorChange(event.target.value)} />
+                <span className="robotics-settings-dialog__color-hex">{backgroundColor}</span>
+              </div>
+              <div className="robotics-bg-presets">
+                {BG_PRESETS.map((preset) => (
+                  <button
+                    key={preset}
+                    className={`robotics-bg-chip${preset.toLowerCase() === backgroundColor.toLowerCase() ? " active" : ""}`}
+                    onClick={() => onBackgroundColorChange(preset)}
+                    style={{ background: preset }}
+                    title={`Use ${preset}`}
+                  />
+                ))}
+              </div>
+            </label>
+          </section>
+
+          <section className="robotics-settings-dialog__section">
+            <h4 className="robotics-settings-dialog__section-title">Behavior</h4>
+            <div className="robotics-form-field">
+              <span>Move collision behavior</span>
+              <KidDropdown
+                value={moveCollisionPolicy}
+                onChange={onMoveCollisionPolicyChange}
+                ariaLabel="Move collision behavior"
+                fullWidth
+                subtle={false}
+                options={[
+                  { value: "hold_until_distance", label: "Hold until target distance" },
+                  { value: "abort_on_collision", label: "Abort and continue" },
+                  { value: "timeout_then_continue", label: "Wait timeout, then continue" },
+                  { value: "error_on_collision", label: "Stop with error" },
+                ]}
+              />
             </div>
-            <div className="robotics-bg-presets">
-              {BG_PRESETS.map((preset) => (
-                <button
-                  key={preset}
-                  className={`robotics-bg-chip${preset.toLowerCase() === backgroundColor.toLowerCase() ? " active" : ""}`}
-                  onClick={() => onBackgroundColorChange(preset)}
-                  style={{ background: preset }}
-                  title={`Use ${preset}`}
+            {onPhysicsEngineChange ? (
+              <div className="robotics-form-field">
+                <span>Physics engine</span>
+                <KidDropdown
+                  value={physicsEngine || "three_runtime"}
+                  onChange={onPhysicsEngineChange}
+                  ariaLabel="Physics engine"
+                  fullWidth
+                  subtle={false}
+                  options={[
+                    { value: "three_runtime", label: "Three Runtime (default)" },
+                    { value: "grid_world", label: "Grid World (deterministic)" },
+                    { value: "rapier", label: "Rapier adapter slot" },
+                  ]}
                 />
-              ))}
+              </div>
+            ) : null}
+          </section>
+
+          <section className="robotics-settings-dialog__section">
+            <h4 className="robotics-settings-dialog__section-title">Physics Tuning</h4>
+            <div className="robotics-settings-dialog__grid">
+              {onTractionLongitudinalChange ? (
+                <label className="robotics-form-field" htmlFor="traction-longitudinal">
+                  <span>Traction (long.)</span>
+                  <input
+                    id="traction-longitudinal"
+                    type="number"
+                    min={0.2}
+                    max={1.2}
+                    step={0.05}
+                    value={Number(tractionLongitudinal ?? 0.92)}
+                    onChange={(event) => onTractionLongitudinalChange(Number(event.target.value))}
+                  />
+                </label>
+              ) : null}
+              {onTractionLateralChange ? (
+                <label className="robotics-form-field" htmlFor="traction-lateral">
+                  <span>Traction (lat.)</span>
+                  <input
+                    id="traction-lateral"
+                    type="number"
+                    min={0.2}
+                    max={1.2}
+                    step={0.05}
+                    value={Number(tractionLateral ?? 0.9)}
+                    onChange={(event) => onTractionLateralChange(Number(event.target.value))}
+                  />
+                </label>
+              ) : null}
+              {onRollingResistanceChange ? (
+                <label className="robotics-form-field" htmlFor="rolling-resistance">
+                  <span>Rolling resistance</span>
+                  <input
+                    id="rolling-resistance"
+                    type="number"
+                    min={0}
+                    max={20}
+                    step={0.2}
+                    value={Number(rollingResistance ?? 4.2)}
+                    onChange={(event) => onRollingResistanceChange(Number(event.target.value))}
+                  />
+                </label>
+              ) : null}
+              {onRobotMaxClimbSlopeDegChange ? (
+                <label className="robotics-form-field" htmlFor="robot-max-climb-slope">
+                  <span>Max climb slope (deg)</span>
+                  <input
+                    id="robot-max-climb-slope"
+                    type="number"
+                    min={0}
+                    max={60}
+                    step={1}
+                    value={Number(robotMaxClimbSlopeDeg ?? 16)}
+                    onChange={(event) => onRobotMaxClimbSlopeDegChange(Number(event.target.value))}
+                  />
+                </label>
+              ) : null}
             </div>
-          </div>
-          <div className="robotics-modal-row">
-            <label htmlFor="move-collision-policy">Move collision behavior</label>
-            <select
-              id="move-collision-policy"
-              value={moveCollisionPolicy}
-              onChange={(event) => onMoveCollisionPolicyChange(event.target.value)}
-            >
-              <option value="hold_until_distance">Hold until target distance is reached</option>
-              <option value="abort_on_collision">Abort move and continue</option>
-              <option value="timeout_then_continue">Wait until timeout, then continue</option>
-              <option value="error_on_collision">Stop with runtime error</option>
-            </select>
-          </div>
-          {onPhysicsEngineChange ? (
-            <div className="robotics-modal-row">
-              <label htmlFor="physics-engine">Physics engine</label>
-              <select
-                id="physics-engine"
-                value={physicsEngine || "three_runtime"}
-                onChange={(event) => onPhysicsEngineChange(event.target.value)}
-              >
-                <option value="three_runtime">Three Runtime (default)</option>
-                <option value="grid_world">Grid World (deterministic)</option>
-                <option value="rapier">Rapier adapter slot</option>
-              </select>
-            </div>
-          ) : null}
-          {onTractionLongitudinalChange ? (
-            <div className="robotics-modal-row">
-              <label htmlFor="traction-longitudinal">Tire traction (longitudinal)</label>
-              <input
-                id="traction-longitudinal"
-                type="number"
-                min={0.2}
-                max={1.2}
-                step={0.05}
-                value={Number(tractionLongitudinal ?? 0.92)}
-                onChange={(event) => onTractionLongitudinalChange(Number(event.target.value))}
-              />
-            </div>
-          ) : null}
-          {onTractionLateralChange ? (
-            <div className="robotics-modal-row">
-              <label htmlFor="traction-lateral">Tire traction (lateral)</label>
-              <input
-                id="traction-lateral"
-                type="number"
-                min={0.2}
-                max={1.2}
-                step={0.05}
-                value={Number(tractionLateral ?? 0.9)}
-                onChange={(event) => onTractionLateralChange(Number(event.target.value))}
-              />
-            </div>
-          ) : null}
-          {onRollingResistanceChange ? (
-            <div className="robotics-modal-row">
-              <label htmlFor="rolling-resistance">Rolling resistance</label>
-              <input
-                id="rolling-resistance"
-                type="number"
-                min={0}
-                max={20}
-                step={0.2}
-                value={Number(rollingResistance ?? 4.2)}
-                onChange={(event) => onRollingResistanceChange(Number(event.target.value))}
-              />
-            </div>
-          ) : null}
-          {onRobotMaxClimbSlopeDegChange ? (
-            <div className="robotics-modal-row">
-              <label htmlFor="robot-max-climb-slope">Robot max climb slope (deg)</label>
-              <input
-                id="robot-max-climb-slope"
-                type="number"
-                min={0}
-                max={60}
-                step={1}
-                value={Number(robotMaxClimbSlopeDeg ?? 16)}
-                onChange={(event) => onRobotMaxClimbSlopeDegChange(Number(event.target.value))}
-              />
-            </div>
-          ) : null}
+          </section>
         </div>
       </div>
     </div>

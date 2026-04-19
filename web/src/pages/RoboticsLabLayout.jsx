@@ -1,4 +1,4 @@
-import { ArrowLeft, Settings } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { Link, NavLink, Outlet } from "react-router-dom";
 import { RoboticsWorkspaceProvider, useRoboticsWorkspaceContext } from "../features/robotics_lab/RoboticsWorkspaceContext";
 import "./RoboticsLab.css";
@@ -24,14 +24,6 @@ function LayoutShell() {
           <span>{projectId ? `${projectId.slice(0, 8)}...` : "No project"}</span>
           <span>r{projectRevision}</span>
         </div>
-        <button
-          className="robotics-lab-btn robotics-lab-btn--icon"
-          onClick={() => {
-            window.dispatchEvent(new CustomEvent("robotics:openViewportSettings"));
-          }}
-        >
-          <Settings size={14} /> Settings
-        </button>
         <Link
           to={fallbackExitPath}
           onClick={(event) => {
