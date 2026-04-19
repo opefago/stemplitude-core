@@ -128,11 +128,14 @@ async def list_projects(
     db: AsyncSession = Depends(get_db),
     tenant: TenantContext = Depends(get_tenant_context),
     student_id: UUID | None = Query(None),
+    assignment_id: str | None = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
 ):
     service = RoboticsService(db)
-    return service.list_projects(tenant=tenant, student_id=student_id, skip=skip, limit=limit)
+    return service.list_projects(
+        tenant=tenant, student_id=student_id, assignment_id=assignment_id, skip=skip, limit=limit,
+    )
 
 
 @router.get(

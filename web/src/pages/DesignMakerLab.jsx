@@ -128,6 +128,22 @@ export default function DesignMakerLab() {
   const objects = useDesignStore(s => s.objects);
   const selectedIds = useDesignStore(s => s.selectedIds);
   const lastObjectCountRef = useRef(0);
+  const sessionInitRef = useRef(false);
+
+  useEffect(() => {
+    if (sessionInitRef.current) return;
+    sessionInitRef.current = true;
+    const store = useDesignStore.getState();
+    if (classroomContext?.savedProjectId) {
+      store.loadProject(classroomContext.savedProjectId);
+      return;
+    }
+    // Playground: persist any unsaved work from the previous session before resetting.
+    if (!classroomContext && store.isDirty && store.objects.length > 0) {
+      store.saveProject();
+    }
+    store.newProject();
+  }, [classroomContext]);
 
   const setProjectName = useDesignStore(s => s.setProjectName);
   const setSettingsOpen = useDesignStore(s => s.setSettingsOpen);

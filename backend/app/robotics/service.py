@@ -102,6 +102,7 @@ class RoboticsService:
         *,
         tenant: TenantContext,
         student_id: UUID | None = None,
+        assignment_id: str | None = None,
         limit: int = 100,
         skip: int = 0,
     ) -> list[RoboticsProjectResponse]:
@@ -110,6 +111,10 @@ class RoboticsService:
             for item in self._projects.values()
             if item.tenant_id == tenant.tenant_id
             and (student_id is None or item.student_id == student_id)
+            and (
+                assignment_id is None
+                or str((item.metadata or {}).get("assignment_id") or "") == assignment_id
+            )
         ]
         rows.sort(key=lambda item: item.updated_at, reverse=True)
         return rows[skip : skip + limit]

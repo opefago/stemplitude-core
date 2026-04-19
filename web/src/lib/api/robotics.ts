@@ -119,11 +119,13 @@ export async function createRoboticsProject(
 
 export async function listRoboticsProjects(opts?: {
   student_id?: string;
+  assignment_id?: string;
   skip?: number;
   limit?: number;
 }): Promise<RoboticsProjectRecord[]> {
   const q = new URLSearchParams();
   if (opts?.student_id) q.set("student_id", opts.student_id);
+  if (opts?.assignment_id) q.set("assignment_id", opts.assignment_id);
   if (opts?.skip != null) q.set("skip", String(opts.skip));
   if (opts?.limit != null) q.set("limit", String(opts.limit));
   const qs = q.toString();

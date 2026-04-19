@@ -13,6 +13,10 @@ import {
   updateRoboticsProject,
 } from "../../lib/api/robotics";
 import {
+  readLabProjectsArray,
+  writeLabProjectsArray,
+} from "../../lib/learnerLabStorage";
+import {
   createRoboticsSimulator,
   IRRuntimeExecutor,
   interpretTextProgram,
@@ -39,6 +43,26 @@ import {
   resolveDebugActionLabel,
   resolveDebugSourceMode,
 } from "./debugSession";
+
+const ROBOTICS_PROJECTS_STORAGE_KEY = "stemplitude_robotics_projects";
+
+function syncProjectToLocalStorage(project) {
+  if (!project?.id) return;
+  const rows = readLabProjectsArray(ROBOTICS_PROJECTS_STORAGE_KEY);
+  const idx = rows.findIndex((r) => r && r.id === project.id);
+  const entry = {
+    id: project.id,
+    name: project.title || "Untitled Robotics Project",
+    updatedAt: project.updated_at || new Date().toISOString(),
+    createdAt: project.created_at || new Date().toISOString(),
+  };
+  if (idx >= 0) {
+    rows[idx] = entry;
+  } else {
+    rows.push(entry);
+  }
+  writeLabProjectsArray(ROBOTICS_PROJECTS_STORAGE_KEY, rows);
+}
 
 function deriveLessonId(search) {
   const params = new URLSearchParams(search);
@@ -427,21 +451,34 @@ export function useRoboticsWorkspace() {
     let cancelled = false;
     (async () => {
       try {
+        // 1. Explicit savedProjectId (assignment resume, pre-linked draft).
         const preferredId = classroomContext?.savedProjectId || null;
         if (preferredId) {
           const existing = await getRoboticsProject(preferredId);
           if (cancelled) return;
           hydrateFromProject(existing);
+          syncProjectToLocalStorage(existing);
           setPersistenceStatus("Cloud project loaded");
           return;
         }
-        const rows = await listRoboticsProjects({ student_id: user.id, limit: 1 });
-        if (cancelled) return;
-        if (rows.length > 0) {
-          hydrateFromProject(rows[0]);
-          setPersistenceStatus("Cloud project loaded");
-          return;
+
+        // 2. Assignment mode: find the student's existing draft for THIS assignment.
+        if (classroomContext?.assignmentId) {
+          const rows = await listRoboticsProjects({
+            student_id: user.id,
+            assignment_id: classroomContext.assignmentId,
+            limit: 1,
+          });
+          if (cancelled) return;
+          if (rows.length > 0) {
+            hydrateFromProject(rows[0]);
+            syncProjectToLocalStorage(rows[0]);
+            setPersistenceStatus("Cloud project loaded");
+            return;
+          }
         }
+
+        // 3. Playground and classroom live sessions: always start a new project.
         const created = await createRoboticsProject({
           title: projectTitle,
           robot_vendor: selectedVendor,
@@ -467,10 +504,13 @@ export function useRoboticsWorkspace() {
             assignment_id: classroomContext?.assignmentId || null,
             curriculum_lab_id: classroomContext?.curriculumLabId || null,
             lesson_id: lessonId || null,
+            classroom_id: classroomContext?.classroomId || null,
+            session_id: classroomContext?.sessionId || null,
           },
         });
         if (cancelled) return;
         hydrateFromProject(created);
+        syncProjectToLocalStorage(created);
         setPersistenceStatus("Cloud project created");
       } catch {
         if (!cancelled) setPersistenceStatus("Cloud unavailable");
@@ -480,9 +520,7 @@ export function useRoboticsWorkspace() {
       cancelled = true;
     };
   }, [
-    classroomContext?.assignmentId,
-    classroomContext?.curriculumLabId,
-    classroomContext?.savedProjectId,
+    classroomContext,
     isAuthenticated,
     lessonId,
     mode,
@@ -643,11 +681,14 @@ export function useRoboticsWorkspace() {
           assignment_id: classroomContext?.assignmentId || null,
           curriculum_lab_id: classroomContext?.curriculumLabId || null,
           lesson_id: lessonId || null,
+          classroom_id: classroomContext?.classroomId || null,
+          session_id: classroomContext?.sessionId || null,
         },
       });
       const nextRevision = updated.revision || projectRevision;
       setProjectRevision(nextRevision);
       setProjectTitle((updated.title || snapshotTitle).slice(0, 120));
+      syncProjectToLocalStorage(updated);
       setPersistenceStatus(`Saved r${nextRevision}`);
     } catch {
       setPersistenceStatus("Save failed");

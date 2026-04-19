@@ -49,6 +49,8 @@ export default function Toolbar() {
   const redo = useDesignStore(s => s.redo);
   const canUndo = useDesignStore(s => s._past.length > 0);
   const canRedo = useDesignStore(s => s._future.length > 0);
+  const undoLabel = useDesignStore(s => s._past.length > 0 ? s._past[s._past.length - 1].label : null);
+  const redoLabel = useDesignStore(s => s._future.length > 0 ? s._future[s._future.length - 1].label : null);
 
   const [arrayOpen, setArrayOpen] = useState(false);
   const [arrayAxis, setArrayAxis] = useState('x');
@@ -83,12 +85,12 @@ export default function Toolbar() {
   return (
     <div className="dml-toolbar">
       <div className="dml-toolbar-group">
-        <RichTip label="Undo" shortcut="Ctrl+Z" description={TC.undo.description} video={TC.undo.video}>
+        <RichTip label={undoLabel ? `Undo: ${undoLabel}` : "Undo"} shortcut="Ctrl+Z" description={TC.undo.description} video={TC.undo.video}>
           <button className="dml-tool-btn" onClick={undo} disabled={!canUndo}>
             <Undo2 size={20} />
           </button>
         </RichTip>
-        <RichTip label="Redo" shortcut="Ctrl+Shift+Z" description={TC.redo.description} video={TC.redo.video}>
+        <RichTip label={redoLabel ? `Redo: ${redoLabel}` : "Redo"} shortcut="Ctrl+Shift+Z" description={TC.redo.description} video={TC.redo.video}>
           <button className="dml-tool-btn" onClick={redo} disabled={!canRedo}>
             <Redo2 size={20} />
           </button>

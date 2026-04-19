@@ -2602,7 +2602,7 @@ function ObjectHandles({
     e.stopPropagation();
     sceneInteracting.active = true;
     if (orbitRef.current) orbitRef.current.enabled = false;
-    useDesignStore.getState()._saveSnapshot();
+    useDesignStore.getState()._saveSnapshot("Transform object");
     document.addEventListener("pointermove", handleDomMove);
     document.addEventListener("pointerup", handleDomUp);
   };
@@ -3104,7 +3104,7 @@ function GroupObjectHandles({
     e.stopPropagation();
     sceneInteracting.active = true;
     if (orbitRef.current) orbitRef.current.enabled = false;
-    useDesignStore.getState()._saveSnapshot();
+    useDesignStore.getState()._saveSnapshot("Transform group");
     window.addEventListener("pointermove", handleDomMove);
     window.addEventListener("pointerup", handleDomUp);
   };
@@ -3805,7 +3805,7 @@ function SceneContent() {
       const state = useDesignStore.getState();
       const obj = state.objects.find((o) => o.id === objectId);
       if (!obj) return;
-      state._saveSnapshot();
+      state._saveSnapshot("Move object");
       const newPos = [...obj.position];
       newPos[0] += deltaDx;
       newPos[2] += deltaDz;
@@ -3832,7 +3832,7 @@ function SceneContent() {
         const dy = domEvent.clientY - d.startMouse.y;
         if (Math.abs(dx) < MIN_DRAG && Math.abs(dy) < MIN_DRAG) return;
         d.dragging = true;
-        useDesignStore.getState()._saveSnapshot();
+        useDesignStore.getState()._saveSnapshot("Drag object");
         if (orbitRef.current) orbitRef.current.enabled = false;
         setTransforming(true);
         const anchorPos = d.startPositions[d.anchorId];

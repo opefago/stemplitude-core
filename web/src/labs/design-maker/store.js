@@ -261,10 +261,11 @@ function cloneGroups(groups) {
   }));
 }
 
-function cloneSnapshot(objects, groups) {
+function cloneSnapshot(objects, groups, label) {
   return {
     objects: cloneObjects(objects),
     groups: cloneGroups(groups || []),
+    label: label || null,
   };
 }
 
@@ -517,9 +518,9 @@ export const useDesignStore = create((set, get) => ({
   setArrayPreview: (preview) => set({ arrayPreview: preview }),
   clearArrayPreview: () => set({ arrayPreview: null }),
 
-  _saveSnapshot: () => {
+  _saveSnapshot: (label = "Edit") => {
     const { objects, groups, _past } = get();
-    const snap = cloneSnapshot(objects, groups);
+    const snap = cloneSnapshot(objects, groups, label);
     const past = _past.length >= MAX_HISTORY ? _past.slice(1) : [..._past];
     past.push(snap);
     set({ _past: past, _future: [] });
@@ -531,7 +532,7 @@ export const useDesignStore = create((set, get) => ({
     const prev = _past[_past.length - 1];
     set({
       _past: _past.slice(0, -1),
-      _future: [..._future, cloneSnapshot(objects, groups)],
+      _future: [..._future, cloneSnapshot(objects, groups, prev.label)],
       objects: prev.objects,
       groups: prev.groups || [],
       selectedIds: [],
@@ -545,7 +546,7 @@ export const useDesignStore = create((set, get) => ({
     const next = _future[_future.length - 1];
     set({
       _future: _future.slice(0, -1),
-      _past: [..._past, cloneSnapshot(objects, groups)],
+      _past: [..._past, cloneSnapshot(objects, groups, next.label)],
       objects: next.objects,
       groups: next.groups || [],
       selectedIds: [],
@@ -553,8 +554,33 @@ export const useDesignStore = create((set, get) => ({
     });
   },
 
+  get undoLabel() {
+    const { _past } = get();
+    return _past.length > 0 ? _past[_past.length - 1].label : null;
+  },
+
+  get redoLabel() {
+    const { _future } = get();
+    return _future.length > 0 ? _future[_future.length - 1].label : null;
+  },
+
+  getUndoLabel: () => {
+    const { _past } = get();
+    return _past.length > 0 ? _past[_past.length - 1].label : null;
+  },
+
+  getRedoLabel: () => {
+    const { _future } = get();
+    return _future.length > 0 ? _future[_future.length - 1].label : null;
+  },
+
+  getActionHistory: () => {
+    const { _past } = get();
+    return _past.map((entry) => entry.label).filter(Boolean);
+  },
+
   addObject: (type, overrides = {}) => {
-    get()._saveSnapshot();
+    get()._saveSnapshot(`Add ${type}`);
     const defaults = SHAPE_DEFAULTS[type] || SHAPE_DEFAULTS.box;
     objectCounter++;
     const obj = {
@@ -591,7 +617,7 @@ export const useDesignStore = create((set, get) => ({
   },
 
   removeObject: (id) => {
-    get()._saveSnapshot();
+    get()._saveSnapshot("Delete object");
     set((state) => {
       const objects = state.objects.filter((o) => o.id !== id);
       const groups = reconcileGroups(objects, state.groups);
@@ -605,7 +631,7 @@ export const useDesignStore = create((set, get) => ({
   },
 
   removeSelected: () => {
-    get()._saveSnapshot();
+    get()._saveSnapshot("Delete selected");
     set((state) => {
       const effective = new Set(
         expandSelection(state.objects, state.selectedIds),
@@ -621,7 +647,7 @@ export const useDesignStore = create((set, get) => ({
   },
 
   updateObject: (id, updates) => {
-    get()._saveSnapshot();
+    get()._saveSnapshot("Update object");
     const normalized =
       updates.rotation != null
         ? { ...updates, rotation: normalizeRotationToPlusMinusPi(updates.rotation) }
@@ -670,7 +696,7 @@ export const useDesignStore = create((set, get) => ({
     })),
 
   duplicateSelected: () => {
-    get()._saveSnapshot();
+    get()._saveSnapshot("Duplicate");
     const state = get();
     const effective = expandSelection(state.objects, state.selectedIds);
     const selected = state.objects.filter((o) => effective.includes(o.id));
@@ -703,7 +729,7 @@ export const useDesignStore = create((set, get) => ({
   },
 
   arraySelected: (axis, count, spacing) => {
-    get()._saveSnapshot();
+    get()._saveSnapshot(`Array ${axis.toUpperCase()} ×${count}`);
     const state = get();
     const effective = expandSelection(state.objects, state.selectedIds);
     const selected = state.objects.filter((o) => effective.includes(o.id));
@@ -775,7 +801,7 @@ export const useDesignStore = create((set, get) => ({
     }),
 
   groupSelected: () => {
-    get()._saveSnapshot();
+    get()._saveSnapshot("Group");
     const state = get();
     const ids = expandSelection(state.objects, state.selectedIds);
     if (ids.length < 2) return;
@@ -796,7 +822,7 @@ export const useDesignStore = create((set, get) => ({
   },
 
   ungroupSelected: () => {
-    get()._saveSnapshot();
+    get()._saveSnapshot("Ungroup");
     const state = get();
     const ids = expandSelection(state.objects, state.selectedIds);
     const selectedGroups = new Set(
@@ -858,7 +884,7 @@ export const useDesignStore = create((set, get) => ({
     const state = get();
     const effective = expandSelection(state.objects, state.selectedIds);
     if (effective.length < 2) return;
-    get()._saveSnapshot();
+    get()._saveSnapshot(`Align ${axis.toUpperCase()} ${edge}`);
     const selected = state.objects.filter((o) => effective.includes(o.id));
     const ai = { x: 0, y: 1, z: 2 }[axis];
     let target;
@@ -881,7 +907,7 @@ export const useDesignStore = create((set, get) => ({
   },
 
   dropToFloor: () => {
-    get()._saveSnapshot();
+    get()._saveSnapshot("Drop to floor");
     const state = get();
     const selectedSet = new Set(
       expandSelection(state.objects, state.selectedIds),
@@ -924,7 +950,7 @@ export const useDesignStore = create((set, get) => ({
   },
 
   mirrorSelected: (axis) => {
-    get()._saveSnapshot();
+    get()._saveSnapshot(`Mirror ${axis.toUpperCase()}`);
     const state = get();
     const effective = expandSelection(state.objects, state.selectedIds);
     const ai = { x: 0, y: 1, z: 2 }[axis];
@@ -948,7 +974,7 @@ export const useDesignStore = create((set, get) => ({
   },
 
   replaceObjects: (oldIds, newObj) => {
-    get()._saveSnapshot();
+    get()._saveSnapshot("Boolean operation");
     set((state) => ({
       objects: [
         ...state.objects.filter((o) => !oldIds.includes(o.id)),
@@ -967,7 +993,7 @@ export const useDesignStore = create((set, get) => ({
   },
 
   addImportedObject: (bufferGeometry, name = "Imported") => {
-    get()._saveSnapshot();
+    get()._saveSnapshot(`Import ${name}`);
     objectCounter++;
     const obj = {
       id: uuidv4(),
