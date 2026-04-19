@@ -1,5 +1,6 @@
 import type { DragEvent } from "react";
 import { useMemo, useState } from "react";
+import { useFeatureFlag } from "../../../../providers/FeatureFlagProvider";
 import { OBJECT_CATEGORIES } from "../../objectPalette/categories";
 import { OBJECT_CATALOG } from "../../objectPalette/catalog";
 import {
@@ -23,10 +24,15 @@ export function ObjectPalette({ onAdd, onDragStart }: ObjectPaletteProps) {
   const [query, setQuery] = useState("");
   const [difficultyMode, setDifficultyMode] = useState<DifficultyFilterMode>("all");
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(createDefaultCollapsedMap);
+  const { enabled: advancedObjects } = useFeatureFlag("robotics_advanced_objects");
 
+  const availableObjects = useMemo(
+    () => advancedObjects ? OBJECT_CATALOG.objects : OBJECT_CATALOG.objects.filter((o) => !o.experimental),
+    [advancedObjects],
+  );
   const filteredObjects = useMemo(
-    () => filterByDifficulty(OBJECT_CATALOG.objects, difficultyMode),
-    [difficultyMode],
+    () => filterByDifficulty(availableObjects, difficultyMode),
+    [availableObjects, difficultyMode],
   );
   const searchResults = useMemo(() => searchObjectLibrary(filteredObjects, query), [filteredObjects, query]);
   const grouped = useMemo(

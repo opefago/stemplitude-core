@@ -108,6 +108,7 @@ export interface SimulatorObjectDefinition {
   sensorInteraction: SensorInteractionDefinition[];
   eventsEmitted: SimulatorObjectEventDefinition[];
   runtimeMetadata?: Record<string, unknown>;
+  experimental?: boolean;
 }
 
 export interface ObjectCategoryDefinition {

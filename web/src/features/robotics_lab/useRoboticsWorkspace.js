@@ -408,6 +408,10 @@ export function useRoboticsWorkspace() {
         if (resolved.runtime_settings) {
           setRuntimeSettings((prev) => ({ ...prev, ...resolved.runtime_settings }));
         }
+        if (resolved.start_pose) {
+          setStartPose(resolved.start_pose);
+          syncPoseToStart(resolved.start_pose);
+        }
       } catch {
         setTemplateResolved(true);
       }

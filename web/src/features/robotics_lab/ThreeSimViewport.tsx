@@ -96,6 +96,7 @@ interface ThreeSimViewportProps {
   onProjectClientToWorkplaneReady?: ((project: (clientX: number, clientY: number) => { x: number; z: number } | null) => void) | null;
   onWorkplaneClick?: ((x: number, z: number) => void) | null;
   snapEnabled?: boolean;
+  selectedGridCell?: { cellX: number; cellZ: number } | null;
 }
 
 interface WorldObjectProps {
@@ -291,6 +292,17 @@ function WorkspaceGrid({ width, depth }: { width: number; depth: number }) {
         <lineBasicMaterial color="#3f6488" transparent opacity={0.55} depthWrite={false} polygonOffset polygonOffsetFactor={-2} polygonOffsetUnits={-2} />
       </lineSegments>
     </group>
+  );
+}
+
+function GridCellHighlight({ cellX, cellZ }: { cellX: number; cellZ: number }) {
+  const cx = cellX * GRID_CELL_CM + GRID_CELL_CM / 2;
+  const cz = cellZ * GRID_CELL_CM + GRID_CELL_CM / 2;
+  return (
+    <mesh position={[cx, 0.05, cz]} rotation={[-Math.PI / 2, 0, 0]}>
+      <planeGeometry args={[GRID_CELL_CM, GRID_CELL_CM]} />
+      <meshBasicMaterial color="#38bdf8" transparent opacity={0.35} depthWrite={false} />
+    </mesh>
   );
 }
 
@@ -946,6 +958,7 @@ export function ThreeSimViewport({
   onProjectClientToWorkplaneReady = null,
   onWorkplaneClick = null,
   snapEnabled = true,
+  selectedGridCell = null,
 }: ThreeSimViewportProps) {
   const orbitRef = useRef<OrbitControlsImpl | null>(null);
   const worldWidth = Math.max(200, worldSizeCm?.width ?? 1000);
@@ -1079,6 +1092,7 @@ export function ThreeSimViewport({
         <group name="worldRoot">
           <group name="floorLayer">
             {resolvedOverlayState.showGrid ? <WorkspaceGrid width={worldWidth} depth={worldDepth} /> : null}
+            {selectedGridCell ? <GridCellHighlight cellX={selectedGridCell.cellX} cellZ={selectedGridCell.cellZ} /> : null}
             <mesh
               position={[worldCenter.x, 0, worldCenter.z]}
               rotation={[-Math.PI / 2, 0, 0]}

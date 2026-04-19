@@ -133,6 +133,7 @@ class RoboticsTemplateResolveResponse(BaseModel):
     source_payload: RoboticsProjectSource = Field(default_factory=RoboticsProjectSource)
     world_scene: dict[str, Any] = Field(default_factory=dict)
     runtime_settings: dict[str, Any] = Field(default_factory=dict)
+    start_pose: dict[str, Any] | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -170,6 +171,7 @@ class RoboticsWorldCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=200)
     description: str | None = Field(None, max_length=2000)
     world_scene: dict[str, Any] = Field(default_factory=dict)
+    start_pose: dict[str, Any] | None = None
     runtime_settings: dict[str, Any] = Field(default_factory=dict)
     mission: dict[str, Any] | None = None
     visibility: WorldVisibility = "private"
@@ -183,6 +185,7 @@ class RoboticsWorldUpdate(BaseModel):
     title: str | None = Field(None, min_length=1, max_length=200)
     description: str | None = Field(None, max_length=2000)
     world_scene: dict[str, Any] | None = None
+    start_pose: dict[str, Any] | None = None
     runtime_settings: dict[str, Any] | None = None
     mission: dict[str, Any] | None = None
     visibility: WorldVisibility | None = None
@@ -201,6 +204,7 @@ class RoboticsWorldResponse(BaseModel):
     title: str
     description: str | None = None
     world_scene: dict[str, Any] = Field(default_factory=dict)
+    start_pose: dict[str, Any] | None = None
     runtime_settings: dict[str, Any] = Field(default_factory=dict)
     mission: dict[str, Any] | None = None
     is_template: bool = False

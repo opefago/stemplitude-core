@@ -2438,6 +2438,46 @@
   white-space: nowrap;
 }
 
+.robotics-floating-grid-toolbar {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: rgba(22, 27, 34, 0.92);
+  border: 1px solid #30363d;
+  border-radius: 10px;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  pointer-events: auto;
+}
+
+.robotics-floating-grid-toolbar__label {
+  font-size: 11px;
+  color: #8b949e;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.robotics-floating-grid-toolbar .robotics-lab-btn {
+  font-size: 12px;
+  padding: 5px 10px;
+  white-space: nowrap;
+}
+
+.robotics-lab-btn--accent {
+  color: #38bdf8;
+}
+
+.robotics-lab-btn--accent:hover {
+  background: rgba(56, 189, 248, 0.15);
+  color: #7dd3fc;
+}
+
 /* World preset dialog */
 .robotics-preset-btn {
   width: 100%;

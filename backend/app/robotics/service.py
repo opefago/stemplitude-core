@@ -617,6 +617,7 @@ class RoboticsService:
                         source_payload=RoboticsProjectSource(),
                         world_scene=world.world_scene,
                         runtime_settings=world.runtime_settings or {},
+                        start_pose=world.start_pose,
                         metadata={
                             "template_priority": "assignment_world",
                             "tenant_id": str(tenant.tenant_id),
@@ -650,6 +651,7 @@ class RoboticsService:
                     ),
                     world_scene=config.get("world_scene") or {},
                     runtime_settings=config.get("runtime_settings") or {},
+                    start_pose=config.get("start_pose"),
                     metadata={
                         "template_priority": "curriculum_first",
                         "tenant_id": str(tenant.tenant_id),
@@ -689,6 +691,7 @@ class RoboticsService:
                         ),
                         world_scene=metadata.get("world_scene") or {},
                         runtime_settings=metadata.get("runtime_settings") or {},
+                        start_pose=metadata.get("start_pose"),
                         metadata={
                             "template_priority": "track_secondary",
                             "tenant_id": str(tenant.tenant_id),

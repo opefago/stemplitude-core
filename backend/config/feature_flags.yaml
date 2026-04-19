@@ -23,3 +23,9 @@ flags:
     description: Robotics simulator incremental rollout.
     stage: dev
     default_enabled: false
+  - name: robotics_advanced_objects
+    owner: robotics
+    status: draft
+    description: Show advanced/future-proofing objects in the robotics simulator object palette (moving obstacles, agents, conveyors, vision tags, etc).
+    stage: dev
+    default_enabled: false

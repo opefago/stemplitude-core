@@ -42,6 +42,7 @@ function clearCache() {
 
 const REGISTERED_KEYS = [
   "gamification_enabled",
+  "robotics_advanced_objects",
 ];
 
 interface FeatureFlagContextValue {

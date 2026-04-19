@@ -198,6 +198,7 @@ export interface RoboticsWorldRecord {
   title: string;
   description?: string | null;
   world_scene: Record<string, unknown>;
+  start_pose?: Record<string, unknown> | null;
   runtime_settings: Record<string, unknown>;
   mission?: Record<string, unknown> | null;
   is_template: boolean;
@@ -217,6 +218,7 @@ export interface CreateRoboticsWorldInput {
   title: string;
   description?: string;
   world_scene: Record<string, unknown>;
+  start_pose?: Record<string, unknown>;
   runtime_settings?: Record<string, unknown>;
   mission?: Record<string, unknown>;
   visibility?: "private" | "tenant" | "public";
@@ -230,6 +232,7 @@ export interface UpdateRoboticsWorldInput {
   title?: string;
   description?: string;
   world_scene?: Record<string, unknown>;
+  start_pose?: Record<string, unknown>;
   runtime_settings?: Record<string, unknown>;
   mission?: Record<string, unknown>;
   visibility?: "private" | "tenant" | "public";

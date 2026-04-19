@@ -1,4 +1,4 @@
-import { Copy, Download, Eye, EyeOff, FlipHorizontal, Group, Magnet, Pause, Play, RotateCcw, RotateCw, Redo2, Save, Settings, Trash2, Undo2, Ungroup, Upload, LayoutTemplate, Share2 } from "lucide-react";
+import { Copy, Download, Eye, EyeOff, FlipHorizontal, Group, Magnet, MapPin, Pause, Play, RotateCcw, RotateCw, Redo2, Save, Settings, Trash2, Undo2, Ungroup, Upload, LayoutTemplate, Share2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRoboticsWorkspaceContext } from "../features/robotics_lab/RoboticsWorkspaceContext";
 import { GRID_CELL_CM } from "../features/robotics_lab/workspaceDefaults";
@@ -117,6 +117,7 @@ export default function RoboticsSimEditorPage() {
   const [presetDialogOpen, setPresetDialogOpen] = useState(false);
   const [customObjectOpen, setCustomObjectOpen] = useState(false);
   const [snapEnabled, setSnapEnabled] = useState(true);
+  const [selectedGridCell, setSelectedGridCell] = useState(null);
 
   const worldSceneRef = useRef(world.world_scene || { version: 1, gravity_m_s2: 9.81, objects: [] });
   const objectGroupsRef = useRef(objectGroups);
@@ -312,6 +313,7 @@ export default function RoboticsSimEditorPage() {
         width_cells: world.width_cells,
         height_cells: world.height_cells,
         world_scene: worldScene,
+        start_pose: startPose,
         runtime_settings: runtimeSettings,
         groups: objectGroups,
       },
@@ -351,6 +353,12 @@ export default function RoboticsSimEditorPage() {
         };
         setWorld(nextWorld);
         if (imported.groups) setObjectGroups(imported.groups);
+        if (imported.start_pose) {
+          setStartPosition(imported.start_pose.position?.x, imported.start_pose.position?.y);
+          if (imported.start_pose.heading_deg != null) {
+            setStartHeading(imported.start_pose.heading_deg);
+          }
+        }
         resetCamera();
         void saveProjectSnapshot("world_imported", { world: nextWorld });
         undo.commitAction();
@@ -1134,6 +1142,7 @@ export default function RoboticsSimEditorPage() {
             onObjectSelect={(id, event) => {
               selectObject(id, event?.shiftKey);
               setRightTab("properties");
+              setSelectedGridCell(null);
             }}
             selectedObjectId={selectedObjectId}
             robotStartPose={startPose}
@@ -1143,10 +1152,20 @@ export default function RoboticsSimEditorPage() {
             onProjectClientToWorkplaneReady={(project) => {
               projectClientToWorkplaneRef.current = project;
             }}
+            selectedGridCell={selectedGridCell}
             onWorkplaneClick={(x, z) => {
               setSelectedObjectIds(new Set());
-              if (!linePaintMode) return;
-              paintLineTrackAt(x, z);
+              if (linePaintMode) {
+                paintLineTrackAt(x, z);
+                return;
+              }
+              const cellX = Math.floor(x / GRID_CELL_CM);
+              const cellZ = Math.floor(z / GRID_CELL_CM);
+              if (selectedGridCell && selectedGridCell.cellX === cellX && selectedGridCell.cellZ === cellZ) {
+                setSelectedGridCell(null);
+              } else {
+                setSelectedGridCell({ cellX, cellZ });
+              }
             }}
           />
           {selectedObjectIds.size > 0 && (
@@ -1169,6 +1188,35 @@ export default function RoboticsSimEditorPage() {
               )}
               <button className="robotics-lab-btn robotics-lab-btn--icon" onClick={deleteSelected} title="Delete">
                 <Trash2 size={14} />
+              </button>
+            </div>
+          )}
+          {selectedGridCell && !selectedObjectIds.size && (
+            <div className="robotics-floating-grid-toolbar">
+              <span className="robotics-floating-grid-toolbar__label">
+                Cell ({selectedGridCell.cellX}, {selectedGridCell.cellZ})
+              </span>
+              <button
+                className="robotics-lab-btn robotics-lab-btn--icon robotics-lab-btn--accent"
+                title="Set robot start point here"
+                onClick={() => {
+                  undo.beginAction("Set start point");
+                  const cx = selectedGridCell.cellX * GRID_CELL_CM + GRID_CELL_CM / 2;
+                  const cz = selectedGridCell.cellZ * GRID_CELL_CM + GRID_CELL_CM / 2;
+                  setStartPosition(cx, cz);
+                  commitRobotStartMove(cx, cz);
+                  undo.commitAction();
+                  setSelectedGridCell(null);
+                }}
+              >
+                <MapPin size={14} /> Set Start Point
+              </button>
+              <button
+                className="robotics-lab-btn robotics-lab-btn--icon"
+                title="Cancel selection"
+                onClick={() => setSelectedGridCell(null)}
+              >
+                <X size={14} />
               </button>
             </div>
           )}
