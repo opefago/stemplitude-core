@@ -26,6 +26,7 @@ import {
 import { EffectComposer, Outline } from "@react-three/postprocessing";
 import { BlendFunction, KernelSize } from "postprocessing";
 import * as THREE from "three";
+import { OverlayRenderPass, useDragDistanceOverlay } from "../../hooks/useDragDistanceOverlay";
 import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
 import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
@@ -3718,6 +3719,21 @@ function SceneContent() {
 
   const selectedId = selectedIds.length === 1 ? selectedIds[0] : null;
 
+  const handleOverlayApplyDelta = useCallback(
+    (objectId, deltaDx, deltaDz) => {
+      const state = useDesignStore.getState();
+      const obj = state.objects.find((o) => o.id === objectId);
+      if (!obj) return;
+      state._saveSnapshot();
+      const newPos = [...obj.position];
+      newPos[0] += deltaDx;
+      newPos[2] += deltaDz;
+      state.updateObjectSilent(objectId, { position: newPos });
+    },
+    [],
+  );
+  const dragOverlay = useDragDistanceOverlay({ onApplyDelta: handleOverlayApplyDelta });
+
   const objDrag = useRef(null);
   const dragPlane = useMemo(() => new THREE.Plane(), []);
   const dragRaycaster = useMemo(() => new THREE.Raycaster(), []);
@@ -3738,6 +3754,8 @@ function SceneContent() {
         useDesignStore.getState()._saveSnapshot();
         if (orbitRef.current) orbitRef.current.enabled = false;
         setTransforming(true);
+        const anchorPos = d.startPositions[d.anchorId];
+        if (anchorPos) dragOverlay.startTracking(d.anchorId, anchorPos[0], anchorPos[2]);
       }
       const rect = gl.domElement.getBoundingClientRect();
       const ndc = new THREE.Vector2(
@@ -3817,6 +3835,8 @@ function SceneContent() {
           };
         });
         useDesignStore.getState().batchUpdateObjects(dragUpdates);
+        const anchorUpdate = dragUpdates[d.anchorId];
+        if (anchorUpdate) dragOverlay.updateTracking(d.anchorId, anchorUpdate.position[0], anchorUpdate.position[2]);
       }
     },
     [
@@ -3828,6 +3848,7 @@ function SceneContent() {
       dragOffset,
       surfaceRaycaster,
       updateObjectSilent,
+      dragOverlay,
     ],
   );
 
@@ -3835,12 +3856,13 @@ function SceneContent() {
     if (objDrag.current?.dragging) {
       setTransforming(false);
       if (orbitRef.current) orbitRef.current.enabled = true;
+      dragOverlay.stopTracking();
     }
     objDrag.current = null;
     sceneInteracting.active = false;
     window.removeEventListener("pointermove", handleObjDragMove);
     window.removeEventListener("pointerup", handleObjDragUp);
-  }, [handleObjDragMove]);
+  }, [handleObjDragMove, dragOverlay]);
 
   const handleObjDragStart = useCallback(
     (e, id) => {
@@ -4061,6 +4083,9 @@ function SceneContent() {
           blendFunction={BlendFunction.ADD}
         />
       </EffectComposer>
+
+      <OverlayRenderPass />
+      {dragOverlay.overlayElement}
 
       <GizmoHelper alignment="top-right" margin={[80, 80]} renderPriority={2}>
         <GizmoViewcube
