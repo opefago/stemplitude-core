@@ -2,7 +2,7 @@
 export const PERMITTED_LAB_OPTIONS = [
   "Circuit Maker",
   "Micro Maker",
-  "Robotics Lab",
+  "Robo Maker",
   "Python Game Maker",
   "Game Maker",
   "Design Maker",

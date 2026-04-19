@@ -17,7 +17,7 @@ class MessageCreate(BaseModel):
                 {
                     "recipient_id": "550e8400-e29b-41d4-a716-446655440000",
                     "subject": "Homework reminder",
-                    "body": "Please complete the robotics lab by Friday.",
+                    "body": "Please complete the Robo Maker lab by Friday.",
                 }
             ]
         }

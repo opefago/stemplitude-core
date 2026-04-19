@@ -373,6 +373,7 @@ class SupportAccessUserOption(BaseModel):
     email: str
     first_name: str
     last_name: str
+    avatar_url: str | None = None
     global_role: str | None = None
 
 

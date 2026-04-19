@@ -273,6 +273,7 @@ export interface SupportAccessUserOption {
   email: string;
   first_name: string;
   last_name: string;
+  avatar_url?: string | null;
   global_role?: string | null;
 }
 
@@ -322,6 +323,13 @@ export async function getSupportAccessOptions(id: string): Promise<{
   roles: SupportAccessRoleOption[];
 }> {
   return apiFetch(`/tenants/${id}/support-access/options`);
+}
+
+export async function lookupSupportUser(
+  id: string,
+  email: string,
+): Promise<SupportAccessUserOption> {
+  return apiFetch(`/tenants/${id}/support-access/lookup?email=${encodeURIComponent(email)}`);
 }
 
 export async function listSupportAccessGrants(id: string): Promise<{

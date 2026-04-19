@@ -22,9 +22,9 @@
     },
     {
       "key": "access_robotics_lab",
-      "name": "Access Robotics Lab",
+      "name": "Access Robo Maker",
       "category": "lab",
-      "description": "Ability to access the robotics lab",
+      "description": "Ability to access the Robo Maker lab",
       "rules": [
         { "required_feature": "access_robotics_lab" }
       ]

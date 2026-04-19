@@ -464,6 +464,7 @@ class TenantService:
                 User.email,
                 User.first_name,
                 User.last_name,
+                User.avatar_url,
                 Role.slug,
             )
             .join(UserRole, UserRole.user_id == User.id)
@@ -494,6 +495,7 @@ class TenantService:
                     "email": row.email,
                     "first_name": row.first_name,
                     "last_name": row.last_name,
+                    "avatar_url": row.avatar_url,
                     "global_role": row.slug,
                 }
                 for row in support_users_result.all()
@@ -506,6 +508,41 @@ class TenantService:
                 }
                 for row in roles_result.all()
             ],
+        }
+
+    async def lookup_support_user_by_email(self, email: str) -> dict[str, str | None] | None:
+        """Look up a super-admin support user by exact email match."""
+        result = await self.session.execute(
+            select(
+                User.id,
+                User.email,
+                User.first_name,
+                User.last_name,
+                User.avatar_url,
+                Role.slug,
+            )
+            .join(UserRole, UserRole.user_id == User.id)
+            .join(Role, UserRole.role_id == Role.id)
+            .where(
+                func.lower(User.email) == func.lower(email.strip()),
+                User.is_active == True,
+                User.is_super_admin == True,
+                UserRole.is_active == True,
+                Role.tenant_id.is_(None),
+                Role.is_active == True,
+            )
+            .limit(1)
+        )
+        row = result.first()
+        if not row:
+            return None
+        return {
+            "id": str(row.id),
+            "email": row.email,
+            "first_name": row.first_name,
+            "last_name": row.last_name,
+            "avatar_url": row.avatar_url,
+            "global_role": row.slug,
         }
 
     # --- Hierarchy ---

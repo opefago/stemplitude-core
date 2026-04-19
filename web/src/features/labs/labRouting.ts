@@ -13,7 +13,7 @@ const LAB_ALIASES: Array<{ id: string; route: string; aliases: string[] }> = [
   {
     id: "robotics-lab",
     route: "/playground/robotics/code",
-    aliases: ["robotics", "robotics lab", "robotics-lab", "robotics_lab", "robotics_lab_vr"],
+    aliases: ["robotics", "robotics lab", "robotics-lab", "robotics_lab", "robotics_lab_vr", "robo maker", "robo-maker"],
   },
   { id: "gamedev", route: "/playground/gamedev", aliases: ["game dev", "gamedev", "game-dev"] },
   { id: "python-game", route: "/playground/python-game", aliases: ["python game", "python-game"] },

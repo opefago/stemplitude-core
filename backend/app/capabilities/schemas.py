@@ -95,9 +95,9 @@ class CapabilityCreate(CapabilityBase):
             "examples": [
                 {
                     "key": "access_robotics_lab",
-                    "name": "Access Robotics Lab",
+                    "name": "Access Robo Maker",
                     "category": "lab",
-                    "description": "Gate access to the robotics/MCU lab",
+                    "description": "Gate access to the Robo Maker lab",
                     "rules": [],
                 },
             ]
@@ -137,7 +137,7 @@ class CapabilityUpdate(BaseModel):
         json_schema_extra={
             "examples": [
                 {
-                    "name": "Access Robotics Lab (Updated)",
+                    "name": "Access Robo Maker (Updated)",
                     "category": "lab",
                     "description": "Full access to robotics and MCU lab facilities",
                 },

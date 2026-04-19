@@ -25,7 +25,7 @@ const LAB_LABELS: Record<string, string> = {
   mcu: "Micro Controller Lab",
   electronics: "Electronics Lab",
   "circuit-maker": "Electronics Lab",
-  "robotics-lab": "Robotics Lab",
+  "robotics-lab": "Robo Maker",
   "design-maker": "Design Maker Lab",
   gamedev: "Game Dev Lab",
 };

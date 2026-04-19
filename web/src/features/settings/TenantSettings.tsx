@@ -58,6 +58,7 @@ import {
   getTenantLabSettings,
   listFranchiseJoinRequests,
   listSupportAccessGrants,
+  lookupSupportUser,
   patchTenant,
   revokeSupportAccessGrant,
   submitFranchiseJoinRequest,
@@ -116,7 +117,7 @@ const TIMEZONES = [
 const LABS = [
   { id: "circuit-maker", name: "Circuit Maker" },
   { id: "micro-maker", name: "Micro Maker" },
-  { id: "robotics-lab", name: "Robotics Lab" },
+  { id: "robotics-lab", name: "Robo Maker" },
   { id: "python-game", name: "Python Game Maker" },
   { id: "game-maker", name: "Game Maker" },
   { id: "design-maker", name: "Design Maker" },
@@ -2216,6 +2217,11 @@ export function TenantSettings() {
   const [supportError, setSupportError] = useState("");
   const [supportSuccess, setSupportSuccess] = useState("");
   const [selectedSupportUserId, setSelectedSupportUserId] = useState("");
+  const [supportEmailQuery, setSupportEmailQuery] = useState("");
+  const [supportLookupResult, setSupportLookupResult] = useState<SupportAccessUserOption | null>(null);
+  const [supportLookupLoading, setSupportLookupLoading] = useState(false);
+  const [supportLookupError, setSupportLookupError] = useState("");
+  const supportLookupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [selectedSupportRoleId, setSelectedSupportRoleId] = useState("");
   const [supportReason, setSupportReason] = useState("");
   const [supportExpiry, setSupportExpiry] = useState(() => {
@@ -2764,6 +2770,7 @@ export function TenantSettings() {
       });
       setSupportSuccess("Support access granted.");
       setSupportReason("");
+      handleClearSupportUser();
       await refreshSupportGrants();
     } catch (error) {
       setSupportError(error instanceof Error ? error.message : "Failed to grant support access");
@@ -2782,6 +2789,51 @@ export function TenantSettings() {
       setSupportError(error instanceof Error ? error.message : "Failed to revoke support access");
     }
   };
+
+  const handleSupportEmailChange = (email: string) => {
+    setSupportEmailQuery(email);
+    setSupportLookupError("");
+    if (supportLookupTimerRef.current) clearTimeout(supportLookupTimerRef.current);
+    if (!email.trim() || !email.includes("@")) {
+      setSupportLookupResult(null);
+      setSupportLookupLoading(false);
+      return;
+    }
+    setSupportLookupLoading(true);
+    supportLookupTimerRef.current = setTimeout(async () => {
+      if (!tenant?.id) return;
+      try {
+        const user = await lookupSupportUser(tenant.id, email.trim());
+        setSupportLookupResult(user);
+        setSupportLookupError("");
+      } catch {
+        setSupportLookupResult(null);
+        setSupportLookupError("No support-eligible user found with that email");
+      } finally {
+        setSupportLookupLoading(false);
+      }
+    }, 400);
+  };
+
+  const handleSelectSupportUser = (user: SupportAccessUserOption) => {
+    setSelectedSupportUserId(user.id);
+    setSupportUsers((prev) => (prev.some((u) => u.id === user.id) ? prev : [...prev, user]));
+    setSupportLookupResult(null);
+    setSupportEmailQuery("");
+    setSupportLookupError("");
+  };
+
+  const handleClearSupportUser = () => {
+    setSelectedSupportUserId("");
+    setSupportEmailQuery("");
+    setSupportLookupResult(null);
+    setSupportLookupError("");
+  };
+
+  const selectedSupportUser = useMemo(
+    () => supportUsers.find((u) => u.id === selectedSupportUserId) ?? null,
+    [supportUsers, selectedSupportUserId],
+  );
 
   return (
     <div
@@ -3998,20 +4050,81 @@ export function TenantSettings() {
                 <h3 className="tenant-settings__support-title">Grant access</h3>
                 <div className="tenant-settings__form">
                   <div className="tenant-settings__field">
-                    <label htmlFor="support-user">Support user</label>
-                    <KidDropdown
-                      value={selectedSupportUserId}
-                      onChange={setSelectedSupportUserId}
-                      fullWidth
-                      ariaLabel="Support user"
-                      options={[
-                        { value: "", label: "Select a support user" },
-                        ...supportUsers.map((user) => ({
-                          value: user.id,
-                          label: `${`${user.first_name} ${user.last_name}`.trim() || user.email}${user.global_role ? ` • ${user.global_role}` : ""}`,
-                        })),
-                      ]}
-                    />
+                    <label htmlFor="support-user-email">Support user</label>
+                    {selectedSupportUserId ? (
+                      <div className="support-user-selected">
+                        <div className="support-user-selected__avatar">
+                          {selectedSupportUser?.avatar_url ? (
+                            <img src={selectedSupportUser.avatar_url} alt="" className="support-user-selected__avatar-img" />
+                          ) : (
+                            <span className="support-user-selected__avatar-fallback">
+                              {(selectedSupportUser?.first_name?.[0] ?? selectedSupportUser?.email?.[0] ?? "?").toUpperCase()}
+                            </span>
+                          )}
+                        </div>
+                        <div className="support-user-selected__info">
+                          <span className="support-user-selected__name">
+                            {`${selectedSupportUser?.first_name ?? ""} ${selectedSupportUser?.last_name ?? ""}`.trim() || selectedSupportUser?.email}
+                          </span>
+                          <span className="support-user-selected__email">{selectedSupportUser?.email}</span>
+                        </div>
+                        <button
+                          type="button"
+                          className="support-user-selected__clear"
+                          onClick={handleClearSupportUser}
+                          aria-label="Clear selected user"
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="support-user-lookup">
+                        <div className="support-user-lookup__input-wrap">
+                          <Search size={16} className="support-user-lookup__icon" />
+                          <input
+                            id="support-user-email"
+                            type="email"
+                            value={supportEmailQuery}
+                            onChange={(e) => handleSupportEmailChange(e.target.value)}
+                            className="support-user-lookup__input"
+                            placeholder="Paste or type admin email address..."
+                            autoComplete="off"
+                          />
+                          {supportLookupLoading && (
+                            <span className="support-user-lookup__spinner" />
+                          )}
+                        </div>
+                        {supportLookupResult && (
+                          <button
+                            type="button"
+                            className="support-user-lookup__result"
+                            onClick={() => handleSelectSupportUser(supportLookupResult)}
+                          >
+                            <div className="support-user-lookup__result-avatar">
+                              {supportLookupResult.avatar_url ? (
+                                <img src={supportLookupResult.avatar_url} alt="" className="support-user-lookup__result-avatar-img" />
+                              ) : (
+                                <span className="support-user-lookup__result-avatar-fallback">
+                                  {(supportLookupResult.first_name?.[0] ?? supportLookupResult.email?.[0] ?? "?").toUpperCase()}
+                                </span>
+                              )}
+                            </div>
+                            <div className="support-user-lookup__result-info">
+                              <span className="support-user-lookup__result-name">
+                                {`${supportLookupResult.first_name} ${supportLookupResult.last_name}`.trim() || supportLookupResult.email}
+                              </span>
+                              <span className="support-user-lookup__result-email">{supportLookupResult.email}</span>
+                              {supportLookupResult.global_role && (
+                                <span className="support-user-lookup__result-role">{supportLookupResult.global_role}</span>
+                              )}
+                            </div>
+                          </button>
+                        )}
+                        {supportLookupError && !supportLookupLoading && supportEmailQuery.includes("@") && (
+                          <div className="support-user-lookup__not-found">{supportLookupError}</div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   <div className="tenant-settings__field">

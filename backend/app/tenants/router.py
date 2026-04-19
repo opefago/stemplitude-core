@@ -38,6 +38,7 @@ from .schemas import (
     SupportAccessListResponse,
     SupportAccessGrantResponse,
     SupportAccessOptionsResponse,
+    SupportAccessUserOption,
     TenantCreate,
     TenantListResponse,
     TenantResponse,
@@ -407,6 +408,23 @@ async def get_support_access_options(
     service = TenantService(db)
     options = await service.list_support_access_options(id)
     return SupportAccessOptionsResponse.model_validate(options)
+
+
+@router.get("/{id}/support-access/lookup", response_model=SupportAccessUserOption)
+async def lookup_support_user(
+    id: UUID,
+    email: str = Query(..., min_length=3, description="Email of the support staff member to look up"),
+    request: Request = None,
+    db: AsyncSession = Depends(get_db),
+    _: None = require_permission("tenants", "update"),
+):
+    """Look up a support-eligible user by email address."""
+    _require_tenant_match(id, request)
+    service = TenantService(db)
+    user = await service.lookup_support_user_by_email(email)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No support-eligible user found with that email")
+    return SupportAccessUserOption.model_validate(user)
 
 
 @router.get("/{id}/support-access", response_model=SupportAccessListResponse)

@@ -34,7 +34,7 @@ const GRADE_OPTIONS = [
 const LAB_OPTIONS = [
   { id: "", label: "No lab linked" },
   { id: "circuit-maker", label: "Circuit Maker" },
-  { id: "robotics-lab", label: "Robotics Lab" },
+  { id: "robotics-lab", label: "Robo Maker" },
   { id: "python-game-maker", label: "Python Game Maker" },
   { id: "game-maker", label: "Game Maker" },
   { id: "design-maker", label: "Design Maker" },

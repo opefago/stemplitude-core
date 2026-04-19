@@ -9,7 +9,7 @@ interface Props {
 
 const LAB_TYPE_LABELS: Record<string, string> = {
   "circuit-maker": "Circuit Lab",
-  "robotics-lab": "Robotics Lab",
+  "robotics-lab": "Robo Maker",
   "python-game": "Python Game Lab",
   "game-maker": "Game Maker Lab",
   "design-maker": "3D Design Lab",

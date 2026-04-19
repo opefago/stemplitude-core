@@ -41,7 +41,7 @@ const Playground = () => {
     },
     {
       id: 'robotics-lab',
-      title: 'Robotics Lab',
+      title: 'Robo Maker',
       icon: <Bot size={48} />,
       description: 'VEX VR-inspired robotics simulator with sensors, missions, and progression from blocks to text.',
       features: [

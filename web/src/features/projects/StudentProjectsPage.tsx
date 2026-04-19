@@ -55,7 +55,7 @@ const LAB_CONFIGS: LabConfig[] = [
   },
   {
     id: "robotics-lab",
-    label: "Robotics Lab",
+    label: "Robo Maker",
     path: "/playground/robotics",
     storageKey: "stemplitude_robotics_projects",
     projectMapper: (raw) => ({

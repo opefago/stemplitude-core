@@ -507,6 +507,185 @@
   color: #475569;
 }
 
+/* --- Support user email lookup --- */
+
+.support-user-lookup {
+  position: relative;
+}
+
+.support-user-lookup__input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.support-user-lookup__icon {
+  position: absolute;
+  left: 12px;
+  color: var(--color-text-secondary, #64748b);
+  pointer-events: none;
+  flex-shrink: 0;
+}
+
+.support-user-lookup__input {
+  width: 100%;
+  padding: 10px 12px 10px 36px;
+  border: 2px solid var(--color-border, #e2e8f0);
+  border-radius: var(--radius-md, 8px);
+  font-size: 0.9375rem;
+  background: #fff;
+  color: var(--color-text, #1e293b);
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.support-user-lookup__input:focus {
+  border-color: var(--color-primary, #0066ff);
+}
+
+.support-user-lookup__input::placeholder {
+  color: var(--color-text-secondary, #94a3b8);
+}
+
+.support-user-lookup__spinner {
+  position: absolute;
+  right: 12px;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--color-border, #e2e8f0);
+  border-top-color: var(--color-primary, #0066ff);
+  border-radius: 50%;
+  animation: support-spinner 0.6s linear infinite;
+}
+
+@keyframes support-spinner {
+  to { transform: rotate(360deg); }
+}
+
+.support-user-lookup__result {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  margin-top: 8px;
+  padding: 12px;
+  border: 2px solid var(--color-border, #e2e8f0);
+  border-radius: var(--radius-md, 8px);
+  background: #fff;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.support-user-lookup__result:hover {
+  border-color: var(--color-primary, #0066ff);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary, #0066ff) 12%, transparent);
+}
+
+.support-user-lookup__result-avatar,
+.support-user-selected__avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--color-primary, #0066ff) 14%, #f1f5f9);
+}
+
+.support-user-lookup__result-avatar-img,
+.support-user-selected__avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.support-user-lookup__result-avatar-fallback,
+.support-user-selected__avatar-fallback {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--color-primary, #0066ff);
+}
+
+.support-user-lookup__result-info,
+.support-user-selected__info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.support-user-lookup__result-name,
+.support-user-selected__name {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--color-text, #1e293b);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.support-user-lookup__result-email,
+.support-user-selected__email {
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary, #64748b);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.support-user-lookup__result-role {
+  margin-top: 2px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-text-secondary, #94a3b8);
+  text-transform: capitalize;
+}
+
+.support-user-lookup__not-found {
+  margin-top: 8px;
+  padding: 8px 12px;
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary, #64748b);
+  background: #f8fafc;
+  border-radius: var(--radius-md, 8px);
+  border: 1px dashed var(--color-border, #e2e8f0);
+}
+
+/* --- Selected support user chip --- */
+
+.support-user-selected {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 2px solid color-mix(in srgb, var(--color-primary, #0066ff) 30%, var(--color-border, #e2e8f0));
+  border-radius: var(--radius-md, 8px);
+  background: color-mix(in srgb, var(--color-primary, #0066ff) 4%, #fff);
+}
+
+.support-user-selected__clear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--color-text-secondary, #64748b);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.support-user-selected__clear:hover {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
 .puzzle-builder {
   display: grid;
   grid-template-columns: 260px 1fr;

@@ -44,7 +44,7 @@ const LABS = [
   { value: "circuit-maker", label: "Circuit Maker" },
   { value: "design-maker", label: "Design Maker (3D)" },
   { value: "micro-maker", label: "Micro Maker (MCU)" },
-  { value: "robotics-lab", label: "Robotics Lab" },
+  { value: "robotics-lab", label: "Robo Maker" },
   { value: "python-game", label: "Python Game Maker" },
   { value: "game-maker", label: "Game Maker" },
 ];

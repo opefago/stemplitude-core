@@ -23,6 +23,7 @@ _CURRICULUM_TYPE_TO_LAUNCHER: dict[str, str] = {
     "access_robotics_lab": "micro-maker",
     "robotics-lab": "robotics-lab",
     "robotics lab": "robotics-lab",
+    "robo maker": "robotics-lab",
     "robotics_lab_vr": "robotics-lab",
     "robotics_vr": "robotics-lab",
     "stemplitude_robotics_lab": "robotics-lab",

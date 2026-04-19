@@ -52,7 +52,7 @@ const LABS: LabItem[] = [
   },
   {
     id: "robotics-lab",
-    name: "Robotics Lab",
+    name: "Robo Maker",
     description: "Program robots, run missions, and test sensors in simulation",
     path: "/playground/robotics",
     icon: Bot,
